@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using System.Text;
 using MinecraftServerManager.Infrastructure.Utilities;
 
@@ -21,6 +22,7 @@ public sealed record FileSystemMetadata(
 
 public static class SafeFileSystem
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("SafeFileSystem");
     public const int DefaultMaxEntries = 100_000;
     public const long DefaultMaxTotalBytes = 128L * 1024 * 1024 * 1024;
 
@@ -106,14 +108,13 @@ public static class SafeFileSystem
             _ => throw new ArgumentOutOfRangeException(nameof(searchOption)),
         };
 
-        return entries
+        return [.. entries
             .Where(entry => !entry.IsDirectory &&
                 System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(
                     searchPattern,
                     Path.GetFileName(entry.FullPath),
                     ignoreCase: true))
-            .Select(static entry => entry.FullPath)
-            .ToArray();
+            .Select(static entry => entry.FullPath)];
     }
 
     /// <summary>
@@ -209,18 +210,17 @@ public static class SafeFileSystem
             _ => throw new ArgumentOutOfRangeException(nameof(searchOption)),
         };
 
-        return entries
+        return [.. entries
             .Where(entry => entry.IsDirectory &&
                 System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(
                     searchPattern,
                     Path.GetFileName(entry.FullPath),
                     ignoreCase: true))
-            .Select(static entry => entry.FullPath)
-            .ToArray();
+            .Select(static entry => entry.FullPath)];
     }
 
     public static IReadOnlyList<string> EnumerateFileSystemEntries(string directoryPath) =>
-        ListBoundedDirectory(directoryPath, rejectReparse: false).Select(static entry => entry.FullPath).ToArray();
+        [.. ListBoundedDirectory(directoryPath, rejectReparse: false).Select(static entry => entry.FullPath)];
 
     public static FileStream OpenRead(
         string filePath,
@@ -463,33 +463,83 @@ public static class SafeFileSystem
         return entries;
     }
 
-    public static IReadOnlyList<FileSystemEntry> WalkBoundedTree(
+    /// <summary>
+    /// 以串流延遲列舉（Streaming）方式走訪目錄樹，支援剪枝下探謂詞（Prune Predicate）與總量上限安全防護。
+    /// </summary>
+    /// <param name="directoryPath">欲走訪之根目錄路徑</param>
+    /// <param name="maxEntries">允許之最大項目數（預設 100,000）</param>
+    /// <param name="maxTotalBytes">允許之最大檔案總位元組數（預設 128 GB）</param>
+    /// <param name="rejectReparse">是否拒絕重解析點（符號連結/連接點，預設 true）</param>
+    /// <param name="pruneDirectory">剪枝謂詞：傳入即將下探之目錄完整路徑與目錄名稱，若回傳 true 則略過該目錄不向下遞迴</param>
+    /// <returns>檔案系統項目之延遲列舉集合</returns>
+    public static IEnumerable<FileSystemEntry> EnumerateBoundedTree(
         string directoryPath,
         int maxEntries = DefaultMaxEntries,
         long maxTotalBytes = DefaultMaxTotalBytes,
-        bool rejectReparse = true)
+        bool rejectReparse = true,
+        Func<string, string, bool>? pruneDirectory = null)
     {
         ValidateLimits(maxEntries, maxTotalBytes);
         string root = ResolveStableDirectory(directoryPath);
-        var entries = new List<FileSystemEntry>();
         var pending = new Queue<string>([root]);
+        int entryCount = 0;
         long totalBytes = 0;
 
         while (pending.Count > 0)
         {
             string current = pending.Dequeue();
-            foreach (var info in new DirectoryInfo(current).EnumerateFileSystemInfos())
+            var dirInfo = new DirectoryInfo(current);
+            if (!dirInfo.Exists)
             {
-                AddEntry(info, entries, ref totalBytes, maxEntries, maxTotalBytes, rejectReparse);
-                if (info is DirectoryInfo)
+                continue;
+            }
+
+            foreach (var info in dirInfo.EnumerateFileSystemInfos())
+            {
+                bool isReparsePoint = IsReparsePoint(info.FullName);
+                if (isReparsePoint && rejectReparse)
                 {
-                    pending.Enqueue(info.FullName);
+                    throw new SafeFileSystemException($"路徑不可為 reparse point： {info.FullName}");
                 }
+
+                bool isDirectory = info is DirectoryInfo;
+                long length = isDirectory ? 0 : ((FileInfo)info).Length;
+
+                if (entryCount >= maxEntries)
+                {
+                    throw new SafeFileSystemException($"目錄項目數超過安全上限 ({maxEntries})：{directoryPath}");
+                }
+
+                if (length > maxTotalBytes - totalBytes)
+                {
+                    throw new SafeFileSystemException($"目錄檔案總大小超過安全上限 ({maxTotalBytes} 位元組)：{directoryPath}");
+                }
+
+                entryCount++;
+                totalBytes += length;
+
+                var entry = new FileSystemEntry(info.FullName, isDirectory, length, info.LastWriteTimeUtc, info.CreationTimeUtc);
+
+                if (isDirectory)
+                {
+                    bool shouldPrune = pruneDirectory is not null && pruneDirectory(info.FullName, info.Name);
+                    if (!shouldPrune)
+                    {
+                        pending.Enqueue(info.FullName);
+                    }
+                }
+
+                yield return entry;
             }
         }
-
-        return entries;
     }
+
+    public static IReadOnlyList<FileSystemEntry> WalkBoundedTree(
+        string directoryPath,
+        int maxEntries = DefaultMaxEntries,
+        long maxTotalBytes = DefaultMaxTotalBytes,
+        bool rejectReparse = true,
+        Func<string, string, bool>? pruneDirectory = null) => [.. EnumerateBoundedTree(directoryPath, maxEntries, maxTotalBytes, rejectReparse, pruneDirectory)];
 
     private static void AddEntry(
         FileSystemInfo info,
@@ -873,8 +923,9 @@ public static class SafeFileSystem
                 }
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("清除唯讀屬性失敗: {0}", ex.Message);
         }
     }
 
@@ -903,8 +954,9 @@ public static class SafeFileSystem
                 }
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("遞迴清除目錄唯讀屬性失敗: {0}", ex.Message);
         }
     }
 }

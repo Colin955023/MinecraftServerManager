@@ -1,4 +1,4 @@
-<Application x:Class="MinecraftServerManager.App.App"
+﻿<Application x:Class="MinecraftServerManager.App.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:behaviors="clr-namespace:MinecraftServerManager.App.Behaviors">
@@ -193,10 +193,8 @@
                   <Setter TargetName="border" Property="BorderBrush" Value="#7F1D1D" />
                 </Trigger>
                 <Trigger Property="IsEnabled" Value="False">
-                  <Setter TargetName="border" Property="Background" Value="{DynamicResource ButtonDisabledBackgroundBrush}" />
-                  <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource ButtonDisabledBorderBrush}" />
-                  <Setter Property="Foreground" Value="{DynamicResource ButtonDisabledForegroundBrush}" />
-                  <Setter Property="Cursor" Value="Arrow" />
+                  <Setter TargetName="border" Property="Opacity" Value="0.4" />
+                  <Setter Property="Cursor" Value="No" />
                 </Trigger>
               </ControlTemplate.Triggers>
             </ControlTemplate>
@@ -234,10 +232,8 @@
                   <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
                 </Trigger>
                 <Trigger Property="IsEnabled" Value="False">
-                  <Setter TargetName="border" Property="Background" Value="{DynamicResource ButtonDisabledBackgroundBrush}" />
-                  <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource ButtonDisabledBorderBrush}" />
-                  <Setter Property="Foreground" Value="{DynamicResource ButtonDisabledForegroundBrush}" />
-                  <Setter Property="Cursor" Value="Arrow" />
+                  <Setter TargetName="border" Property="Opacity" Value="0.4" />
+                  <Setter Property="Cursor" Value="No" />
                 </Trigger>
               </ControlTemplate.Triggers>
             </ControlTemplate>

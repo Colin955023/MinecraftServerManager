@@ -24,9 +24,7 @@ public sealed class ServerDirectorySizeServiceTests : IDisposable
                 Directory.Delete(_testDir, recursive: true);
             }
         }
-        catch
-        {
-        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
     }
 
     [Fact]
@@ -90,5 +88,42 @@ public sealed class ServerDirectorySizeServiceTests : IDisposable
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             _sizeService.CalculateServerSizeAsync(_testDir, cts.Token));
+    }
+
+    [Fact]
+    public async Task CalculateServerSizeAsync_FailedCalculation_DoesNotCacheAndReturnsNegativeOne()
+    {
+        // 建立一個嚴格限制最大項目數為 2 的服務實例
+        var strictService = new ServerDirectorySizeService(maxEntries: 2);
+
+        // 在目錄中建立 5 個檔案以超出上限
+        string overflowDir = Path.Combine(_testDir, "overflowDir");
+        Directory.CreateDirectory(overflowDir);
+        for (int i = 0; i < 5; i++)
+        {
+            File.WriteAllText(Path.Combine(overflowDir, $"file_{i}.dat"), "data");
+        }
+
+        // 走訪超限會捕捉例外並回傳 -1L
+        long result = await strictService.CalculateServerSizeAsync(overflowDir);
+        Assert.Equal(-1, result);
+
+        // 驗證失敗結果未被快取：清理檔案至 1 個檔案後再次呼叫，應能即時重新計算成功
+        for (int i = 1; i < 5; i++)
+        {
+            File.Delete(Path.Combine(overflowDir, $"file_{i}.dat"));
+        }
+
+        long refreshedResult = await strictService.CalculateServerSizeAsync(overflowDir);
+        Assert.Equal(4, refreshedResult); // 1 個檔案長度為 4 位元組 ("data")
+    }
+
+    [Fact]
+    public void FormatServerSize_ReturnsExpectedLabels()
+    {
+        Assert.Equal("無法計算", _sizeService.FormatServerSize(-1));
+        Assert.Equal("無法計算", _sizeService.FormatServerSize(-100));
+        Assert.Equal("-", _sizeService.FormatServerSize(0));
+        Assert.Equal("1.0 KiB", _sizeService.FormatServerSize(1024));
     }
 }

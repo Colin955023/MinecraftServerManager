@@ -1,4 +1,4 @@
-<UserControl x:Class="MinecraftServerManager.App.Views.ManageServerView"
+﻿<UserControl x:Class="MinecraftServerManager.App.Views.ManageServerView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:MinecraftServerManager.App.ViewModels">
@@ -240,15 +240,47 @@
       </Grid>
 
       <WrapPanel>
+        <!-- 啟動按鈕 (未執行時顯示) -->
         <Button Command="{Binding StartServerCommand}"
                 IsEnabled="{Binding CanStartOrMonitorServer}"
-                Style="{DynamicResource PrimaryButtonStyle}"
                 Width="120"
                 Height="32"
                 Margin="0,0,8,8">
+          <Button.Style>
+            <Style TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
+              <Setter Property="Visibility" Value="Visible" />
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSelectedServerRunning}" Value="True">
+                  <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Button.Style>
           <StackPanel Orientation="Horizontal">
             <Image Source="{DynamicResource IconStart}" Width="15" Height="15" Margin="0,0,6,0" VerticalAlignment="Center" />
             <TextBlock Text="啟動" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+
+        <!-- 停止按鈕 (執行中時顯示，避免誤導) -->
+        <Button Command="{Binding StopServerCommand}"
+                IsEnabled="{Binding HasSelectedServer}"
+                Width="120"
+                Height="32"
+                Margin="0,0,8,8">
+          <Button.Style>
+            <Style TargetType="Button" BasedOn="{StaticResource DangerButtonStyle}">
+              <Setter Property="Visibility" Value="Collapsed" />
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSelectedServerRunning}" Value="True">
+                  <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Button.Style>
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="⏹️" FontSize="11" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="#FFFFFF" />
+            <TextBlock Text="停止" VerticalAlignment="Center" Foreground="#FFFFFF" />
           </StackPanel>
         </Button>
         <Button Command="{Binding MonitorServerCommand}"

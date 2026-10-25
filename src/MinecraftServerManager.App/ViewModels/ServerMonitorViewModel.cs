@@ -18,7 +18,7 @@ namespace MinecraftServerManager.App.ViewModels;
 /// <summary>
 /// 伺服器即時監控視窗 ViewModel
 /// </summary>
-public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposable
+public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
 {
     private readonly IUiService _ui;
 
@@ -69,6 +69,9 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
     public partial string CommandText { get; set; } = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanStartServer))]
+    [NotifyCanExecuteChangedFor(nameof(StartServerCommand))]
+    [NotifyCanExecuteChangedFor(nameof(StopServerCommand))]
     public partial bool IsServerRunning { get; set; }
 
     public bool CanStartServer => !IsServerRunning;
@@ -409,7 +412,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
         await _serverRuntime.SendCommandAsync(cmd).ConfigureAwait(false);
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanStartServer))]
     public async Task StartServerAsync()
     {
         if (_serverRuntime.IsRunning)
@@ -432,7 +435,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
         RefreshState();
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(IsServerRunning))]
     public async Task StopServerAsync()
     {
         if (!_serverRuntime.IsRunning)
@@ -550,7 +553,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
                 if (!_serverReadyNotified)
                 {
                     _serverReadyNotified = true;
-                    _ = ShowServerReadyNotificationAsync();
+                    _ = RunSafeAsync(ShowServerReadyNotificationAsync, "伺服器就緒通知", Logger);
                 }
             }
         });

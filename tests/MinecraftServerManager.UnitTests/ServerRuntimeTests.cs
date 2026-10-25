@@ -37,9 +37,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
             {
                 await Task.Delay(50).ConfigureAwait(false);
             }
-            catch
-            {
-            }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
         }
     }
 

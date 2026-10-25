@@ -242,17 +242,17 @@ public sealed partial class ModsViewModel : PageViewModel
         _modrinthClient = modrinthClient;
         _notificationSink = notificationSink;
         _launcher = launcher;
-        _dependencyPlanner = dependencyPlanner ?? new ModDependencyPlanner();
-        _modListExporter = modListExporter ?? new ModListExporter();
+        _dependencyPlanner = dependencyPlanner ?? throw new ArgumentNullException(nameof(dependencyPlanner));
+        _modListExporter = modListExporter ?? throw new ArgumentNullException(nameof(modListExporter));
 
-        _ = LoadServersInternalAsync();
+        _ = RunSafeAsync(LoadServersInternalAsync, "初始化伺服器清單", Logger);
     }
 
     partial void OnSelectedTabIndexChanged(int value)
     {
         if (value == 1 && _allOnlineMods.Count == 0 && !IsSearchingOnline)
         {
-            _ = SearchOnlineModsAsync();
+            _ = RunSafeAsync(SearchOnlineModsAsync, "搜尋線上模組", Logger);
         }
     }
 
@@ -268,7 +268,7 @@ public sealed partial class ModsViewModel : PageViewModel
         }
         else if ((_allOnlineMods.Count > 0 || SelectedTabIndex == 1) && !IsSearchingOnline)
         {
-            _ = SearchOnlineModsAsync();
+            _ = RunSafeAsync(SearchOnlineModsAsync, "搜尋線上模組", Logger);
         }
         else
         {
@@ -291,7 +291,7 @@ public sealed partial class ModsViewModel : PageViewModel
             OnlineResultHint = string.Empty;
             if (SelectedTabIndex == 1)
             {
-                _ = SearchOnlineModsAsync();
+                _ = RunSafeAsync(SearchOnlineModsAsync, "搜尋線上模組", Logger);
             }
         }
     }
@@ -305,7 +305,7 @@ public sealed partial class ModsViewModel : PageViewModel
     partial void OnSelectedServerChanged(string value)
     {
         HasSelectedServer = !string.IsNullOrWhiteSpace(value) && value != "請選擇伺服器";
-        _ = LoadLocalModsAsync();
+        _ = RunSafeAsync(LoadLocalModsAsync, "載入本機模組清單", Logger);
     }
 
     [RelayCommand]
@@ -1609,7 +1609,7 @@ public sealed partial class ModsViewModel : PageViewModel
 
         if (confirmed == true && InstallQueue.Count > 0)
         {
-            _ = InstallQueuedModsAsync();
+            _ = RunSafeAsync(() => InstallQueuedModsAsync(), "安裝佇列模組", Logger);
         }
     }
 

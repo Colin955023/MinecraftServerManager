@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using System.Globalization;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.FileSystem;
@@ -9,6 +10,7 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 /// </summary>
 public sealed class ServerBackupService(string serversRoot, int maxRetentionCount = 10) : IServerBackupService
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerBackupService");
     private readonly string _resolvedServersRoot = SafeFileSystem.ResolveStableDirectory(serversRoot);
     private readonly int _maxRetentionCount = Math.Max(1, maxRetentionCount);
 
@@ -114,32 +116,47 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
 
         await Task.Run(() =>
         {
-            var entries = SafeFileSystem.WalkBoundedTree(serverDir, rejectReparse: true);
-            var filesToBackup = entries
-                .Where(e => !e.IsDirectory)
-                .Where(e =>
-                {
-                    string filePath = e.FullPath;
-                    ReadOnlySpan<char> rel = Path.GetRelativePath(serverDir, filePath);
-                    int sepIdx = rel.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                    ReadOnlySpan<char> firstSegment = sepIdx >= 0 ? rel[..sepIdx] : rel;
+            List<FileSystemEntry> filesToBackup;
+            try
+            {
+                var entries = SafeFileSystem.EnumerateBoundedTree(
+                    serverDir,
+                    rejectReparse: true,
+                    pruneDirectory: static (fullPath, name) =>
+                        name.Equals("logs", StringComparison.OrdinalIgnoreCase) ||
+                        name.Equals("crash-reports", StringComparison.OrdinalIgnoreCase) ||
+                        name.Equals("backups", StringComparison.OrdinalIgnoreCase));
 
-                    if (firstSegment.Equals("logs", StringComparison.OrdinalIgnoreCase) ||
-                        firstSegment.Equals("crash-reports", StringComparison.OrdinalIgnoreCase))
+                filesToBackup = entries
+                    .Where(static e => !e.IsDirectory)
+                    .Where(e =>
                     {
-                        return false;
-                    }
+                        string filePath = e.FullPath;
+                        ReadOnlySpan<char> rel = Path.GetRelativePath(serverDir, filePath);
+                        int sepIdx = rel.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                        ReadOnlySpan<char> firstSegment = sepIdx >= 0 ? rel[..sepIdx] : rel;
 
-                    bool isUnderBackups = filePath.StartsWith(legacyBackupsPrefix, StringComparison.OrdinalIgnoreCase) ||
-                                          filePath.Equals(legacyBackupsDir, StringComparison.OrdinalIgnoreCase);
+                        if (firstSegment.Equals("logs", StringComparison.OrdinalIgnoreCase) ||
+                            firstSegment.Equals("crash-reports", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return false;
+                        }
 
-                    return !isUnderBackups &&
-                           !filePath.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) &&
-                           !filePath.EndsWith(".lock", StringComparison.OrdinalIgnoreCase);
-                })
-                .ToList();
+                        bool isUnderBackups = filePath.StartsWith(legacyBackupsPrefix, StringComparison.OrdinalIgnoreCase) ||
+                                              filePath.Equals(legacyBackupsDir, StringComparison.OrdinalIgnoreCase);
 
-            long totalBytes = filesToBackup.Sum(f => f.Length);
+                        return !isUnderBackups &&
+                               !filePath.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) &&
+                               !filePath.EndsWith(".lock", StringComparison.OrdinalIgnoreCase);
+                    })
+                    .ToList();
+            }
+            catch (SafeFileSystemException ex) when (ex.Message.Contains("安全上限", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"伺服器檔案數量或大小超過安全備份上限（安全上限：{SafeFileSystem.DefaultMaxEntries} 個項目或 128 GB）。請清理地圖快取或暫存檔案後重試。", ex);
+            }
+
+            long totalBytes = filesToBackup.Sum(static f => f.Length);
             long processedBytes = 0;
 
             SafeZipArchive.WriteArchive(backupFilePath, writer =>
@@ -313,8 +330,9 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
                         }
                     }
                 }
-                catch
+                catch (Exception rbEx) when (rbEx is not OperationCanceledException)
                 {
+                    Logger.Error(rbEx, "還原失敗後嘗試復原現場檔案時發生錯誤");
                 }
                 finally
                 {
@@ -399,8 +417,9 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
                 SafeFileSystem.DeleteDirectory(dirPath, recursive: true);
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("安全清理目錄失敗: {0}", ex.Message);
         }
     }
 

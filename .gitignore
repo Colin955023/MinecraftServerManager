@@ -49,4 +49,4 @@ publish/
 output/
 *_wpftmp.csproj
 *_wpftmp.*
-
+.gitleaks.toml

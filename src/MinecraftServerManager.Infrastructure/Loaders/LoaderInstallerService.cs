@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using System.Buffers;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -15,6 +16,7 @@ public sealed partial class LoaderInstallerService(
     IProcessRunner processRunner,
     string installerCacheDirectory) : ILoaderInstallerService
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("LoaderInstallerService");
     private static readonly SearchValues<char> HashSeparators = SearchValues.Create(" \t\r\n");
     private readonly string _cacheDir = SafeFileSystem.ResolveStableDirectory(installerCacheDirectory, create: true);
 
@@ -213,8 +215,9 @@ public sealed partial class LoaderInstallerService(
                     }
                 }
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.Warning("解析官方版本 Manifest 異常: {0}", ex.Message);
             }
         }
 
@@ -444,8 +447,9 @@ public sealed partial class LoaderInstallerService(
                     return "@" + matchedArgs;
                 }
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.Warning("解析 run.bat 啟動參數異常: {0}", ex.Message);
             }
         }
 

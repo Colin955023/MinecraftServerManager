@@ -1,6 +1,7 @@
 using System.Windows;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Domain.Mods;
+using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.Views;
 
@@ -9,6 +10,7 @@ namespace MinecraftServerManager.App.Views;
 /// </summary>
 public partial class ExportModListDialog : Window
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ExportModListDialog");
     private readonly ExportModListViewModel _viewModel;
     private bool _isExporting;
 
@@ -40,8 +42,9 @@ public partial class ExportModListDialog : Window
                 Close();
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Error(ex, "匯出模組清單失敗: {Message}", ex.Message);
         }
         finally
         {

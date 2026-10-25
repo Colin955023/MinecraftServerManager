@@ -114,7 +114,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         _viewModel.AboutPreferences?.UpdateDisplayInfo(sw, sh, ww, wh);
 
         // 啟動時自動檢查更新（判斷邏輯位於 ViewModel，此處僅負責提示）
-        _ = _viewModel.CheckForUpdateOnStartupAsync();
+        _ = ViewModelBase.RunSafeAsync(() => _viewModel.CheckForUpdateOnStartupAsync(), "啟動檢查更新", Logger);
     }
 
 
@@ -148,7 +148,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
             }
 
             _shutdownCompleted = true;
-            _ = DisposeSafelyAsync();
+            _ = ViewModelBase.RunSafeAsync(DisposeSafelyAsync, "非同步釋放視窗資源", Logger);
             return;
         }
 
@@ -167,7 +167,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
             UnregisterWindowEvents();
         }
 
-        _ = ShutdownAndCloseAsync();
+        _ = ViewModelBase.RunSafeAsync(ShutdownAndCloseAsync, "關閉應用程式與伺服器資源", Logger);
     }
 
     private void UnregisterWindowEvents()

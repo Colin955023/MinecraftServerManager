@@ -33,9 +33,7 @@ public sealed class ServerBackupServiceTests : IDisposable
                 Directory.Delete(_testRoot, recursive: true);
             }
         }
-        catch
-        {
-        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
 
         try
         {
@@ -44,9 +42,7 @@ public sealed class ServerBackupServiceTests : IDisposable
                 Directory.Delete(_externalBackupsDir, recursive: true);
             }
         }
-        catch
-        {
-        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
     }
 
     [Fact]
@@ -135,9 +131,7 @@ public sealed class ServerBackupServiceTests : IDisposable
                     Directory.Delete(extraDir, recursive: true);
                 }
             }
-            catch
-            {
-            }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
         }
     }
 
@@ -191,5 +185,38 @@ public sealed class ServerBackupServiceTests : IDisposable
         var attrs = File.GetAttributes(propsPath);
         Assert.False(attrs.HasFlag(FileAttributes.ReadOnly));
         Assert.Equal("motd=Initial Server", File.ReadAllText(propsPath));
+    }
+
+    [Fact]
+    public async Task CreateBackupAsync_PrunesAndExcludesDiagnosticDirectories()
+    {
+        // 建立伺服器診斷與記錄資料夾
+        string logsDir = Path.Combine(_serverDir, "logs");
+        string crashDir = Path.Combine(_serverDir, "crash-reports");
+        string legacyBackupsDir = Path.Combine(_serverDir, "backups");
+        Directory.CreateDirectory(logsDir);
+        Directory.CreateDirectory(crashDir);
+        Directory.CreateDirectory(legacyBackupsDir);
+
+        File.WriteAllText(Path.Combine(logsDir, "latest.log"), "diagnostic log");
+        File.WriteAllText(Path.Combine(crashDir, "crash.txt"), "crash report");
+        File.WriteAllText(Path.Combine(legacyBackupsDir, "old-backup.zip"), "old zip");
+
+        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir);
+        string backupFile = Path.Combine(_externalBackupsDir, backup.FileName);
+
+        Assert.True(File.Exists(backupFile));
+
+        using var archive = Infrastructure.FileSystem.SafeZipArchive.OpenRead(backupFile);
+        var entryNames = archive.Entries.Select(static e => e.FullName).ToList();
+
+        // 必須包含正常伺服器設定
+        Assert.Contains(entryNames, static n => n.Equals("server.properties", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(entryNames, static n => n.Equals("world.txt", StringComparison.OrdinalIgnoreCase));
+
+        // 必須排除 logs、crash-reports 與舊版 backups
+        Assert.DoesNotContain(entryNames, static n => n.StartsWith("logs/", StringComparison.OrdinalIgnoreCase) || n.StartsWith("logs\\", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(entryNames, static n => n.StartsWith("crash-reports/", StringComparison.OrdinalIgnoreCase) || n.StartsWith("crash-reports\\", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(entryNames, static n => n.StartsWith("backups/", StringComparison.OrdinalIgnoreCase) || n.StartsWith("backups\\", StringComparison.OrdinalIgnoreCase));
     }
 }

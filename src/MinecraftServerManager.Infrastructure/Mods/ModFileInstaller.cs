@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Infrastructure.FileSystem;
@@ -10,6 +11,7 @@ namespace MinecraftServerManager.Infrastructure.Mods;
 /// </summary>
 public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ModFileInstaller");
     public Task<LocalModMutationResult> SetModStateAsync(
         string modsDirectory,
         string modId,
@@ -259,8 +261,9 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
                 SafeFileSystem.DeleteWithin(stableModsDir, stagingDir);
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("清理模組暫存目錄失敗: {0}", ex.Message);
         }
     }
 
@@ -277,8 +280,9 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
                 }
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("清理暫存子目錄失敗: {0}", ex.Message);
         }
     }
 
@@ -295,8 +299,9 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
                 SafeFileSystem.MoveWithin(stableModsDir, backupPath, targetPath);
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning(ex, "模組安裝復原（Rollback）失敗");
         }
     }
 

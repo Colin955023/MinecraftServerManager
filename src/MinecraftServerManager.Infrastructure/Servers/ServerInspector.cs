@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Servers;
+using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
@@ -13,12 +14,12 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 public sealed partial class ServerInspector : IServerInspector
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerInspector");
-    private static readonly IServerDirectorySizeService s_defaultDirectorySizeService = new ServerDirectorySizeService();
     private readonly IServerDirectorySizeService _directorySizeService;
 
-    public ServerInspector(IServerDirectorySizeService? directorySizeService = null)
+    public ServerInspector(IServerDirectorySizeService directorySizeService)
     {
-        _directorySizeService = directorySizeService ?? s_defaultDirectorySizeService;
+        ArgumentNullException.ThrowIfNull(directorySizeService);
+        _directorySizeService = directorySizeService;
     }
 
     private static readonly string[] ServerJarCandidates =
@@ -29,6 +30,20 @@ public sealed partial class ServerInspector : IServerInspector
         "quilt-server-launch.jar",
         "server.jar",
         "minecraft_server.jar",
+    ];
+
+    private static readonly string[] MemoryCandidateScriptNames =
+    [
+        "user_jvm_args.txt",
+        "start_server.bat",
+        "start.bat",
+        "run.bat",
+        "launch.bat",
+        "start.cmd",
+        "run.cmd",
+        "start.sh",
+        "run.sh",
+        "launch.sh",
     ];
 
     private static readonly string[] VersionJsonCandidateProperties = ["id", "name", "release_target"];
@@ -63,7 +78,7 @@ public sealed partial class ServerInspector : IServerInspector
 
             bool isCandidate = launchTarget.Kind != LaunchTargetKind.None || files.Contains("server.properties");
             bool launchable = launchTarget.Kind != LaunchTargetKind.None && eulaState == EulaState.Accepted;
-            bool statusReady = launchable && !string.IsNullOrEmpty(mcVersion) && mcVersion != "unknown";
+            bool statusReady = launchable && MinecraftVersion.TryParse(mcVersion, out _);
 
             var revisionBuilder = new StringBuilder();
             foreach (string? file in files.OrderBy(static f => f, StringComparer.OrdinalIgnoreCase))
@@ -255,9 +270,9 @@ public sealed partial class ServerInspector : IServerInspector
         HashSet<string> files,
         ServerLaunchTarget target)
     {
-        string loaderType = "unknown";
-        string loaderVersion = "unknown";
-        string mcVersion = "unknown";
+        string? loaderType = null;
+        string? loaderVersion = null;
+        string? mcVersion = null;
         string loaderTypeSource = "未偵測到";
         string loaderVersionSource = "未偵測到";
         string mcVersionSource = "未偵測到";
@@ -274,7 +289,7 @@ public sealed partial class ServerInspector : IServerInspector
         }
 
         // 2. 檢查主程式 JAR 內部 metadata (version.json 與 MANIFEST.MF)
-        if (mcVersion == "unknown")
+        if (mcVersion is null)
         {
             string? primaryJarPath = null;
             if (files.Contains("server.jar"))
@@ -317,7 +332,7 @@ public sealed partial class ServerInspector : IServerInspector
                         loaderVersion = verName;
                         loaderVersionSource = $"libraries/net/neoforged/neoforge/{verName}";
                         string? derived = MinecraftVersionSemantics.DeriveMinecraftVersionFromNeoForge(verName);
-                        if (!string.IsNullOrEmpty(derived) && mcVersion == "unknown")
+                        if (!string.IsNullOrEmpty(derived) && mcVersion is null)
                         {
                             mcVersion = derived;
                             mcVersionSource = $"從 NeoForge {verName} 推導";
@@ -346,12 +361,12 @@ public sealed partial class ServerInspector : IServerInspector
                         int dash = dirName.IndexOf('-');
                         if (dash > 0)
                         {
-                            if (mcVersion == "unknown")
+                            if (mcVersion is null)
                             {
                                 mcVersion = dirName[..dash];
                                 mcVersionSource = $"libraries/net/minecraftforge/forge/{dirName}";
                             }
-                            if (loaderVersion == "unknown")
+                            if (loaderVersion is null)
                             {
                                 loaderVersion = dirName[(dash + 1)..];
                                 loaderVersionSource = $"libraries/net/minecraftforge/forge/{dirName}";
@@ -416,7 +431,7 @@ public sealed partial class ServerInspector : IServerInspector
         }
 
         // 4. 從標準啟動檔名或特徵設定檔判斷載入器類型
-        if (loaderType == "unknown")
+        if (loaderType is null)
         {
             if (target.Value.StartsWith("paper", StringComparison.OrdinalIgnoreCase) ||
                 files.Any(static f => f.StartsWith("paper-", StringComparison.OrdinalIgnoreCase) && f.EndsWith(".jar", StringComparison.OrdinalIgnoreCase)) ||
@@ -448,12 +463,12 @@ public sealed partial class ServerInspector : IServerInspector
         var paperMatch = PaperJarRegex().Match(exeName);
         if (paperMatch.Success)
         {
-            if (mcVersion == "unknown")
+            if (mcVersion is null)
             {
                 mcVersion = paperMatch.Groups["mcVer"].Value;
                 mcVersionSource = $"{exeName} 檔名";
             }
-            if (loaderVersion == "unknown")
+            if (loaderVersion is null)
             {
                 loaderVersion = paperMatch.Groups["build"].Value;
                 loaderVersionSource = $"{exeName} 檔名";
@@ -465,23 +480,23 @@ public sealed partial class ServerInspector : IServerInspector
         var forgeMatch = ForgeJarRegex().Match(exeName);
         if (forgeMatch.Success)
         {
-            if (mcVersion == "unknown")
+            if (mcVersion is null)
             {
                 mcVersion = forgeMatch.Groups[1].Value;
                 mcVersionSource = $"{exeName} 檔名";
             }
-            if (loaderVersion == "unknown")
+            if (loaderVersion is null)
             {
                 loaderVersion = forgeMatch.Groups[2].Value;
                 loaderVersionSource = $"{exeName} 檔名";
             }
-            if (loaderType == "unknown")
+            if (loaderType is null)
             {
                 loaderType = "forge";
                 loaderTypeSource = $"{exeName} 檔名";
             }
         }
-        else if (mcVersion == "unknown")
+        else if (mcVersion is null)
         {
             string? extractedMc = MinecraftVersionSemantics.ExtractMinecraftVersionFromText(exeName);
             if (!string.IsNullOrEmpty(extractedMc))
@@ -492,7 +507,7 @@ public sealed partial class ServerInspector : IServerInspector
         }
 
         // 6. 掃描 run.bat / win_args.txt 內容
-        if (mcVersion == "unknown" || loaderVersion == "unknown")
+        if (mcVersion is null || loaderVersion is null)
         {
             string runBat = Path.Combine(directory, "run.bat");
             string winArgs = Path.Combine(directory, "win_args.txt");
@@ -505,17 +520,17 @@ public sealed partial class ServerInspector : IServerInspector
                     var m = ForgeJarRegex().Match(content);
                     if (m.Success)
                     {
-                        if (mcVersion == "unknown")
+                        if (mcVersion is null)
                         {
                             mcVersion = m.Groups[1].Value;
                             mcVersionSource = $"{Path.GetFileName(toCheck)} 腳本內容";
                         }
-                        if (loaderVersion == "unknown")
+                        if (loaderVersion is null)
                         {
                             loaderVersion = m.Groups[2].Value;
                             loaderVersionSource = $"{Path.GetFileName(toCheck)} 腳本內容";
                         }
-                        if (loaderType == "unknown")
+                        if (loaderType is null)
                         {
                             loaderType = "forge";
                             loaderTypeSource = $"{Path.GetFileName(toCheck)} 腳本內容";
@@ -530,7 +545,7 @@ public sealed partial class ServerInspector : IServerInspector
         }
 
         // 7. 檢查 logs/latest.log 或最新修改之記錄檔
-        if (mcVersion == "unknown" || loaderVersion == "unknown")
+        if (mcVersion is null || loaderVersion is null)
         {
             string? logFile = FindLatestLogFile(directory);
             if (logFile is not null && SafeFileSystem.FileExists(logFile))
@@ -542,7 +557,7 @@ public sealed partial class ServerInspector : IServerInspector
                     string? line;
                     while ((line = sr.ReadLine()) is not null && lineCount++ < 2000)
                     {
-                        if (mcVersion == "unknown")
+                        if (mcVersion is null)
                         {
                             var mcMatch = McLogRegex().Match(line);
                             if (mcMatch.Success)
@@ -552,14 +567,14 @@ public sealed partial class ServerInspector : IServerInspector
                             }
                         }
 
-                        if (loaderVersion == "unknown")
+                        if (loaderVersion is null)
                         {
                             var forgeM = ForgeLogRegex().Match(line);
                             if (forgeM.Success)
                             {
                                 loaderVersion = forgeM.Groups[1].Value;
                                 loaderVersionSource = $"{Path.GetFileName(logFile)} 載入器記錄";
-                                if (loaderType == "unknown")
+                                if (loaderType is null)
                                 {
                                     loaderType = "forge";
                                     loaderTypeSource = $"{Path.GetFileName(logFile)} 載入器記錄";
@@ -572,7 +587,7 @@ public sealed partial class ServerInspector : IServerInspector
                                 {
                                     loaderVersion = neoM.Groups[1].Value;
                                     loaderVersionSource = $"{Path.GetFileName(logFile)} 載入器記錄";
-                                    if (loaderType == "unknown")
+                                    if (loaderType is null)
                                     {
                                         loaderType = "neoforge";
                                         loaderTypeSource = $"{Path.GetFileName(logFile)} 載入器記錄";
@@ -581,7 +596,7 @@ public sealed partial class ServerInspector : IServerInspector
                             }
                         }
 
-                        if (mcVersion != "unknown" && loaderVersion != "unknown")
+                        if (mcVersion is not null && loaderVersion is not null)
                         {
                             break;
                         }
@@ -596,14 +611,14 @@ public sealed partial class ServerInspector : IServerInspector
 
         if (string.Equals(loaderType, "vanilla", StringComparison.OrdinalIgnoreCase))
         {
-            if (loaderVersion == "unknown" || string.IsNullOrWhiteSpace(loaderVersion))
+            if (string.IsNullOrWhiteSpace(loaderVersion))
             {
                 loaderVersion = mcVersion;
                 loaderVersionSource = mcVersionSource;
             }
         }
 
-        return (loaderType, loaderVersion, mcVersion, loaderTypeSource, loaderVersionSource, mcVersionSource);
+        return (loaderType ?? "unknown", loaderVersion ?? "unknown", mcVersion ?? "unknown", loaderTypeSource, loaderVersionSource, mcVersionSource);
     }
 
     private static string? FindLatestLogFile(string serverDirectory)
@@ -761,40 +776,97 @@ public sealed partial class ServerInspector : IServerInspector
         return memoryStream.ToArray();
     }
 
+    private static (int? MaxMb, int? MinMb) TryExtractMemoryFromFile(string filePath)
+    {
+        if (!SafeFileSystem.FileExists(filePath) || SafeFileSystem.GetFileLength(filePath) > MaxMetadataBytes)
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            int? foundMax = null;
+            int? foundMin = null;
+
+            foreach (string line in SafeFileSystem.ReadAllLines(filePath))
+            {
+                string trimmed = line.Trim();
+                if (trimmed.Length == 0 || trimmed.StartsWith('#') || trimmed.StartsWith("rem ", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("::", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                int? xmx = MemoryUtils.ParseMemorySetting(trimmed, "Xmx");
+                if (xmx.HasValue)
+                {
+                    foundMax = xmx.Value;
+                }
+
+                int? xms = MemoryUtils.ParseMemorySetting(trimmed, "Xms");
+                if (xms.HasValue)
+                {
+                    foundMin = xms.Value;
+                }
+            }
+
+            return (foundMax, foundMin);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.Warning("讀取檔案記憶體設定失敗 ({Path}): {Message}", filePath, ex.Message);
+            return (null, null);
+        }
+    }
+
     private static (int MaxMb, int? MinMb) InspectMemory(string directory)
     {
         int maxMb = 2048;
         int? minMb = null;
+        bool found = false;
 
-        string argsFile = Path.Combine(directory, "user_jvm_args.txt");
-        if (SafeFileSystem.FileExists(argsFile))
+        foreach (string candidate in MemoryCandidateScriptNames)
+        {
+            string candidatePath = Path.Combine(directory, candidate);
+            var (parsedMax, parsedMin) = TryExtractMemoryFromFile(candidatePath);
+            if (parsedMax.HasValue)
+            {
+                maxMb = parsedMax.Value;
+                minMb = parsedMin;
+                found = true;
+                Logger.Information("從來源檔案「{File}」解析到記憶體設定: Max={Max}MB, Min={Min}MB", candidate, maxMb, minMb);
+                break;
+            }
+        }
+
+        if (!found)
         {
             try
             {
-                foreach (string line in SafeFileSystem.ReadAllLines(argsFile))
+                foreach (string subDir in SafeFileSystem.EnumerateDirectories(directory))
                 {
-                    string trimmed = line.Trim();
-                    if (trimmed.StartsWith('#'))
+                    foreach (string candidate in MemoryCandidateScriptNames)
                     {
-                        continue;
+                        string candidatePath = Path.Combine(subDir, candidate);
+                        var (parsedMax, parsedMin) = TryExtractMemoryFromFile(candidatePath);
+                        if (parsedMax.HasValue)
+                        {
+                            maxMb = parsedMax.Value;
+                            minMb = parsedMin;
+                            found = true;
+                            Logger.Information("從子目錄檔案「{File}」解析到記憶體設定: Max={Max}MB, Min={Min}MB", Path.GetRelativePath(directory, candidatePath), maxMb, minMb);
+                            break;
+                        }
                     }
 
-                    int? xmx = MemoryUtils.ParseMemorySetting(trimmed, "Xmx");
-                    if (xmx.HasValue)
+                    if (found)
                     {
-                        maxMb = xmx.Value;
-                    }
-
-                    int? xms = MemoryUtils.ParseMemorySetting(trimmed, "Xms");
-                    if (xms.HasValue)
-                    {
-                        minMb = xms.Value;
+                        break;
                     }
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                Logger.Warning("讀取 user_jvm_args.txt 記憶體設定失敗: {Message}", ex.Message);
+                Logger.Warning("掃描子目錄記憶體設定失敗: {Message}", ex.Message);
             }
         }
 

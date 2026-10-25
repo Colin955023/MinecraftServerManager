@@ -293,8 +293,9 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
                 return Math.Max(8, minimum);
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("從 Paper API 解析 Java 最低版本異常: {0}", ex.Message);
         }
 
         return null;
@@ -324,8 +325,9 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
                     return fetched;
                 }
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.Warning(ex, "取得 Paper 組建版本列表異常");
             }
 
             return [];
@@ -609,8 +611,9 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
                 }
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning(ex, "抓取官方 Minecraft 版本清單異常");
         }
 
         return FilterMinecraftVersions(existing, includeSnapshots);
@@ -1040,8 +1043,9 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
                 SaveCachedVersions(cacheFile, updated);
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("更新 Paper 快取版本異常: {0}", ex.Message);
         }
     }
 

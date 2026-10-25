@@ -132,7 +132,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
 
         if (_loaderCatalog is not null)
         {
-            _ = InitializeVersionsAsync();
+            _ = RunSafeAsync(InitializeVersionsAsync, "初始化 Minecraft 版本清單", Logger);
         }
     }
 
@@ -164,7 +164,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
     {
         IsMinecraftVersionReloadEnabled = !string.Equals(value, "Paper", StringComparison.OrdinalIgnoreCase);
         UpdateSynchronizedServerName();
-        _ = HandleLoaderChangedAsync(value);
+        _ = RunSafeAsync(() => HandleLoaderChangedAsync(value), "切換模組載入器", Logger);
     }
 
     private async Task HandleLoaderChangedAsync(string loaderName)
@@ -216,8 +216,9 @@ public sealed partial class CreateServerViewModel : PageViewModel
                 }
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning(ex, "載入可用 Minecraft 版本失敗");
         }
     }
 
@@ -232,10 +233,10 @@ public sealed partial class CreateServerViewModel : PageViewModel
         {
             if (_javaRequirementService is not null)
             {
-                _ = UpdateJvmArgsSummaryAsync(value);
+                _ = RunSafeAsync(() => UpdateJvmArgsSummaryAsync(value), "更新 JVM 參數摘要", Logger);
             }
         }
-        _ = RefreshLoaderVersionsAsync();
+        _ = RunSafeAsync(RefreshLoaderVersionsAsync, "重新整理載入器版本", Logger);
     }
 
     private async Task UpdateJvmArgsSummaryAsync(string version)

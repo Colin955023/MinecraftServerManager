@@ -11,7 +11,6 @@ using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
-using MinecraftServerManager.Infrastructure.Servers;
 using MinecraftServerManager.Infrastructure.Settings;
 
 namespace MinecraftServerManager.App.ViewModels;
@@ -128,6 +127,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
 
     public bool CanStartOrMonitorServer => HasSelectedServer && SelectedServer is not null && !SelectedServer.HasMissingFiles;
     public bool CanManagePlayers => HasSelectedServer && !IsSelectedServerActive;
+    public bool IsSelectedServerRunning => IsSelectedServerActive;
 
     private bool IsSelectedServerActive =>
         SelectedServer is not null &&
@@ -135,35 +135,46 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
          string.Equals(SelectedServer.Status, "執行中", StringComparison.OrdinalIgnoreCase));
 
     public ManageServerViewModel(
-        SettingsManager? settingsManager = null,
-        IServerManager? serverManager = null,
-        IServerBackupService? backupService = null,
-        IServerRuntime? serverRuntime = null,
-        IServerInspector? serverInspector = null,
-        IServerLaunchPlanner? launchPlanner = null,
-        IServerPropertiesStore? propertiesStore = null,
+        SettingsManager settingsManager,
+        IServerManager serverManager,
+        IServerBackupService backupService,
+        IServerRuntime serverRuntime,
+        IServerInspector serverInspector,
+        IServerLaunchPlanner launchPlanner,
+        IServerPropertiesStore propertiesStore,
+        IServerPlayerConfigStore playerConfigStore,
+        IServerDirectorySizeService directorySizeService,
+        IServerIntegrityService integrityService,
         Action<string>? navigateCallback = null,
         Action<string, bool>? notificationSink = null,
         IExternalLauncher? launcher = null,
         IJavaRuntimeDetector? javaDetector = null,
         IMinecraftJavaRequirementService? javaRequirementService = null,
-        IUiService? uiService = null,
-        IServerPlayerConfigStore? playerConfigStore = null,
-        IServerDirectorySizeService? directorySizeService = null,
-        IServerIntegrityService? integrityService = null)
+        IUiService? uiService = null)
         : base("manage", "管理現有伺服器", "檢視已安裝伺服器清單，執行啟動、停止、設定與備份維護")
     {
+        ArgumentNullException.ThrowIfNull(settingsManager);
+        ArgumentNullException.ThrowIfNull(serverManager);
+        ArgumentNullException.ThrowIfNull(backupService);
+        ArgumentNullException.ThrowIfNull(serverRuntime);
+        ArgumentNullException.ThrowIfNull(serverInspector);
+        ArgumentNullException.ThrowIfNull(launchPlanner);
+        ArgumentNullException.ThrowIfNull(propertiesStore);
+        ArgumentNullException.ThrowIfNull(playerConfigStore);
+        ArgumentNullException.ThrowIfNull(directorySizeService);
+        ArgumentNullException.ThrowIfNull(integrityService);
+
         _ui = uiService ?? NoOpUiService.Instance;
         _settingsManager = settingsManager;
         _serverManager = serverManager;
         _backupService = backupService;
         _serverRuntime = serverRuntime;
-        _serverInspector = serverInspector ?? new ServerInspector();
-        _launchPlanner = launchPlanner ?? new ServerLaunchPlanner();
+        _serverInspector = serverInspector;
+        _launchPlanner = launchPlanner;
         _propertiesStore = propertiesStore;
-        _playerConfigStore = playerConfigStore ?? new ServerPlayerConfigStore();
-        _directorySizeService = directorySizeService ?? new ServerDirectorySizeService();
-        _integrityService = integrityService ?? new ServerIntegrityService();
+        _playerConfigStore = playerConfigStore;
+        _directorySizeService = directorySizeService;
+        _integrityService = integrityService;
         _navigateCallback = navigateCallback;
         _notificationSink = notificationSink;
         _launcher = launcher;
@@ -222,7 +233,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             : $"{maxMb} MB";
     }
 
-    partial void OnSelectedServerChanged(ServerRowItem? value)
+    private void UpdateSelectedServerDetails(ServerRowItem? value)
     {
         HasSelectedServer = value is not null;
         if (value is not null)
@@ -254,6 +265,12 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
 
         OnPropertyChanged(nameof(CanStartOrMonitorServer));
         OnPropertyChanged(nameof(CanManagePlayers));
+        OnPropertyChanged(nameof(IsSelectedServerRunning));
+    }
+
+    partial void OnSelectedServerChanged(ServerRowItem? value)
+    {
+        UpdateSelectedServerDetails(value);
     }
 
     [RelayCommand]
@@ -283,7 +300,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
     /// <summary>
     /// 於 UI 執行緒排入伺服器狀態更新（不阻塞事件來源執行緒）
     /// </summary>
-    private void RequestStatusRefresh() => _ui.PostToUi(() => { _ = UpdateServerStatusInPlaceAsync(); });
+    private void RequestStatusRefresh() => _ui.PostToUi(() => { _ = RunSafeAsync(UpdateServerStatusInPlaceAsync, "更新伺服器就緒狀態", Logger); });
 
     [RelayCommand]
     public void AddServer() => _navigateCallback?.Invoke("create");
@@ -357,6 +374,9 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
                         SelectedServer = Servers.FirstOrDefault();
                     }
 
+                    // 確保選取項目之詳細資訊與記憶體顯示即時同步
+                    UpdateSelectedServerDetails(SelectedServer);
+
                     // 啟動背景容量非同步回填
                     TriggerBackgroundSizeBackfill();
 
@@ -398,7 +418,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
                 {
                     token.ThrowIfCancellationRequested();
                     long bytes = await _directorySizeService.CalculateServerSizeAsync(target.Path, token).ConfigureAwait(false);
-                    string formatted = Core.Utilities.UnitFormatter.FormatBytes(bytes);
+                    string formatted = _directorySizeService.FormatServerSize(bytes);
 
                     _ui.PostToUi(() =>
                     {
@@ -410,6 +430,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
                 }
                 catch (OperationCanceledException)
                 {
+                    // 正常切換伺服器或重新整理時取消背景容量計算，不寫入日誌以維持記錄檔整潔
                 }
                 catch (Exception ex)
                 {
@@ -602,6 +623,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             {
                 SelectedServer = target;
             }
+            UpdateSelectedServerDetails(SelectedServer);
         }
         catch (Exception ex)
         {
@@ -655,7 +677,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             if (missingTarget is not null)
             {
                 Logger.Error("啟動目標檔案不存在: {Target}", missingTarget);
-                _ = UpdateServerStatusInPlaceAsync();
+                _ = RunSafeAsync(UpdateServerStatusInPlaceAsync, "更新伺服器就緒狀態", Logger);
                 _notificationSink?.Invoke($"啟動目標檔案不存在：{missingTarget}", true);
                 _ui.ShowError($"啟動目標檔案不存在：\n{missingTarget}", "啟動伺服器失敗");
                 return false;
@@ -675,7 +697,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             MonitorServerByName(server.Name.Value, server.Path, server.MinecraftVersion.Value);
 
             await _serverRuntime.StartAsync(plan).ConfigureAwait(true);
-            _ = UpdateServerStatusInPlaceAsync();
+            _ = RunSafeAsync(UpdateServerStatusInPlaceAsync, "更新伺服器就緒狀態", Logger);
 
             string? earlyExit = await DetectEarlyExitAsync().ConfigureAwait(true);
             if (earlyExit is not null)
@@ -683,7 +705,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
                 Logger.Error("伺服器啟動後異常結束: {Message}", earlyExit);
                 _notificationSink?.Invoke(earlyExit, true);
                 _ui.ShowError($"伺服器啟動後異常結束：\n{earlyExit}", "伺服器異常結束");
-                _ = UpdateServerStatusInPlaceAsync();
+                _ = RunSafeAsync(UpdateServerStatusInPlaceAsync, "更新伺服器就緒狀態", Logger);
                 return false;
             }
 
@@ -712,7 +734,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             try
             {
                 await _serverRuntime.StopAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(true);
-                _ = UpdateServerStatusInPlaceAsync();
+                _ = RunSafeAsync(UpdateServerStatusInPlaceAsync, "更新伺服器就緒狀態", Logger);
                 Logger.Information("伺服器已成功傳送停止請求: {Name}", SelectedServer.Name);
                 return;
             }
@@ -774,7 +796,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             return;
         }
 
-        var store = _propertiesStore ?? (!string.IsNullOrWhiteSpace(_settingsManager?.GetServersRoot()) ? new ServerPropertiesStore(_settingsManager.GetServersRoot()) : null);
+        var store = _propertiesStore;
         if (store is not null)
         {
             var vm = new ServerPropertiesViewModel(store, SelectedServer.Name,
@@ -1003,8 +1025,9 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
                 backupCount = backups.Count;
                 backupsToDelete = backups;
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.Warning(ex, "取得伺服器「{Name}」關聯備份清單失敗", name);
             }
         }
 
@@ -1090,6 +1113,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
         {
             _notificationSink?.Invoke($"已更新伺服器「{SelectedServer.Name}」記憶體設定", false);
             await RefreshAndSelectServerAsync(SelectedServer.Name);
+            UpdateSelectedServerDetails(SelectedServer);
         }
     }
 

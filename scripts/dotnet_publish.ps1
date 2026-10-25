@@ -30,23 +30,6 @@ function Publish-App {
         "-c", "Release",
         "-r", "win-x64",
         "--self-contained", $SelfContained,
-        "-p:PublishSingleFile=true",
-        "-p:PublishReadyToRun=false",
-        "-p:HttpActivityPropagationSupport=false",
-        "-p:MetricsSupport=false",
-        "-p:EnableUnsafeBinaryFormatterSerialization=false",
-        "-p:EnableUnsafeUTF7Encoding=false",
-        "-p:StartupHookSupport=false",
-        "-p:CustomResourceTypesSupport=false",
-        "-p:XmlResolverIsNetworkingEnabledByDefault=false",
-        "-p:DebugType=None",
-        "-p:DebugSymbols=false",
-        "-p:PublishDocumentationFiles=false",
-        "-p:AllowedReferenceRelatedFileExtensions=none",
-        "-p:DebuggerSupport=false",
-        "-p:EventSourceSupport=false",
-        "-p:MetadataUpdaterSupport=false",
-        "-p:UseSharedCompilation=false",
         "-nodereuse:false",
         "-m:$maxCpuCount",
         "-o", $tempOutput
@@ -71,12 +54,7 @@ function Publish-App {
 
     $targetExe = Join-Path $outputRoot "MinecraftServerManager-$Name.exe"
 
-    if ($SelfContained -eq "true") {
-        Copy-Item -LiteralPath $sourceExe -Destination $targetExe -Force
-    }
-    else {
-        Move-Item -LiteralPath $sourceExe -Destination $targetExe -Force
-    }
+    Copy-Item -LiteralPath $sourceExe -Destination $targetExe -Force
 
     $hash = (Get-FileHash -LiteralPath $targetExe -Algorithm SHA256).Hash
     $targetSha = "$targetExe.sha256"

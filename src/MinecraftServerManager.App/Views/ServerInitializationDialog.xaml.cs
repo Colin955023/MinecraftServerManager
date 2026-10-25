@@ -5,6 +5,7 @@ using System.Windows;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
+using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Servers;
 
@@ -70,18 +71,18 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
 
     private async void ServerInitializationDialog_Loaded(object sender, RoutedEventArgs e)
     {
-        _serverRuntime.OutputLineReceived += OnOutputLineReceived;
-        _serverRuntime.ServerReady += OnServerReady;
-        _serverRuntime.ServerExited += OnServerExited;
-
-        _flushTimer = _ui.CreateUiTimer(TimeSpan.FromMilliseconds(150), FlushPendingLines);
-        _flushTimer.StartTimer();
-
-        AppendLog($"[系統] 準備啟動伺服器「{_config.Name.Value}」執行初次世界與設定初始化...\n");
-
         try
         {
-            string executableName = ServerStartupTargetResolver.Resolve(_config.Path);
+            _serverRuntime.OutputLineReceived += OnOutputLineReceived;
+            _serverRuntime.ServerReady += OnServerReady;
+            _serverRuntime.ServerExited += OnServerExited;
+
+            _flushTimer = _ui.CreateUiTimer(TimeSpan.FromMilliseconds(150), FlushPendingLines);
+            _flushTimer.StartTimer();
+
+            AppendLog($"[系統] 準備啟動伺服器「{_config.Name.Value}」執行初次世界與設定初始化...\n");
+
+            string executableName = SafeFileSystem.FileExists(System.IO.Path.Combine(_config.Path, "start_server.bat")) ? "start_server.bat" : "server.jar";
             AppendLog(executableName.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)
                 ? $"[系統] 偵測到啟動腳本 {executableName}，即將執行...\n"
                 : $"[系統] 啟動伺服器核心 {executableName}...\n");
@@ -288,8 +289,9 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
                 {
                     await _workflow.StopAsync(TimeSpan.FromSeconds(5));
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Logger.Warning("關閉對話方塊停止伺服器時發生例外: {Message}", ex.Message);
                 }
                 finally
                 {
@@ -329,8 +331,9 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
                 Owner.Focus();
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Warning("初始化對話框關閉後回復擁有者焦點異常: {0}", ex.Message);
         }
     }
 }

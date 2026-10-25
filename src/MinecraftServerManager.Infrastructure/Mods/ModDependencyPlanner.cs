@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
+using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
@@ -59,7 +60,9 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         var embedded = new List<string>();
 
         string normalizedServerLoader = ModHelpers.NormalizeIdentifier(serverLoader);
-        string normalizedServerMcVer = ModHelpers.NormalizeIdentifier(serverMinecraftVersion);
+        string normalizedServerMcVer = MinecraftVersion.TryParse(serverMinecraftVersion, out var parsedServerMc)
+            ? parsedServerMc.Value
+            : string.Empty;
 
         // 0. 伺服器端環境相容性檢查 (純用戶端模組不可在伺服器運作)
         if (!string.IsNullOrWhiteSpace(serverSide) && string.Equals(serverSide.Trim(), "unsupported", StringComparison.OrdinalIgnoreCase))
@@ -77,7 +80,7 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         }
 
         // 2. Minecraft 版本相容性檢查
-        if (!string.IsNullOrEmpty(normalizedServerMcVer) && normalizedServerMcVer != "未知")
+        if (!string.IsNullOrEmpty(normalizedServerMcVer))
         {
             if (targetVersion.GameVersions.Count > 0 && !IsMinecraftVersionCompatible(normalizedServerMcVer, targetVersion.GameVersions))
             {
@@ -550,9 +553,9 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
                         IsLoaderCompatible(normLoader, v.Loaders, normMc);
 
         bool mcOk = string.IsNullOrEmpty(normMc) ||
-                    normMc == "未知" ||
+                    !MinecraftVersion.TryParse(normMc, out var validMc) ||
                     v.GameVersions.Count == 0 ||
-                    IsMinecraftVersionCompatible(normMc, v.GameVersions);
+                    IsMinecraftVersionCompatible(validMc.Value, v.GameVersions);
 
         return loaderOk && mcOk;
     }

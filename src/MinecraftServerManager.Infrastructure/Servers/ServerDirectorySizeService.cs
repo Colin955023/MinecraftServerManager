@@ -22,12 +22,19 @@ public sealed class ServerDirectorySizeService : IServerDirectorySizeService
     private static readonly TimeSpan DefaultCacheDuration = TimeSpan.FromSeconds(60);
 
     private readonly TimeSpan _cacheDuration;
+    private readonly int _maxEntries;
+    private readonly long _maxTotalBytes;
     private readonly ConcurrentDictionary<string, (long SizeBytes, DateTime ExpireAt)> _cache =
         new(StringComparer.OrdinalIgnoreCase);
 
-    public ServerDirectorySizeService(TimeSpan? cacheDuration = null)
+    public ServerDirectorySizeService(
+        TimeSpan? cacheDuration = null,
+        int maxEntries = SafeFileSystem.DefaultMaxEntries,
+        long maxTotalBytes = SafeFileSystem.DefaultMaxTotalBytes)
     {
         _cacheDuration = cacheDuration ?? DefaultCacheDuration;
+        _maxEntries = maxEntries;
+        _maxTotalBytes = maxTotalBytes;
     }
 
     public async Task<long> CalculateServerSizeAsync(string serverPath, CancellationToken cancellationToken = default)
@@ -56,7 +63,13 @@ public sealed class ServerDirectorySizeService : IServerDirectorySizeService
 
             try
             {
-                var entries = SafeFileSystem.WalkBoundedTree(normalizedPath, rejectReparse: false);
+                var entries = SafeFileSystem.EnumerateBoundedTree(
+                    normalizedPath,
+                    maxEntries: _maxEntries,
+                    maxTotalBytes: _maxTotalBytes,
+                    rejectReparse: false,
+                    pruneDirectory: static (fullPath, name) => ExcludedDirectoryNames.Contains(name));
+
                 long totalBytes = 0;
 
                 foreach (var entry in entries)
@@ -86,15 +99,27 @@ public sealed class ServerDirectorySizeService : IServerDirectorySizeService
             catch (Exception ex)
             {
                 Logger.Warning("計算伺服器容量失敗 ({Path}): {Message}", normalizedPath, ex.Message);
-                return 0L;
+                return -1L;
             }
         }, cancellationToken).ConfigureAwait(false);
 
-        _cache[normalizedPath] = (calculatedSize, now.Add(_cacheDuration));
+        if (calculatedSize >= 0)
+        {
+            _cache[normalizedPath] = (calculatedSize, now.Add(_cacheDuration));
+        }
+
         return calculatedSize;
     }
 
-    public string FormatServerSize(long bytes) => bytes <= 0 ? "-" : UnitFormatter.FormatBytes(bytes);
+    public string FormatServerSize(long bytes)
+    {
+        if (bytes < 0)
+        {
+            return "無法計算";
+        }
+
+        return bytes == 0 ? "-" : UnitFormatter.FormatBytes(bytes);
+    }
 
     public void InvalidateCache(string serverPath)
     {

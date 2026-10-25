@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.ComponentModel;
@@ -90,6 +91,7 @@ public static class DataGridNaturalSortBehavior
 /// </summary>
 public sealed class WindowsNaturalSortComparer(string propertyName, ListSortDirection direction) : IComparer
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("WindowsNaturalSortComparer");
     private static readonly ConcurrentDictionary<(Type, string), Func<object, object?>?> GetterCache = new();
 
     public int Compare<T>(T? x, T? y) => Compare(x, (object?)y);
@@ -167,8 +169,9 @@ public sealed class WindowsNaturalSortComparer(string propertyName, ListSortDire
             {
                 return compX.CompareTo(valY);
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Warning("自然排序物件比較失敗，改用字串比對: {0}", ex.Message);
             }
         }
 

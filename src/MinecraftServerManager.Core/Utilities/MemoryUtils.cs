@@ -51,7 +51,7 @@ public sealed record MemoryValidationResult
 /// </summary>
 public static partial class MemoryUtils
 {
-    [GeneratedRegex(@"-(Xmx|Xms)(\d+)([mMgG]?)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"-(Xmx|Xms)(\d+)([mMgG]?)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex XmxPattern();
 
     /// <summary>
@@ -103,9 +103,17 @@ public static partial class MemoryUtils
                 continue;
             }
 
-            parsedResult = (hasUnit && (last is 'g' or 'G'))
-                ? value * 1024
-                : value;
+            if (hasUnit && (last is 'g' or 'G'))
+            {
+                if (value <= int.MaxValue / 1024)
+                {
+                    parsedResult = value * 1024;
+                }
+            }
+            else
+            {
+                parsedResult = value;
+            }
         }
 
         return parsedResult;

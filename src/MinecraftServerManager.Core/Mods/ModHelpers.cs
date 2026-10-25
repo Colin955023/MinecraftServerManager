@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using System.Text.RegularExpressions;
 using MinecraftServerManager.Domain.Mods;
@@ -10,6 +11,7 @@ namespace MinecraftServerManager.Core.Mods;
 public static partial class ModHelpers
 {
     public const string PreferredHashAlgorithm = "sha512";
+    private static readonly SearchValues<char> FormattingChars = SearchValues.Create("\x1B§\\");
 
     public static string ModFilenameStem(string? filename)
     {
@@ -45,6 +47,11 @@ public static partial class ModHelpers
         if (string.IsNullOrWhiteSpace(text))
         {
             return string.Empty;
+        }
+
+        if (!text.AsSpan().ContainsAny(FormattingChars))
+        {
+            return text;
         }
 
         return ColorAndFormattingCodeRegex().Replace(text, string.Empty);

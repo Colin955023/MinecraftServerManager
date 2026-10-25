@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using System.Windows;
 using System.Windows.Media.Animation;
 using MinecraftServerManager.App.Services;
@@ -15,6 +16,7 @@ public enum NotificationLevel
 /// </summary>
 public partial class NotificationDialog : Window
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("NotificationDialog");
     private readonly NotificationLevel _level;
     private readonly IUiService _ui;
     private readonly IUiTimer _autoCloseTimer;
@@ -189,8 +191,9 @@ public partial class NotificationDialog : Window
                 DialogResult = true;
             }
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex)
         {
+            Logger.Warning("非強制回應視窗設定 DialogResult 異常（安全關閉）: {0}", ex.Message);
         }
 
         Close();
@@ -212,8 +215,9 @@ public partial class NotificationDialog : Window
                 Owner.Focus();
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Warning("對話框關閉後回復擁有者視窗焦點異常: {0}", ex.Message);
         }
     }
 }

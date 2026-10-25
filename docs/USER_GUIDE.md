@@ -122,5 +122,8 @@
 - 請檢查伺服器設定的 Java 版本是否與 Minecraft 版本相符（例如 Minecraft 1.20.5+ 需要 Java 21 以上）。
 - 請至主控台視窗檢視當機報告（Crash Report），確認是否因模組相依性缺失或記憶體配置超出實體限制所致。
 
-### 3. 如何回報問題或建議
+### 3. 初次啟動出現 Windows SmartScreen 提示
+本軟體為免費開源專案，未購買商業數位憑證。若於 Windows 首次啟動時出現「Windows 已保護您的電腦」提示，請點選「**其他資訊**（More info）」→「**仍要執行**（Run anyway）」即可正常啟動；主程式日常更新均內建全自動 SHA-256 完整性檢查，請安心使用。
+
+### 4. 如何回報問題或建議
 如遇程式異常，請至 [GitHub Issues](https://github.com/Colin955023/MinecraftServerManager/issues) 提出，並附上 Windows 版本、使用的版本類型、操作步驟與記錄檔（位於 `%LOCALAPPDATA%\Programs\MinecraftServerManager\Logs\`）。

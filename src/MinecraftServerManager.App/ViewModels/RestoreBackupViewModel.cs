@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Services;
 using System.Globalization;
@@ -20,8 +21,9 @@ public sealed class BackupDisplayItem(string fileName, long sizeBytes, DateTimeO
 /// <summary>
 /// 備份還原與管理對話方塊 ViewModel
 /// </summary>
-public sealed partial class RestoreBackupViewModel : ObservableObject
+public sealed partial class RestoreBackupViewModel : ViewModelBase
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("RestoreBackup");
     private readonly IUiService _ui;
 
     private readonly IServerBackupService _backupService;
@@ -53,7 +55,7 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
         WindowTitle = $"備份還原 — {serverName}";
         Backups = [];
 
-        _ = RefreshBackupsAsync();
+        _ = RunSafeAsync(RefreshBackupsAsync, "重新整理備份清單", Logger);
     }
 
     public string WindowTitle { get; }

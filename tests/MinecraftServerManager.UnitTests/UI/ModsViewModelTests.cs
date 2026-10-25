@@ -7,10 +7,18 @@ namespace MinecraftServerManager.UnitTests.UI;
 
 public sealed class ModsViewModelTests
 {
+    private static ModsViewModel CreateTestViewModel(IModrinthClient? modrinthClient = null)
+    {
+        return new ModsViewModel(
+            dependencyPlanner: new Infrastructure.Mods.ModDependencyPlanner(),
+            modListExporter: new Infrastructure.Mods.ModListExporter(),
+            modrinthClient: modrinthClient);
+    }
+
     [Fact]
     public void PlatformOptionsShouldContainModrinthAndCurseForgeWithModrinthDefault()
     {
-        var vm = new ModsViewModel();
+        var vm = CreateTestViewModel();
         Assert.Equal("Modrinth", vm.SelectedPlatform);
         Assert.Contains("Modrinth", ModsViewModel.PlatformOptions);
         Assert.Contains("CurseForge", ModsViewModel.PlatformOptions);
@@ -19,7 +27,7 @@ public sealed class ModsViewModelTests
     [Fact]
     public void SwitchingToCurseForgeShouldClearOnlineModsAndShowHint()
     {
-        var vm = new ModsViewModel();
+        var vm = CreateTestViewModel();
         vm.OnlineMods.Add(new OnlineModRowItem { Title = "TestMod" });
         Assert.NotEmpty(vm.OnlineMods);
 
@@ -35,10 +43,8 @@ public sealed class ModsViewModelTests
     {
         bool modrinthCalled = false;
         var fakeModrinth = new FakeModrinthClient(() => modrinthCalled = true);
-        var vm = new ModsViewModel(modrinthClient: fakeModrinth)
-        {
-            SelectedPlatform = "CurseForge"
-        };
+        var vm = CreateTestViewModel(modrinthClient: fakeModrinth);
+        vm.SelectedPlatform = "CurseForge";
 
         await vm.SearchOnlineModsCommand.ExecuteAsync(null);
 

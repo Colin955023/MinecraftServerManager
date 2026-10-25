@@ -34,11 +34,11 @@ public class NoOpUiService : IUiService
 
     public virtual IUiTimer CreateUiTimer(TimeSpan interval, Action tick) => new NoOpUiTimer();
 
-    public IReadOnlyList<string>? PickFiles(string title, string filter, bool multiselect = false) => null;
+    public virtual IReadOnlyList<string>? PickFiles(string title, string filter, bool multiselect = false) => null;
 
-    public string? PickSaveFile(string title, string fileName, string filter) => null;
+    public virtual string? PickSaveFile(string title, string fileName, string filter) => null;
 
-    public string? PickFolder(string title, string? initialDirectory = null) => null;
+    public virtual string? PickFolder(string title, string? initialDirectory = null) => null;
 
     public bool? ShowManageJava(ManageJavaViewModel viewModel) => null;
 
@@ -51,7 +51,7 @@ public class NoOpUiService : IUiService
 
     public bool? ShowServerMemory(ServerMemoryViewModel viewModel) => null;
 
-    public bool? ShowImportServer(ImportServerViewModel viewModel) => null;
+    public virtual bool? ShowImportServer(ImportServerViewModel viewModel) => null;
 
     public bool? ShowModVersionPicker(ModVersionPickerViewModel viewModel) => null;
 

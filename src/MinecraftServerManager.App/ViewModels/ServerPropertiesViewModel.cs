@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -98,8 +99,9 @@ public sealed partial class PropertyEditItem : ObservableObject
 /// <summary>
 /// 伺服器屬性設定對話方塊 ViewModel
 /// </summary>
-public sealed partial class ServerPropertiesViewModel : ObservableObject
+public sealed partial class ServerPropertiesViewModel : ViewModelBase
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerProperties");
     private readonly IUiService _ui;
 
     private readonly IServerPropertiesStore _propertiesStore;
@@ -112,6 +114,10 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
 
     [ObservableProperty]
     public partial string SelectedCategory { get; set; } = "全部";
+
+    partial void OnSearchTextChanged(string value) => ApplyFilter();
+
+    partial void OnSelectedCategoryChanged(string value) => ApplyFilter();
 
 
 
@@ -151,7 +157,7 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
         _serverName = serverName;
         WindowTitle = $"伺服器設定 — {serverName}";
 
-        _ = LoadPropertiesAsync();
+        _ = RunSafeAsync(LoadPropertiesAsync, "載入伺服器屬性設定", Logger);
     }
 
     public async Task LoadPropertiesAsync()

@@ -23,9 +23,7 @@ public sealed class ServerInspectorTests : IDisposable
                 Directory.Delete(_testRoot, recursive: true);
             }
         }
-        catch
-        {
-        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
     }
 
     [Fact]
@@ -37,7 +35,7 @@ public sealed class ServerInspectorTests : IDisposable
         File.WriteAllText(Path.Combine(serverDir, "eula.txt"), "eula=true\n");
         File.WriteAllText(Path.Combine(serverDir, "server.properties"), "server-port=25565\n");
 
-        var inspector = new ServerInspector();
+        var inspector = new ServerInspector(new ServerDirectorySizeService());
         var inspection = await inspector.InspectAsync(serverDir);
 
         Assert.True(inspection.IsCandidate);
@@ -57,7 +55,7 @@ public sealed class ServerInspectorTests : IDisposable
         File.WriteAllText(Path.Combine(serverDir, "server.jar"), "dummy jar");
         File.WriteAllText(Path.Combine(serverDir, "eula.txt"), "eula=true\n");
 
-        var inspector = new ServerInspector();
+        var inspector = new ServerInspector(new ServerDirectorySizeService());
         var inspection = await inspector.InspectAsync(serverDir);
 
         Assert.Equal("run.bat", inspection.LaunchTarget.Value);
@@ -75,7 +73,7 @@ public sealed class ServerInspectorTests : IDisposable
         File.WriteAllText(Path.Combine(serverDir, "eula.txt"), "eula=true\n");
         File.WriteAllText(Path.Combine(serverDir, "user_jvm_args.txt"), "-Xms2G\n-Xmx6G\n");
 
-        var inspector = new ServerInspector();
+        var inspector = new ServerInspector(new ServerDirectorySizeService());
         var inspection = await inspector.InspectAsync(serverDir);
 
         Assert.Equal("fabric", inspection.LoaderType);
@@ -92,7 +90,7 @@ public sealed class ServerInspectorTests : IDisposable
         File.WriteAllText(Path.Combine(serverDir, "server.jar"), "dummy");
         File.WriteAllText(Path.Combine(serverDir, "eula.txt"), "eula=false\n");
 
-        var inspector = new ServerInspector();
+        var inspector = new ServerInspector(new ServerDirectorySizeService());
         var inspection = await inspector.InspectAsync(serverDir);
 
         Assert.Equal(EulaState.Rejected, inspection.EulaState);
@@ -108,7 +106,7 @@ public sealed class ServerInspectorTests : IDisposable
         File.WriteAllText(Path.Combine(serverDir, "eula.txt"), "eula=true\n");
         File.WriteAllText(Path.Combine(serverDir, "paper-global.yml"), "# paper config\n");
 
-        var inspector = new ServerInspector();
+        var inspector = new ServerInspector(new ServerDirectorySizeService());
         var inspection = await inspector.InspectAsync(serverDir);
 
         Assert.True(inspection.IsCandidate);
@@ -140,10 +138,27 @@ public sealed class ServerInspectorTests : IDisposable
             fs.SetLength(3L * 1024 * 1024);
         }
 
-        var inspector = new ServerInspector();
+        var inspector = new ServerInspector(new ServerDirectorySizeService());
         var inspection = await inspector.InspectAsync(serverDir);
 
         Assert.True(inspection.IsCandidate);
         Assert.Equal(EulaState.Missing, inspection.EulaState); // 超大 eula.txt 被安全忽略，不致當機
+    }
+
+    [Fact]
+    public async Task InspectsEmptyDirectory_ReturnsFallbackUnknownsAndNotReady()
+    {
+        string serverDir = Path.Combine(_testRoot, "empty-server");
+        Directory.CreateDirectory(serverDir);
+
+        var inspector = new ServerInspector(new ServerDirectorySizeService());
+        var inspection = await inspector.InspectAsync(serverDir);
+
+        Assert.False(inspection.IsCandidate);
+        Assert.False(inspection.Launchable);
+        Assert.False(inspection.StatusReady);
+        Assert.Equal("unknown", inspection.LoaderType);
+        Assert.Equal("unknown", inspection.LoaderVersion);
+        Assert.Equal("unknown", inspection.MinecraftVersion);
     }
 }

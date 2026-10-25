@@ -31,7 +31,7 @@ public partial class ModsView : UserControl
     {
         if (DataContext is ModsViewModel vm && sender is DataGrid grid && grid.SelectedItem is OnlineModRowItem item)
         {
-            _ = vm.PickOnlineModVersionAsync(item);
+            _ = ViewModelBase.RunSafeAsync(() => vm.PickOnlineModVersionAsync(item), "選取線上模組版本");
         }
     }
 

@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using System.Buffers;
 using System.Collections.Frozen;
 using System.Net;
@@ -43,6 +44,7 @@ public sealed record HttpRequestRetryOptions
 
 public sealed class HttpDownloadClient : IHttpPort
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("HttpDownloadClient");
     public const long MaxJsonBytes = 16L * 1024 * 1024;
     public const long MaxTextBytes = 64L * 1024 * 1024;
     public const long DefaultMaxDownloadBytes = 512L * 1024 * 1024;
@@ -877,11 +879,9 @@ public sealed class HttpDownloadClient : IHttpPort
                 SafeFileSystem.DeleteFile(path);
             }
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-        }
-        catch (UnauthorizedAccessException)
-        {
+            Logger.Warning("清理暫存下載檔失敗（已忽略）: {0}", ex.Message);
         }
     }
 

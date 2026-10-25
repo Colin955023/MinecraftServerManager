@@ -42,7 +42,7 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
     [Fact]
     public async Task ServerLifecycleWorkflowSucceeds()
     {
-        var inspector = new ServerInspector();
+        var inspector = new ServerInspector(new ServerDirectorySizeService());
         var planner = new ServerLaunchPlanner();
         var manager = new ServerManager(_serversRoot, inspector);
 
@@ -132,7 +132,8 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
     [Fact]
     public async Task ServerImportDirectoryAndZipWorkflowSucceeds()
     {
-        var manager = new ServerManager(_serversRoot);
+        var inspector = new ServerInspector(new ServerDirectorySizeService());
+        var manager = new ServerManager(_serversRoot, inspector);
 
         // 1. 測試資料夾匯入
         string externalDir = Path.Combine(_testRoot, "ExternalServerDir");
@@ -223,6 +224,78 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         var deleteResult = await modManager.DeleteModsAsync(serverDir, ["testmod"]);
         Assert.True(deleteResult.Completed);
         Assert.False(File.Exists(Path.Combine(modsDir, "testmod-1.0.0.jar.disabled")));
+    }
+
+
+    [Fact]
+    public async Task RestoreBackup_PreservesLiveDiagnosticsLogsAndCrashReports()
+    {
+        string serverDir = Path.Combine(_serversRoot, "DiagServer");
+        SafeFileSystem.ResolveStableDirectory(serverDir, create: true);
+        string worldFile = Path.Combine(serverDir, "world.txt");
+        File.WriteAllText(worldFile, "v1 world");
+
+        string externalBackupsDir = Path.Combine(_testRoot, "DiagBackups");
+        SafeFileSystem.ResolveStableDirectory(externalBackupsDir, create: true);
+
+        var backupService = new ServerBackupService(_serversRoot, maxRetentionCount: 5);
+
+        // 1. 建立第一個備份（此時沒有 logs 與 crash-reports）
+        var backup = await backupService.CreateBackupAsync("DiagServer", destinationPath: externalBackupsDir);
+        Assert.NotNull(backup);
+
+        // 2. 模擬伺服器崩潰，產生最新現場記錄 logs/latest.log 與 crash-reports/crash-2026.txt
+        string logsDir = Path.Combine(serverDir, "logs");
+        string crashDir = Path.Combine(serverDir, "crash-reports");
+        Directory.CreateDirectory(logsDir);
+        Directory.CreateDirectory(crashDir);
+
+        string latestLogPath = Path.Combine(logsDir, "latest.log");
+        string crashReportPath = Path.Combine(crashDir, "crash-2026.txt");
+        File.WriteAllText(latestLogPath, "CRITICAL ERROR AT SHUTDOWN");
+        File.WriteAllText(crashReportPath, "Stack trace of crash");
+
+        // 3. 執行還原
+        bool restoreSuccess = await backupService.RestoreBackupAsync("DiagServer", backup.FileName, externalBackupsDir);
+        Assert.True(restoreSuccess);
+
+        // 4. 驗證資料已還原，且現場記錄 logs 與 crash-reports 被安全保護並保留
+        Assert.Equal("v1 world", File.ReadAllText(worldFile));
+        Assert.True(File.Exists(latestLogPath));
+        Assert.Equal("CRITICAL ERROR AT SHUTDOWN", File.ReadAllText(latestLogPath));
+        Assert.True(File.Exists(crashReportPath));
+        Assert.Equal("Stack trace of crash", File.ReadAllText(crashReportPath));
+    }
+
+    [Fact]
+    public async Task ImportServer_MaliciousZipSlipArchive_IsSafelyRejected()
+    {
+        var inspector = new ServerInspector(new ServerDirectorySizeService());
+        var manager = new ServerManager(_serversRoot, inspector);
+
+        // 建立含惡意 Zip Slip 目錄穿越條目的 ZIP 壓縮檔
+        string maliciousZip = Path.Combine(_testRoot, "malicious_zipslip.zip");
+        using (var zipStream = new FileStream(maliciousZip, FileMode.Create))
+        using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create))
+        {
+            var validEntry = archive.CreateEntry("server.properties");
+            using (var writer = new StreamWriter(validEntry.Open()))
+            {
+                writer.Write("motd=Safe motd");
+            }
+
+            var evilEntry = archive.CreateEntry("../../../evil_escape.txt");
+            using (var writer = new StreamWriter(evilEntry.Open()))
+            {
+                writer.Write("pwned");
+            }
+        }
+
+        // 匯入應失敗，且系統外部絕不會出現被穿越寫入的檔案
+        var result = await manager.ImportServerAsync(maliciousZip, "MaliciousServer");
+        Assert.False(result.Completed);
+        Assert.False(File.Exists(Path.Combine(_testRoot, "evil_escape.txt")));
+        Assert.False(Directory.Exists(Path.Combine(_serversRoot, "MaliciousServer")));
     }
 
     private sealed class DummyHttpPort : IHttpPort

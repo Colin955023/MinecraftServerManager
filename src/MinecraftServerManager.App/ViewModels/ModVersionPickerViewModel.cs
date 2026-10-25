@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -36,8 +37,9 @@ public sealed class ModVersionDisplayItem
 /// <summary>
 /// 線上模組版本選擇對話方塊 ViewModel
 /// </summary>
-public sealed partial class ModVersionPickerViewModel : ObservableObject
+public sealed partial class ModVersionPickerViewModel : ViewModelBase
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ModVersionPicker");
     private readonly IModrinthClient _modrinthClient;
     private readonly string _projectId;
     private readonly string? _loader;
@@ -68,7 +70,7 @@ public sealed partial class ModVersionPickerViewModel : ObservableObject
         WindowTitle = $"選擇模組版本 — {projectTitle}";
         Versions = [];
 
-        _ = LoadVersionsAsync();
+        _ = RunSafeAsync(LoadVersionsAsync, "載入模組版本清單", Logger);
     }
 
     public string WindowTitle { get; }

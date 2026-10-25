@@ -34,7 +34,7 @@ public sealed partial class JavaItemViewModel : ObservableObject
     public partial string StatusText { get; set; } = string.Empty;
 }
 
-public sealed partial class ManageJavaViewModel : ObservableObject
+public sealed partial class ManageJavaViewModel : ViewModelBase
 {
     private readonly IUiService _ui;
 
@@ -101,7 +101,7 @@ public sealed partial class ManageJavaViewModel : ObservableObject
             : (AvailableInstallMajors.Count > 0 ? AvailableInstallMajors[^1] : 0);
 
         ResultJavaPath = currentJavaPath;
-        _ = LoadInstalledJavasAsync(currentJavaPath);
+        _ = RunSafeAsync(() => LoadInstalledJavasAsync(currentJavaPath), "載入已安裝 Java 清單", Logger);
     }
 
     [RelayCommand]

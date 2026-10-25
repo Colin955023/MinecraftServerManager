@@ -41,15 +41,16 @@ public sealed partial class ServerManager : IServerManager
 
     public ServerManager(
         string serversRoot,
-        IServerInspector? inspector = null,
+        IServerInspector inspector,
         ILoaderInstallerService? loaderInstaller = null,
         IJavaRuntimeDetector? javaDetector = null,
         IMinecraftJavaRequirementService? javaRequirementService = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serversRoot);
+        ArgumentNullException.ThrowIfNull(inspector);
         _serversRoot = SafeFileSystem.ResolveStableDirectory(serversRoot, create: true);
         _registryFilePath = Path.Combine(_serversRoot, "servers.json");
-        _inspector = inspector ?? new ServerInspector();
+        _inspector = inspector;
         _loaderInstaller = loaderInstaller;
         _javaDetector = javaDetector;
         _javaRequirementService = javaRequirementService;
@@ -292,8 +293,9 @@ public sealed partial class ServerManager : IServerManager
                             SafeFileSystem.DeleteWithin(_serversRoot, cleanupTarget);
                         }
                     }
-                    catch
+                    catch (Exception cleanEx) when (cleanEx is not OperationCanceledException)
                     {
+                        Logger.Warning(cleanEx, "建立伺服器失敗後清理目錄異常: {0}", cleanupTarget);
                     }
                 }
             }
@@ -309,8 +311,9 @@ public sealed partial class ServerManager : IServerManager
                     SafeFileSystem.DeleteWithin(_serversRoot, stagingDir);
                 }
             }
-            catch
+            catch (Exception cleanEx) when (cleanEx is not OperationCanceledException)
             {
+                Logger.Warning("清理暫存目錄異常: {0}", cleanEx.Message);
             }
         }
     }
@@ -349,8 +352,9 @@ public sealed partial class ServerManager : IServerManager
                     return "@" + matchedArgs;
                 }
             }
-            catch
+            catch (Exception readEx) when (readEx is not OperationCanceledException)
             {
+                Logger.Warning("解析 run.bat 啟動參數異常: {0}", readEx.Message);
             }
         }
 
@@ -494,6 +498,46 @@ public sealed partial class ServerManager : IServerManager
         Logger.Information("已更新 Forge/NeoForge 參數檔: {Path}", userJvmArgsPath);
     }
 
+    /// <summary>
+    /// 更新統一啟動腳本 start_server.bat 中的記憶體設定（-Xms 與 -Xmx）
+    /// </summary>
+    public static void UpdateStartScriptMemory(string serverDirectory, ServerConfig config)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
+        ArgumentNullException.ThrowIfNull(config);
+
+        string stableDir = SafeFileSystem.ResolveStableDirectory(serverDirectory);
+        string scriptPath = Path.Combine(stableDir, "start_server.bat");
+        if (!SafeFileSystem.FileExists(scriptPath))
+        {
+            return;
+        }
+
+        string content = SafeFileSystem.ReadAllText(scriptPath);
+        int minMb = config.MemoryMinMb ?? (config.MemoryMaxMb > 1024 ? 1024 : config.MemoryMaxMb);
+        int maxMb = config.MemoryMaxMb;
+
+        bool hasXmx = ScriptXmxRegex().IsMatch(content);
+        bool hasXms = ScriptXmsRegex().IsMatch(content);
+
+        if (hasXmx)
+        {
+            content = ScriptXmxRegex().Replace(content, $"-Xmx{maxMb}M");
+        }
+
+        if (hasXms)
+        {
+            content = ScriptXmsRegex().Replace(content, $"-Xms{minMb}M");
+        }
+        else if (hasXmx)
+        {
+            content = ScriptXmxRegex().Replace(content, match => $"-Xms{minMb}M " + match.Value, 1);
+        }
+
+        AtomicFileWriter.WriteText(scriptPath, content);
+        Logger.Information("已更新統一啟動腳本記憶體設定: {Path} (-Xms{Min}M -Xmx{Max}M)", scriptPath, minMb, maxMb);
+    }
+
     private async Task<string?> ResolveJavaExecutableAsync(
         string? configuredJava,
         string minecraftVersion,
@@ -539,8 +583,9 @@ public sealed partial class ServerManager : IServerManager
                     return best.ExecutablePath;
                 }
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.Warning("自動偵測 Java 執行檔異常: {0}", ex.Message);
             }
         }
 
@@ -582,8 +627,9 @@ public sealed partial class ServerManager : IServerManager
                     return candidate;
                 }
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.Warning("檢查 PATH 中的 Java 候選路徑異常: {0}", ex.Message);
             }
         }
 
@@ -652,6 +698,12 @@ public sealed partial class ServerManager : IServerManager
 
     [GeneratedRegex(@"(?i)@([^\s""]+win_args\.txt)")]
     private static partial Regex WinArgsRegex();
+
+    [GeneratedRegex(@"(?i)-Xmx[0-9]+[kmgt]?\b")]
+    private static partial Regex ScriptXmxRegex();
+
+    [GeneratedRegex(@"(?i)-Xms[0-9]+[kmgt]?\b")]
+    private static partial Regex ScriptXmsRegex();
 
     public async Task<ServerOperationResult> DeleteServerAsync(string name, CancellationToken cancellationToken = default)
     {
@@ -729,6 +781,8 @@ public sealed partial class ServerManager : IServerManager
             {
                 UpdateForgeUserJvmArgs(config.Path, config);
             }
+
+            UpdateStartScriptMemory(config.Path, config);
         }
 
         string jvmText = config.JvmArgs is { Count: > 0 } ? string.Join(" ", config.JvmArgs) : "無";
@@ -848,8 +902,9 @@ public sealed partial class ServerManager : IServerManager
                     string backupBat = Path.Combine(stableStaging, "start_server.bat.bak");
                     SafeFileSystem.CopyFile(existingBat, backupBat, overwrite: true);
                 }
-                catch
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
+                    Logger.Warning("備份現有啟動腳本異常: {0}", ex.Message);
                 }
             }
 
@@ -911,8 +966,9 @@ public sealed partial class ServerManager : IServerManager
                 {
                     SafeFileSystem.DeleteWithin(_serversRoot, targetDir);
                 }
-                catch
+                catch (Exception cleanEx) when (cleanEx is not OperationCanceledException)
                 {
+                    Logger.Warning(cleanEx, "匯入失敗後清理目標目錄異常: {0}", targetDir);
                 }
             }
             return ServerImportResult.Failed(targetName, $"匯入伺服器失敗：{ex.Message}");
@@ -925,8 +981,9 @@ public sealed partial class ServerManager : IServerManager
                 {
                     SafeFileSystem.DeleteWithin(_serversRoot, stagingDir);
                 }
-                catch
+                catch (Exception cleanEx) when (cleanEx is not OperationCanceledException)
                 {
+                    Logger.Warning("清理匯入暫存目錄異常: {0}", cleanEx.Message);
                 }
             }
         }

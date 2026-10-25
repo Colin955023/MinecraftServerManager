@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Media;
@@ -17,6 +18,7 @@ namespace MinecraftServerManager.App.Services;
 /// </summary>
 public sealed class WpfUiService : IUiService
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("WpfUiService");
     private static ImageSource? s_cachedAppIcon;
 
     public bool Confirm(string message, string title, UiMessageLevel level = UiMessageLevel.Question)
@@ -284,8 +286,9 @@ public sealed class WpfUiService : IUiService
             frame.Freeze();
             s_cachedAppIcon = frame;
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Warning(ex, "載入應用程式圖示失敗");
         }
 
         return s_cachedAppIcon;
@@ -313,7 +316,10 @@ public sealed class WpfUiService : IUiService
         public void Complete()
         {
             markCompleted();
-            RunOnUi(window, window.Close);
+            RunOnUi(window, () =>
+            {
+                window.Dispatcher.InvokeAsync(window.Close, DispatcherPriority.Background);
+            });
         }
     }
 

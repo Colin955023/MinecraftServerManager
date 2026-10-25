@@ -248,8 +248,9 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
             {
                 manifestResp = await _httpPort.GetJsonDocumentAsync(new Uri(ManifestV2Url), cancellationToken).ConfigureAwait(false);
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.Warning("抓取 Mojang Manifest V2 失敗，將嘗試後備網址: {Error}", ex.Message);
             }
 
             if (manifestResp is null || !manifestResp.IsSuccess || manifestResp.Payload is null)
@@ -701,8 +702,9 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         {
             AtomicFileWriter.WriteJson(cachePath, versions, indented: true);
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("儲存版本快取失敗: {Error}", ex.Message);
         }
     }
 
@@ -727,8 +729,9 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
                 return minimum;
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("從 Paper 取得 Java 需求版本失敗: {Error}", ex.Message);
         }
 
         return null;

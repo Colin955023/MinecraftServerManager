@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json.Serialization;
@@ -9,6 +10,7 @@ namespace MinecraftServerManager.Infrastructure.Java;
 
 public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRuntimeDetector
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("JavaRuntimeDetector");
     private const int MaxJavaDirectoryEntries = 128;
     private const string CacheFileName = "java_candidates_cache.json";
     private static readonly string[] CommonVendors =
@@ -257,8 +259,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                         AddCandidate(candidates, Path.Combine(entry.FullPath, "bin", "java.exe"));
                     }
                 }
-                catch (IOException)
+                catch (IOException ex)
                 {
+                    Logger.Warning("列舉 JDK 目錄失敗: {0}", ex.Message);
                 }
             }
         }
@@ -351,8 +354,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 return true;
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("檢查 Shim 可執行檔資訊失敗: {0}", ex.Message);
         }
 
         return false;
@@ -437,8 +441,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                             continue;
                         }
                     }
-                    catch
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
+                        Logger.Warning("讀取 Java 快取檔案中繼資料失敗: {0}", ex.Message);
                     }
 
                     using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -460,8 +465,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                     {
                         hadInvalidEntries = true;
                     }
-                    catch
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
+                        Logger.Warning("讀取 Java 執行期資訊失敗: {0}", ex.Message);
                         hadInvalidEntries = true;
                     }
                 }
@@ -521,8 +527,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                         lastWriteTicks = fi.LastWriteTimeUtc.Ticks;
                         fileSize = fi.Length;
                     }
-                    catch
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
+                        Logger.Warning("取得 Java 檔案中繼資料失敗: {0}", ex.Message);
                     }
                     return new JavaCacheEntry(
                         r.ExecutablePath,

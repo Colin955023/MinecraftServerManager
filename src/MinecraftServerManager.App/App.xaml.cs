@@ -28,6 +28,7 @@ public partial class App : Application
         // 1. 最先註冊未處理例外事件，確保啟動初期之任何錯誤均被記錄
         DispatcherUnhandledException += App_DispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+        TaskScheduler.UnobservedTaskException += TaskScheduler_UnobservedTaskException;
 
         // 2. 單一實體檢查
         _singleInstanceMutex = new Mutex(true, "MinecraftServerManagerMutex", out bool createdNew);
@@ -148,25 +149,26 @@ public partial class App : Application
     {
         try
         {
-            Logger.Information("Minecraft Server Manager 正在結束 (結束代碼: {ExitCode})", e.ApplicationExitCode);
-            AppLogging.Shutdown();
-        }
-        finally
-        {
             if (_singleInstanceMutex is not null)
             {
                 try
                 {
                     _singleInstanceMutex.ReleaseMutex();
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Logger.Warning("釋放 SingleInstanceMutex 異常: {0}", ex.Message);
                 }
 
                 _singleInstanceMutex.Dispose();
                 _singleInstanceMutex = null;
             }
 
+            Logger.Information("Minecraft Server Manager 正在結束 (結束代碼: {ExitCode})", e.ApplicationExitCode);
+            AppLogging.Shutdown();
+        }
+        finally
+        {
             base.OnExit(e);
         }
     }
@@ -197,6 +199,12 @@ public partial class App : Application
             MessageBoxImage.Error);
 
         e.Handled = true;
+    }
+
+    private static void TaskScheduler_UnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        Logger.Error(e.Exception, "TaskScheduler 攔截到未觀察任務例外: {Message}", e.Exception.Message);
+        e.SetObserved();
     }
 
     private static void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)

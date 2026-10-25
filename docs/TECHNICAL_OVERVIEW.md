@@ -111,12 +111,14 @@ Domain （不相依其他任何專案，純粹領域邏輯）
 
 ### 8. 雙版本原生單一檔案發布
 
-- **原生 Single-File 封裝**：直接使用 .NET 官方提供之 Single-File 封裝技術，產出單一可執行檔
+- **原生 Single-File 封裝**：直接於 `MinecraftServerManager.App.csproj` 設定 `<PublishSingleFile>true</PublishSingleFile>`，確保無論透過發布腳本或於 IDE 中直接發布，皆產出標準原生單一可執行檔
 - **雙版本發布策略**：
   - **`MinecraftServerManager-self-contained.exe`（獨立自包含版）**：包含完整 .NET 10 Runtime 與所有必要原生函式庫，啟用微軟官方原生單檔壓縮（`EnableCompressionInSingleFile=true`）並僅保留繁體中文與英文之衛星資源組件（`SatelliteResourceLanguages`），具備最高穩定性與隨點即開特性
   - **`MinecraftServerManager-framework-dependent.exe`（框架相依版）**：僅包含應用程式編譯中繼資料，體積極小，仰賴目標電腦安裝之 .NET 10 Desktop Runtime (x64)
 
 ### 9. 執行期功能開關裁切（Feature Switches）
+
+以下安全防護與功能開關全量集中宣告於 `MinecraftServerManager.App.csproj`（單一事實來源），確保所有途徑之發布產出皆維持一致：
 
 - `HttpActivityPropagationSupport=false`：停用 HttpClient 內部 OpenTelemetry 分散式追蹤
 - `MetricsSupport=false`：停用度量指標系統以降低資源負擔

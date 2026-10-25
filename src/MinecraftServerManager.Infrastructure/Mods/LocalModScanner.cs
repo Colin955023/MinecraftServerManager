@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.IO.Compression;
@@ -18,6 +19,7 @@ namespace MinecraftServerManager.Infrastructure.Mods;
 /// </summary>
 public sealed partial class LocalModScanner(IModIndexPersistence? indexPersistence = null) : ILocalModScanner
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("LocalModScanner");
     private const int MaxMetadataEntryBytes = 256 * 1024;
 
     public async Task<IReadOnlyList<LocalModInfo>> ScanModsAsync(string modsDirectory, CancellationToken cancellationToken = default)
@@ -263,8 +265,9 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                 return meta;
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("掃描模組封裝中繼資料異常: {0}", ex.Message);
         }
 
         return meta;
@@ -316,8 +319,9 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                     }
                 }
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.Warning("讀取模組 MANIFEST.MF 異常: {0}", ex.Message);
             }
         }
 
@@ -352,7 +356,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                     using var r = new StreamReader(s);
                     string tomlContent = r.ReadToEnd();
                     ParseForgeToml(tomlContent, meta, innerZip);
-                    if ((meta.Version == "未知" || string.IsNullOrWhiteSpace(meta.Version)) && !string.IsNullOrWhiteSpace(manifestVersion))
+                    if (string.IsNullOrWhiteSpace(meta.Version) && !string.IsNullOrWhiteSpace(manifestVersion))
                     {
                         meta.Version = ModHelpers.StripColorAndFormattingCodes(manifestVersion);
                     }
@@ -365,15 +369,16 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                     using var s = innerFabric.Open();
                     using var doc = JsonCodec.ParseDocument(s);
                     ParseFabricJson(doc.RootElement, meta, innerZip);
-                    if ((meta.Version == "未知" || string.IsNullOrWhiteSpace(meta.Version)) && !string.IsNullOrWhiteSpace(manifestVersion))
+                    if (string.IsNullOrWhiteSpace(meta.Version) && !string.IsNullOrWhiteSpace(manifestVersion))
                     {
                         meta.Version = ModHelpers.StripColorAndFormattingCodes(manifestVersion);
                     }
                     return true;
                 }
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.Warning("讀取內嵌 JAR 模組中繼資料異常: {0}", ex.Message);
             }
         }
 
@@ -409,12 +414,16 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
 
         if (root.TryGetProperty("version", out var verElem))
         {
-            string v = verElem.GetString() ?? meta.Version;
+            string? v = verElem.GetString() ?? meta.Version;
             if (v == "${file.jarVersion}")
             {
                 v = ReadManifestVersion(archive) ?? v;
             }
-            meta.Version = ModHelpers.StripColorAndFormattingCodes(v);
+
+            if (!string.IsNullOrWhiteSpace(v))
+            {
+                meta.Version = ModHelpers.StripColorAndFormattingCodes(v);
+            }
         }
 
         if (root.TryGetProperty("description", out var descElem))
@@ -786,7 +795,11 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
 
         if (target.TryGetProperty("version", out var verElem))
         {
-            meta.Version = ModHelpers.StripColorAndFormattingCodes(verElem.GetString() ?? meta.Version);
+            string? v = verElem.GetString() ?? meta.Version;
+            if (!string.IsNullOrWhiteSpace(v))
+            {
+                meta.Version = ModHelpers.StripColorAndFormattingCodes(v);
+            }
         }
 
         if (target.TryGetProperty("mcversion", out var mcElem))
@@ -846,8 +859,9 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                 }
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("讀取 Manifest 版本異常: {0}", ex.Message);
         }
         return null;
     }
@@ -871,7 +885,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                 meta.Id = baseStem[..firstDash];
             }
 
-            if (meta.Version == "未知" || string.IsNullOrWhiteSpace(meta.Version))
+            if (string.IsNullOrWhiteSpace(meta.Version))
             {
                 ReadOnlySpan<char> span = baseStem.AsSpan();
                 int currentPos = firstDash + 1;
@@ -899,7 +913,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
             meta.Id = baseStem;
         }
 
-        if (meta.MinecraftVersion == "未知" || string.IsNullOrWhiteSpace(meta.MinecraftVersion))
+        if (string.IsNullOrWhiteSpace(meta.MinecraftVersion))
         {
             string? extracted = MinecraftVersionSemantics.ExtractMinecraftVersionFromText(baseStem);
             if (!string.IsNullOrWhiteSpace(extracted))
@@ -908,7 +922,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
             }
         }
 
-        if (meta.LoaderType == "未知")
+        if (string.IsNullOrWhiteSpace(meta.LoaderType))
         {
             string? detected = DetectLoaderDisplayNameFromText(baseStem);
             if (!string.IsNullOrEmpty(detected))
@@ -952,9 +966,9 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
     {
         public string Id { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
-        public string Version { get; set; } = "未知";
-        public string MinecraftVersion { get; set; } = "未知";
-        public string LoaderType { get; set; } = "未知";
+        public string? Version { get; set; }
+        public string? MinecraftVersion { get; set; }
+        public string? LoaderType { get; set; }
         public string Author { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public ModPlatform Platform { get; set; } = ModPlatform.Local;
@@ -963,9 +977,9 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
         {
             ["id"] = Id,
             ["name"] = Name,
-            ["version"] = Version,
-            ["mc_version"] = MinecraftVersion,
-            ["loader_type"] = LoaderType,
+            ["version"] = Version ?? "未知",
+            ["mc_version"] = MinecraftVersion ?? "未知",
+            ["loader_type"] = LoaderType ?? "未知",
             ["author"] = Author,
             ["description"] = Description,
             ["platform"] = Platform.ToString(),
@@ -975,13 +989,23 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
         {
             Id = dict.GetValueOrDefault("id", string.Empty),
             Name = dict.GetValueOrDefault("name", fallbackName),
-            Version = dict.GetValueOrDefault("version", "未知"),
-            MinecraftVersion = dict.GetValueOrDefault("mc_version", "未知"),
-            LoaderType = dict.GetValueOrDefault("loader_type", "未知"),
+            Version = NormalizeUnknown(dict.TryGetValue("version", out string? v) ? v : null),
+            MinecraftVersion = NormalizeUnknown(dict.TryGetValue("mc_version", out string? mc) ? mc : null),
+            LoaderType = NormalizeUnknown(dict.TryGetValue("loader_type", out string? lt) ? lt : null),
             Author = dict.GetValueOrDefault("author", string.Empty),
             Description = dict.GetValueOrDefault("description", string.Empty),
             Platform = Enum.TryParse<ModPlatform>(dict.GetValueOrDefault("platform", "Local"), ignoreCase: true, out var p) ? p : ModPlatform.Local,
         };
+
+        private static string? NormalizeUnknown(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value == "未知" || string.Equals(value, "unknown", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return value.Trim();
+        }
 
         public LocalModInfo ToModInfo(
             string filePath,
@@ -995,9 +1019,9 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                 id: string.IsNullOrWhiteSpace(Id) ? baseStem : Id,
                 name: string.IsNullOrWhiteSpace(Name) ? baseStem : Name,
                 filename: fileName,
-                version: string.IsNullOrWhiteSpace(Version) ? "未知" : Version,
-                minecraftVersion: string.IsNullOrWhiteSpace(MinecraftVersion) ? "未知" : MinecraftVersion,
-                loaderType: string.IsNullOrWhiteSpace(LoaderType) ? "未知" : LoaderType,
+                version: Version ?? "未知",
+                minecraftVersion: MinecraftVersion ?? "未知",
+                loaderType: LoaderType ?? "未知",
                 description: Description ?? string.Empty,
                 author: Author ?? string.Empty,
                 platform: Platform,
