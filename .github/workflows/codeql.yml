@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup .NET 10 SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
           cache: true
@@ -47,7 +47,7 @@ jobs:
             tests/**/*.csproj
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         with:
           languages: csharp
           build-mode: manual
@@ -60,7 +60,7 @@ jobs:
         run: dotnet build src/MinecraftServerManager.App/MinecraftServerManager.App.csproj -c Release -p:UseSharedCompilation=false
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         with:
           category: "/language:csharp"
           upload: true
