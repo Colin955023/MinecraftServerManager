@@ -1,11 +1,15 @@
 <UserControl x:Class="MinecraftServerManager.App.Views.AboutPreferencesView"
-             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:vm="clr-namespace:MinecraftServerManager.App.ViewModels">
-  <UserControl.Resources>
-    <BooleanToVisibilityConverter x:Key="BoolToVis" />
-  </UserControl.Resources>
-  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:vm="using:MinecraftServerManager.App.ViewModels"
+  xmlns:controls="using:MinecraftServerManager.App.Controls"
+  xmlns:views="using:MinecraftServerManager.App.Views"
+  mc:Ignorable="d">
+
+  <ScrollViewer VerticalScrollBarVisibility="Auto"
+    HorizontalScrollBarVisibility="Disabled">
     <!-- 左右分欄版面配置 -->
     <Grid Margin="12,4,16,24">
       <Grid.ColumnDefinitions>
@@ -18,182 +22,275 @@
       </Grid.ColumnDefinitions>
 
       <!-- 左欄：關於程式 -->
-      <StackPanel Grid.Column="0" Margin="10,0,24,0">
+      <StackPanel Grid.Column="0"
+        Margin="10,0,24,0">
         <TextBlock Text="🎮 Minecraft Server Manager"
-                   FontSize="22"
-                   FontWeight="Bold"
-                   HorizontalAlignment="Center"
-                   Foreground="{DynamicResource TextBrush}"
-                   Margin="0,0,0,6" />
-        <TextBlock Text="{Binding AppDescription}"
-                   FontSize="14"
-                   Foreground="{DynamicResource MutedTextBrush}"
-                   HorizontalAlignment="Center"
-                   Margin="0,0,0,4" />
-        <TextBlock Text="{Binding AppVersion, StringFormat='版本 {0}'}"
-                   FontSize="13"
-                   Foreground="{DynamicResource MutedTextBrush}"
-                   HorizontalAlignment="Center"
-                   Margin="0,0,0,18" />
+          FontSize="22"
+          FontWeight="Bold"
+          HorizontalAlignment="Center"
+          Foreground="{ThemeResource TextBrush}"
+          Margin="0,0,0,6" />
+        <TextBlock Text="{x:Bind vm:AboutPreferencesViewModel.AppDescription}"
+          FontSize="14"
+          Foreground="{ThemeResource MutedTextBrush}"
+          HorizontalAlignment="Center"
+          Margin="0,0,0,4" />
+        <TextBlock
+          Text="{x:Bind views:AboutPreferencesView.FormatVersion(vm:AboutPreferencesViewModel.AppVersion)}"
+          FontSize="13"
+          Foreground="{ThemeResource MutedTextBrush}"
+          HorizontalAlignment="Center"
+          Margin="0,0,0,18" />
 
         <!-- 開發資訊 -->
-        <TextBlock Text="👨‍💻 開發資訊" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,8" />
-        <Border Background="{DynamicResource CardBrush}"
-                BorderBrush="{DynamicResource BorderBrush}"
-                BorderThickness="1"
-                CornerRadius="6"
-                Padding="12,10"
-                Margin="0,0,0,14">
+        <TextBlock Text="👨‍💻 開發資訊"
+          FontSize="16"
+          FontWeight="SemiBold"
+          Foreground="{ThemeResource TextBrush}"
+          Margin="0,0,0,8" />
+        <Border Background="{ThemeResource CardBrush}"
+          BorderBrush="{ThemeResource BorderBrush}"
+          BorderThickness="1"
+          CornerRadius="6"
+          Padding="12,10"
+          Margin="0,0,0,14">
           <StackPanel>
-            <TextBlock Text="{Binding AppAuthor, StringFormat='• 開發者：{0}'}" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
-            <TextBlock Text="{Binding AppTargetFramework, StringFormat='• 技術堆疊：{0}、C# 14'}" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
-            <TextBlock Text="• Java 管理：自動偵測 Java，支援 Windows 登錄檔與環境變數" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
-            <TextBlock Text="• 架構：分層模組化設計、MVVM" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
-            <TextBlock Text="• 參考專案：PrismLauncher" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
+            <TextBlock
+              Text="{x:Bind views:AboutPreferencesView.FormatAuthor(vm:AboutPreferencesViewModel.AppAuthor)}"
+              Foreground="{ThemeResource TextBrush}"
+              Margin="0,2" />
+            <TextBlock
+              Text="{x:Bind views:AboutPreferencesView.FormatFramework(vm:AboutPreferencesViewModel.AppTargetFramework)}"
+              Foreground="{ThemeResource TextBrush}"
+              Margin="0,2" />
+            <TextBlock Text="• Java 管理：自動偵測 Java，支援 Windows 登錄檔與環境變數"
+              Foreground="{ThemeResource TextBrush}"
+              Margin="0,2" />
+            <TextBlock Text="• 架構：分層模組化設計、MVVM"
+              Foreground="{ThemeResource TextBrush}"
+              Margin="0,2" />
+            <TextBlock Text="• 參考專案：PrismLauncher"
+              Foreground="{ThemeResource TextBrush}"
+              Margin="0,2" />
           </StackPanel>
         </Border>
 
         <!-- GitHub 連結 -->
-        <Border Background="{DynamicResource CardBrush}"
-                BorderBrush="{DynamicResource BorderBrush}"
-                BorderThickness="1"
-                CornerRadius="6"
-                Padding="12,8"
-                Margin="0,0,0,14">
-          <TextBlock FontSize="13">
-            <Hyperlink Command="{Binding OpenGithubCommand}" Foreground="{DynamicResource AccentBrush}">
-              GitHub - Minecraft Server Manager
-            </Hyperlink>
-          </TextBlock>
+        <Border Background="{ThemeResource CardBrush}"
+          BorderBrush="{ThemeResource BorderBrush}"
+          BorderThickness="1"
+          CornerRadius="6"
+          Padding="12,8"
+          Margin="0,0,0,14">
+          <HyperlinkButton Content="GitHub - Minecraft Server Manager"
+            Command="{x:Bind ViewModel.OpenGithubCommand}"
+            Padding="0" />
         </Border>
 
         <!-- 授權條款 -->
-        <TextBlock Text="📄 授權條款" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,8" />
-        <Border Background="{DynamicResource CardBrush}"
-                BorderBrush="{DynamicResource BorderBrush}"
-                BorderThickness="1"
-                CornerRadius="6"
-                Padding="12,10"
-                Margin="0,0,0,14">
+        <TextBlock Text="📄 授權條款"
+          FontSize="16"
+          FontWeight="SemiBold"
+          Foreground="{ThemeResource TextBrush}"
+          Margin="0,0,0,8" />
+        <Border Background="{ThemeResource CardBrush}"
+          BorderBrush="{ThemeResource BorderBrush}"
+          BorderThickness="1"
+          CornerRadius="6"
+          Padding="12,10"
+          Margin="0,0,0,14">
           <StackPanel>
-            <TextBlock Text="• 本專案採用 GNU General Public License v3.0 授權條款" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
-            <TextBlock Text="• 部分設計理念參考 Prism Launcher 等開放原始碼專案" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
-            <TextBlock Text="• 可依 GPLv3 條款使用、修改與散布" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
-            <TextBlock Text="• 請遵守 Minecraft EULA 和相關法令" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
-            <TextBlock Text="特別感謝 Prism Launcher 開發團隊的開放原始碼貢獻！" Foreground="{DynamicResource TextBrush}" Margin="0,8,0,0" />
+            <TextBlock Text="• 本專案採用 GNU General Public License v3.0 授權條款"
+              Foreground="{ThemeResource TextBrush}"
+              Margin="0,2" />
+            <TextBlock Text="• 部分設計理念參考 Prism Launcher 等開放原始碼專案"
+              Foreground="{ThemeResource TextBrush}"
+              Margin="0,2" />
+            <TextBlock Text="• 可依 GPLv3 條款使用、修改與散布"
+              Foreground="{ThemeResource TextBrush}"
+              Margin="0,2" />
+            <TextBlock Text="• 請遵守 Minecraft EULA 和相關法令"
+              Foreground="{ThemeResource TextBrush}"
+              Margin="0,2" />
+            <TextBlock Text="特別感謝 Prism Launcher 開發團隊的開放原始碼貢獻！"
+              Foreground="{ThemeResource TextBrush}"
+              Margin="0,8,0,0" />
           </StackPanel>
         </Border>
 
         <!-- 更新設定 -->
-        <TextBlock Text="🔄 更新設定" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,6" />
+        <TextBlock Text="🔄 更新設定"
+          FontSize="16"
+          FontWeight="SemiBold"
+          Foreground="{ThemeResource TextBrush}"
+          Margin="0,0,0,6" />
         <TextBlock Text="更新檔僅接受 GitHub Release 提供的 SHA-256 digest 驗證"
-                   FontSize="12"
-                   Foreground="{DynamicResource MutedTextBrush}"
-                   Margin="0,0,0,8" />
+          FontSize="12"
+          Foreground="{ThemeResource MutedTextBrush}"
+          Margin="0,0,0,8" />
         <CheckBox Content="自動檢查更新"
-                  IsChecked="{Binding IsAutoUpdateEnabled}"
-                  Foreground="{DynamicResource TextBrush}"
-                  Margin="0,0,0,10" />
+          IsChecked="{x:Bind ViewModel.IsAutoUpdateEnabled, Mode=TwoWay}"
+          Foreground="{ThemeResource TextBrush}"
+          Margin="0,0,0,10" />
         <Button Content="檢查更新"
-                Command="{Binding CheckForUpdatesCommand}"
-                Visibility="{Binding IsManualCheckVisible, Converter={StaticResource BoolToVis}}"
-                HorizontalAlignment="Left"
-                Width="100"
-                Height="32" />
+          Command="{x:Bind ViewModel.CheckForUpdatesCommand}"
+          Visibility="{x:Bind controls:UiBindHelpers.BoolToVis(ViewModel.IsManualCheckVisible), Mode=OneWay}"
+          HorizontalAlignment="Left"
+          Width="100"
+          Height="32" />
       </StackPanel>
 
       <!-- 中間垂直分隔線 -->
-      <Border Grid.Column="1" Width="1" Background="{DynamicResource BorderBrush}" Margin="0,8" />
+      <Border Grid.Column="1"
+        Width="1"
+        Background="{ThemeResource BorderBrush}"
+        Margin="0,8" />
 
       <!-- 右欄：視窗偏好設定 -->
-      <StackPanel Grid.Column="2" Margin="24,0,10,0">
+      <StackPanel Grid.Column="2"
+        Margin="24,0,10,0">
         <TextBlock Text="🖥️ 視窗偏好設定"
-                   FontSize="22"
-                   FontWeight="Bold"
-                   HorizontalAlignment="Center"
-                   Foreground="{DynamicResource TextBrush}"
-                   Margin="0,0,0,24" />
+          FontSize="22"
+          FontWeight="Bold"
+          HorizontalAlignment="Center"
+          Foreground="{ThemeResource TextBrush}"
+          Margin="0,0,0,24" />
 
         <!-- 主視窗設定 -->
-        <TextBlock Text="🏠 主視窗設定" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,8" />
-        <Border Background="{DynamicResource CardBrush}"
-                BorderBrush="{DynamicResource BorderBrush}"
-                BorderThickness="1"
-                CornerRadius="6"
-                Padding="12,10"
-                Margin="0,0,0,10">
+        <TextBlock Text="🏠 主視窗設定"
+          FontSize="16"
+          FontWeight="SemiBold"
+          Foreground="{ThemeResource TextBrush}"
+          Margin="0,0,0,8" />
+        <Border Background="{ThemeResource CardBrush}"
+          BorderBrush="{ThemeResource BorderBrush}"
+          BorderThickness="1"
+          CornerRadius="6"
+          Padding="12,10"
+          Margin="0,0,0,10">
           <StackPanel>
-            <TextBlock Text="{Binding ScreenResolutionInfo}" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
-            <TextBlock Text="{Binding CurrentWindowSizeInfo}" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
+            <TextBlock Text="{x:Bind ViewModel.ScreenResolutionInfo, Mode=OneWay}"
+              Foreground="{ThemeResource TextBrush}"
+              Margin="0,2" />
+            <TextBlock Text="{x:Bind ViewModel.CurrentWindowSizeInfo, Mode=OneWay}"
+              Foreground="{ThemeResource TextBrush}"
+              Margin="0,2" />
           </StackPanel>
         </Border>
         <Button Content="重設為預設大小"
-                Command="{Binding ResetToDefaultSizeCommand}"
-                Style="{DynamicResource DangerButtonStyle}"
-                HorizontalAlignment="Left"
-                Padding="14,6"
-                Height="32"
-                Margin="0,0,0,20" />
+          Command="{x:Bind ViewModel.ResetToDefaultSizeCommand}"
+          Style="{ThemeResource DangerButtonStyle}"
+          HorizontalAlignment="Left"
+          Padding="14,6"
+          Height="32"
+          Margin="0,0,0,20" />
 
         <!-- 顯示設定 -->
-        <TextBlock Text="🎨 顯示設定" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,10" />
-        <Grid Margin="0,0,0,24">
+        <TextBlock Text="🎨 顯示設定"
+          FontSize="16"
+          FontWeight="SemiBold"
+          Foreground="{ThemeResource TextBrush}"
+          Margin="0,0,0,10" />
+        <Grid Margin="0,0,0,16">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
-          <TextBlock Grid.Column="0" Text="主題模式：" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" Margin="0,0,12,0" />
+          <TextBlock Grid.Column="0"
+            Text="主題模式："
+            VerticalAlignment="Center"
+            Foreground="{ThemeResource TextBrush}"
+            Margin="0,0,12,0" />
           <ComboBox Grid.Column="1"
-                    SelectedIndex="{Binding SelectedThemeModeIndex}"
-                    ItemsSource="{x:Static vm:AboutPreferencesViewModel.ThemeModes}"
-                    Width="160"
-                    HorizontalAlignment="Left" />
+            SelectedIndex="{x:Bind ViewModel.SelectedThemeModeIndex, Mode=TwoWay}"
+            ItemsSource="{x:Bind vm:AboutPreferencesViewModel.ThemeModes}"
+            Width="160"
+            HorizontalAlignment="Left" />
         </Grid>
 
-        <!-- 全域介面縮放 -->
-        <Grid Margin="0,0,0,24">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <TextBlock Grid.Column="0" Text="介面縮放：" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" Margin="0,0,12,0" />
-          <StackPanel Grid.Column="1" Orientation="Horizontal">
-            <ComboBox SelectedIndex="{Binding SelectedUiScaleIndex}"
-                      ItemsSource="{x:Static vm:AboutPreferencesViewModel.UiScaleOptions}"
-                      Width="160"
-                      HorizontalAlignment="Left" />
-            <StackPanel Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
-              <StackPanel.Style>
-                <Style TargetType="StackPanel">
-                  <Setter Property="Visibility" Value="Collapsed" />
-                  <Style.Triggers>
-                    <DataTrigger Binding="{Binding IsCustomScaleVisible}" Value="True">
-                      <Setter Property="Visibility" Value="Visible" />
-                    </DataTrigger>
-                  </Style.Triggers>
-                </Style>
-              </StackPanel.Style>
-              <TextBox Text="{Binding CustomUiScaleText, UpdateSourceTrigger=PropertyChanged}"
-                       Width="70"
-                       Padding="6,4"
-                       VerticalContentAlignment="Center" />
-              <TextBlock Text="%（50～300）"
-                         VerticalAlignment="Center"
-                         Margin="6,0,0,0"
-                         Foreground="{DynamicResource MutedTextBrush}" />
+        <!-- 強調色彩設定卡片 -->
+        <Border Background="{ThemeResource CardBrush}"
+          BorderBrush="{ThemeResource BorderBrush}"
+          BorderThickness="1"
+          CornerRadius="6"
+          Padding="12,10"
+          Margin="0,0,0,24">
+          <StackPanel Spacing="10">
+            <TextBlock Text="強調色彩（按鈕與焦點色）："
+              Foreground="{ThemeResource TextBrush}"
+              FontWeight="SemiBold" />
+            <StackPanel Orientation="Horizontal"
+              Spacing="10"
+              VerticalAlignment="Center">
+              <!-- 色彩預覽圓角方塊 -->
+              <Border Width="28"
+                Height="28"
+                CornerRadius="4"
+                BorderBrush="{ThemeResource BorderBrush}"
+                BorderThickness="1">
+                <Border.Background>
+                  <SolidColorBrush Color="{x:Bind ViewModel.CurrentAccentColor, Mode=OneWay}" />
+                </Border.Background>
+              </Border>
+              <TextBlock Text="{x:Bind ViewModel.AccentColorSummaryText, Mode=OneWay}"
+                VerticalAlignment="Center"
+                Foreground="{ThemeResource TextBrush}" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal"
+              Spacing="8">
+              <!-- 自訂選色按鈕 + Flyout 搭配原生 ColorPicker -->
+              <Button Content="🎨 挑選自訂顏色"
+                Height="32"
+                Padding="12,4"
+                VerticalContentAlignment="Center">
+                <Button.Flyout>
+                  <Flyout x:Name="AccentColorFlyout">
+                    <StackPanel Spacing="12"
+                      Width="260">
+                      <ColorPicker x:Name="AccentPicker"
+                        Color="{x:Bind ViewModel.CurrentAccentColor, Mode=OneWay}"
+                        IsColorSpectrumVisible="True"
+                        IsColorPreviewVisible="True"
+                        IsHexInputVisible="True"
+                        IsAlphaEnabled="False" />
+                      <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Spacing="8">
+                        <Button Content="套用"
+                          Style="{StaticResource PrimaryButtonStyle}"
+                          Height="32"
+                          Padding="12,4"
+                          Click="OnApplyAccentColorClicked" />
+                        <Button Content="取消"
+                          Height="32"
+                          Padding="12,4"
+                          Click="OnCancelAccentColorClicked" />
+                      </StackPanel>
+                    </StackPanel>
+                  </Flyout>
+                </Button.Flyout>
+              </Button>
+              <Button Content="重設為系統強調色"
+                Command="{x:Bind ViewModel.ResetAccentColorCommand}"
+                IsEnabled="{x:Bind ViewModel.IsCustomAccentColor, Mode=OneWay}"
+                Height="32"
+                Padding="12,4"
+                VerticalContentAlignment="Center" />
             </StackPanel>
           </StackPanel>
-        </Grid>
-
+        </Border>
 
         <!-- 底部偏好設定操作按鈕 (還原預設) -->
-        <Border Height="1" Background="{DynamicResource BorderBrush}" Margin="0,0,0,20" />
+        <Border Height="1"
+          Background="{ThemeResource BorderBrush}"
+          Margin="0,0,0,20" />
         <Button Content="還原預設"
-                Command="{Binding ResetAllSettingsCommand}"
-                Style="{DynamicResource DangerButtonStyle}"
-                HorizontalAlignment="Left"
-                MinWidth="100"
-                Height="34" />
+          Command="{x:Bind ViewModel.ResetAllSettingsCommand}"
+          Style="{ThemeResource DangerButtonStyle}"
+          HorizontalAlignment="Left"
+          MinWidth="100"
+          Height="36"
+          VerticalContentAlignment="Center" />
       </StackPanel>
     </Grid>
   </ScrollViewer>

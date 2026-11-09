@@ -1,12 +1,12 @@
-using System.Windows;
-using System.Windows.Markup;
-using System.Xml;
+using System.Xml.Linq;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
 public sealed class ColorIconsResourceTests
 {
+    private static readonly XNamespace XamlNs = "http://schemas.microsoft.com/winfx/2006/xaml";
+
     [Theory]
     [InlineData("IconCreateServer")]
     [InlineData("IconManageServer")]
@@ -45,10 +45,12 @@ public sealed class ColorIconsResourceTests
 
         Assert.True(candidate is not null && File.Exists(candidate), "找不到 ColorIcons.xaml");
 
-        using var fileStream = File.OpenRead(candidate);
-        using var xmlReader = XmlReader.Create(fileStream);
-        var resourceDictionary = (ResourceDictionary)XamlReader.Load(xmlReader);
+        var doc = XDocument.Load(candidate);
+        var keys = doc.Descendants()
+            .Select(e => (string?)e.Attribute(XamlNs + "Key"))
+            .Where(k => !string.IsNullOrEmpty(k))
+            .ToHashSet();
 
-        Assert.True(resourceDictionary.Contains(resourceKey), $"ColorIcons.xaml 遺漏圖示資源: {resourceKey}");
+        Assert.Contains(resourceKey, keys);
     }
 }

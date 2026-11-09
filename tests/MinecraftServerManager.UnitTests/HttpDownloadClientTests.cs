@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -11,14 +10,11 @@ namespace MinecraftServerManager.UnitTests;
 
 public sealed partial class HttpDownloadClientTests
 {
+    [JsonSourceGenerationOptions(PropertyNameCaseInsensitive = true)]
     [JsonSerializable(typeof(TestModel))]
     private sealed partial class TestJsonContext : JsonSerializerContext;
 
-    private static readonly JsonSerializerOptions TestJsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        TypeInfoResolver = TestJsonContext.Default,
-    };
+    private static readonly JsonSerializerContext TestJsonOptions = TestJsonContext.Default;
     [Fact]
     public void UrlPolicyRejectsInsecureAndPrivateTargets()
     {
@@ -640,7 +636,7 @@ public sealed partial class HttpDownloadClientTests
         return path;
     }
 
-    private sealed class QueueHandler(params HttpResponseMessage[] responses) : HttpMessageHandler
+    private sealed partial class QueueHandler(params HttpResponseMessage[] responses) : HttpMessageHandler
     {
         private readonly Queue<HttpResponseMessage> _responses = new(responses);
 

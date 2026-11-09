@@ -22,7 +22,8 @@ public sealed record FileSystemMetadata(
 
 public static class SafeFileSystem
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("SafeFileSystem");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(SafeFileSystem));
+    private static readonly Encoding DefaultUtf8Encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
     public const int DefaultMaxEntries = 100_000;
     public const long DefaultMaxTotalBytes = 128L * 1024 * 1024 * 1024;
 
@@ -118,6 +119,49 @@ public static class SafeFileSystem
     }
 
     /// <summary>
+    /// 檢查目錄中是否存在符合條件之檔案，支援早期短路返回以避免完整樹狀走訪與集合配置。
+    /// </summary>
+    public static bool HasAnyFile(
+        string directoryPath,
+        string searchPattern,
+        SearchOption searchOption = SearchOption.TopDirectoryOnly)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(searchPattern);
+        if (string.IsNullOrWhiteSpace(directoryPath) || !DirectoryExists(directoryPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            IReadOnlyList<FileSystemEntry> entries = searchOption switch
+            {
+                SearchOption.TopDirectoryOnly => ListBoundedDirectory(directoryPath),
+                SearchOption.AllDirectories => WalkBoundedTree(directoryPath),
+                _ => throw new ArgumentOutOfRangeException(nameof(searchOption)),
+            };
+
+            return entries.Any(entry => !entry.IsDirectory &&
+                System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(
+                    searchPattern,
+                    Path.GetFileName(entry.FullPath),
+                    ignoreCase: true));
+        }
+        catch (SafeFileSystemException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// 取得經過路徑穩定性檢查之目錄的最後修改時間。
     /// </summary>
     public static DateTime GetDirectoryLastWriteTime(string path) =>
@@ -149,6 +193,7 @@ public static class SafeFileSystem
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
         {
+            Logger.Warning(ex, "查詢路徑 {Path} 磁碟剩餘空間失敗", path);
         }
 
         return null;
@@ -240,46 +285,79 @@ public static class SafeFileSystem
     {
         byte[] bytes = ReadRegularFile(filePath, maxBytes)
             ?? throw new FileNotFoundException("找不到或無法安全讀取檔案", filePath);
-        using var reader = new StreamReader(new MemoryStream(bytes, writable: false), encoding ?? Encoding.UTF8);
-        return reader.ReadToEnd();
+        return (encoding ?? Encoding.UTF8).GetString(bytes);
     }
 
     public static string[] ReadAllLines(string filePath, Encoding? encoding = null, long maxBytes = 16L * 1024 * 1024)
     {
-        if (GetFileLength(filePath) > maxBytes)
+        string stablePath = ResolveStablePath(filePath);
+        var info = new FileInfo(stablePath);
+        if (!info.Exists)
+        {
+            throw new FileNotFoundException("找不到檔案", stablePath);
+        }
+
+        if (info.Length > maxBytes)
         {
             throw new IOException($"檔案大小超過安全上限：{filePath}");
         }
 
-        using var reader = new StreamReader(OpenRead(filePath), encoding ?? Encoding.UTF8);
-        var lines = new List<string>();
-        while (reader.ReadLine() is { } line)
-        {
-            lines.Add(line);
-        }
-
-        return [.. lines];
+        return File.ReadAllLines(stablePath, encoding ?? Encoding.UTF8);
     }
 
-    public static Task<string> ReadAllTextAsync(
+    public static async Task<string> ReadAllTextAsync(
         string filePath,
         Encoding? encoding = null,
         long maxBytes = 16L * 1024 * 1024,
-        CancellationToken cancellationToken = default) =>
-        Task.Run(() => ReadAllText(filePath, encoding, maxBytes), cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        string stablePath = ResolveStablePath(filePath);
+        var info = new FileInfo(stablePath);
+        if (!info.Exists || (info.Attributes & FileAttributes.Directory) != 0)
+        {
+            throw new FileNotFoundException("找不到或無法安全讀取檔案", filePath);
+        }
 
-    public static Task WriteAllBytesAsync(
+        if (info.Length > maxBytes)
+        {
+            throw new IOException($"檔案大小超過安全上限：{filePath}");
+        }
+
+        return await File.ReadAllTextAsync(stablePath, encoding ?? Encoding.UTF8, cancellationToken).ConfigureAwait(false);
+    }
+
+    public static async Task WriteAllBytesAsync(
         string filePath,
         ReadOnlyMemory<byte> content,
-        CancellationToken cancellationToken = default) =>
-        Task.Run(() => WriteAllBytes(filePath, content.Span), cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        if (!await AtomicFileWriter.WriteBytesAsync(filePath, content, cancellationToken: cancellationToken).ConfigureAwait(false))
+        {
+            throw new IOException($"無法安全寫入檔案：{filePath}");
+        }
+    }
 
     public static Task WriteAllTextAsync(
         string filePath,
         string content,
         Encoding? encoding = null,
-        CancellationToken cancellationToken = default) =>
-        Task.Run(() => WriteAllText(filePath, content, encoding), cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        Encoding textEncoding = encoding ?? DefaultUtf8Encoding;
+        ReadOnlySpan<byte> preamble = textEncoding.GetPreamble();
+        byte[] body = textEncoding.GetBytes(content);
+        if (preamble.IsEmpty)
+        {
+            return WriteAllBytesAsync(filePath, body, cancellationToken);
+        }
+
+        byte[] payload = new byte[preamble.Length + body.Length];
+        preamble.CopyTo(payload);
+        body.CopyTo(payload.AsSpan(preamble.Length));
+        return WriteAllBytesAsync(filePath, payload, cancellationToken);
+    }
 
     public static void WriteAllBytes(string filePath, ReadOnlySpan<byte> content)
     {
@@ -292,12 +370,18 @@ public static class SafeFileSystem
     public static void WriteAllText(string filePath, string content, Encoding? encoding = null)
     {
         ArgumentNullException.ThrowIfNull(content);
-        Encoding textEncoding = encoding ?? new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-        byte[] preamble = textEncoding.GetPreamble();
+        Encoding textEncoding = encoding ?? DefaultUtf8Encoding;
+        ReadOnlySpan<byte> preamble = textEncoding.GetPreamble();
         byte[] body = textEncoding.GetBytes(content);
+        if (preamble.IsEmpty)
+        {
+            WriteAllBytes(filePath, body);
+            return;
+        }
+
         byte[] payload = new byte[preamble.Length + body.Length];
-        preamble.CopyTo(payload, 0);
-        body.CopyTo(payload, preamble.Length);
+        preamble.CopyTo(payload);
+        body.CopyTo(payload.AsSpan(preamble.Length));
         WriteAllBytes(filePath, payload);
     }
 
@@ -349,12 +433,45 @@ public static class SafeFileSystem
                 DeleteDirectory(destination, recursive: true);
             }
 
-            Directory.Move(source, destination);
+            RetryTransientMove(() => Directory.Move(source, destination));
             return;
         }
 
-        File.Move(source, destination, overwrite);
+        RetryTransientMove(() => File.Move(source, destination, overwrite));
     }
+
+    /// <summary>
+    /// 移動作業的暫時性存取拒絕重試上限與間隔：剛解壓縮或剛寫入的檔案常被防毒軟體、搜尋索引短暫開啟，
+    /// 導致目錄更名回報「拒絕存取」，稍候即可成功
+    /// </summary>
+    private const int TransientMoveMaxAttempts = 8;
+    private static readonly TimeSpan TransientMoveBaseDelay = TimeSpan.FromMilliseconds(150);
+
+    private static void RetryTransientMove(Action move)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                move();
+                return;
+            }
+            catch (Exception ex) when (attempt < TransientMoveMaxAttempts && IsTransientMoveFailure(ex))
+            {
+                Logger.Warning("移動路徑暫時遭拒（第 {0} 次），稍後重試: {1}", attempt, ex.Message);
+                Thread.Sleep(TransientMoveBaseDelay * attempt);
+            }
+        }
+    }
+
+    private static bool IsTransientMoveFailure(Exception ex) => ex switch
+    {
+        UnauthorizedAccessException => true,
+        FileNotFoundException or DirectoryNotFoundException or PathTooLongException => false,
+        // ERROR_ACCESS_DENIED (5)、ERROR_SHARING_VIOLATION (32)、ERROR_LOCK_VIOLATION (33)
+        IOException io => (io.HResult & 0xFFFF) is 5 or 32 or 33,
+        _ => false,
+    };
 
     public static void CopyFile(string sourcePath, string destinationPath, bool overwrite = false)
     {
@@ -411,7 +528,8 @@ public static class SafeFileSystem
             string target = GetFullPath(targetPath);
             string relative = Path.GetRelativePath(basePath, target);
             bool within = relative is "."
-                || (!relative.Equals("..", StringComparison.Ordinal)
+                || (!Path.IsPathFullyQualified(relative)
+                    && !relative.Equals("..", StringComparison.Ordinal)
                     && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal));
             if (!within)
             {
@@ -613,8 +731,9 @@ public static class SafeFileSystem
 
             return false;
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("受限路徑刪除失敗: {0}", ex.Message);
             return false;
         }
     }
@@ -664,8 +783,9 @@ public static class SafeFileSystem
 
             return false;
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("受限路徑移動失敗: {0}", ex.Message);
             return false;
         }
     }
@@ -794,8 +914,9 @@ public static class SafeFileSystem
 
             return false;
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("受限目錄複製失敗: {0}", ex.Message);
             return false;
         }
     }

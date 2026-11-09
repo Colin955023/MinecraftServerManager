@@ -45,7 +45,4 @@ public sealed record LocalModMutationResult(
 
     public static LocalModMutationResult Failure(string title, string message, IEnumerable<string>? missingIds = null) =>
         new("failed", title, message, null, 0, missingIds?.ToArray());
-
-    public static LocalModMutationResult PartialSuccess(string title, string message, int affectedCount, IEnumerable<string>? missingIds = null) =>
-        new("partial", title, message, null, affectedCount, missingIds?.ToArray());
 }

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Nodes;
 using MinecraftServerManager.Core;
 using MinecraftServerManager.Core.Ports;
@@ -9,20 +10,16 @@ namespace MinecraftServerManager.UnitTests;
 public sealed class UpdateCheckerServiceTests
 {
     private static readonly string RepoUrl = AppInfo.RepositoryUrl;
-    private static readonly string AppId = AppInfo.AppId;
-    private static readonly string FdExeName = $"{AppId}-framework-dependent.exe";
-    private static readonly string FdShaName = $"{AppId}-framework-dependent.exe.sha256";
-    private static readonly string ScExeName = $"{AppId}-self-contained.exe";
-    private static readonly string ScShaName = $"{AppId}-self-contained.exe.sha256";
-
-    private sealed class FakeEnvironmentRuntimeInfo(bool hasRuntime, bool isFrameworkDependent) : IEnvironmentRuntimeInfo
-    {
-        public bool IsNet10DesktopRuntimeInstalled() => hasRuntime;
-        public bool IsCurrentProcessFrameworkDependent() => isFrameworkDependent;
-    }
+    private const string SingleExeName = "MinecraftServerManager.exe";
+    private const string SingleShaName = "MinecraftServerManager.exe.sha256";
+    private const string LegacyScExeName = "MinecraftServerManager-self-contained.exe";
+    private const string LegacyScShaName = "MinecraftServerManager-self-contained.exe.sha256";
 
     private sealed class FakeHttpPort(string? responseText) : IHttpPort
     {
+        public Task<HttpJsonResponse<System.Text.Json.JsonDocument>> GetJsonDocumentAsync(Uri uri, CancellationToken cancellationToken = default) =>
+            TestHttpJson.FromTextAsync(this, uri, cancellationToken);
+
         public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default) =>
             Task.FromResult(responseText);
 
@@ -42,6 +39,7 @@ public sealed class UpdateCheckerServiceTests
             throw new NotImplementedException();
     }
 
+    [RequiresUnreferencedCode("Calls System.Text.Json.Nodes.JsonArray.Add<T>(T)")]
     private static string BuildReleasePayload(string tagName, params (string Name, string Url)[] assets)
     {
         var root = new JsonObject
@@ -49,7 +47,7 @@ public sealed class UpdateCheckerServiceTests
             ["tag_name"] = tagName,
             ["name"] = $"Release {tagName}",
             ["body"] = "更新說明與修復內容",
-            ["html_url"] = $"{RepoUrl}/releases/tag/{tagName}"
+            ["html_url"] = $"{RepoUrl}/releases/tag/{tagName}",
         };
 
         var assetArray = new JsonArray();
@@ -58,7 +56,7 @@ public sealed class UpdateCheckerServiceTests
             assetArray.Add(new JsonObject
             {
                 ["name"] = name,
-                ["browser_download_url"] = url
+                ["browser_download_url"] = url,
             });
         }
         root["assets"] = assetArray;
@@ -67,73 +65,69 @@ public sealed class UpdateCheckerServiceTests
     }
 
     [Fact]
-    public async Task SelectsSelfContainedByDefaultAndPairsSha256()
+    [RequiresUnreferencedCode("Testing reflection")]
+    public async Task SelectsSingleExeAndPairsSha256()
     {
         string json = BuildReleasePayload(
             "99.0.0",
-            (FdExeName, $"{RepoUrl}/releases/download/v99.0.0/{FdExeName}"),
-            (FdShaName, $"{RepoUrl}/releases/download/v99.0.0/{FdShaName}"),
-            (ScExeName, $"{RepoUrl}/releases/download/v99.0.0/{ScExeName}"),
-            (ScShaName, $"{RepoUrl}/releases/download/v99.0.0/{ScShaName}"));
+            (SingleExeName, $"{RepoUrl}/releases/download/v99.0.0/{SingleExeName}"),
+            (SingleShaName, $"{RepoUrl}/releases/download/v99.0.0/{SingleShaName}"));
 
-        var runtime = new FakeEnvironmentRuntimeInfo(hasRuntime: false, isFrameworkDependent: false);
         var http = new FakeHttpPort(json);
-        var checker = new UpdateCheckerService(http, runtime);
+        var checker = new UpdateCheckerService(http);
 
         var result = await checker.CheckForUpdateAsync();
 
         Assert.True(result.HasUpdate);
-        Assert.Equal($"{RepoUrl}/releases/download/v99.0.0/{ScExeName}", result.DownloadUrl);
-        Assert.Equal($"{RepoUrl}/releases/download/v99.0.0/{ScShaName}", result.Sha256ChecksumUrl);
+        Assert.Equal($"{RepoUrl}/releases/download/v99.0.0/{SingleExeName}", result.DownloadUrl);
+        Assert.Equal($"{RepoUrl}/releases/download/v99.0.0/{SingleShaName}", result.Sha256ChecksumUrl);
     }
 
     [Fact]
-    public async Task SelectsFrameworkDependentWhenRunningFrameworkDependentAndRuntimeInstalled()
+    [RequiresUnreferencedCode("Testing reflection")]
+    public async Task SelectsLegacySelfContainedWhenStandardExeNotPresent()
     {
         string json = BuildReleasePayload(
             "99.0.0",
-            (FdExeName, $"{RepoUrl}/releases/download/v99.0.0/{FdExeName}"),
-            (FdShaName, $"{RepoUrl}/releases/download/v99.0.0/{FdShaName}"),
-            (ScExeName, $"{RepoUrl}/releases/download/v99.0.0/{ScExeName}"),
-            (ScShaName, $"{RepoUrl}/releases/download/v99.0.0/{ScShaName}"));
+            (LegacyScExeName, $"{RepoUrl}/releases/download/v99.0.0/{LegacyScExeName}"),
+            (LegacyScShaName, $"{RepoUrl}/releases/download/v99.0.0/{LegacyScShaName}"));
 
-        var runtime = new FakeEnvironmentRuntimeInfo(hasRuntime: true, isFrameworkDependent: true);
         var http = new FakeHttpPort(json);
-        var checker = new UpdateCheckerService(http, runtime);
+        var checker = new UpdateCheckerService(http);
 
         var result = await checker.CheckForUpdateAsync();
 
         Assert.True(result.HasUpdate);
-        Assert.Equal($"{RepoUrl}/releases/download/v99.0.0/{FdExeName}", result.DownloadUrl);
-        Assert.Equal($"{RepoUrl}/releases/download/v99.0.0/{FdShaName}", result.Sha256ChecksumUrl);
+        Assert.Equal($"{RepoUrl}/releases/download/v99.0.0/{LegacyScExeName}", result.DownloadUrl);
+        Assert.Equal($"{RepoUrl}/releases/download/v99.0.0/{LegacyScShaName}", result.Sha256ChecksumUrl);
     }
 
     [Fact]
-    public async Task RejectsFrameworkDependentWhenRuntimeNotInstalledAndOnlyFrameworkDependentAvailable()
+    [RequiresUnreferencedCode("Testing reflection")]
+    public async Task LegacyV211CompatibilityContract_SingleExeAssetSelectedAndPaired()
     {
+        // 2.1.1 舊版相容性契約驗證：
+        // 驗證當 Release 僅包含單一 MinecraftServerManager.exe 與 .sha256 時，
+        // 舊版與新版更新機制均能自動匹配選中，確保舊版用戶可無縫升級至 v2.2.0。
         string json = BuildReleasePayload(
-            "99.0.0",
-            (FdExeName, $"{RepoUrl}/releases/download/v99.0.0/{FdExeName}"),
-            (FdShaName, $"{RepoUrl}/releases/download/v99.0.0/{FdShaName}"));
+            "2.2.0",
+            (SingleExeName, $"{RepoUrl}/releases/download/v2.2.0/{SingleExeName}"),
+            (SingleShaName, $"{RepoUrl}/releases/download/v2.2.0/{SingleShaName}"));
 
-        var runtime = new FakeEnvironmentRuntimeInfo(hasRuntime: false, isFrameworkDependent: false);
         var http = new FakeHttpPort(json);
-        var checker = new UpdateCheckerService(http, runtime);
+        var checker = new UpdateCheckerService(http);
 
         var result = await checker.CheckForUpdateAsync();
 
-        Assert.True(result.HasUpdate);
-        Assert.Null(result.DownloadUrl);
-        Assert.Contains("重要提示", result.ReleaseNotes);
-        Assert.Contains("framework-dependent", result.ReleaseNotes);
+        Assert.Equal($"{RepoUrl}/releases/download/v2.2.0/{SingleExeName}", result.DownloadUrl);
+        Assert.Equal($"{RepoUrl}/releases/download/v2.2.0/{SingleShaName}", result.Sha256ChecksumUrl);
     }
 
     [Fact]
     public async Task HandlesEmptyResponseGracefully()
     {
-        var runtime = new FakeEnvironmentRuntimeInfo(hasRuntime: false, isFrameworkDependent: false);
         var http = new FakeHttpPort(null);
-        var checker = new UpdateCheckerService(http, runtime);
+        var checker = new UpdateCheckerService(http);
 
         var result = await checker.CheckForUpdateAsync();
 
@@ -142,15 +136,15 @@ public sealed class UpdateCheckerServiceTests
     }
 
     [Fact]
+    [RequiresUnreferencedCode("Testing reflection")]
     public async Task IgnoresAssetsOutsideTrustedReleaseDownloadPath()
     {
         string json = BuildReleasePayload(
             "99.0.0",
-            (ScExeName, "https://evil.example.com/sc.exe"),
-            (ScShaName, "https://github.com/Other/Repo/releases/download/99.0.0/sc.sha256"));
+            (SingleExeName, "https://evil.example.com/sc.exe"),
+            (SingleShaName, "https://github.com/Other/Repo/releases/download/99.0.0/sc.sha256"));
 
-        var runtime = new FakeEnvironmentRuntimeInfo(hasRuntime: true, isFrameworkDependent: false);
-        var checker = new UpdateCheckerService(new FakeHttpPort(json), runtime);
+        var checker = new UpdateCheckerService(new FakeHttpPort(json));
 
         var result = await checker.CheckForUpdateAsync();
 

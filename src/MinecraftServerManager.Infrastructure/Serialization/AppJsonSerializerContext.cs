@@ -37,6 +37,7 @@ namespace MinecraftServerManager.Infrastructure.Serialization;
 [JsonSerializable(typeof(List<LocalModInfo>))]
 [JsonSerializable(typeof(LocalModInfo))]
 [JsonSerializable(typeof(string[]))]
+[JsonSerializable(typeof(string[][]))]
 [JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(ModrinthVersionFilesRequest))]
 [JsonSerializable(typeof(List<ModJsonItem>))]

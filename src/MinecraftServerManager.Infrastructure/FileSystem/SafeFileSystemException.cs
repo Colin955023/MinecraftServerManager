@@ -2,6 +2,11 @@ namespace MinecraftServerManager.Infrastructure.FileSystem;
 
 public sealed class SafeFileSystemException : IOException
 {
+    public SafeFileSystemException()
+        : base()
+    {
+    }
+
     public SafeFileSystemException(string message)
         : base(message)
     {

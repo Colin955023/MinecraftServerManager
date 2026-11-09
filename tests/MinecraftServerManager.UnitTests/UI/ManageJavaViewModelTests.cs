@@ -4,8 +4,9 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-public sealed class ManageJavaViewModelTests : IDisposable
+public sealed partial class ManageJavaViewModelTests : IDisposable
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ManageJavaViewModelTests));
     private readonly string _tempDir;
     private readonly string _dummyJava17;
     private readonly string _dummyJava21;
@@ -28,7 +29,10 @@ public sealed class ManageJavaViewModelTests : IDisposable
                 Directory.Delete(_tempDir, recursive: true);
             }
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+        }
     }
 
     [Fact]

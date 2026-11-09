@@ -3,6 +3,8 @@ using System.Text;
 using Microsoft.Extensions.Logging;
 using MinecraftServerManager.Infrastructure.FileSystem;
 
+using MinecraftServerManager.Infrastructure.Utilities;
+
 namespace MinecraftServerManager.Infrastructure.Logging;
 
 /// <summary>
@@ -18,12 +20,31 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
     private string _currentFilePath = string.Empty;
     private long _currentFileBytes;
     private bool _isDisposed;
+    private Exception? _lastFileIoException;
+    private static Exception? s_lastPruneException;
 
     public RotatingFileLoggerProvider(RotatingFileLoggerOptions? options = null)
     {
         _options = options ?? new RotatingFileLoggerOptions();
         InitializeWriter();
     }
+
+    internal Exception? LastFileIoException => _lastFileIoException;
+
+    /// <summary>
+    /// 目前寫入中的記錄檔完整路徑；初始化失敗時為空字串
+    /// </summary>
+    internal string CurrentFilePath
+    {
+        get
+        {
+            lock (_syncRoot)
+            {
+                return _currentFilePath;
+            }
+        }
+    }
+    internal static Exception? LastPruneException => s_lastPruneException;
 
     public void SetScopeProvider(IExternalScopeProvider scopeProvider) => _scopeProvider = scopeProvider;
 
@@ -48,9 +69,9 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
                 _writer?.Flush();
                 _writer?.Dispose();
             }
-            catch
+            catch (Exception ex)
             {
-                // 忽略關閉時的 I/O 錯誤
+                _lastFileIoException = ex;
             }
             finally
             {
@@ -90,18 +111,6 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
 
         string logLine = sb.ToString();
 
-        if (_options.OutputToConsole)
-        {
-            try
-            {
-                Console.Error.WriteLine(logLine);
-            }
-            catch
-            {
-                // 忽略主控台輸出例外
-            }
-        }
-
         lock (_syncRoot)
         {
             if (_isDisposed)
@@ -125,9 +134,9 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
                     DoRollover();
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // 檔案寫入失敗時不造成宿主行程閃退
+                _lastFileIoException = ex;
             }
         }
     }
@@ -145,8 +154,8 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"[RotatingFileLoggerProvider] 無法於預設目錄建立記錄檔 ({ex.Message})，嘗試切換至暫存目錄備援");
-                    string fallbackDir = Path.Combine(Path.GetTempPath(), "MinecraftServerManager", "Logs");
+                    _lastFileIoException = ex;
+                    string fallbackDir = Path.Combine(RuntimePaths.GetTempDir(), "MinecraftServerManager", "Logs");
                     SafeFileSystem.CreateDirectory(fallbackDir);
                     logDir = fallbackDir;
                 }
@@ -161,7 +170,7 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[RotatingFileLoggerProvider] 備援記錄檔初始化亦失敗: {ex.Message}");
+                _lastFileIoException = ex;
                 _writer = null;
             }
         }
@@ -224,9 +233,9 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
             PruneLogs(logDir, _options.MaxArchiveFiles);
             OpenWriter();
         }
-        catch
+        catch (Exception ex)
         {
-            // 輪替失敗時嘗試重新開啟原檔繼續記錄
+            _lastFileIoException = ex;
             OpenWriter();
         }
     }
@@ -252,9 +261,9 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
                 SafeFileSystem.DeleteWithin(logDir, files[i].FullPath);
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // 清理失敗不中斷主流程
+            s_lastPruneException = ex;
         }
     }
 
@@ -292,8 +301,6 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
 
     private static string FormatLogLevel(LogLevel level) => level switch
     {
-        LogLevel.Trace => "TRACE   ",
-        LogLevel.Debug => "DEBUG   ",
         LogLevel.Information => "INFO    ",
         LogLevel.Warning => "WARNING ",
         LogLevel.Error => "ERROR   ",

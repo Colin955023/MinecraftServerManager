@@ -19,7 +19,7 @@ public static class AppInfo
     public const string Author = "Colin955023";
     public const string License = "GNU General Public License v3.0 (GPL-3.0)";
     public const string RepositoryUrl = "https://github.com/Colin955023/MinecraftServerManager";
-    public const string TargetFramework = ".NET 10 (WPF)";
+    public const string TargetFramework = ".NET 10 (WinUI 3)";
 
     private static string ResolveVersion()
     {
@@ -32,7 +32,7 @@ public static class AppInfo
             return typeof(AppInfo).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
         }
 
-        int separatorIndex = informationalVersion.IndexOf('+');
+        int separatorIndex = informationalVersion.IndexOf('+', StringComparison.Ordinal);
         return separatorIndex >= 0 ? informationalVersion[..separatorIndex] : informationalVersion;
     }
 }

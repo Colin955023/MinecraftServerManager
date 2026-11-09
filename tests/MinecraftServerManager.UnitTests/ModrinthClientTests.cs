@@ -235,6 +235,9 @@ public sealed class ModrinthClientTests
         public Task<HttpJsonResponse<T>> GetJsonAsync<T>(Uri uri, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
 
+        public Task<HttpJsonResponse<System.Text.Json.JsonDocument>> GetJsonDocumentAsync(Uri uri, CancellationToken cancellationToken = default) =>
+            TestHttpJson.FromTextAsync(this, uri, cancellationToken);
+
         public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default) =>
             Task.FromResult(handler(uri));
 

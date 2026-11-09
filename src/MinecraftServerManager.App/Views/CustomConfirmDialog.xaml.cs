@@ -1,92 +1,48 @@
-using System.Windows;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
 /// <summary>
-/// 提供深淺色主題相容、鍵盤導航與原生音效回饋的自訂確認視窗
+/// 提供標準確認操作之 WinUI 3 原生 ContentDialog
 /// </summary>
-public partial class CustomConfirmDialog : Window
+public sealed partial class CustomConfirmDialog : ContentDialog
 {
-    private readonly UiMessageLevel _level;
+    public string DialogTitle { get; }
+    public string Message { get; }
+    public string IconGlyph { get; }
 
-    public CustomConfirmDialog(string title, string message, UiMessageLevel level = UiMessageLevel.Question)
+    public CustomConfirmDialog(
+        string message,
+        string title,
+        UiMessageLevel level = UiMessageLevel.Question,
+        string primaryButtonText = "確定",
+        string? secondaryButtonText = null,
+        string closeButtonText = "取消")
     {
         InitializeComponent();
 
-        _level = level;
-        Title = title;
-        TitleText.Text = title;
-        MessageText.Text = message;
+        Message = message;
+        DialogTitle = title;
+        PrimaryButtonText = primaryButtonText;
+        SecondaryButtonText = secondaryButtonText ?? string.Empty;
+        CloseButtonText = closeButtonText;
 
-        switch (level)
+        IconGlyph = level switch
         {
-            case UiMessageLevel.Error:
-                IconText.Text = "❌";
-                ConfirmButton.SetResourceReference(StyleProperty, "DangerButtonStyle");
-                break;
-            case UiMessageLevel.Warning:
-                IconText.Text = "⚠️";
-                ConfirmButton.SetResourceReference(StyleProperty, "DangerButtonStyle");
-                break;
-            case UiMessageLevel.Information:
-                IconText.Text = "ℹ️";
-                break;
-            case UiMessageLevel.Question:
-            default:
-                IconText.Text = "❓";
-                break;
-        }
-    }
+            UiMessageLevel.Error => "❌",
+            UiMessageLevel.Warning => "⚠️",
+            UiMessageLevel.Information => "ℹ️",
+            UiMessageLevel.Question or _ => "❓",
+        };
 
-    private void Window_Loaded(object sender, RoutedEventArgs e)
-    {
-        switch (_level)
+        if (level is UiMessageLevel.Error or UiMessageLevel.Warning)
         {
-            case UiMessageLevel.Error:
-                AudioFeedback.PlayError();
-                break;
-            case UiMessageLevel.Warning:
-                AudioFeedback.PlayWarning();
-                break;
-            case UiMessageLevel.Information:
-                AudioFeedback.PlayInfo();
-                break;
-            case UiMessageLevel.Question:
-            default:
-                AudioFeedback.PlayQuestion();
-                break;
+            if (Application.Current.Resources.TryGetValue("DangerButtonStyle", out object? styleObj) && styleObj is Style dangerStyle)
+            {
+                PrimaryButtonStyle = dangerStyle;
+            }
         }
-    }
-
-    private void ConfirmButton_Click(object sender, RoutedEventArgs e)
-    {
-        DialogResult = true;
-        Close();
-    }
-
-    private void CancelButton_Click(object sender, RoutedEventArgs e)
-    {
-        DialogResult = false;
-        Close();
-    }
-
-    /// <summary>
-    /// 顯示確認對話方塊並回傳使用者選擇結果
-    /// </summary>
-    public static bool Show(Window? owner, string message, string title, UiMessageLevel level = UiMessageLevel.Question)
-    {
-        var dialog = new CustomConfirmDialog(title, message, level);
-        if (owner is not null && owner.IsLoaded && owner.IsVisible)
-        {
-            dialog.Owner = owner;
-            dialog.WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        }
-        else
-        {
-            dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        }
-
-        return dialog.ShowDialog() == true;
     }
 }

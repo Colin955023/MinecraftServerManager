@@ -2,6 +2,11 @@ name: Build and Create Release
 
 on:
   workflow_dispatch:
+    inputs:
+      skip_smoke_test:
+        description: "略過發布 EXE 的啟動煙霧測試"
+        type: boolean
+        default: true
 
 concurrency:
   group: release-${{ github.repository }}
@@ -110,15 +115,14 @@ jobs:
         with:
           global-json-file: global.json
           cache: true
-          cache-dependency-path: |
-            global.json
-            Directory.Packages.props
-            src/**/*.csproj
-            tests/**/*.csproj
+          cache-dependency-path: "**/packages.lock.json"
 
-      - name: Publish Dual Executables (Self-contained & Framework-dependent)
+      - name: Publish Single Executable (Self-contained)
         shell: pwsh
-        run: .\scripts\dotnet_publish.ps1
+        env:
+          SKIP_SMOKE_TEST: ${{ inputs.skip_smoke_test }}
+        run: |
+              .\scripts\dotnet_publish.ps1 -SkipSmokeTest
 
       - name: Attest release executable provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -210,8 +214,8 @@ jobs:
           $destSbom = "output/MinecraftServerManager.spdx.json"
           Copy-Item -LiteralPath $spdxFile.FullName -Destination $destSbom -Force
           Remove-Item -Path "output/_manifest" -Recurse -Force
-          $hash = Get-FileHash -LiteralPath $destSbom -Algorithm SHA256
-          Set-Content -LiteralPath "$destSbom.sha256" -Value "$($hash.Hash)  MinecraftServerManager.spdx.json" -Encoding UTF8
+          . ./scripts/lib/Common.ps1
+          $null = Write-Sha256File -LiteralPath $destSbom
           Write-Host "SBOM 與 SHA-256 產生完成: $destSbom (SBOM Tool $versionTag)"
 
       - name: Upload release payload
@@ -296,24 +300,29 @@ jobs:
 
           Write-Host "Created annotated tag: $tag -> $headCommit"
 
-      - name: Create Release and Upload Assets
+      - name: Create Draft Release and Upload Assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
+          . ./scripts/lib/Common.ps1
           $tag = $env:RELEASE_TAG
           $prereleaseArgs = @()
-          if ($tag -match '^\d+\.\d+\.\d+-') { $prereleaseArgs += '--prerelease' }
-          $expectedAssets = @(
-              'MinecraftServerManager-self-contained.exe',
-              'MinecraftServerManager-self-contained.exe.sha256',
-              'MinecraftServerManager-self-contained.exe.intoto.jsonl',
-              'MinecraftServerManager-framework-dependent.exe',
-              'MinecraftServerManager-framework-dependent.exe.sha256',
-              'MinecraftServerManager-framework-dependent.exe.intoto.jsonl',
-              'MinecraftServerManager.spdx.json',
-              'MinecraftServerManager.spdx.json.sha256'
-          )
+          if ($tag -match '^v?\d+\.\d+\.\d+-') { $prereleaseArgs += '--prerelease' }
+
+          # 重新執行時清除先前失敗留下的草稿；已公開的 Release 一律禁止覆蓋
+          $existing = gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft 2>$null | ConvertFrom-Json
+          if ($LASTEXITCODE -eq 0 -and $null -ne $existing) {
+              if (-not $existing.isDraft) {
+                  throw "Release $tag 已公開發布，禁止覆蓋"
+              }
+              Write-Host "刪除先前未完成的草稿 Release $tag（保留標籤）"
+              gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes
+              if ($LASTEXITCODE -ne 0) { throw "刪除草稿 Release $tag 失敗" }
+          }
+          $global:LASTEXITCODE = 0
+
+          $expectedAssets = Get-ReleaseAssetNames
           $actualNames = @(Get-ChildItem -Path 'output' -File | Select-Object -ExpandProperty Name)
           $missingAssets = @($expectedAssets | Where-Object { $_ -notin $actualNames })
           if ($missingAssets.Count -gt 0) {
@@ -323,7 +332,8 @@ jobs:
           $ghArgs = @('release', 'create', $tag) + $assets + @(
               '--title', "Minecraft Server Manager $tag",
               '--notes-file', 'release_notes.md',
-              '--verify-tag'
+              '--verify-tag',
+              '--draft'
           ) + $prereleaseArgs
 
           Write-Host "Executing: gh $ghArgs"
@@ -333,13 +343,14 @@ jobs:
               exit $LASTEXITCODE
           }
 
-      - name: Verify Published Release Assets End-to-End
+      - name: Verify Draft Release Assets End-to-End
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
+          . ./scripts/lib/Common.ps1
           $tag = $env:RELEASE_TAG
-          Write-Host "=== 開始對已發布 Release $tag 進行端對端資產驗證 ==="
+          Write-Host "=== 開始對草稿 Release $tag 進行端對端資產驗證 ==="
           $verifyDir = Join-Path $env:RUNNER_TEMP "release-verify"
           if (Test-Path -LiteralPath $verifyDir) {
               Remove-Item -LiteralPath $verifyDir -Recurse -Force
@@ -366,16 +377,7 @@ jobs:
               Write-Host "成功下載 $($downloadedFiles.Count) 個發布資產："
               $downloadedFiles | Select-Object Name, Length | Format-Table -AutoSize
 
-              $expectedAssets = @(
-                  'MinecraftServerManager-self-contained.exe',
-                  'MinecraftServerManager-self-contained.exe.sha256',
-                  'MinecraftServerManager-self-contained.exe.intoto.jsonl',
-                  'MinecraftServerManager-framework-dependent.exe',
-                  'MinecraftServerManager-framework-dependent.exe.sha256',
-                  'MinecraftServerManager-framework-dependent.exe.intoto.jsonl',
-                  'MinecraftServerManager.spdx.json',
-                  'MinecraftServerManager.spdx.json.sha256'
-              )
+              $expectedAssets = Get-ReleaseAssetNames
               $actualNames = @($downloadedFiles | Select-Object -ExpandProperty Name)
               $missingAssets = @($expectedAssets | Where-Object { $_ -notin $actualNames })
               if ($missingAssets.Count -gt 0) {
@@ -383,13 +385,13 @@ jobs:
               }
 
               $exeFiles = @(Get-ChildItem -LiteralPath $verifyDir -Filter '*.exe' -File)
-              if ($exeFiles.Count -ne 2) {
-                  throw "驗證失敗：預期 2 個 .exe，實際找到 $($exeFiles.Count) 個"
+              if ($exeFiles.Count -ne 1) {
+                  throw "驗證失敗：預期 1 個 .exe，實際找到 $($exeFiles.Count) 個"
               }
 
               $shaFiles = @(Get-ChildItem -LiteralPath $verifyDir -Filter '*.sha256' -File)
-              if ($shaFiles.Count -ne 3) {
-                  throw "驗證失敗：預期 3 個 .sha256，實際找到 $($shaFiles.Count) 個"
+              if ($shaFiles.Count -ne 2) {
+                  throw "驗證失敗：預期 2 個 .sha256，實際找到 $($shaFiles.Count) 個"
               }
 
               Write-Host "--- 步驟 1：比對 SHA-256 雜湊值 ---"
@@ -424,8 +426,19 @@ jobs:
                   Write-Host " [Attestation 驗證通過] $($exe.Name)"
               }
 
-              Write-Host "=== 發布後端對端資產驗證全數通過！==="
+              Write-Host "=== 草稿 Release 端對端資產驗證全數通過！==="
           }
           finally {
               Remove-Item -LiteralPath $verifyDir -Recurse -Force -ErrorAction SilentlyContinue
           }
+
+      - name: Publish Verified Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false
+          if ($LASTEXITCODE -ne 0) {
+              throw "公開 Release $env:RELEASE_TAG 失敗"
+          }
+          Write-Host "Release $env:RELEASE_TAG 已驗證並公開發布"

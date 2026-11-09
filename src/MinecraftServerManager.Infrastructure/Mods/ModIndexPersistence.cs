@@ -10,7 +10,7 @@ namespace MinecraftServerManager.Infrastructure.Mods;
 /// </summary>
 public sealed class ModIndexPersistence : IModIndexPersistence
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ModIndexPersistence");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModIndexPersistence));
     private readonly string _indexFilePath;
     private readonly Lock _lock = new();
     private Dictionary<string, ModCacheEntry> _index = new(StringComparer.OrdinalIgnoreCase);

@@ -9,8 +9,9 @@ namespace MinecraftServerManager.UnitTests.UI;
 /// <summary>
 /// 伺服器監控視窗 ViewModel 測試（驗證紀錄限制、重新整理清空重載與玩家名單解析）
 /// </summary>
-public sealed class ServerMonitorViewModelTests : IDisposable
+public sealed partial class ServerMonitorViewModelTests : IDisposable
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerMonitorViewModelTests));
     private readonly string _tempServerDir;
     private readonly MockServerRuntime _runtime;
 
@@ -30,7 +31,10 @@ public sealed class ServerMonitorViewModelTests : IDisposable
                 Directory.Delete(_tempServerDir, recursive: true);
             }
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+        }
     }
 
     [Fact]

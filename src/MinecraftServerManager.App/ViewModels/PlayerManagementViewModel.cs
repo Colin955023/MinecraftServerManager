@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -5,20 +6,26 @@ using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
+using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
 /// <summary>
 /// 伺服器名單管理（ops.json, whitelist.json, banned-players.json, banned-ips.json）對話方塊 ViewModel
 /// </summary>
-public sealed partial class PlayerManagementViewModel : ObservableObject
+public sealed partial class PlayerManagementViewModel(
+    string serverName,
+    string serverPath,
+    IServerPlayerConfigStore configStore,
+    IUiService ui) : ViewModelBase
 {
-    private readonly IServerPlayerConfigStore _configStore;
-    private readonly IUiService _ui;
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(PlayerManagementViewModel));
+    private readonly IServerPlayerConfigStore _configStore = configStore;
+    private readonly IUiService _ui = ui;
     private readonly List<ServerUserCacheEntry> _allUserCache = [];
 
-    public string ServerName { get; }
-    public string ServerPath { get; }
+    public string ServerName { get; } = serverName;
+    public string ServerPath { get; } = serverPath;
 
     [ObservableProperty]
     public partial string PlayerSearchText { get; set; } = string.Empty;
@@ -42,7 +49,7 @@ public sealed partial class PlayerManagementViewModel : ObservableObject
     public partial ServerUserCacheEntry? SelectedOpCandidate { get; set; }
 
     [ObservableProperty]
-    public partial OpLevelOption SelectedOpLevel { get; set; }
+    public partial OpLevelOption SelectedOpLevel { get; set; } = OpLevelOptions[0];
 
     [ObservableProperty]
     public partial bool OpBypassesPlayerLimit { get; set; }
@@ -71,13 +78,7 @@ public sealed partial class PlayerManagementViewModel : ObservableObject
     public BulkObservableCollection<ServerBannedPlayerEntry> BannedPlayers { get; } = [];
     public BulkObservableCollection<ServerBannedIpEntry> BannedIps { get; } = [];
 
-    [ObservableProperty]
-    public partial string NewPlayerName { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial string NewPlayerUuid { get; set; } = string.Empty;
-
-    public IReadOnlyList<OpLevelOption> OpLevelOptions { get; } =
+    private static readonly OpLevelOption[] OpLevelOptionsCache =
     [
         new(4, "等級 4 - 伺服器完全控制權限 (stop, save-all 等維護指令)"),
         new(3, "等級 3 - 玩家名單與權限管理 (op, deop, kick, ban 等)"),
@@ -85,20 +86,9 @@ public sealed partial class PlayerManagementViewModel : ObservableObject
         new(1, "等級 1 - 僅略過出生點方塊保護 (無作弊與管理指令)"),
     ];
 
-    public event Action<bool>? RequestClose;
+    public static IReadOnlyList<OpLevelOption> OpLevelOptions => OpLevelOptionsCache;
 
-    public PlayerManagementViewModel(
-        string serverName,
-        string serverPath,
-        IServerPlayerConfigStore configStore,
-        IUiService ui)
-    {
-        ServerName = serverName;
-        ServerPath = serverPath;
-        _configStore = configStore;
-        _ui = ui;
-        SelectedOpLevel = OpLevelOptions[0];
-    }
+    public event Action<bool>? RequestClose;
 
     public async Task InitializeAsync()
     {
@@ -161,6 +151,7 @@ public sealed partial class PlayerManagementViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            Logger.Error(ex, "讀取伺服器名單設定失敗: {Message}", ex.Message);
             StatusMessage = $"讀取失敗：{ex.Message}";
         }
         finally
@@ -184,44 +175,6 @@ public sealed partial class PlayerManagementViewModel : ObservableObject
         SelectedOpCandidate = AvailableCandidates.FirstOrDefault();
         SelectedWhitelistCandidate = AvailableCandidates.FirstOrDefault();
         SelectedBanCandidate = AvailableCandidates.FirstOrDefault();
-    }
-
-    [RelayCommand]
-    public void AddCustomPlayer()
-    {
-        string name = NewPlayerName.Trim();
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            StatusMessage = "請輸入玩家名稱";
-            return;
-        }
-
-        string uuid = string.IsNullOrWhiteSpace(NewPlayerUuid) ? Guid.NewGuid().ToString() : NewPlayerUuid.Trim();
-
-        if (OperatorRows.Any(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase) ||
-                                  (!string.IsNullOrWhiteSpace(r.Uuid) && string.Equals(r.Uuid, uuid, StringComparison.OrdinalIgnoreCase))))
-        {
-            StatusMessage = $"玩家「{name}」已存在於名單中";
-            return;
-        }
-
-        var newRow = new OperatorRowItem(
-            name,
-            uuid,
-            isOp: true,
-            level: 4,
-            bypassesPlayerLimit: false,
-            () =>
-            {
-                HasUnsavedChanges = true;
-                StatusMessage = "管理員名單已變更，尚未儲存";
-            });
-
-        OperatorRows.Insert(0, newRow);
-        NewPlayerName = string.Empty;
-        NewPlayerUuid = string.Empty;
-        HasUnsavedChanges = true;
-        StatusMessage = $"已手動新增玩家「{name}」並設為管理員 (Level 4)";
     }
 
     [RelayCommand]
@@ -441,9 +394,9 @@ public sealed partial class PlayerManagementViewModel : ObservableObject
             var bundle = new ServerPlayerConfigBundle(
                 UserCache: _allUserCache,
                 Operators: ops,
-                Whitelist: [.. Whitelist],
-                BannedPlayers: [.. BannedPlayers],
-                BannedIps: [.. BannedIps]);
+                Whitelist: (ServerWhitelistEntry[])[.. Whitelist],
+                BannedPlayers: (ServerBannedPlayerEntry[])[.. BannedPlayers],
+                BannedIps: (ServerBannedIpEntry[])[.. BannedIps]);
 
             await _configStore.SaveBundleAsync(ServerPath, bundle).ConfigureAwait(true);
             HasUnsavedChanges = false;
@@ -451,6 +404,7 @@ public sealed partial class PlayerManagementViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            Logger.Error(ex, "儲存伺服器名單設定失敗: {Message}", ex.Message);
             StatusMessage = $"儲存失敗：{ex.Message}";
         }
         finally
@@ -460,9 +414,9 @@ public sealed partial class PlayerManagementViewModel : ObservableObject
     }
 
     [RelayCommand]
-    public void Cancel()
+    public async Task CancelAsync()
     {
-        if (ConfirmDiscard())
+        if (await ConfirmDiscardAsync())
         {
             RequestClose?.Invoke(false);
         }
@@ -471,18 +425,11 @@ public sealed partial class PlayerManagementViewModel : ObservableObject
     /// <summary>
     /// 檢查是否有尚未儲存之暫存變更；若有則彈出確認詢問對話方塊
     /// </summary>
-    public bool ConfirmDiscard()
-    {
-        if (!HasUnsavedChanges)
-        {
-            return true;
-        }
-
-        return _ui.Confirm("有尚未儲存的名單設定變更，確定要捨棄變更並關閉嗎？", "捨棄變更", UiMessageLevel.Warning);
-    }
+    public Task<bool> ConfirmDiscardAsync() =>
+        ConfirmDiscardChangesAsync(_ui, HasUnsavedChanges, "有尚未儲存的名單設定變更，確定要捨棄變更並關閉嗎？");
 
     private static string FormatMinecraftTimestamp(DateTimeOffset dto) =>
-        dto.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " " + dto.ToString("zzz", CultureInfo.InvariantCulture).Replace(":", "");
+        dto.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " " + dto.ToString("zzz", CultureInfo.InvariantCulture).Replace(":", "", StringComparison.Ordinal);
 }
 
 public sealed record OpLevelOption(int Level, string Display);
@@ -490,35 +437,27 @@ public sealed record OpLevelOption(int Level, string Display);
 /// <summary>
 /// 管理員名單資料列項目模型
 /// </summary>
-public sealed partial class OperatorRowItem : ObservableObject
+public sealed partial class OperatorRowItem(string name, string uuid, bool isOp, int level, bool bypassesPlayerLimit, Action? onChanged = null) : ObservableObject
 {
-    private readonly Action? _onChanged;
+    private readonly Action? _onChanged = onChanged;
 
-    public string Name { get; init; } = string.Empty;
-    public string Uuid { get; init; } = string.Empty;
-
-    [ObservableProperty]
-    public partial bool IsOp { get; set; }
+    public string Name { get; init; } = name;
+    public string Uuid { get; init; } = uuid;
 
     [ObservableProperty]
-    public partial int Level { get; set; } = 4;
+    public partial bool IsOp { get; set; } = isOp;
 
     [ObservableProperty]
-    public partial bool BypassesPlayerLimit { get; set; }
+    public partial int Level { get; set; } = level is >= 1 and <= 4 ? level : 4;
+
+    [ObservableProperty]
+    public partial bool BypassesPlayerLimit { get; set; } = bypassesPlayerLimit;
 
     partial void OnIsOpChanged(bool value) => _onChanged?.Invoke();
     partial void OnLevelChanged(int value) => _onChanged?.Invoke();
     partial void OnBypassesPlayerLimitChanged(bool value) => _onChanged?.Invoke();
 
-    public static IReadOnlyList<int> AvailableLevels { get; } = [1, 2, 3, 4];
-
-    public OperatorRowItem(string name, string uuid, bool isOp, int level, bool bypassesPlayerLimit, Action? onChanged = null)
-    {
-        Name = name;
-        Uuid = uuid;
-        IsOp = isOp;
-        Level = level is >= 1 and <= 4 ? level : 4;
-        BypassesPlayerLimit = bypassesPlayerLimit;
-        _onChanged = onChanged;
-    }
+    private static readonly int[] LevelsCache = [1, 2, 3, 4];
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "WinUI 3 x:Bind requires instance member for DataTemplate bindings")]
+    public IReadOnlyList<int> AvailableLevels => LevelsCache;
 }

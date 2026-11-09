@@ -5,6 +5,7 @@ using MinecraftServerManager.Core.Loaders;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Loaders;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
 
@@ -17,12 +18,12 @@ namespace MinecraftServerManager.Infrastructure.Java;
 /// </summary>
 public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementService
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("MinecraftJavaRequirementService");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(MinecraftJavaRequirementService));
 
     public const string RequirementsCacheFileName = "mc_java_requirements_cache.json";
-    public const string VersionsCacheFileName = "mc_versions_cache.json";
-    public const string ManifestV2Url = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
-    public const string ManifestFallbackUrl = "https://piston-meta.mojang.com/mc/game/version_manifest.json";
+    public const string VersionsCacheFileName = MojangVersionCatalog.VersionsCacheFileName;
+    public const string ManifestV2Url = MojangVersionCatalog.ManifestV2Url;
+    public const string ManifestFallbackUrl = MojangVersionCatalog.ManifestFallbackUrl;
 
     private readonly IHttpPort _httpPort;
     private readonly string _cacheDirectory;
@@ -58,7 +59,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
 
         if (loader == LoaderKind.Paper)
         {
-            int? paperMajor = await FetchJavaMajorFromPaperAsync(cleaned, cancellationToken).ConfigureAwait(false);
+            int? paperMajor = await MojangVersionCatalog.FetchPaperJavaMajorAsync(_httpPort, cleaned, cancellationToken).ConfigureAwait(false);
             if (paperMajor is > 0)
             {
                 _memoryCache[cacheKey] = paperMajor.Value;
@@ -130,14 +131,9 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
 
         // 只抓取 Stable == true 且具備官方 server 下載連結之正式版本
         var mcVersions = await GetMinecraftVersionsWithServerAsync(cancellationToken).ConfigureAwait(false);
-        if (mcVersions.Count == 0)
-        {
-            return new Dictionary<string, int>(_memoryCache, StringComparer.OrdinalIgnoreCase);
-        }
-
         var toFetch = force
-            ? mcVersions
-            : mcVersions.Where(kv => !_memoryCache.ContainsKey(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
+            ? [.. mcVersions]
+            : mcVersions.Where(kv => !_memoryCache.ContainsKey(kv.Key)).ToList();
 
         if (toFetch.Count == 0)
         {
@@ -146,29 +142,18 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
 
         Logger.Information("開始預載入 {Count} 個穩定版 Minecraft 版本的官方 Java major 需求", toFetch.Count);
 
-        using var throttler = new SemaphoreSlim(10, 10);
-        var tasks = toFetch.Select(async pair =>
-        {
-            await throttler.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
+        await Parallel.ForEachAsync(
+            toFetch,
+            new ParallelOptions { MaxDegreeOfParallelism = 10, CancellationToken = cancellationToken },
+            async (pair, token) =>
             {
-                int? major = await FetchJavaMajorFromUrlAsync(pair.Value, cancellationToken).ConfigureAwait(false);
+                int? major = await MojangVersionCatalog.FetchOfficialJavaMajorAsync(_httpPort, pair.Value, token).ConfigureAwait(false);
                 if (major is > 0)
                 {
                     _memoryCache[pair.Key] = major.Value;
                 }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning("預載入版本 {Version} 的官方 Java major 失敗: {Error}", pair.Key, ex.Message);
-            }
-            finally
-            {
-                throttler.Release();
-            }
-        });
+            }).ConfigureAwait(false);
 
-        await Task.WhenAll(tasks).ConfigureAwait(false);
         PersistCache();
 
         return new Dictionary<string, int>(_memoryCache, StringComparer.OrdinalIgnoreCase);
@@ -176,167 +161,31 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
 
     /// <summary>
     /// 取得所有 Stable == true 且具備官方 server.jar 下載連結的 Minecraft 版本及其 package URL。
-    /// 僅回傳正式釋出版本，排除 snapshot/alpha/beta/pre/release candidate 等預發布版本。
+    /// 本機版本快取為空時改自 Mojang 官方 Manifest 取得並寫回快取。
     /// </summary>
     private async Task<Dictionary<string, string>> GetMinecraftVersionsWithServerAsync(CancellationToken cancellationToken)
     {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        // 優先從本地 mc_versions_cache.json 讀取
-        string versionsCachePath = Path.Combine(_cacheDirectory, VersionsCacheFileName);
-        if (SafeFileSystem.FileExists(versionsCachePath))
+        var result = MojangVersionCatalog.GetCachedReleasePackageUrls(_cacheDirectory);
+        if (result.Count > 0)
         {
-            try
-            {
-                using var stream = SafeFileSystem.OpenRead(versionsCachePath, FileShare.ReadWrite | FileShare.Delete, FileOptions.Asynchronous | FileOptions.SequentialScan);
-                using var doc = await JsonCodec.ParseDocumentAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
-
-                if (doc.RootElement.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var elem in doc.RootElement.EnumerateArray())
-                    {
-                        string? id = null;
-                        string? url = null;
-                        bool? stable = null;
-
-                        if (elem.TryGetProperty("Version", out var vProp))
-                        {
-                            id = vProp.GetString();
-                        }
-                        else if (elem.TryGetProperty("id", out var idProp))
-                        {
-                            id = idProp.GetString();
-                        }
-
-                        if (elem.TryGetProperty("Url", out var uProp))
-                        {
-                            url = uProp.GetString();
-                        }
-                        else if (elem.TryGetProperty("url", out var urlProp))
-                        {
-                            url = urlProp.GetString();
-                        }
-
-                        if (elem.TryGetProperty("Stable", out var sProp))
-                        {
-                            stable = sProp.GetBoolean();
-                        }
-                        else if (elem.TryGetProperty("stable", out var stableProp))
-                        {
-                            stable = stableProp.GetBoolean();
-                        }
-
-                        // 只保留 Stable == true 且有 URL 的版本
-                        if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(url) && stable == true)
-                        {
-                            result[id.Trim()] = url.Trim();
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning("自本機 mc_versions_cache.json 讀取版本失敗: {Error}", ex.Message);
-            }
+            return result;
         }
 
-        // 本地快取為空時，從官方 Manifest 取得
-        if (result.Count == 0)
+        var manifest = await MojangVersionCatalog.FetchManifestAsync(_httpPort, cancellationToken).ConfigureAwait(false);
+        if (manifest is null)
         {
-            HttpJsonResponse<JsonDocument>? manifestResp = null;
-            try
-            {
-                manifestResp = await _httpPort.GetJsonDocumentAsync(new Uri(ManifestV2Url), cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Logger.Warning("抓取 Mojang Manifest V2 失敗，將嘗試後備網址: {Error}", ex.Message);
-            }
+            return result;
+        }
 
-            if (manifestResp is null || !manifestResp.IsSuccess || manifestResp.Payload is null)
-            {
-                try
-                {
-                    manifestResp = await _httpPort.GetJsonDocumentAsync(new Uri(ManifestFallbackUrl), cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning("抓取 Mojang Manifest 失敗: {Error}", ex.Message);
-                }
-            }
+        var releases = manifest.Where(static v => v.Stable && !string.IsNullOrWhiteSpace(v.Url)).ToList();
+        foreach (var v in releases)
+        {
+            result[v.Version] = v.Url!;
+        }
 
-            if (manifestResp is { IsSuccess: true, Payload: not null })
-            {
-                using var doc = manifestResp.Payload;
-                try
-                {
-                    JsonElement arrayElement;
-
-                    if (doc.RootElement.ValueKind == JsonValueKind.Object &&
-                        doc.RootElement.TryGetProperty("versions", out var vElem) &&
-                        vElem.ValueKind == JsonValueKind.Array)
-                    {
-                        arrayElement = vElem;
-                    }
-                    else if (doc.RootElement.ValueKind == JsonValueKind.Array)
-                    {
-                        arrayElement = doc.RootElement;
-                    }
-                    else
-                    {
-                        return result;
-                    }
-
-                    foreach (var elem in arrayElement.EnumerateArray())
-                    {
-                        string? id = null;
-                        string? url = null;
-                        string? type = null;
-
-                        if (elem.TryGetProperty("id", out var idProp))
-                        {
-                            id = idProp.GetString();
-                        }
-                        else if (elem.TryGetProperty("Version", out var vProp))
-                        {
-                            id = vProp.GetString();
-                        }
-
-                        if (elem.TryGetProperty("url", out var urlProp))
-                        {
-                            url = urlProp.GetString();
-                        }
-                        else if (elem.TryGetProperty("Url", out var uProp))
-                        {
-                            url = uProp.GetString();
-                        }
-
-                        if (elem.TryGetProperty("type", out var tProp))
-                        {
-                            type = tProp.GetString();
-                        }
-
-                        // 只保留 release 類型且有 URL 的版本
-                        if (!string.IsNullOrWhiteSpace(id)
-                            && !string.IsNullOrWhiteSpace(url)
-                            && string.Equals(type, "release", StringComparison.OrdinalIgnoreCase))
-                        {
-                            result[id.Trim()] = url.Trim();
-                        }
-                    }
-
-                    // 將結果寫入本地快取
-                    if (result.Count > 0)
-                    {
-                        var forCache = result.Select(static kv => new LoaderVersion(kv.Key, kv.Value, true)).ToList();
-                        SaveCachedVersions(versionsCachePath, forCache);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning("解析 Manifest 版本 JSON 清單失敗: {Error}", ex.Message);
-                }
-            }
+        if (releases.Count > 0)
+        {
+            MojangVersionCatalog.SaveCachedVersions(MojangVersionCatalog.GetVersionsCachePath(_cacheDirectory), releases);
         }
 
         return result;
@@ -383,59 +232,19 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
                 }
             }
 
-            string paperCachePath = Path.Combine(_cacheDirectory, "paper_mc_versions_cache.json");
-            if (SafeFileSystem.FileExists(paperCachePath))
+            foreach (var v in MojangVersionCatalog.LoadCachedVersions(MojangVersionCatalog.GetPaperVersionsCachePath(_cacheDirectory)))
             {
-                try
+                if (!string.IsNullOrWhiteSpace(v.Version) && v.JavaMajor is > 0)
                 {
-                    string pJson = SafeFileSystem.ReadAllText(paperCachePath, Encoding.UTF8);
-                    using var pDoc = JsonCodec.ParseDocument(pJson);
-                    if (pDoc.RootElement.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var elem in pDoc.RootElement.EnumerateArray())
-                        {
-                            string? ver = elem.TryGetProperty("Version", out var vP) ? vP.GetString() : (elem.TryGetProperty("version", out var vP2) ? vP2.GetString() : null);
-                            int? jm = elem.TryGetProperty("JavaMajor", out var jP) && jP.ValueKind == JsonValueKind.Number && jP.TryGetInt32(out int jVal)
-                                ? jVal
-                                : (elem.TryGetProperty("javaMajor", out var jP2) && jP2.ValueKind == JsonValueKind.Number && jP2.TryGetInt32(out int jVal2) ? jVal2 : null);
-                            if (!string.IsNullOrWhiteSpace(ver) && jm is > 0)
-                            {
-                                _memoryCache[$"paper:{ver.Trim()}"] = Math.Max(8, jm.Value);
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning("讀取 Paper Java requirements 快取失敗 ({Path}): {Error}", paperCachePath, ex.Message);
+                    _memoryCache[$"paper:{v.Version.Trim()}"] = Math.Max(MojangVersionCatalog.MinimumJavaMajor, v.JavaMajor.Value);
                 }
             }
 
-            string mcCachePath = Path.Combine(_cacheDirectory, VersionsCacheFileName);
-            if (SafeFileSystem.FileExists(mcCachePath))
+            foreach (var v in MojangVersionCatalog.LoadCachedVersions(MojangVersionCatalog.GetVersionsCachePath(_cacheDirectory)))
             {
-                try
+                if (!string.IsNullOrWhiteSpace(v.Version) && v.JavaMajor is > 0)
                 {
-                    string mJson = SafeFileSystem.ReadAllText(mcCachePath, Encoding.UTF8);
-                    using var mDoc = JsonCodec.ParseDocument(mJson);
-                    if (mDoc.RootElement.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var elem in mDoc.RootElement.EnumerateArray())
-                        {
-                            string? ver = elem.TryGetProperty("Version", out var vP) ? vP.GetString() : (elem.TryGetProperty("version", out var vP2) ? vP2.GetString() : null);
-                            int? jm = elem.TryGetProperty("JavaMajor", out var jP) && jP.ValueKind == JsonValueKind.Number && jP.TryGetInt32(out int jVal)
-                                ? jVal
-                                : (elem.TryGetProperty("javaMajor", out var jP2) && jP2.ValueKind == JsonValueKind.Number && jP2.TryGetInt32(out int jVal2) ? jVal2 : null);
-                            if (!string.IsNullOrWhiteSpace(ver) && jm is > 0)
-                            {
-                                _memoryCache.TryAdd(ver.Trim(), Math.Max(8, jm.Value));
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning("讀取 MC 版本快取中之 Java major 失敗 ({Path}): {Error}", mcCachePath, ex.Message);
+                    _memoryCache.TryAdd(v.Version.Trim(), Math.Max(MojangVersionCatalog.MinimumJavaMajor, v.JavaMajor.Value));
                 }
             }
 
@@ -474,8 +283,8 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
                 }
 
                 // 1. 同步更新官方 MC 快取 mc_versions_cache.json
-                string mcCachePath = Path.Combine(_cacheDirectory, VersionsCacheFileName);
-                var mcVersions = SafeFileSystem.FileExists(mcCachePath) ? LoadCachedVersions(mcCachePath) : [];
+                string mcCachePath = MojangVersionCatalog.GetVersionsCachePath(_cacheDirectory);
+                var mcVersions = SafeFileSystem.FileExists(mcCachePath) ? MojangVersionCatalog.LoadCachedVersions(mcCachePath) : [];
                 bool mcChanged = false;
                 var updatedMc = new List<LoaderVersion>(mcVersions.Count + _memoryCache.Count);
                 var seenMc = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -505,14 +314,14 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
 
                 if (mcChanged)
                 {
-                    SaveCachedVersions(mcCachePath, updatedMc);
+                    MojangVersionCatalog.SaveCachedVersions(mcCachePath, updatedMc);
                 }
 
                 // 2. 同步更新 Paper 快取 paper_mc_versions_cache.json
-                string paperCachePath = Path.Combine(_cacheDirectory, "paper_mc_versions_cache.json");
+                string paperCachePath = MojangVersionCatalog.GetPaperVersionsCachePath(_cacheDirectory);
                 if (SafeFileSystem.FileExists(paperCachePath))
                 {
-                    var paperVersions = LoadCachedVersions(paperCachePath);
+                    var paperVersions = MojangVersionCatalog.LoadCachedVersions(paperCachePath);
                     bool paperChanged = false;
                     var updatedPaper = new List<LoaderVersion>(paperVersions.Count);
                     foreach (var v in paperVersions)
@@ -530,7 +339,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
 
                     if (paperChanged)
                     {
-                        SaveCachedVersions(paperCachePath, updatedPaper);
+                        MojangVersionCatalog.SaveCachedVersions(paperCachePath, updatedPaper);
                     }
                 }
             }
@@ -545,10 +354,8 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         string minecraftVersion,
         CancellationToken cancellationToken)
     {
-        // 1. 優先從本地 mc_versions_cache.json 尋找 URL
-        string? targetUrl = TryFindPackageUrlFromLocalCache(minecraftVersion);
-
-        // 2. 本地找不到時向 Mojang 官方 Manifest 查詢
+        // 1. 優先從本地版本快取尋找 package URL；2. 找不到時向 Mojang 官方 Manifest 查詢
+        string? targetUrl = MojangVersionCatalog.TryGetCachedPackageUrl(_cacheDirectory, minecraftVersion);
         if (string.IsNullOrWhiteSpace(targetUrl))
         {
             var urls = await GetMinecraftVersionsWithServerAsync(cancellationToken).ConfigureAwait(false);
@@ -561,119 +368,17 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
             return null;
         }
 
-        return await FetchJavaMajorFromUrlAsync(targetUrl, cancellationToken).ConfigureAwait(false);
-    }
-
-    private string? TryFindPackageUrlFromLocalCache(string minecraftVersion)
-    {
-        try
-        {
-            string versionsCachePath = Path.Combine(_cacheDirectory, VersionsCacheFileName);
-            if (!SafeFileSystem.FileExists(versionsCachePath))
-            {
-                return null;
-            }
-
-            string json = SafeFileSystem.ReadAllText(versionsCachePath);
-            if (json is null)
-            {
-                return null;
-            }
-
-            using var doc = JsonCodec.ParseDocument(json);
-
-            if (doc.RootElement.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var elem in doc.RootElement.EnumerateArray())
-                {
-                    string? id = null;
-                    if (elem.TryGetProperty("Version", out var vProp))
-                    {
-                        id = vProp.GetString();
-                    }
-                    else if (elem.TryGetProperty("id", out var idProp))
-                    {
-                        id = idProp.GetString();
-                    }
-
-                    if (string.Equals(id, minecraftVersion, StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (elem.TryGetProperty("Url", out var uProp))
-                        {
-                            return uProp.GetString();
-                        }
-                        if (elem.TryGetProperty("url", out var urlProp))
-                        {
-                            return urlProp.GetString();
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("自本機 mc_versions_cache.json 讀取版本 URL 失敗: {Error}", ex.Message);
-        }
-
-        return null;
-    }
-
-    private async Task<int?> FetchJavaMajorFromUrlAsync(string url, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var response = await _httpPort.GetJsonDocumentAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccess || response.Payload is null)
-            {
-                return null;
-            }
-
-            using (response.Payload)
-            {
-                return ParseJavaMajorFromVersionJson(response.Payload.RootElement);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("抓取版本 package JSON 失敗 ({Url}): {Error}", url, ex.Message);
-            return null;
-        }
+        return await MojangVersionCatalog.FetchOfficialJavaMajorAsync(_httpPort, targetUrl, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     /// 解析 Minecraft version package JSON 中的 javaVersion.majorVersion 或 java_version.major
     /// </summary>
-    public static int? ParseJavaMajorFromVersionJson(JsonElement root)
-    {
-        // 1. 標準 Mojang 結構: { "javaVersion": { "component": "...", "majorVersion": 21 } }
-        if (root.TryGetProperty("javaVersion", out var jvElem) && jvElem.ValueKind == JsonValueKind.Object)
-        {
-            if (jvElem.TryGetProperty("majorVersion", out var mvElem) && mvElem.TryGetInt32(out int mv) && mv > 0)
-            {
-                return mv;
-            }
-        }
-
-        // 2. 替代結構: { "java_version": { "major": 17 } }
-        if (root.TryGetProperty("java_version", out var jvElem2) && jvElem2.ValueKind == JsonValueKind.Object)
-        {
-            if (jvElem2.TryGetProperty("major", out var mvElem2) && mvElem2.TryGetInt32(out int mv2) && mv2 > 0)
-            {
-                return mv2;
-            }
-        }
-
-        // 3. Mojang 官方套件規格：合法 version package 但未定義 javaVersion 欄位者，官方啟動器標準皆指派 jre-legacy (Java 8)
-        if (root.TryGetProperty("id", out _) && (root.TryGetProperty("downloads", out _) || root.TryGetProperty("libraries", out _)))
-        {
-            return 8;
-        }
-
-        return null;
-    }
+    public static int? ParseJavaMajorFromVersionJson(JsonElement root) =>
+        MojangVersionCatalog.ParseJavaMajorFromVersionJson(root);
 
     public static int? ParseJavaMajorFromVersionJson(JsonDocument doc) =>
-        ParseJavaMajorFromVersionJson(doc.RootElement);
+        MojangVersionCatalog.ParseJavaMajorFromVersionJson(doc.RootElement);
 
     public static int? ParseJavaMajorFromVersionJson(string json)
     {
@@ -683,65 +388,6 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         }
 
         using var doc = JsonCodec.ParseDocument(json);
-        return ParseJavaMajorFromVersionJson(doc.RootElement);
+        return MojangVersionCatalog.ParseJavaMajorFromVersionJson(doc.RootElement);
     }
-
-    private static List<LoaderVersion> LoadCachedVersions(string cachePath)
-    {
-        try
-        {
-            if (!SafeFileSystem.FileExists(cachePath))
-            {
-                return [];
-            }
-            string json = SafeFileSystem.ReadAllText(cachePath, Encoding.UTF8);
-            return JsonCodec.Deserialize<List<LoaderVersion>>(json) ?? [];
-        }
-        catch
-        {
-            return [];
-        }
-    }
-
-    private static void SaveCachedVersions(string cachePath, IReadOnlyList<LoaderVersion> versions)
-    {
-        try
-        {
-            AtomicFileWriter.WriteJson(cachePath, versions, indented: true);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning("儲存版本快取失敗: {Error}", ex.Message);
-        }
-    }
-
-    private async Task<int?> FetchJavaMajorFromPaperAsync(string version, CancellationToken cancellationToken)
-    {
-        try
-        {
-            string url = $"https://fill.papermc.io/v3/projects/paper/versions/{version}";
-            var response = await _httpPort.GetJsonDocumentAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccess || response.Payload is null)
-            {
-                return null;
-            }
-
-            using var doc = response.Payload;
-            if (doc.RootElement.TryGetProperty("version", out var vProp) &&
-                vProp.TryGetProperty("java", out var jProp) &&
-                jProp.TryGetProperty("version", out var jvProp) &&
-                jvProp.TryGetProperty("minimum", out var minProp) &&
-                minProp.TryGetInt32(out int minimum))
-            {
-                return minimum;
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning("從 Paper 取得 Java 需求版本失敗: {Error}", ex.Message);
-        }
-
-        return null;
-    }
-
 }

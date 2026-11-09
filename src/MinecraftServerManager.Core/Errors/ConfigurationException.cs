@@ -2,6 +2,11 @@ namespace MinecraftServerManager.Core.Errors;
 
 public sealed class ConfigurationException : InvalidOperationException
 {
+    public ConfigurationException()
+        : base()
+    {
+    }
+
     public ConfigurationException(string message)
         : base(message)
     {

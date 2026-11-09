@@ -54,6 +54,21 @@ public static class AppLogging
     }
 
     /// <summary>
+    /// 目前寫入中的記錄檔完整路徑；記錄管線未初始化時為 null
+    /// </summary>
+    public static string? CurrentLogFilePath
+    {
+        get
+        {
+            lock (SyncRoot)
+            {
+                string? path = _fileLoggerProvider?.CurrentFilePath;
+                return string.IsNullOrEmpty(path) ? null : path;
+            }
+        }
+    }
+
+    /// <summary>
     /// 關閉並清除記錄管線，確保檔案串流完成寫入與釋放
     /// </summary>
     public static void Shutdown()

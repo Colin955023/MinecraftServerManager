@@ -1,127 +1,108 @@
 using System.ComponentModel;
-using System.Windows;
-using System.Windows.Media;
-using System.Windows.Media.Animation;
+using Microsoft.UI.Xaml.Controls;
 using MinecraftServerManager.App.Services;
-using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.Views;
 
 /// <summary>
-/// 通用作業進度視窗（具備 Shimmer 動態流光光效與原生百分比推進）
+/// 通用非同步作業進度 WinUI 3 原生 ContentDialog
 /// </summary>
-public partial class OperationProgressDialog : Window
+public sealed partial class OperationProgressDialog : ContentDialog, INotifyPropertyChanged
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("OperationProgressDialog");
-    private readonly Storyboard _shimmerStoryboard = new();
+    public event PropertyChangedEventHandler? PropertyChanged;
+
     private readonly IUiService _ui;
     private bool _completed;
-    private double _currentPercent;
+    private bool _allowNestedHide;
+
+    public string DialogHeading { get; }
+    public string PhaseMessage { get; private set; }
+    public double ProgressValue { get; private set; }
+    public string PercentDisplay { get; private set; } = "0%";
 
     public OperationProgressDialog(IUiService ui, string windowTitle, string heading, string initialMessage)
     {
         ArgumentNullException.ThrowIfNull(ui);
         InitializeComponent();
+
         _ui = ui;
-        Title = windowTitle;
-        TitleText.Text = heading;
-        PhaseText.Text = initialMessage;
+        _ = windowTitle;
+        DialogHeading = heading;
+        PhaseMessage = initialMessage;
 
-        Loaded += OnDialogLoaded;
-        Closing += OnDialogClosing;
-        Closed += OnDialogClosed;
-        SizeChanged += OnDialogSizeChanged;
-    }
-
-    private void OnDialogLoaded(object sender, RoutedEventArgs e)
-    {
-        SetupShimmerAnimation();
-        OperationProgressBar.Value = _currentPercent;
-    }
-
-    private void SetupShimmerAnimation()
-    {
-        double trackWidth = ProgressTrackContainer.ActualWidth > 0 ? ProgressTrackContainer.ActualWidth : 472;
-        var anim = new DoubleAnimation
+        // 作業在對話框真正顯示（或被巢狀對話框中斷後重新顯示）之前就已完成時，開啟後立即關閉，避免殘留卡住主視窗
+        Opened += (_, _) =>
         {
-            From = -160,
-            To = trackWidth + 160,
-            Duration = TimeSpan.FromSeconds(1.8),
-            RepeatBehavior = RepeatBehavior.Forever,
+            if (_completed)
+            {
+                Hide();
+            }
         };
-
-        Storyboard.SetTarget(anim, ShimmerTransform);
-        Storyboard.SetTargetProperty(anim, new PropertyPath(TranslateTransform.XProperty));
-
-        _shimmerStoryboard.Children.Clear();
-        _shimmerStoryboard.Children.Add(anim);
-        _shimmerStoryboard.Begin();
     }
 
-    private void OnDialogSizeChanged(object sender, SizeChangedEventArgs e)
+    private void ContentDialog_Closing(ContentDialog sender, ContentDialogClosingEventArgs args)
     {
-        if (IsLoaded)
+        if (_allowNestedHide)
         {
-            SetupShimmerAnimation();
+            // 讓位給巢狀對話框的暫時隱藏，待上層關閉後由協調器重新顯示
+            _allowNestedHide = false;
+            return;
+        }
+
+        if (!_completed)
+        {
+            args.Cancel = true;
         }
     }
 
-    /// <summary>
-    /// 標記流程結束，解除防誤關閉鎖定
-    /// </summary>
     public void MarkCompleted() => _completed = true;
 
     /// <summary>
-    /// 更新百分比與階段訊息
+    /// 暫時隱藏以讓位給巢狀對話框（作業尚未完成時亦允許）
     /// </summary>
+    public void HideForNestedDialog()
+    {
+        _allowNestedHide = true;
+        Hide();
+    }
+
+    public void Close()
+    {
+        _completed = true;
+        _ui.RunOnUi(Hide);
+    }
+
     public void UpdateProgress(int percent, string message)
     {
         int pct = Math.Clamp(percent, 0, 100);
         _ui.RunOnUi(() =>
         {
-            _currentPercent = pct;
-            PercentText.Text = $"{pct}%";
+            ProgressValue = pct;
+            PercentDisplay = $"{pct}%";
             if (!string.IsNullOrWhiteSpace(message))
             {
-                PhaseText.Text = message;
+                PhaseMessage = message;
             }
-
-            OperationProgressBar.Value = pct;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ProgressValue)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PercentDisplay)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PhaseMessage)));
         });
     }
 
-    /// <summary>
-    /// 更新進度數量與階段訊息
-    /// </summary>
     public void UpdateProgress(int current, int total, string message)
     {
         int pct = total > 0 ? (int)Math.Clamp(current * 100.0 / total, 0, 100) : 0;
         _ui.RunOnUi(() =>
         {
-            _currentPercent = pct;
-            PercentText.Text = $"{pct}% ({current}/{total})";
+            ProgressValue = pct;
+            PercentDisplay = $"{pct}% ({current}/{total})";
             if (!string.IsNullOrWhiteSpace(message))
             {
-                PhaseText.Text = message;
+                PhaseMessage = message;
             }
-
-            OperationProgressBar.Value = pct;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ProgressValue)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PercentDisplay)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PhaseMessage)));
         });
-    }
-
-    private void OnDialogClosing(object? sender, CancelEventArgs e) =>
-        e.Cancel = !_completed;
-
-    private void OnDialogClosed(object? sender, EventArgs e)
-    {
-        try
-        {
-            _shimmerStoryboard.Stop();
-            _shimmerStoryboard.Children.Clear();
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("停止進度對話方塊動畫異常: {0}", ex.Message);
-        }
     }
 }

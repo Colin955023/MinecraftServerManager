@@ -1,8 +1,6 @@
 using MinecraftServerManager.App.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Microsoft.Win32;
-using MinecraftServerManager.App.Views;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.FileSystem;
@@ -15,9 +13,8 @@ namespace MinecraftServerManager.App.ViewModels;
 /// </summary>
 public sealed partial class MainViewModel : ViewModelBase
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(MainViewModel));
     private readonly IUiService _ui;
-
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("MainViewModel");
     private readonly SettingsManager _settingsManager;
     private readonly IServerManager? _serverManager;
     private readonly Dictionary<string, PageViewModel> _pages = new(StringComparer.OrdinalIgnoreCase);
@@ -39,20 +36,23 @@ public sealed partial class MainViewModel : ViewModelBase
     private readonly IUpdateCheckerService? _updateChecker;
 
     [ObservableProperty]
+    public partial string ThemeMode { get; set; } = "system";
+
+    [ObservableProperty]
     public partial bool IsLightTheme { get; set; }
 
     public event Action<string, string, NotificationLevel>? NotificationRequested;
     public event Action? ResetWindowSizeRequested;
 
     /// <summary>
+    /// 主題模式變更事件，通知 MainWindow 切換 WinUI 3 原生 ElementTheme
+    /// </summary>
+    public event Action<string>? ThemeModeChanged;
+
+    /// <summary>
     /// 偵測到新版本時觸發，由視窗負責詢問使用者
     /// </summary>
     public event Action<UpdateCheckResult>? UpdateAvailable;
-
-    /// <summary>
-    /// 全域 UI 縮放變更事件，由 MainWindow 套用至 LayoutTransform。
-    /// </summary>
-    public event Action<double>? UiScaleChanged;
 
     public MainViewModel(MainViewModelDependencies dependencies)
     {
@@ -63,7 +63,6 @@ public sealed partial class MainViewModel : ViewModelBase
         _serverManager = dependencies.ServerManager;
         _launcher = dependencies.Launcher;
         _updateChecker = dependencies.UpdateChecker;
-
 
         var createVm = new CreateServerViewModel(
             dependencies.JavaDetector,
@@ -121,14 +120,11 @@ public sealed partial class MainViewModel : ViewModelBase
             () => ResetWindowSizeRequested?.Invoke(),
             ShowNotification,
             dependencies.Launcher,
-            scale => UiScaleChanged?.Invoke(scale),
             uiService: _ui,
             appUpdateService: dependencies.AppUpdateService);
 
         CurrentPage = createVm;
-
         ApplyInitialTheme();
-        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
     }
 
     public string PageTitle => CurrentPage.Title;
@@ -141,7 +137,6 @@ public sealed partial class MainViewModel : ViewModelBase
 
     public IExternalLauncher? Launcher => _launcher;
 
-    public ManageServerViewModel ManageServerPage => (ManageServerViewModel)GetOrCreatePage("manage")!;
 
     public AboutPreferencesViewModel? AboutPreferences => GetOrCreatePage("about_preferences") as AboutPreferencesViewModel;
 
@@ -191,14 +186,18 @@ public sealed partial class MainViewModel : ViewModelBase
                 else
                 {
                     string cleanedNotes = AboutPreferencesViewModel.CleanReleaseNotes(result.ReleaseNotes);
-                    if (_ui.Confirm(
+                    if (await _ui.ConfirmAsync(
                         $"發現新版本 {result.LatestVersion} (目前版本：{result.CurrentVersion})！\n\n更新內容：\n{cleanedNotes}\n\n是否立即更新主程式？",
-                        "發現新版本"))
+                        "發現新版本").ConfigureAwait(true))
                     {
                         OpenReleasePage(result.ReleasePageUrl);
                     }
                 }
             }
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.Information("啟動自動檢查更新操作已取消");
         }
         catch (Exception ex)
         {
@@ -245,25 +244,29 @@ public sealed partial class MainViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    public void ImportServer()
+    public async Task ImportServerAsync()
     {
         if (_serverManager is not null)
         {
-            var vm = new ImportServerViewModel(_serverManager,
-            uiService: _ui);
-            if (_ui.ShowImportServer(vm) == true)
+            var vm = new ImportServerViewModel(_serverManager, uiService: _ui);
+            if (await _ui.ShowImportServerAsync(vm).ConfigureAwait(true) == true)
             {
-                ShowNotification("伺服器匯入成功！已更新至伺服器管理清單", false);
-                Navigate("manage");
-                if (_pages.TryGetValue("manage", out var page) && page is ManageServerViewModel manageVm)
+                bool success = true;
+                if (!string.IsNullOrWhiteSpace(vm.SourcePath) && !string.IsNullOrWhiteSpace(vm.ServerName))
                 {
-                    if (!string.IsNullOrWhiteSpace(vm.ImportedServerName))
+                    success = await vm.ExecuteImportAsync().ConfigureAwait(true);
+                }
+
+                if (success)
+                {
+                    ShowNotification("伺服器匯入成功！已更新至伺服器管理清單", false);
+                    Navigate("manage");
+                    if (_pages.TryGetValue("manage", out var page) && page is ManageServerViewModel manageVm)
                     {
-                        _ = RunSafeAsync(() => manageVm.RefreshAndSelectServerAsync(vm.ImportedServerName), "重新整理並選取匯入伺服器", Logger);
-                    }
-                    else
-                    {
-                        _ = RunSafeAsync(manageVm.RefreshServers, "重新整理伺服器清單", Logger);
+                        if (!string.IsNullOrWhiteSpace(vm.ImportedServerName))
+                        {
+                            _ = RunSafeAsync(() => manageVm.RefreshAndSelectServerAsync(vm.ImportedServerName), "重新整理並選取匯入伺服器", Logger);
+                        }
                     }
                 }
             }
@@ -303,45 +306,36 @@ public sealed partial class MainViewModel : ViewModelBase
     [RelayCommand]
     public void ToggleTheme()
     {
-        IsLightTheme = !IsLightTheme;
-        string mode = IsLightTheme ? "light" : "dark";
-        _settingsManager.SetThemeMode(mode);
-        NotificationMessage = $"已切換為{(IsLightTheme ? "淺色" : "深色")}主題";
+        string newMode = ThemeMode == "light" ? "dark" : "light";
+        SetThemeMode(newMode);
+        NotificationMessage = $"已切換為{(newMode == "light" ? "淺色" : "深色")}主題";
         IsNotificationVisible = true;
     }
 
     public void ShowNotification(string message, bool isError = false)
     {
-        NotificationMessage = message;
-        IsNotificationError = isError;
-        IsNotificationVisible = true;
-        if (isError)
+        _ui.RunOnUi(() =>
         {
-            NotificationRequested?.Invoke("錯誤", message, NotificationLevel.Error);
-        }
-        else
-        {
-            _ui.ShowToast(message, "提示", ToastType.Info);
-        }
+            NotificationMessage = message;
+            IsNotificationError = isError;
+            IsNotificationVisible = true;
+            if (isError)
+            {
+                NotificationRequested?.Invoke("錯誤", message, NotificationLevel.Error);
+            }
+            else
+            {
+                _ui.ShowToast(message, "提示", ToastType.Info);
+            }
+        });
     }
 
-    public void SetThemeMode(string mode) =>
-        IsLightTheme = mode switch
-        {
-            "light" => true,
-            "dark" => false,
-            _ => SystemThemeService.IsSystemLightTheme(),
-        };
-
-    private void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
+    public void SetThemeMode(string mode)
     {
-        if (e.Category is UserPreferenceCategory.General or UserPreferenceCategory.Color)
-        {
-            if (string.Equals(_settingsManager.GetThemeMode(), "system", StringComparison.OrdinalIgnoreCase))
-            {
-                _ui.PostToUi(() => SetThemeMode("system"));
-            }
-        }
+        ThemeMode = mode;
+        IsLightTheme = mode == "light";
+        _settingsManager.SetThemeMode(mode);
+        ThemeModeChanged?.Invoke(mode);
     }
 
     private void ApplyInitialTheme()
@@ -350,11 +344,7 @@ public sealed partial class MainViewModel : ViewModelBase
         SetThemeMode(themeMode);
     }
 
-    public void UnregisterEvents()
-    {
-        SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
-        DisposePages();
-    }
+    public void UnregisterEvents() => DisposePages();
 
     public void DisposePages()
     {

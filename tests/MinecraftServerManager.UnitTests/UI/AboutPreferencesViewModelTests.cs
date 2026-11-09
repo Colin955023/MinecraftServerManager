@@ -1,11 +1,15 @@
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
+using MinecraftServerManager.Core;
+using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Infrastructure.Settings;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-public sealed class AboutPreferencesViewModelTests : IDisposable
+public sealed partial class AboutPreferencesViewModelTests : IDisposable
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AboutPreferencesViewModelTests));
     private readonly string _testDir;
 
     public AboutPreferencesViewModelTests()
@@ -22,20 +26,20 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
                 Directory.Delete(_testDir, recursive: true);
             }
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+        }
     }
 
     [Fact]
     public void ShouldAlignWithAppInfo()
     {
-        var vm = new AboutPreferencesViewModel();
-
-        Assert.Equal("about_preferences", vm.Key);
-        Assert.Equal("關於與設定", vm.Title);
-        Assert.Equal(Core.AppInfo.Version, AboutPreferencesViewModel.AppVersion);
-        Assert.Equal(Core.AppInfo.AppName, AboutPreferencesViewModel.AppDescription);
-        Assert.Equal(Core.AppInfo.RepositoryUrl, AboutPreferencesViewModel.GithubUrl);
-        Assert.Equal("GNU General Public License v3.0 (GPL-3.0)", Core.AppInfo.License);
+        Assert.Equal(AppInfo.Version, AboutPreferencesViewModel.AppVersion);
+        Assert.Equal(AppInfo.AppName, AboutPreferencesViewModel.AppDescription);
+        Assert.Equal(AppInfo.Author, AboutPreferencesViewModel.AppAuthor);
+        Assert.Equal(AppInfo.RepositoryUrl, AboutPreferencesViewModel.GithubUrl);
+        Assert.Equal("GNU General Public License v3.0 (GPL-3.0)", AppInfo.License);
     }
 
     [Fact]
@@ -54,7 +58,7 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     [Fact]
     public void ResetAllSettingsShouldRestoreDefaults()
     {
-        var settings = new Infrastructure.Settings.SettingsManager(_testDir);
+        var settings = new SettingsManager(_testDir);
         bool windowSizeResetCalled = false;
         string notificationMsg = string.Empty;
         var vm = new AboutPreferencesViewModel(
@@ -75,31 +79,65 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     }
 
     [Fact]
-    public void UiScaleChangesShouldApplyImmediatelyWithoutApplyButton()
+    public void SelectAccentColorShouldUpdateSettingsAndViewModel()
     {
-        var settings = new Infrastructure.Settings.SettingsManager(_testDir);
-        double invokedScale = 0;
-        var vm = new AboutPreferencesViewModel(
-            settingsManager: settings,
-            onUiScaleChanged: scale => invokedScale = scale)
+        var settings = new SettingsManager(_testDir);
+        var vm = new AboutPreferencesViewModel(settingsManager: settings);
+
+        var customColor = Windows.UI.Color.FromArgb(255, 18, 52, 86);
+        vm.SelectAccentColor(customColor);
+
+        Assert.True(vm.IsCustomAccentColor);
+        Assert.Equal("#123456", vm.CustomAccentColor);
+        Assert.Equal("#123456", settings.GetCustomAccentColor());
+
+        vm.ResetAccentColor();
+        Assert.False(vm.IsCustomAccentColor);
+        Assert.Null(vm.CustomAccentColor);
+        Assert.Null(settings.GetCustomAccentColor());
+    }
+
+    [Fact]
+    public void AccentColorService_ParseAndFormatHex_ShouldRoundTripCorrectly()
+    {
+        var parsed = AccentColorService.ParseColor("#3A7BD5");
+        Assert.NotNull(parsed);
+        Assert.Equal(255, parsed.Value.A);
+        Assert.Equal(0x3A, parsed.Value.R);
+        Assert.Equal(0x7B, parsed.Value.G);
+        Assert.Equal(0xD5, parsed.Value.B);
+        Assert.Equal("#3A7BD5", AccentColorService.ToHex(parsed.Value));
+
+        Assert.Null(AccentColorService.ParseColor(null));
+        Assert.Null(AccentColorService.ParseColor(""));
+        Assert.Null(AccentColorService.ParseColor("#ZZZZZZ"));
+    }
+
+    [Fact]
+    public void ServerListColumns_ResetAll_ShouldRestoreDefaultWidths()
+    {
+        var cols = new App.Views.ServerListColumns
         {
-            // 切換到 125% (索引 2)
-            SelectedUiScaleIndex = 2
+            NameWidth = new Microsoft.UI.Xaml.GridLength(320),
+            VersionWidth = new Microsoft.UI.Xaml.GridLength(150),
         };
 
-        Assert.Equal(1.25, settings.GetUiScale());
-        Assert.Equal(1.25, invokedScale);
+        cols.ResetAll();
+
+        Assert.Equal(App.Views.ServerListColumns.DefaultNameWidth, cols.NameWidth.Value);
+        Assert.Equal(App.Views.ServerListColumns.DefaultVersionWidth, cols.VersionWidth.Value);
+        Assert.True(cols.PathWidth.IsStar);
     }
 
     [Fact]
     public async Task CheckForUpdatesShouldNotifyWhenAlreadyLatestVersion()
     {
         string notification = string.Empty;
-        var mockChecker = new MockUpdateChecker(new Core.Ports.UpdateCheckResult(
+        var mockChecker = new MockUpdateChecker(new UpdateCheckResult(
             HasUpdate: false,
-            CurrentVersion: Core.AppInfo.Version,
-            LatestVersion: Core.AppInfo.Version,
-            ReleaseTitle: Core.AppInfo.Version,
+            CurrentVersion: "2.1.0",
+            LatestVersion: "2.1.0",
+            ReleaseTitle: "v2.1.0",
             ReleaseNotes: "無更新",
             DownloadUrl: null,
             Sha256ChecksumUrl: null,
@@ -107,7 +145,7 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
 
         var vm = new AboutPreferencesViewModel(
             updateChecker: mockChecker,
-            notificationSink: (msg, isErr) => notification = msg);
+            notificationSink: (msg, _) => notification = msg);
 
         await vm.CheckForUpdatesCommand.ExecuteAsync(null);
 
@@ -117,23 +155,22 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     [Fact]
     public async Task CheckForUpdates_WhenUserDeclinesUpdate_DoesNotDownloadOrApply()
     {
-        var mockChecker = new MockUpdateChecker(new Core.Ports.UpdateCheckResult(
+        var mockChecker = new MockUpdateChecker(new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: Core.AppInfo.Version,
-            LatestVersion: "2.0.1",
-            ReleaseTitle: "2.0.1",
-            ReleaseNotes: "更新說明",
-            DownloadUrl: "https://example.com/msm.exe",
-            Sha256ChecksumUrl: "https://example.com/msm.exe.sha256",
+            CurrentVersion: "2.1.0",
+            LatestVersion: "2.2.0",
+            ReleaseTitle: "v2.2.0",
+            ReleaseNotes: "測試更新",
+            DownloadUrl: "https://example.com/update.exe",
+            Sha256ChecksumUrl: null,
             ReleasePageUrl: "https://example.com"));
-
         var mockUpdateService = new MockAppUpdateService();
-        var mockUi = new ConfirmingUiService(confirmResult: false);
+        var fakeUi = new ConfirmingUiService(confirmResult: false);
 
         var vm = new AboutPreferencesViewModel(
             updateChecker: mockChecker,
-            uiService: mockUi,
-            appUpdateService: mockUpdateService);
+            appUpdateService: mockUpdateService,
+            uiService: fakeUi);
 
         await vm.CheckForUpdatesCommand.ExecuteAsync(null);
 
@@ -144,23 +181,22 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     [Fact]
     public async Task CheckForUpdates_WhenUserConfirmsUpdate_DownloadsAndAppliesUpdate()
     {
-        var mockChecker = new MockUpdateChecker(new Core.Ports.UpdateCheckResult(
+        var mockChecker = new MockUpdateChecker(new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: Core.AppInfo.Version,
-            LatestVersion: "2.0.1",
-            ReleaseTitle: "2.0.1",
-            ReleaseNotes: "更新說明",
-            DownloadUrl: "https://example.com/msm.exe",
-            Sha256ChecksumUrl: "https://example.com/msm.exe.sha256",
+            CurrentVersion: "2.1.0",
+            LatestVersion: "2.2.0",
+            ReleaseTitle: "v2.2.0",
+            ReleaseNotes: "測試更新",
+            DownloadUrl: "https://example.com/update.exe",
+            Sha256ChecksumUrl: null,
             ReleasePageUrl: "https://example.com"));
-
         var mockUpdateService = new MockAppUpdateService();
-        var mockUi = new ConfirmingUiService(confirmResult: true);
+        var fakeUi = new ConfirmingUiService(confirmResult: true);
 
         var vm = new AboutPreferencesViewModel(
             updateChecker: mockChecker,
-            uiService: mockUi,
-            appUpdateService: mockUpdateService);
+            appUpdateService: mockUpdateService,
+            uiService: fakeUi);
 
         await vm.CheckForUpdatesCommand.ExecuteAsync(null);
 
@@ -168,19 +204,54 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
         Assert.True(mockUpdateService.ApplyInvoked);
     }
 
-    private sealed class ConfirmingUiService(bool confirmResult) : NoOpUiService
+    [Fact]
+    public void AccentColorService_ApplyAndReset_FiresAccentColorChanged()
     {
-        public override bool Confirm(string message, string title, UiMessageLevel level = UiMessageLevel.Question) =>
-            confirmResult;
+        bool eventFired = false;
+        Action handler = () => eventFired = true;
+        AccentColorService.AccentColorChanged += handler;
+        try
+        {
+            AccentColorService.ApplyAccentColor("#FF112233");
+            Assert.True(eventFired);
+
+            eventFired = false;
+            AccentColorService.ApplyAccentColor(null);
+            Assert.True(eventFired);
+        }
+        finally
+        {
+            AccentColorService.AccentColorChanged -= handler;
+        }
     }
 
-    private sealed class MockAppUpdateService : Core.Ports.IAppUpdateService
+    [Fact]
+    public void ResetAccentColor_ResetsCustomColorAndAppliesSystemDefault()
+    {
+        var settings = new SettingsManager(_testDir);
+        settings.SetCustomAccentColor("#112233");
+        var vm = new AboutPreferencesViewModel(settingsManager: settings);
+
+        vm.ResetAccentColor();
+
+        Assert.False(vm.IsCustomAccentColor);
+        Assert.Null(vm.CustomAccentColor);
+        Assert.Null(settings.Snapshot.WindowPreferences.CustomAccentColor);
+    }
+
+    private sealed class ConfirmingUiService(bool confirmResult) : NoOpUiService
+    {
+        public override Task<bool> ConfirmAsync(string message, string title, UiMessageLevel level = UiMessageLevel.Question) =>
+            Task.FromResult(confirmResult);
+    }
+
+    private sealed class MockAppUpdateService : IAppUpdateService
     {
         public bool DownloadInvoked { get; private set; }
         public bool ApplyInvoked { get; private set; }
 
         public Task<string> DownloadAndVerifyUpdateAsync(
-            Core.Ports.UpdateCheckResult update,
+            UpdateCheckResult update,
             IProgress<(int Percentage, string StatusMessage)>? progress = null,
             CancellationToken cancellationToken = default)
         {
@@ -191,9 +262,9 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
         public void ApplyUpdateAndRestart(string verifiedInstallerPath) => ApplyInvoked = true;
     }
 
-    private sealed class MockUpdateChecker(Core.Ports.UpdateCheckResult result) : Core.Ports.IUpdateCheckerService
+    private sealed class MockUpdateChecker(UpdateCheckResult result) : IUpdateCheckerService
     {
-        public Task<Core.Ports.UpdateCheckResult> CheckForUpdateAsync(CancellationToken cancellationToken = default) =>
+        public Task<UpdateCheckResult> CheckForUpdateAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(result);
     }
 }

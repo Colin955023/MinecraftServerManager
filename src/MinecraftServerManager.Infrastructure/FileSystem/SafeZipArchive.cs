@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Buffers;
 using System.IO.Compression;
+using System.Text;
 using MinecraftServerManager.Core.Utilities;
+using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
 
@@ -9,7 +11,7 @@ namespace MinecraftServerManager.Infrastructure.FileSystem;
 
 public static class SafeZipArchive
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("SafeZipArchive");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(SafeZipArchive));
     public const int DefaultMaxMembers = 100_000;
     public const long DefaultMaxMemberBytes = 2L * 1024 * 1024 * 1024; // 2 GB
     public const long DefaultMaxTotalBytes = 32L * 1024 * 1024 * 1024; // 32 GB
@@ -61,7 +63,7 @@ public static class SafeZipArchive
                 ValidateArchive(archive, maxMembers, DefaultMaxTotalBytes);
                 return archive;
             }
-            catch
+            catch (Exception)
             {
                 archive.Dispose();
                 throw;
@@ -102,11 +104,107 @@ public static class SafeZipArchive
             ValidateArchive(archive, maxMembers, DefaultMaxTotalBytes);
             return archive;
         }
-        catch
+        catch (Exception)
         {
             archive.Dispose();
             throw;
         }
+    }
+
+    /// <summary>
+    /// 受限讀取單一壓縮檔成員之位元組陣列（若超過 <paramref name="maxBytes"/> 則回傳 <see langword="null"/>，防止記憶體解壓縮炸彈）。
+    /// </summary>
+    public static byte[]? ReadEntryBytesBounded(ZipArchiveEntry entry, int maxBytes)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentOutOfRangeException.ThrowIfNegative(maxBytes);
+
+        long declaredLength = entry.Length;
+        if (declaredLength < 0 || declaredLength > maxBytes)
+        {
+            return null;
+        }
+
+        using var stream = entry.Open();
+        if (declaredLength > 0)
+        {
+            int targetLength = (int)declaredLength;
+            byte[] exactBuffer = new byte[targetLength];
+            int read = stream.ReadAtLeast(exactBuffer, targetLength, throwOnEndOfStream: false);
+            return read == targetLength && stream.ReadByte() == -1 ? exactBuffer : null;
+        }
+
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(maxBytes + 1);
+        try
+        {
+            int totalRead = stream.ReadAtLeast(buffer.AsSpan(0, maxBytes + 1), maxBytes + 1, throwOnEndOfStream: false);
+            return totalRead > maxBytes ? null : buffer.AsSpan(0, totalRead).ToArray();
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    /// <summary>
+    /// 受限讀取單一壓縮檔成員之 UTF-8 文字（自動剝除 UTF-8 BOM；若超過 <paramref name="maxBytes"/> 則回傳 <see langword="null"/>）。
+    /// </summary>
+    public static string? ReadEntryTextBounded(ZipArchiveEntry entry, int maxBytes)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentOutOfRangeException.ThrowIfNegative(maxBytes);
+
+        if (entry.Length < 0 || entry.Length > maxBytes)
+        {
+            return null;
+        }
+
+        int rentSize = (int)Math.Min(entry.Length > 0 ? entry.Length + 1 : 4096, maxBytes + 1);
+        using var stream = entry.Open();
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(rentSize);
+        try
+        {
+            int totalRead = stream.ReadAtLeast(buffer.AsSpan(0, rentSize), rentSize, throwOnEndOfStream: false);
+            if (totalRead == rentSize && rentSize < maxBytes + 1)
+            {
+                int nextByte = stream.ReadByte();
+                if (nextByte != -1)
+                {
+                    byte[] largeBuffer = ArrayPool<byte>.Shared.Rent(maxBytes + 1);
+                    try
+                    {
+                        buffer.AsSpan(0, totalRead).CopyTo(largeBuffer);
+                        largeBuffer[totalRead++] = (byte)nextByte;
+                        totalRead += stream.ReadAtLeast(
+                            largeBuffer.AsSpan(totalRead, maxBytes + 1 - totalRead),
+                            maxBytes + 1 - totalRead,
+                            throwOnEndOfStream: false);
+
+                        return totalRead > maxBytes ? null : DecodeUtf8WithoutBom(largeBuffer.AsSpan(0, totalRead));
+                    }
+                    finally
+                    {
+                        ArrayPool<byte>.Shared.Return(largeBuffer);
+                    }
+                }
+            }
+
+            return totalRead > maxBytes ? null : DecodeUtf8WithoutBom(buffer.AsSpan(0, totalRead));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static string DecodeUtf8WithoutBom(ReadOnlySpan<byte> span)
+    {
+        if (span.StartsWith(Encoding.UTF8.Preamble))
+        {
+            span = span[Encoding.UTF8.Preamble.Length..];
+        }
+
+        return Encoding.UTF8.GetString(span);
     }
 
     private static void ValidateArchive(ZipArchive archive, int maxMembers, long maxTotalBytes)
@@ -264,7 +362,7 @@ public static class SafeZipArchive
         }
         catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
         {
-            // 無法判定磁碟資訊時不阻斷流程，交由實際寫入階段回報錯誤
+            Logger.Warning(exception, "預估解壓縮磁碟剩餘空間失敗，降級由寫入階段處理");
         }
     }
 
@@ -326,30 +424,38 @@ public static class SafeZipArchive
 
     private static string SanitizeMemberName(string memberName)
     {
-        string normalized = memberName.Replace('\\', '/');
-        if (string.IsNullOrEmpty(normalized) || normalized.StartsWith('/'))
+        if (string.IsNullOrEmpty(memberName))
         {
             throw new SafeArchiveException($"壓縮檔包含不安全的成員名稱： {memberName}");
         }
 
-        if (Path.IsPathRooted(normalized) || normalized.Contains(':'))
+        ReadOnlySpan<char> span = memberName.AsSpan();
+        if (span[0] is '/' or '\\' || span.Contains(':'))
         {
             throw new SafeArchiveException($"壓縮檔包含不安全的成員名稱： {memberName}");
         }
 
-        string trimmed = normalized.TrimEnd('/');
-        if (string.IsNullOrEmpty(trimmed))
+        ReadOnlySpan<char> trimmed = span.TrimEnd("/\\");
+        if (trimmed.IsEmpty || Path.IsPathRooted(trimmed))
         {
             throw new SafeArchiveException($"壓縮檔包含不安全的成員名稱： {memberName}");
         }
 
-        string[] parts = trimmed.Split('/', StringSplitOptions.None);
-        if (parts.Any(static part => string.IsNullOrEmpty(part) || part is "." or ".." || IsReservedWindowsName(part)))
+        foreach (Range range in trimmed.SplitAny("/\\"))
         {
-            throw new SafeArchiveException($"壓縮檔包含不安全的成員名稱： {memberName}");
+            ReadOnlySpan<char> part = trimmed[range];
+            if (part.IsEmpty || part is "." or ".." || IsReservedWindowsName(part))
+            {
+                throw new SafeArchiveException($"壓縮檔包含不安全的成員名稱： {memberName}");
+            }
         }
 
-        return Path.Combine(parts);
+        return string.Create(trimmed.Length, trimmed, static (dst, src) =>
+        {
+            src.CopyTo(dst);
+            dst.Replace('/', Path.DirectorySeparatorChar);
+            dst.Replace('\\', Path.DirectorySeparatorChar);
+        });
     }
 
     private static void ValidatePathCollision(
@@ -393,19 +499,8 @@ public static class SafeZipArchive
         return unixMode == 0xA000;
     }
 
-    private static bool IsReservedWindowsName(string value)
-    {
-        string name = value.TrimEnd(' ', '.');
-        string baseName = name.Contains('.')
-            ? name[..name.IndexOf('.')]
-            : name;
-        return baseName.Equals("CON", StringComparison.OrdinalIgnoreCase)
-            || baseName.Equals("PRN", StringComparison.OrdinalIgnoreCase)
-            || baseName.Equals("AUX", StringComparison.OrdinalIgnoreCase)
-            || baseName.Equals("NUL", StringComparison.OrdinalIgnoreCase)
-            || (baseName.Length == 4 && (baseName.StartsWith("COM", StringComparison.OrdinalIgnoreCase)
-                || baseName.StartsWith("LPT", StringComparison.OrdinalIgnoreCase)) && char.IsDigit(baseName[3]));
-    }
+    private static bool IsReservedWindowsName(ReadOnlySpan<char> value) =>
+        ServerName.IsWindowsDeviceName(value);
 
     public sealed class BoundedZipWriter : IDisposable
     {
@@ -426,7 +521,7 @@ public static class SafeZipArchive
         {
             ArgumentOutOfRangeException.ThrowIfNegative(maxMembers);
             _targetPath = SafeFileSystem.ResolveStablePath(targetPath, createParent: true);
-            _temporaryPath = _targetPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            _temporaryPath = AtomicFileWriter.CreateTempSiblingPath(_targetPath);
             _maxMembers = maxMembers;
             _maxTotalBytes = maxTotalBytes;
             _maxMemberBytes = maxMemberBytes;

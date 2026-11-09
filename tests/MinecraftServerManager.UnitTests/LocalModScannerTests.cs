@@ -9,8 +9,9 @@ namespace MinecraftServerManager.UnitTests;
 /// <summary>
 /// 本地模組檔案掃描與詮釋資料解析測試
 /// </summary>
-public sealed class LocalModScannerTests : IDisposable
+public sealed partial class LocalModScannerTests : IDisposable
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(LocalModScannerTests));
     private readonly string _testDir;
     private readonly string _modsDir;
 
@@ -30,7 +31,10 @@ public sealed class LocalModScannerTests : IDisposable
                 Directory.Delete(_testDir, recursive: true);
             }
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+        }
     }
 
     [Fact]
@@ -164,12 +168,11 @@ public sealed class LocalModScannerTests : IDisposable
             }
 
             var nestedEntry = archive.CreateEntry("META-INF/jarjar/nested-mod.jar");
-            using (var nestedStream = nestedEntry.Open())
-            using (var nestedArchive = new ZipArchive(nestedStream, ZipArchiveMode.Create, leaveOpen: true))
-            {
-                var fabricEntry = nestedArchive.CreateEntry("fabric.mod.json");
-                using var fabricWriter = new StreamWriter(fabricEntry.Open(), Encoding.UTF8);
-                fabricWriter.Write("""
+            using var nestedStream = nestedEntry.Open();
+            using var nestedArchive = new ZipArchive(nestedStream, ZipArchiveMode.Create, leaveOpen: true);
+            var fabricEntry = nestedArchive.CreateEntry("fabric.mod.json");
+            using var fabricWriter = new StreamWriter(fabricEntry.Open(), Encoding.UTF8);
+            fabricWriter.Write("""
                 {
                     "schemaVersion": 1,
                     "id": "nested_mod",
@@ -180,7 +183,6 @@ public sealed class LocalModScannerTests : IDisposable
                     }
                 }
                 """);
-            }
         }
 
         var persistence = new ModIndexPersistence(_testDir);

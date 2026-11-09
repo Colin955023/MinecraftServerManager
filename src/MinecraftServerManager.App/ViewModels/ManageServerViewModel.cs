@@ -1,16 +1,15 @@
-using System.Collections.ObjectModel;
 using System.Globalization;
-using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Services;
-using MinecraftServerManager.App.Views;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Infrastructure.Servers;
 using MinecraftServerManager.Infrastructure.Settings;
 
 namespace MinecraftServerManager.App.ViewModels;
@@ -34,6 +33,9 @@ public sealed partial class ServerRowItem : ObservableObject
 
     [ObservableProperty]
     public partial string Size { get; set; } = "-";
+
+    [ObservableProperty]
+    public partial long RawSizeBytes { get; set; } = -1;
 
     [ObservableProperty]
     public partial string BackupStatus { get; set; } = string.Empty;
@@ -67,7 +69,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
 {
     private readonly IUiService _ui;
 
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ManageServer");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ManageServerViewModel));
 
     private readonly SettingsManager? _settingsManager;
     private readonly IServerManager? _serverManager;
@@ -205,9 +207,11 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
         _sizeCalculationCts?.Cancel();
         _sizeCalculationCts?.Dispose();
         _sizeCalculationCts = null;
+        _activeMonitorViewModel?.Dispose();
+        _activeMonitorViewModel = null;
     }
 
-    public ObservableCollection<ServerRowItem> Servers { get; }
+    public BulkObservableCollection<ServerRowItem> Servers { get; }
 
     private string ResolveServersDirectory()
     {
@@ -220,8 +224,9 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
         {
             return _settingsManager.GetValidatedServersRootPath();
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("取得已驗證之伺服器根目錄失敗，改用設定值: {0}", ex.Message);
             return _settingsManager.GetServersRoot();
         }
     }
@@ -250,7 +255,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
                                  $"Minecraft 版本：{value.Version}\n" +
                                  $"載入器類型：{value.Loader}\n" +
                                  $"目前狀態：{value.Status}\n" +
-                                 $"目錄容量：{value.Size}\n" +
+                                 $"目錄大小：{value.Size}\n" +
                                  $"備份狀況：{value.BackupStatus}\n" +
                                  $"外部備份路徑：{backupInfo}\n" +
                                  $"記憶體配置：{memoryDisplay}\n" +
@@ -268,9 +273,125 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
         OnPropertyChanged(nameof(IsSelectedServerRunning));
     }
 
-    partial void OnSelectedServerChanged(ServerRowItem? value)
+    partial void OnSelectedServerChanged(ServerRowItem? value) => UpdateSelectedServerDetails(value);
+
+    [RelayCommand]
+    public async Task ChangeServersRootAsync()
     {
-        UpdateSelectedServerDetails(value);
+        if (_settingsManager is null)
+        {
+            return;
+        }
+
+        if (_serverRuntime?.IsRunning == true)
+        {
+            await _ui.ShowWarningAsync("目前有伺服器正在執行中，請先停止伺服器後再修改存放路徑。", "無法修改路徑").ConfigureAwait(true);
+            return;
+        }
+
+        string currentPath = ResolveServersDirectory();
+        string? pickedFolder = await _ui.PickFolderAsync("選擇伺服器存放主資料夾", !string.IsNullOrWhiteSpace(currentPath) && SafeFileSystem.DirectoryExists(currentPath) ? currentPath : null).ConfigureAwait(true);
+        if (string.IsNullOrWhiteSpace(pickedFolder))
+        {
+            return;
+        }
+
+        var checkResult = ServersRootRelocator.ValidateTargetRoot(currentPath, pickedFolder, out string normalizedCurrent, out string normalizedNew);
+        switch (checkResult)
+        {
+            case RelocationPathCheckResult.SameAsCurrent:
+                return;
+
+            case RelocationPathCheckResult.TargetIsFile:
+            case RelocationPathCheckResult.EmptyTarget:
+                await _ui.ShowErrorAsync("所選路徑不是有效的資料夾。", "路徑無效").ConfigureAwait(true);
+                return;
+        }
+
+        // 新路徑一律為「所選資料夾\servers」；位於原路徑內時無法遷移，僅修改設定並保留原處資料
+        bool hasContent = await Task.Run(() => ServersRootRelocator.HasStoredContent(normalizedCurrent)).ConfigureAwait(true);
+        if (!hasContent || checkResult == RelocationPathCheckResult.SubdirectoryOfCurrent)
+        {
+            try
+            {
+                _settingsManager.SetExactServersRoot(normalizedNew);
+                DetectPath = normalizedNew;
+                await _ui.ConfirmAsync($"伺服器存放路徑已更新為：\n{normalizedNew}\n\n應用程式將重新啟動以套用新路徑設定。", "路徑已更新", UiMessageLevel.Information).ConfigureAwait(true);
+                _ui.RestartApplication();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Logger.Error(ex, "修改伺服器存放路徑失敗: {Message}", ex.Message);
+                await _ui.ShowErrorAsync($"修改伺服器存放路徑失敗：\n{ex.Message}", "修改失敗").ConfigureAwait(true);
+            }
+            return;
+        }
+
+        bool? decision = await _ui.ConfirmYesNoCancelAsync(
+            $"偵測到原路徑已有存放伺服器或檔案：\n{normalizedCurrent}\n\n是否要將存放資料遷移至新路徑？\n{normalizedNew}\n\n• 選擇「是，遷移資料」：將原路徑內所有資料搬移至新路徑（新路徑必須為空資料夾）\n• 選擇「否，僅改設定」：保留原處資料不動，直接修改設定路徑\n• 選擇「取消」：取消操作不做任何變更",
+            "是否遷移伺服器資料",
+            "是，遷移資料",
+            "否，僅改設定",
+            "取消").ConfigureAwait(true);
+
+        if (decision is null)
+        {
+            return;
+        }
+
+        if (decision == false)
+        {
+            try
+            {
+                _settingsManager.SetExactServersRoot(normalizedNew);
+                DetectPath = normalizedNew;
+                await _ui.ConfirmAsync($"伺服器存放路徑已更新為：\n{normalizedNew}\n（原路徑資料已保留於原處）\n\n應用程式將重新啟動以套用新路徑設定。", "路徑已更新", UiMessageLevel.Information).ConfigureAwait(true);
+                _ui.RestartApplication();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Logger.Error(ex, "修改伺服器存放路徑設定失敗: {Message}", ex.Message);
+                await _ui.ShowErrorAsync($"修改伺服器存放路徑設定失敗：\n{ex.Message}", "修改失敗").ConfigureAwait(true);
+            }
+            return;
+        }
+
+        bool isTargetEmpty = await Task.Run(() => ServersRootRelocator.IsTargetDirectoryEmpty(normalizedNew)).ConfigureAwait(true);
+        if (!isTargetEmpty)
+        {
+            await _ui.ShowWarningAsync(
+                $"目標資料夾不是空的，無法執行資料遷移：\n{normalizedNew}\n\n為避免檔案覆蓋衝突（或上層目錄包含舊目錄本身），遷移目標必須為空資料夾。\n請選擇一個空資料夾，或重新操作並選擇「否，僅改設定」。",
+                "目標資料夾非空").ConfigureAwait(true);
+            return;
+        }
+
+        var progressDialog = _ui.ShowModOperationProgress("遷移伺服器存放資料", "正在準備遷移伺服器資料...");
+        try
+        {
+            var progress = new Progress<(int Percent, string Message)>(report =>
+                progressDialog.UpdateProgress(report.Percent, 100, report.Message));
+
+            await Task.Run(() => ServersRootRelocator.RelocateAllContent(
+                normalizedCurrent,
+                normalizedNew,
+                progress)).ConfigureAwait(true);
+
+            progressDialog.Close();
+            _settingsManager.SetExactServersRoot(normalizedNew);
+            DetectPath = normalizedNew;
+
+            await _ui.ConfirmAsync(
+                $"伺服器資料已成功遷移至新路徑：\n{normalizedNew}\n\n應用程式將重新啟動以套用新路徑設定。",
+                "遷移完成",
+                UiMessageLevel.Information).ConfigureAwait(true);
+            _ui.RestartApplication();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            progressDialog.Close();
+            Logger.Error(ex, "遷移伺服器存放資料失敗: {Message}", ex.Message);
+            await _ui.ShowErrorAsync($"遷移伺服器存放資料失敗（已自動復原原路徑資料）：\n{ex.Message}", "遷移失敗").ConfigureAwait(true);
+        }
     }
 
     [RelayCommand]
@@ -377,7 +498,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
                     // 確保選取項目之詳細資訊與記憶體顯示即時同步
                     UpdateSelectedServerDetails(SelectedServer);
 
-                    // 啟動背景容量非同步回填
+                    // 啟動背景目錄大小非同步回填
                     TriggerBackgroundSizeBackfill();
 
                     Logger.Information("成功重新整理伺服器清單，共 {Count} 個伺服器，路徑: {Path}", Servers.Count, DetectPath);
@@ -400,8 +521,13 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
 
     private void TriggerBackgroundSizeBackfill()
     {
-        _sizeCalculationCts?.Cancel();
-        _sizeCalculationCts?.Dispose();
+        try
+        {
+            _sizeCalculationCts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
         var cts = new CancellationTokenSource();
         _sizeCalculationCts = cts;
         var token = cts.Token;
@@ -424,17 +550,22 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
                     {
                         if (!token.IsCancellationRequested)
                         {
+                            target.Row.RawSizeBytes = bytes;
                             target.Row.Size = formatted;
+                            if (ReferenceEquals(SelectedServer, target.Row))
+                            {
+                                UpdateSelectedServerDetails(SelectedServer);
+                            }
                         }
                     });
                 }
                 catch (OperationCanceledException)
                 {
-                    // 正常切換伺服器或重新整理時取消背景容量計算，不寫入日誌以維持記錄檔整潔
+                    Logger.Information("伺服器目錄大小背景計算已取消");
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warning("非同步計算伺服器容量失敗 ({Path}): {Message}", target.Path, ex.Message);
+                    Logger.Warning("非同步計算伺服器目錄大小失敗 ({Path}): {Message}", target.Path, ex.Message);
                 }
                 finally
                 {
@@ -560,14 +691,15 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
                 ? SafeFileSystem.GetDirectoryLastWriteTime(path).ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture)
                 : null;
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Warning(ex, "取得目錄最後修改時間失敗: {Path}", path);
             return null;
         }
     }
 
     /// <summary>
-    /// 低資源消耗即時更新各伺服器的執行與重要檔案狀態：UI 執行緒僅讀寫集合，檔案檢查於背景執行，不重新掃描整個硬碟與目錄容量。
+    /// 低資源消耗即時更新各伺服器的執行與重要檔案狀態：UI 執行緒僅讀寫集合，檔案檢查於背景執行，不重新掃描整個硬碟與目錄大小。
     /// </summary>
     public async Task UpdateServerStatusInPlaceAsync()
     {
@@ -580,7 +712,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             var probes = await Task.Run(() => targets
                 .Select(t =>
                 {
-                    var lk = Enum.TryParse<LoaderKind>(t.Loader, ignoreCase: true, out var parsedLk) ? parsedLk : LoaderKind.Unknown;
+                    var lk = LoaderKinds.ParseOrDefault(t.Loader);
                     return ProbeServerStatus(
                         t.Path,
                         lk,
@@ -679,7 +811,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
                 Logger.Error("啟動目標檔案不存在: {Target}", missingTarget);
                 _ = RunSafeAsync(UpdateServerStatusInPlaceAsync, "更新伺服器就緒狀態", Logger);
                 _notificationSink?.Invoke($"啟動目標檔案不存在：{missingTarget}", true);
-                _ui.ShowError($"啟動目標檔案不存在：\n{missingTarget}", "啟動伺服器失敗");
+                await _ui.ShowErrorAsync($"啟動目標檔案不存在：\n{missingTarget}", "啟動伺服器失敗");
                 return false;
             }
 
@@ -688,7 +820,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             {
                 Logger.Error("解析 Java 執行環境失敗: {Message}", javaError);
                 _notificationSink?.Invoke(javaError, true);
-                _ui.ShowError($"解析 Java 執行環境失敗：\n{javaError}", "啟動伺服器失敗");
+                await _ui.ShowErrorAsync($"解析 Java 執行環境失敗：\n{javaError}", "啟動伺服器失敗");
                 return false;
             }
 
@@ -704,7 +836,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             {
                 Logger.Error("伺服器啟動後異常結束: {Message}", earlyExit);
                 _notificationSink?.Invoke(earlyExit, true);
-                _ui.ShowError($"伺服器啟動後異常結束：\n{earlyExit}", "伺服器異常結束");
+                await _ui.ShowErrorAsync($"伺服器啟動後異常結束：\n{earlyExit}", "伺服器異常結束");
                 _ = RunSafeAsync(UpdateServerStatusInPlaceAsync, "更新伺服器就緒狀態", Logger);
                 return false;
             }
@@ -716,7 +848,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
         {
             Logger.Error(ex, "啟動伺服器失敗: {Message}", ex.Message);
             _notificationSink?.Invoke($"啟動伺服器失敗：{ex.Message}", true);
-            _ui.ShowError($"啟動伺服器失敗：\n{ex.Message}", "啟動伺服器失敗");
+            await _ui.ShowErrorAsync($"啟動伺服器失敗：\n{ex.Message}", "啟動伺服器失敗");
             return false;
         }
     }
@@ -789,7 +921,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
     }
 
     [RelayCommand(CanExecute = nameof(HasSelectedServer))]
-    public void ConfigureServer()
+    public async Task ConfigureServerAsync()
     {
         if (SelectedServer is null)
         {
@@ -801,7 +933,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
         {
             var vm = new ServerPropertiesViewModel(store, SelectedServer.Name,
                 uiService: _ui);
-            if (_ui.ShowServerProperties(vm) == true)
+            if (await _ui.ShowServerPropertiesAsync(vm) == true)
             {
                 _notificationSink?.Invoke($"伺服器「{SelectedServer.Name}」屬性設定已更新", false);
             }
@@ -809,7 +941,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
     }
 
     [RelayCommand(CanExecute = nameof(HasSelectedServer))]
-    public void ManagePlayers()
+    public async Task ManagePlayersAsync()
     {
         if (SelectedServer is null)
         {
@@ -828,7 +960,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             configStore: _playerConfigStore,
             ui: _ui);
 
-        if (_ui.ShowPlayerManagement(vm) == true)
+        if (await _ui.ShowPlayerManagementAsync(vm) == true)
         {
             _notificationSink?.Invoke($"伺服器「{SelectedServer.Name}」名單設定已更新", false);
         }
@@ -896,6 +1028,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
         }
         catch (Exception ex)
         {
+            Logger.Warning(ex, "建立備份目錄失敗：{Message}", ex.Message);
             _notificationSink?.Invoke($"建立備份目錄失敗：{ex.Message}", true);
             return;
         }
@@ -939,7 +1072,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
     }
 
     /// <summary>
-    /// 備份目的地邊界檢查：禁止位於伺服器存放目錄 (servers/) 或其子目錄內。
+    /// 備份目的地邊界檢查：禁止位於伺服器存放目錄或子目錄內。
     /// </summary>
     /// <returns>合法時回傳 null，違規時回傳阻擋訊息。</returns>
     private string? ValidateBackupDestination(string destinationPath)
@@ -961,13 +1094,14 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
 
             if (SafeFileSystem.IsPathWithin(normalizedServersRoot, normalizedTarget, strict: false))
             {
-                return "備份路徑不得位於伺服器存放目錄 (servers/) 或其子目錄內，請重新選擇其他外部資料夾。";
+                return "備份路徑不得位於伺服器存放目錄或其子目錄內，請重新選擇其他外部資料夾。";
             }
 
             return null;
         }
         catch (Exception ex)
         {
+            Logger.Warning(ex, "路徑邊界解析失敗：{Message}", ex.Message);
             return $"路徑解析失敗：{ex.Message}";
         }
     }
@@ -991,7 +1125,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
                 SelectedServer.BackupPath,
                 isServerRunningCheck: () => isRunning,
                 uiService: _ui);
-            if (_ui.ShowRestoreBackup(vm) == true)
+            if (await _ui.ShowRestoreBackupAsync(vm) == true)
             {
                 string serverName = SelectedServer.Name;
                 Logger.Information("伺服器「{Name}」備份已成功還原", serverName);
@@ -1031,7 +1165,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             }
         }
 
-        ServerDeleteDecision decision = _ui.ShowServerDeleteConfirmation(name, backupCount);
+        ServerDeleteDecision decision = await _ui.ShowServerDeleteConfirmationAsync(name, backupCount);
         if (decision == ServerDeleteDecision.Cancel)
         {
             return;
@@ -1109,7 +1243,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             return res.Success;
         }, uiService: _ui);
 
-        if (_ui.ShowServerMemory(vm) == true)
+        if (await _ui.ShowServerMemoryAsync(vm) == true)
         {
             _notificationSink?.Invoke($"已更新伺服器「{SelectedServer.Name}」記憶體設定", false);
             await RefreshAndSelectServerAsync(SelectedServer.Name);
@@ -1140,7 +1274,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
                 return;
             }
 
-            var lk = Enum.TryParse<LoaderKind>(inspection.LoaderType, ignoreCase: true, out var parsedLk) ? parsedLk : config.LoaderType;
+            var lk = LoaderKinds.ParseOrDefault(inspection.LoaderType, config.LoaderType);
             var mv = MinecraftVersion.TryParse(inspection.MinecraftVersion, out var parsedMv) ? parsedMv : config.MinecraftVersion;
 
             var updated = new ServerConfig(
@@ -1161,6 +1295,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
         }
         catch (Exception ex)
         {
+            Logger.Warning(ex, "伺服器重新偵測失敗：{Message}", ex.Message);
             _notificationSink?.Invoke($"重新偵測失敗：{ex.Message}", true);
         }
     }
@@ -1176,7 +1311,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
         string? backupFolder = SelectedServer.BackupPath;
         if (string.IsNullOrWhiteSpace(backupFolder) || !SafeFileSystem.DirectoryExists(backupFolder))
         {
-            if (_ui.Confirm(
+            if (await _ui.ConfirmAsync(
                 $"伺服器「{SelectedServer.Name}」尚未設定自訂備份路徑。\n\n是否要立即設定外部備份資料夾？",
                 "尚未設定備份資料夾"))
             {
@@ -1207,7 +1342,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
 
         while (true)
         {
-            string? folder = _ui.PickFolder($"選擇伺服器「{SelectedServer.Name}」的外部備份資料夾", !string.IsNullOrWhiteSpace(config.BackupPath) && SafeFileSystem.DirectoryExists(config.BackupPath) ? config.BackupPath : null);
+            string? folder = await _ui.PickFolderAsync($"選擇伺服器「{SelectedServer.Name}」的外部備份資料夾", !string.IsNullOrWhiteSpace(config.BackupPath) && SafeFileSystem.DirectoryExists(config.BackupPath) ? config.BackupPath : null);
             if (string.IsNullOrWhiteSpace(folder))
             {
                 return;
@@ -1261,8 +1396,9 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             string fullPath = Path.GetFullPath(Path.Combine(serverPath, target));
             return SafeFileSystem.FileExists(fullPath) ? null : target;
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("驗證啟動目標路徑失敗: {0}", ex.Message);
             return target;
         }
     }
@@ -1296,6 +1432,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
         }
         catch (Exception exception)
         {
+            Logger.Warning(exception, "偵測 Java {Major} 執行環境時發生錯誤：{Message}", requiredMajor, exception.Message);
             return (null, $"偵測 Java {requiredMajor} 執行環境時發生錯誤：{exception.Message}");
         }
 

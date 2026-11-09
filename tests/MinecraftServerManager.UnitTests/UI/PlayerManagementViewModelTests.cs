@@ -42,7 +42,7 @@ public sealed class PlayerManagementViewModelTests
         await vm.InitializeAsync();
 
         vm.SelectedOpCandidate = vm.AvailableCandidates[0];
-        vm.SelectedOpLevel = vm.OpLevelOptions[1]; // Level 3
+        vm.SelectedOpLevel = PlayerManagementViewModel.OpLevelOptions[1]; // Level 3
         vm.OpBypassesPlayerLimit = true;
 
         vm.AddOperatorCommand.Execute(null);
@@ -282,7 +282,7 @@ public sealed class PlayerManagementViewModelTests
 
     private sealed class ConfirmingUiService(bool confirmResult) : NoOpUiService
     {
-        public override bool Confirm(string message, string title, UiMessageLevel level = UiMessageLevel.Question) =>
-            confirmResult;
+        public override Task<bool> ConfirmAsync(string message, string title, UiMessageLevel level = UiMessageLevel.Question) =>
+            Task.FromResult(confirmResult);
     }
 }

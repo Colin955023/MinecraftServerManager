@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using MinecraftServerManager.Core.Ports;
@@ -7,9 +8,12 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-public sealed class ServerDirectorySizeService : IServerDirectorySizeService
+public sealed class ServerDirectorySizeService(
+    TimeSpan? cacheDuration = null,
+    int maxEntries = SafeFileSystem.DefaultMaxEntries,
+    long maxTotalBytes = SafeFileSystem.DefaultMaxTotalBytes) : IServerDirectorySizeService
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerDirectorySize");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerDirectorySizeService));
 
     private static readonly string[] ExcludedDirectoryNamesSource =
     [
@@ -21,21 +25,11 @@ public sealed class ServerDirectorySizeService : IServerDirectorySizeService
 
     private static readonly TimeSpan DefaultCacheDuration = TimeSpan.FromSeconds(60);
 
-    private readonly TimeSpan _cacheDuration;
-    private readonly int _maxEntries;
-    private readonly long _maxTotalBytes;
-    private readonly ConcurrentDictionary<string, (long SizeBytes, DateTime ExpireAt)> _cache =
+    private readonly TimeSpan _cacheDuration = cacheDuration ?? DefaultCacheDuration;
+    private readonly int _maxEntries = maxEntries;
+    private readonly long _maxTotalBytes = maxTotalBytes;
+    private readonly ConcurrentDictionary<string, (long SizeBytes, long ExpireTimestamp)> _cache =
         new(StringComparer.OrdinalIgnoreCase);
-
-    public ServerDirectorySizeService(
-        TimeSpan? cacheDuration = null,
-        int maxEntries = SafeFileSystem.DefaultMaxEntries,
-        long maxTotalBytes = SafeFileSystem.DefaultMaxTotalBytes)
-    {
-        _cacheDuration = cacheDuration ?? DefaultCacheDuration;
-        _maxEntries = maxEntries;
-        _maxTotalBytes = maxTotalBytes;
-    }
 
     public async Task<long> CalculateServerSizeAsync(string serverPath, CancellationToken cancellationToken = default)
     {
@@ -45,9 +39,9 @@ public sealed class ServerDirectorySizeService : IServerDirectorySizeService
         }
 
         string normalizedPath = Path.GetFullPath(serverPath);
-        DateTime now = DateTime.UtcNow;
+        long now = Stopwatch.GetTimestamp();
 
-        if (_cache.TryGetValue(normalizedPath, out var cached) && cached.ExpireAt > now)
+        if (_cache.TryGetValue(normalizedPath, out var cached) && cached.ExpireTimestamp > now)
         {
             return cached.SizeBytes;
         }
@@ -80,13 +74,6 @@ public sealed class ServerDirectorySizeService : IServerDirectorySizeService
                     {
                         continue;
                     }
-
-                    string relative = Path.GetRelativePath(normalizedPath, entry.FullPath);
-                    if (IsUnderExcludedDirectory(relative))
-                    {
-                        continue;
-                    }
-
                     totalBytes += entry.Length;
                 }
 
@@ -105,7 +92,7 @@ public sealed class ServerDirectorySizeService : IServerDirectorySizeService
 
         if (calculatedSize >= 0)
         {
-            _cache[normalizedPath] = (calculatedSize, now.Add(_cacheDuration));
+            _cache[normalizedPath] = (calculatedSize, now + (long)(_cacheDuration.TotalSeconds * Stopwatch.Frequency));
         }
 
         return calculatedSize;
@@ -134,28 +121,4 @@ public sealed class ServerDirectorySizeService : IServerDirectorySizeService
 
     public void ClearAllCache() => _cache.Clear();
 
-    private static bool IsUnderExcludedDirectory(string relativePath)
-    {
-        ReadOnlySpan<char> span = relativePath.AsSpan();
-
-        while (!span.IsEmpty)
-        {
-            int sepIndex = span.IndexOfAny('\\', '/');
-            ReadOnlySpan<char> segment = sepIndex >= 0 ? span[..sepIndex] : span;
-
-            if (ExcludedDirectoryNames.Contains(segment.ToString()))
-            {
-                return true;
-            }
-
-            if (sepIndex < 0)
-            {
-                break;
-            }
-
-            span = span[(sepIndex + 1)..];
-        }
-
-        return false;
-    }
 }

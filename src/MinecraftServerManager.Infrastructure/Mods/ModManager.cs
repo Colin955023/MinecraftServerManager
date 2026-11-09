@@ -16,10 +16,7 @@ public sealed class ModManager(
         bool includeDisabled = true,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
-        string stableServerDir = SafeFileSystem.ResolveStableDirectory(serverDirectory, create: true);
-        string modsDir = Path.Combine(stableServerDir, "mods");
-
+        string modsDir = ResolveModsDirectory(serverDirectory);
         var mods = await scanner.ScanModsAsync(modsDir, cancellationToken).ConfigureAwait(false);
         return includeDisabled ? mods : [.. mods.Where(m => m.Status == ModStatus.Enabled)];
     }
@@ -28,35 +25,20 @@ public sealed class ModManager(
         string serverDirectory,
         string modId,
         bool enable,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
-        string stableServerDir = SafeFileSystem.ResolveStableDirectory(serverDirectory, create: true);
-        string modsDir = Path.Combine(stableServerDir, "mods");
-        return installer.SetModStateAsync(modsDir, modId, enable, cancellationToken);
-    }
+        CancellationToken cancellationToken = default) =>
+        installer.SetModStateAsync(ResolveModsDirectory(serverDirectory), modId, enable, cancellationToken);
 
     public Task<LocalModMutationResult> DeleteModsAsync(
         string serverDirectory,
         IReadOnlyList<string> modIds,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
-        string stableServerDir = SafeFileSystem.ResolveStableDirectory(serverDirectory, create: true);
-        string modsDir = Path.Combine(stableServerDir, "mods");
-        return installer.DeleteModsAsync(modsDir, modIds, cancellationToken);
-    }
+        CancellationToken cancellationToken = default) =>
+        installer.DeleteModsAsync(ResolveModsDirectory(serverDirectory), modIds, cancellationToken);
 
     public Task<LocalModMutationResult> ImportModAsync(
         string serverDirectory,
         string sourceFilePath,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
-        string stableServerDir = SafeFileSystem.ResolveStableDirectory(serverDirectory, create: true);
-        string modsDir = Path.Combine(stableServerDir, "mods");
-        return installer.ImportLocalModAsync(modsDir, sourceFilePath, cancellationToken);
-    }
+        CancellationToken cancellationToken = default) =>
+        installer.ImportLocalModAsync(ResolveModsDirectory(serverDirectory), sourceFilePath, cancellationToken);
 
     public Task<ModFileOperationResult> InstallOnlineModAsync(
         string serverDirectory,
@@ -65,11 +47,13 @@ public sealed class ModManager(
         string? expectedHash = null,
         string? hashAlgorithm = null,
         IProgress<int>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        installer.InstallRemoteModAsync(ResolveModsDirectory(serverDirectory), downloadUrl, fileName, expectedHash, hashAlgorithm, progress, cancellationToken);
+
+    private static string ResolveModsDirectory(string serverDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
         string stableServerDir = SafeFileSystem.ResolveStableDirectory(serverDirectory, create: true);
-        string modsDir = Path.Combine(stableServerDir, "mods");
-        return installer.InstallRemoteModAsync(modsDir, downloadUrl, fileName, expectedHash, hashAlgorithm, progress, cancellationToken);
+        return Path.Combine(stableServerDir, "mods");
     }
 }

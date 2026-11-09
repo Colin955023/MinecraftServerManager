@@ -1,25 +1,26 @@
 using System.Collections.Concurrent;
-using System.ComponentModel;
 using System.Text;
-using System.Windows;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Servers;
+using Windows.UI;
 
 namespace MinecraftServerManager.App.Views;
 
 /// <summary>
-/// 伺服器初次啟動初始化對話方塊
+/// 伺服器初次啟動初始化視窗（原生模態視窗，透過 ModalWindowHost 裝載）
 /// </summary>
 public sealed partial class ServerInitializationDialog : Window, IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerInitialization");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerInitializationDialog));
 
-    private static readonly System.Windows.Media.SolidColorBrush SuccessCountdownBrush = CreateFrozenBrush(0x00, 0xFF, 0x66);
-    private static readonly System.Windows.Media.SolidColorBrush WarningCountdownBrush = CreateFrozenBrush(0xF5, 0x9E, 0x0B);
+    private static readonly SolidColorBrush SuccessCountdownBrush = new(Color.FromArgb(255, 0x00, 0xFF, 0x66));
+    private static readonly SolidColorBrush WarningCountdownBrush = new(Color.FromArgb(255, 0xF5, 0x9E, 0x0B));
 
     private readonly IServerRuntime _serverRuntime;
     private readonly IUiService _ui;
@@ -40,13 +41,6 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
 
     public bool IsSuccess { get; private set; }
 
-    private static System.Windows.Media.SolidColorBrush CreateFrozenBrush(byte r, byte g, byte b)
-    {
-        var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(r, g, b));
-        brush.Freeze();
-        return brush;
-    }
-
     public ServerInitializationDialog(
         IUiService ui,
         IServerRuntime serverRuntime,
@@ -57,16 +51,22 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(ui);
         InitializeComponent();
+        Title = "伺服器初次啟動初始化";
         _ui = ui;
         _serverRuntime = serverRuntime;
         _config = config;
         _javaExecutablePath = javaExecutablePath;
         _workflow = new ServerInitializationWorkflow(serverRuntime);
 
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(780, 540));
         TitleText.Text = $"正在初始化伺服器「{_config.Name.Value}」";
 
-        Loaded += ServerInitializationDialog_Loaded;
-        Closing += ServerInitializationDialog_Closing;
+        if (Content is FrameworkElement fe)
+        {
+            fe.Loaded += ServerInitializationDialog_Loaded;
+        }
+
+        AppWindow.Closing += ServerInitializationDialog_Closing;
     }
 
     private async void ServerInitializationDialog_Loaded(object sender, RoutedEventArgs e)
@@ -82,12 +82,22 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
 
             AppendLog($"[系統] 準備啟動伺服器「{_config.Name.Value}」執行初次世界與設定初始化...\n");
 
-            string executableName = SafeFileSystem.FileExists(System.IO.Path.Combine(_config.Path, ServerDefaults.StartServerBatFileName)) ? ServerDefaults.StartServerBatFileName : "server.jar";
+            string executableName = SafeFileSystem.FileExists(Path.Combine(_config.Path, ServerDefaults.StartServerBatFileName))
+                ? ServerDefaults.StartServerBatFileName
+                : "server.jar";
             AppendLog(executableName.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)
                 ? $"[系統] 偵測到啟動腳本 {executableName}，即將執行...\n"
                 : $"[系統] 啟動伺服器核心 {executableName}...\n");
 
             await _workflow.StartAsync(_javaExecutablePath, _config, executableName).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.Information("伺服器初次啟動初始化操作已由使用者取消。");
+            StatusText.Text = "狀態：初始化操作已取消";
+            CompleteButton.IsEnabled = true;
+            CompleteButton.Content = "關閉";
+            IsSuccess = false;
         }
         catch (Exception ex)
         {
@@ -179,15 +189,15 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
 
     private void AppendLog(string text)
     {
-        ConsoleBox.AppendText(text);
-        if (ConsoleBox.Text.Length > MaxConsoleChars)
+        string current = ConsoleBox.Text;
+        if (current.Length + text.Length > MaxConsoleChars)
         {
-            int removeLen = ConsoleBox.Text.Length - TrimmedConsoleChars;
-            ConsoleBox.Select(0, removeLen);
-            ConsoleBox.SelectedText = string.Empty;
+            int keepLen = Math.Min(current.Length, TrimmedConsoleChars);
+            current = current[^keepLen..];
         }
-        ConsoleBox.CaretIndex = ConsoleBox.Text.Length;
-        ConsoleBox.ScrollToEnd();
+        ConsoleBox.Text = current + text;
+        ConsoleBox.SelectionStart = ConsoleBox.Text.Length;
+        ConsoleScrollViewer.ChangeView(null, ConsoleScrollViewer.ScrollableHeight, null);
     }
 
     private void FlushPendingLines()
@@ -222,42 +232,15 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
         }
     }
 
-    private async void CancelButton_Click(object sender, RoutedEventArgs e)
+    private void CancelButton_Click(object sender, RoutedEventArgs e)
     {
-        try
-        {
-            _countdownTimer?.StopTimer();
-            IsSuccess = false;
-
-            if (_serverRuntime.IsRunning)
-            {
-                AppendLog("\n[系統] 使用者要求強制中斷伺服器...\n");
-                StatusText.Text = "狀態：正在強制終止伺服器...";
-                CancelButton.IsEnabled = false;
-
-                try
-                {
-                    await _workflow.StopAsync(TimeSpan.Zero);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning("強制終止伺服器時發生例外: {Message}", ex.Message);
-                }
-            }
-
-            _isClosingExpected = true;
-            Close();
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("CancelButton_Click 異常: {Message}", ex.Message);
-        }
+        IsSuccess = false;
+        Close();
     }
 
     private void CompleteButton_Click(object sender, RoutedEventArgs e)
     {
-        _countdownTimer?.StopTimer();
-        _isClosingExpected = true;
+        IsSuccess = true;
         Close();
     }
 
@@ -270,7 +253,7 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
         _serverRuntime.ServerExited -= OnServerExited;
     }
 
-    private async void ServerInitializationDialog_Closing(object? sender, CancelEventArgs e)
+    private async void ServerInitializationDialog_Closing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
     {
         try
         {
@@ -278,7 +261,7 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
 
             if (_serverRuntime.IsRunning && !_isClosingExpected)
             {
-                e.Cancel = true;
+                args.Cancel = true;
                 if (_isStopping)
                 {
                     return;
@@ -288,6 +271,10 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
                 try
                 {
                     await _workflow.StopAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (OperationCanceledException)
+                {
+                    Logger.Information("伺服器行程關閉等候已取消。");
                 }
                 catch (Exception ex)
                 {
@@ -307,33 +294,9 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
         }
     }
 
-    /// <summary>
-    /// 釋放初次啟動流程資源（取消就緒事件訂閱）
-    /// </summary>
     public void Dispose()
     {
         CleanupTimersAndSubscriptions();
         _workflow.Dispose();
-    }
-
-    protected override void OnClosed(EventArgs e)
-    {
-        base.OnClosed(e);
-        try
-        {
-            if (Owner is not null)
-            {
-                if (Owner.WindowState == WindowState.Minimized)
-                {
-                    Owner.WindowState = WindowState.Normal;
-                }
-                Owner.Activate();
-                Owner.Focus();
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("初始化對話框關閉後回復擁有者焦點異常: {0}", ex.Message);
-        }
     }
 }

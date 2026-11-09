@@ -58,17 +58,47 @@ public sealed class ExportModListViewModelTests
         Assert.True(fakeUi.ShowErrorCalled);
     }
 
+    [Fact]
+    public async Task ExportAsync_WhenOpenConfirmationFails_StillReturnsTrueWithoutError()
+    {
+        var fakeUi = new FakeUiService
+        {
+            SaveFileResult = @"C:\Exports\mods.html",
+            ConfirmThrows = true
+        };
+        var fakeExporter = new FakeExporter();
+        var vm = new ExportModListViewModel("TestServer", [], fakeExporter, new FakeLauncher(), fakeUi);
+
+        bool result = await vm.ExportAsync(ModListExportFormat.Html);
+
+        Assert.True(result);
+        Assert.True(fakeExporter.ExportCalled);
+        Assert.False(fakeUi.ShowErrorCalled);
+        Assert.True(fakeUi.ToastShown);
+    }
+
     private sealed class FakeUiService : NoOpUiService
     {
         public string? SaveFileResult { get; init; }
         public bool ConfirmResult { get; init; }
+        public bool ConfirmThrows { get; init; }
         public bool ShowErrorCalled { get; private set; }
+        public bool ToastShown { get; private set; }
 
-        public override string? PickSaveFile(string title, string fileName, string filter) => SaveFileResult;
+        public override Task<string?> PickSaveFileAsync(string title, string defaultFileName, string filter) => Task.FromResult(SaveFileResult);
 
-        public override bool Confirm(string message, string title, UiMessageLevel level = UiMessageLevel.Question) => ConfirmResult;
+        public override Task<bool> ConfirmAsync(string message, string title, UiMessageLevel level = UiMessageLevel.Question) =>
+            ConfirmThrows
+                ? Task.FromException<bool>(new InvalidOperationException("Only a single ContentDialog can be open at any time."))
+                : Task.FromResult(ConfirmResult);
 
-        public override void ShowError(string message, string title) => ShowErrorCalled = true;
+        public override void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3) => ToastShown = true;
+
+        public override Task ShowErrorAsync(string message, string title)
+        {
+            ShowErrorCalled = true;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeExporter : IModListExporter

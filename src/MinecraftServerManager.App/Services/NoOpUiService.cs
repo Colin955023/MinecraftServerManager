@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using MinecraftServerManager.App.ViewModels;
-using MinecraftServerManager.App.Views;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Domain.Servers;
@@ -14,13 +13,25 @@ public class NoOpUiService : IUiService
 {
     public static readonly NoOpUiService Instance = new();
 
-    public virtual bool Confirm(string message, string title, UiMessageLevel level = UiMessageLevel.Question) => true;
+    public virtual Task<bool> ConfirmAsync(string message, string title, UiMessageLevel level = UiMessageLevel.Question) =>
+        Task.FromResult(true);
+
+    public virtual Task<bool?> ConfirmYesNoCancelAsync(
+        string message,
+        string title,
+        string yesText = "是",
+        string noText = "否",
+        string cancelText = "取消",
+        UiMessageLevel level = UiMessageLevel.Question) =>
+        Task.FromResult<bool?>(true);
 
     public virtual void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3) { }
 
-    public virtual void ShowWarning(string message, string title) { }
+    public virtual Task ShowWarningAsync(string message, string title) =>
+        Task.CompletedTask;
 
-    public virtual void ShowError(string message, string title) { }
+    public virtual Task ShowErrorAsync(string message, string title) =>
+        Task.CompletedTask;
 
     public void CopyToClipboard(string text) { }
 
@@ -28,58 +39,78 @@ public class NoOpUiService : IUiService
 
     public void ShutdownApplication(int exitCode = 0) { }
 
-    public void PostToUi(Action action, bool afterLayout = false) { }
+    public virtual void RestartApplication() { }
 
-    public void RunOnUi(Action action) => action();
+    public virtual void PostToUi(Action action, bool afterLayout = false) { }
+
+    public virtual void RunOnUi(Action action) => action();
 
     public virtual IUiTimer CreateUiTimer(TimeSpan interval, Action tick) => new NoOpUiTimer();
 
-    public virtual IReadOnlyList<string>? PickFiles(string title, string filter, bool multiselect = false) => null;
+    public virtual Task<IReadOnlyList<string>?> PickFilesAsync(string title, string filter, bool multiselect = false) =>
+        Task.FromResult<IReadOnlyList<string>?>(null);
 
-    public virtual string? PickSaveFile(string title, string fileName, string filter) => null;
+    public virtual Task<string?> PickSaveFileAsync(string title, string fileName, string filter) =>
+        Task.FromResult<string?>(null);
 
-    public virtual string? PickFolder(string title, string? initialDirectory = null) => null;
+    public virtual Task<string?> PickFolderAsync(string title, string? initialDirectory = null) =>
+        Task.FromResult<string?>(null);
 
-    public bool? ShowManageJava(ManageJavaViewModel viewModel) => null;
+    public virtual Task<bool?> ShowManageJavaAsync(ManageJavaViewModel viewModel) =>
+        Task.FromResult<bool?>(null);
 
-    public bool? ShowJvmArgs(JvmArgsViewModel viewModel) => null;
+    public virtual Task<bool?> ShowJvmArgsAsync(JvmArgsViewModel viewModel) =>
+        Task.FromResult<bool?>(null);
 
-    public bool? ShowServerProperties(ServerPropertiesViewModel viewModel) => null;
-    public bool? ShowPlayerManagement(PlayerManagementViewModel viewModel) => null;
+    public virtual Task<bool?> ShowServerPropertiesAsync(ServerPropertiesViewModel viewModel) =>
+        Task.FromResult<bool?>(null);
 
-    public bool? ShowRestoreBackup(RestoreBackupViewModel viewModel) => null;
+    public virtual Task<bool?> ShowPlayerManagementAsync(PlayerManagementViewModel viewModel) =>
+        Task.FromResult<bool?>(null);
 
-    public bool? ShowServerMemory(ServerMemoryViewModel viewModel) => null;
+    public virtual Task<bool?> ShowRestoreBackupAsync(RestoreBackupViewModel viewModel) =>
+        Task.FromResult<bool?>(null);
 
-    public virtual bool? ShowImportServer(ImportServerViewModel viewModel) => null;
+    public virtual Task<bool?> ShowServerMemoryAsync(ServerMemoryViewModel viewModel) =>
+        Task.FromResult<bool?>(null);
 
-    public bool? ShowModVersionPicker(ModVersionPickerViewModel viewModel) => null;
+    public virtual Task<bool?> ShowImportServerAsync(ImportServerViewModel viewModel) =>
+        Task.FromResult<bool?>(null);
 
-    public bool? ShowModInstallQueue(ObservableCollection<ModInstallQueueItem> queue) => null;
+    public virtual Task<bool?> ShowModVersionPickerAsync(ModVersionPickerViewModel viewModel) =>
+        Task.FromResult<bool?>(null);
 
-    public IReadOnlyList<ModUpdateCandidateItem>? ShowModUpdates(IEnumerable<ModUpdateCandidateItem> items) => null;
+    public virtual Task<bool?> ShowModInstallQueueAsync(ObservableCollection<ModInstallQueueItem> queue) =>
+        Task.FromResult<bool?>(null);
+
+    public virtual Task<IReadOnlyList<ModUpdateCandidateItem>?> ShowModUpdatesAsync(IEnumerable<ModUpdateCandidateItem> items) =>
+        Task.FromResult<IReadOnlyList<ModUpdateCandidateItem>?>(null);
 
     /// <summary>
     /// 無介面時維持原本流程：不阻擋刪除，僅刪除伺服器本體
     /// </summary>
-    public ServerDeleteDecision ShowServerDeleteConfirmation(string serverName, int backupCount) => ServerDeleteDecision.DeleteServerOnly;
+    public virtual Task<ServerDeleteDecision> ShowServerDeleteConfirmationAsync(string serverName, int backupCount) =>
+        Task.FromResult(ServerDeleteDecision.DeleteServerOnly);
 
-    public void ShowExportModList(string serverName, IReadOnlyList<ModListExportRow> rows, IModListExporter exporter, IExternalLauncher? launcher) { }
+    public virtual Task ShowExportModListAsync(string serverName, IReadOnlyList<ModListExportRow> rows, IModListExporter exporter, IExternalLauncher? launcher) =>
+        Task.CompletedTask;
 
-    public bool ShowServerInitialization(ServerConfig config, string javaPath, IServerRuntime runtime) => true;
+    public virtual Task<bool> ShowServerInitializationAsync(ServerConfig config, string javaPath, IServerRuntime runtime) =>
+        Task.FromResult(true);
 
-    public IMonitorWindow OpenServerMonitor(ServerMonitorViewModel viewModel) => new NoOpMonitorWindow();
+    public virtual IMonitorWindow OpenServerMonitor(ServerMonitorViewModel viewModel) => new NoOpMonitorWindow();
 
-    public IProgressSession<ServerBackupProgressReport> ShowServerBackupProgress(string serverName, string actionTitle = "備份") =>
+    public virtual IProgressSession<ServerBackupProgressReport> ShowServerBackupProgress(string serverName, string actionTitle = "備份") =>
         new NoOpProgressSession<ServerBackupProgressReport>();
 
-    public IProgressSession<ServerImportProgressReport> ShowServerImportProgress(string serverName) =>
+    public virtual IProgressSession<ServerImportProgressReport> ShowServerImportProgress(string serverName) =>
         new NoOpProgressSession<ServerImportProgressReport>();
 
-    public IProgressSession<ServerCreationProgressReport> ShowServerCreationProgress(string serverName) =>
+    public virtual IProgressSession<ServerCreationProgressReport> ShowServerCreationProgress(string serverName) =>
         new NoOpProgressSession<ServerCreationProgressReport>();
 
-    public IOperationProgress ShowModOperationProgress(string title, string initialMessage) => new NoOpModOperationProgress();
+    public virtual IOperationProgress ShowModOperationProgress(string title, string initialMessage) =>
+        new NoOpModOperationProgress();
 
     private sealed class NoOpProgressSession<TReport> : IProgressSession<TReport>
     {
@@ -106,7 +137,11 @@ public class NoOpUiService : IUiService
     {
         public bool IsOpen => false;
 
-        public event Action? Closed { add { } remove { } }
+        public event Action? Closed
+        {
+            add { }
+            remove { }
+        }
 
         public void BringToFront() { }
     }

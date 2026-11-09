@@ -1,38 +1,35 @@
-using System.ComponentModel;
-using System.Windows;
+using Microsoft.UI.Xaml.Controls;
 using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
 /// <summary>
-/// 伺服器記憶體設定對話方塊 Code-Behind
+/// 伺服器記憶體設定 WinUI 3 原生 ContentDialog
 /// </summary>
-public partial class ServerMemoryDialog : Window
+public sealed partial class ServerMemoryDialog : ContentDialog
 {
-    private readonly ServerMemoryViewModel _viewModel;
+    public ServerMemoryViewModel ViewModel { get; }
 
     public ServerMemoryDialog(ServerMemoryViewModel viewModel)
     {
+        ArgumentNullException.ThrowIfNull(viewModel);
         InitializeComponent();
-        _viewModel = viewModel;
-        DataContext = viewModel;
+
+        ViewModel = viewModel;
         viewModel.RequestClose += success =>
         {
-            DialogResult = success;
-            Close();
+            if (success)
+            {
+                Hide();
+            }
         };
-
-        Closing += OnWindowClosing;
     }
 
-    private void OnWindowClosing(object? sender, CancelEventArgs e)
+    private void Dialog_PrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)
     {
-        if (DialogResult is null && _viewModel.HasUnsavedChanges)
+        if (ViewModel.SaveCommand.CanExecute(null))
         {
-            if (!_viewModel.ConfirmDiscard())
-            {
-                e.Cancel = true;
-            }
+            ViewModel.SaveCommand.Execute(null);
         }
     }
 }

@@ -26,6 +26,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: 隱私與機密資訊檢查 (Gitleaks)
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
@@ -52,11 +53,7 @@ jobs:
         with:
           global-json-file: global.json
           cache: true
-          cache-dependency-path: |
-            global.json
-            Directory.Packages.props
-            src/**/*.csproj
-            tests/**/*.csproj
+          cache-dependency-path: "**/packages.lock.json"
 
       - name: C# 品質門禁 (Restore, Format, Build, Tests)
         run: pwsh -NoProfile -File scripts/dotnet_quality_gate.ps1

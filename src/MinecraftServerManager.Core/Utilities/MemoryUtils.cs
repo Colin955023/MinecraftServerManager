@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Core.Utilities;
 
@@ -51,8 +52,14 @@ public sealed record MemoryValidationResult
 /// </summary>
 public static partial class MemoryUtils
 {
-    [GeneratedRegex(@"-(Xmx|Xms)(\d+)([mMgG]?)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"-(Xmx|Xms)(\d+)([kmgt]?)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex XmxPattern();
+
+    [GeneratedRegex(@"-Xmx[0-9]+[kmgt]?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex XmxFlagRegex();
+
+    [GeneratedRegex(@"-Xms[0-9]+[kmgt]?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex XmsFlagRegex();
 
     /// <summary>
     /// 取得系統實體記憶體總量（MB）
@@ -95,28 +102,62 @@ public static partial class MemoryUtils
                 continue;
             }
 
-            char last = remainder[^1];
-            bool hasUnit = last is 'g' or 'G' or 'm' or 'M';
+            char unit = char.ToLowerInvariant(remainder[^1]);
+            bool hasUnit = unit is 'k' or 'm' or 'g' or 't';
             ReadOnlySpan<char> digits = hasUnit ? remainder[..^1] : remainder;
-            if (!int.TryParse(digits, CultureInfo.InvariantCulture, out int value))
+            if (!long.TryParse(digits, CultureInfo.InvariantCulture, out long value))
             {
                 continue;
             }
 
-            if (hasUnit && (last is 'g' or 'G'))
+            long megabytes = unit switch
             {
-                if (value <= int.MaxValue / 1024)
-                {
-                    parsedResult = value * 1024;
-                }
-            }
-            else
+                'k' => value / 1024,
+                'g' => value * 1024,
+                't' => value * 1024 * 1024,
+                _ => value
+            };
+
+            if (megabytes is >= 0 and <= int.MaxValue)
             {
-                parsedResult = value;
+                parsedResult = (int)megabytes;
             }
         }
 
         return parsedResult;
+    }
+
+    /// <summary>
+    /// 取得實際生效之最小記憶體（MB）：未指定時取預設值與最大記憶體之較小者
+    /// </summary>
+    public static int ResolveEffectiveMinMemoryMb(int? memoryMinMb, int memoryMaxMb) =>
+        memoryMinMb ?? Math.Min(ServerDefaults.DefaultMemoryMinMb, memoryMaxMb);
+
+    /// <summary>
+    /// 將啟動腳本內容中的 -Xmx／-Xms 參數改寫為指定 MB 值；缺少 -Xms 時插入於第一個 -Xmx 之前。
+    /// </summary>
+    public static string ApplyMemoryFlags(string content, int minMb, int maxMb)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+
+        bool hasXmx = XmxFlagRegex().IsMatch(content);
+        bool hasXms = XmsFlagRegex().IsMatch(content);
+
+        if (hasXmx)
+        {
+            content = XmxFlagRegex().Replace(content, $"-Xmx{maxMb}M");
+        }
+
+        if (hasXms)
+        {
+            content = XmsFlagRegex().Replace(content, $"-Xms{minMb}M");
+        }
+        else if (hasXmx)
+        {
+            content = XmxFlagRegex().Replace(content, match => $"-Xms{minMb}M " + match.Value, 1);
+        }
+
+        return content;
     }
 
     /// <summary>

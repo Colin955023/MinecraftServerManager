@@ -125,7 +125,7 @@ public static class OpenXmlSpreadsheetBuilder
     {
         var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
         using var stream = entry.Open();
-        using var writer = new StreamWriter(stream, new UTF8Encoding(false));
+        using var writer = new StreamWriter(stream);
         writer.Write(content);
     }
 
@@ -145,17 +145,18 @@ public static class OpenXmlSpreadsheetBuilder
 
     private static string ComputeExcelColumnName(int columnNumber)
     {
-        string result = string.Empty;
+        Span<char> buffer = stackalloc char[4];
+        int pos = buffer.Length;
         int current = columnNumber;
 
         while (current > 0)
         {
             int remainder = (current - 1) % 26;
-            result = (char)('A' + remainder) + result;
+            buffer[--pos] = (char)('A' + remainder);
             current = (current - 1) / 26;
         }
 
-        return result;
+        return new string(buffer[pos..]);
     }
 
     /// <summary>
@@ -168,14 +169,10 @@ public static class OpenXmlSpreadsheetBuilder
             return "Sheet1";
         }
 
-        var sb = new StringBuilder(sheetName.Length);
-        foreach (char c in sheetName)
+        string validText = RemoveInvalidXmlRunes(sheetName);
+        var sb = new StringBuilder(validText.Length);
+        foreach (char c in validText)
         {
-            if (IsInvalidXmlChar(c))
-            {
-                continue;
-            }
-
             if (InvalidSheetNameChars.Contains(c))
             {
                 sb.Append('_');
@@ -189,7 +186,7 @@ public static class OpenXmlSpreadsheetBuilder
         string cleaned = sb.ToString().Trim('\'').Trim();
         if (cleaned.Length > 31)
         {
-            cleaned = cleaned[..31].Trim();
+            cleaned = cleaned[..(char.IsHighSurrogate(cleaned[30]) ? 30 : 31)].Trim();
         }
 
         return string.IsNullOrEmpty(cleaned) ? "Sheet1" : cleaned;
@@ -205,45 +202,57 @@ public static class OpenXmlSpreadsheetBuilder
             return string.Empty;
         }
 
-        text = ModHelpers.StripColorAndFormattingCodes(text);
+        return RemoveInvalidXmlRunes(ModHelpers.StripColorAndFormattingCodes(text));
+    }
 
-        bool hasInvalid = false;
-        foreach (char c in text)
-        {
-            if (IsInvalidXmlChar(c))
-            {
-                hasInvalid = true;
-                break;
-            }
-        }
-
-        if (!hasInvalid)
+    /// <summary>
+    /// 移除 XML 1.0 不允許之字元（含孤立代理字元），保留合法代理字對（如 emoji）。
+    /// </summary>
+    private static string RemoveInvalidXmlRunes(string text)
+    {
+        int firstInvalid = IndexOfInvalidXmlRune(text);
+        if (firstInvalid < 0)
         {
             return text;
         }
 
         var sb = new StringBuilder(text.Length);
-        foreach (char c in text)
+        sb.Append(text, 0, firstInvalid);
+        ReadOnlySpan<char> remaining = text.AsSpan(firstInvalid);
+        while (!remaining.IsEmpty)
         {
-            if (!IsInvalidXmlChar(c))
+            OperationStatus status = Rune.DecodeFromUtf16(remaining, out Rune rune, out int consumed);
+            if (status == OperationStatus.Done && IsValidXmlRune(rune))
             {
-                sb.Append(c);
+                sb.Append(remaining[..consumed]);
             }
+
+            remaining = remaining[consumed..];
         }
 
         return sb.ToString();
     }
 
-    private static bool IsInvalidXmlChar(char c)
+    /// <summary>
+    /// 以 Unicode 純量值逐一檢查，回傳第一個 XML 1.0 不允許字元（含孤立代理字元）之索引；全部合法時回傳 -1。
+    /// </summary>
+    private static int IndexOfInvalidXmlRune(ReadOnlySpan<char> text)
     {
-        // XML 1.0 規範合法字元包含 #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD]
-        return c switch
+        int index = 0;
+        while (index < text.Length)
         {
-            '\t' or '\n' or '\r' => false,
-            < ' ' => true,
-            >= '\uD800' and <= '\uDFFF' => false, // 代理對由 .NET 字串處理
-            '\uFFFE' or '\uFFFF' => true,
-            _ => false
-        };
+            OperationStatus status = Rune.DecodeFromUtf16(text[index..], out Rune rune, out int consumed);
+            if (status != OperationStatus.Done || !IsValidXmlRune(rune))
+            {
+                return index;
+            }
+
+            index += consumed;
+        }
+
+        return -1;
     }
+
+    private static bool IsValidXmlRune(Rune rune) =>
+        !rune.IsBmp || XmlConvert.IsXmlChar((char)rune.Value);
 }

@@ -1,14 +1,23 @@
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
+using MinecraftServerManager.Infrastructure.Logging;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
 public sealed class ManageServerViewModelTests
 {
-    private static ManageServerViewModel CreateTestViewModel(Core.Ports.IExternalLauncher? launcher = null)
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ManageServerViewModelTests));
+
+    private static ManageServerViewModel CreateTestViewModel(
+        Core.Ports.IExternalLauncher? launcher = null,
+        IUiService? uiService = null,
+        string? customRoot = null)
     {
-        string root = Path.Combine(Path.GetTempPath(), "msm-manage-test-" + Guid.NewGuid().ToString("N"));
+        string root = customRoot ?? Path.Combine(Path.GetTempPath(), "msm-manage-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
         var settings = new Infrastructure.Settings.SettingsManager(root);
+        settings.SetExactServersRoot(root);
         var dirSize = new Infrastructure.Servers.ServerDirectorySizeService();
         var inspector = new Infrastructure.Servers.ServerInspector(dirSize);
         var manager = new Infrastructure.Servers.ServerManager(root, inspector);
@@ -31,7 +40,8 @@ public sealed class ManageServerViewModelTests
             playerConfigStore: playerConfigStore,
             directorySizeService: dirSize,
             integrityService: integrityService,
-            launcher: launcher);
+            launcher: launcher,
+            uiService: uiService);
     }
 
     [Fact]
@@ -42,6 +52,7 @@ public sealed class ManageServerViewModelTests
         try
         {
             var settings = new Infrastructure.Settings.SettingsManager(root);
+            settings.SetExactServersRoot(root);
             var dirSize = new Infrastructure.Servers.ServerDirectorySizeService();
             var inspector = new Infrastructure.Servers.ServerInspector(dirSize);
             var manager = new Infrastructure.Servers.ServerManager(root, inspector);
@@ -82,7 +93,6 @@ public sealed class ManageServerViewModelTests
 
             Assert.Equal("1024 MB ~ 2048 MB", vm.SelectedServerMemory);
 
-            // 模擬伺服器設定修改為 10G ~ 20G
             var updatedConfig = new Domain.Servers.ServerConfig(
                 name: Domain.ValueObjects.ServerName.Parse(server.Name),
                 minecraftVersion: Domain.ValueObjects.MinecraftVersion.Parse(server.Version),
@@ -97,10 +107,88 @@ public sealed class ManageServerViewModelTests
 
             Assert.Equal("10240 MB ~ 20480 MB", vm.SelectedServerMemory);
             Assert.Contains("10240 MB ~ 20480 MB", vm.SelectedServerInfo);
+            Assert.Contains("目錄大小：", vm.SelectedServerInfo);
         }
         finally
         {
-            try { Directory.Delete(root, true); } catch { }
+            try { Directory.Delete(root, true); }
+            catch (Exception ex)
+            {
+                Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ChangeServersRoot_WhenSubdirectorySelected_ChangesSettingWithoutMigration()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "msm-change-root-" + Guid.NewGuid().ToString("N"));
+        string subDir = Path.Combine(root, "SubFolder");
+        Directory.CreateDirectory(subDir);
+        try
+        {
+            var ui = new FakeRelocateUiService { FolderToPick = subDir };
+            var vm = CreateTestViewModel(uiService: ui, customRoot: root);
+
+            await vm.ChangeServersRootCommand.ExecuteAsync(null);
+
+            Assert.Null(ui.LastErrorMessage);
+            Assert.True(ui.RestartCalled);
+            Assert.Equal(Path.Combine(subDir, "servers"), vm.DetectPath);
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); }
+            catch (Exception ex)
+            {
+                Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ChangeServersRoot_WhenHasContentAndUserChoosesMigrate_RelocatesAndRestarts()
+    {
+        string oldRoot = Path.Combine(Path.GetTempPath(), "msm-old-root-" + Guid.NewGuid().ToString("N"));
+        string newRoot = Path.Combine(Path.GetTempPath(), "msm-new-root-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(oldRoot);
+        try
+        {
+            string serverDir = Path.Combine(oldRoot, "MyServer");
+            Directory.CreateDirectory(serverDir);
+            await File.WriteAllTextAsync(Path.Combine(serverDir, "server.jar"), "jar");
+
+            var ui = new FakeRelocateUiService
+            {
+                FolderToPick = newRoot,
+                YesNoCancelDecision = true,
+            };
+            var vm = CreateTestViewModel(uiService: ui, customRoot: oldRoot);
+
+            await vm.ChangeServersRootCommand.ExecuteAsync(null);
+
+            Assert.True(ui.RestartCalled);
+            Assert.Equal(Path.Combine(newRoot, "servers"), vm.DetectPath);
+            Assert.True(File.Exists(Path.Combine(newRoot, "servers", "MyServer", "server.jar")));
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(oldRoot))
+                {
+                    Directory.Delete(oldRoot, true);
+                }
+            }
+            catch (Exception ex) { Logger.Warning("測試清理失敗: {0}", ex.Message); }
+            try
+            {
+                if (Directory.Exists(newRoot))
+                {
+                    Directory.Delete(newRoot, true);
+                }
+            }
+            catch (Exception ex) { Logger.Warning("測試清理失敗: {0}", ex.Message); }
         }
     }
 
@@ -164,7 +252,6 @@ public sealed class ManageServerViewModelTests
                 BackupPath = string.Empty
             };
 
-            // 執行 OpenBackupFolder，未設定 BackupPath 且在測試中預設不會確認開啟
             await vm.OpenBackupFolderCommand.ExecuteAsync(null);
 
             string internalBackupDir = Path.Combine(tempDir, "backups");
@@ -173,7 +260,11 @@ public sealed class ManageServerViewModelTests
         }
         finally
         {
-            try { Directory.Delete(tempDir, true); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+            try { Directory.Delete(tempDir, true); }
+            catch (Exception ex)
+            {
+                Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+            }
         }
     }
 
@@ -228,6 +319,41 @@ public sealed class ManageServerViewModelTests
 
         Assert.Equal("2048 MB ~ 4096 MB", vm.SelectedServerMemory);
         Assert.Contains("記憶體配置：2048 MB ~ 4096 MB", vm.SelectedServerInfo);
+    }
+
+    private sealed class FakeRelocateUiService : NoOpUiService
+    {
+        public string? FolderToPick { get; set; }
+        public bool? YesNoCancelDecision { get; set; } = true;
+        public string? LastErrorMessage { get; private set; }
+        public string? LastWarningMessage { get; private set; }
+        public bool RestartCalled { get; private set; }
+
+        public override Task<string?> PickFolderAsync(string title, string? initialDirectory = null) =>
+            Task.FromResult(FolderToPick);
+
+        public override Task<bool?> ConfirmYesNoCancelAsync(
+            string message,
+            string title,
+            string yesText = "是",
+            string noText = "否",
+            string cancelText = "取消",
+            UiMessageLevel level = UiMessageLevel.Question) =>
+            Task.FromResult(YesNoCancelDecision);
+
+        public override Task ShowErrorAsync(string message, string title)
+        {
+            LastErrorMessage = message;
+            return Task.CompletedTask;
+        }
+
+        public override Task ShowWarningAsync(string message, string title)
+        {
+            LastWarningMessage = message;
+            return Task.CompletedTask;
+        }
+
+        public override void RestartApplication() => RestartCalled = true;
     }
 
     private sealed class FakeExternalLauncher : Core.Ports.IExternalLauncher

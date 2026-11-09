@@ -1,93 +1,111 @@
-﻿$ErrorActionPreference = "Stop"
+﻿[CmdletBinding()]
+param(
+    # 略過啟動煙霧測試（僅在執行環境無法開啟桌面視窗時使用）
+    [switch]$SkipSmokeTest
+)
+
+$commonScript = Join-Path $PSScriptRoot "lib\Common.ps1"
+if (-not (Test-Path -LiteralPath $commonScript))
+{
+    throw "找不到共用函式庫：$commonScript"
+}
+. $commonScript
+Initialize-ScriptEnvironment
+
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $projectPath = Join-Path $repoRoot "src\MinecraftServerManager.App\MinecraftServerManager.App.csproj"
 $outputRoot = Join-Path $repoRoot "output"
 $publishStartedAt = Get-Date
 
-if (-not (Test-Path -LiteralPath $outputRoot)) {
-    [System.IO.Directory]::CreateDirectory($outputRoot) | Out-Null
+if (Test-Path -LiteralPath $outputRoot)
+{
+    Remove-Item -LiteralPath $outputRoot -Recurse -Force
+}
+[System.IO.Directory]::CreateDirectory($outputRoot) | Out-Null
+
+Write-Host "=== 發布單一自包含執行檔 (WinUI 3) ==="
+
+& dotnet publish $projectPath -o $outputRoot
+if ($LASTEXITCODE -ne 0)
+{
+    throw "C# 發布建置失敗 (ExitCode: $LASTEXITCODE)"
 }
 
-# 動態偵測環境 CPU 核心數並保留 1 核給系統
-$maxCpuCount = [Math]::Max(1, [Environment]::ProcessorCount - 1)
-
-function Publish-App {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Name,
-        [Parameter(Mandatory = $true)]
-        [string]$SelfContained
-    )
-
-    $tempOutput = Join-Path $outputRoot $Name
-    if (Test-Path -LiteralPath $tempOutput) {
-        Remove-Item -LiteralPath $tempOutput -Recurse -Force
-    }
-
-    Write-Host "=== 發布 $Name ==="
-    $arguments = @(
-        "publish", $projectPath,
-        "-c", "Release",
-        "-r", "win-x64",
-        "--self-contained", $SelfContained,
-        "-nodereuse:false",
-        "-m:$maxCpuCount",
-        "-o", $tempOutput
-    )
-    if ($SelfContained -eq "true") {
-        $arguments += @(
-            "-p:IncludeNativeLibrariesForSelfExtract=true",
-            "-p:EnableCompressionInSingleFile=true"
-        )
-    }
-
-    & dotnet @arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "C# 發布失敗：$Name"
-    }
-
-    $sourceExe = Join-Path $tempOutput "MinecraftServerManager.App.exe"
-
-    if (-not (Test-Path -LiteralPath $sourceExe -PathType Leaf)) {
-        throw "發布成功但找不到預期的 EXE：$sourceExe"
-    }
-
-    $targetExe = Join-Path $outputRoot "MinecraftServerManager-$Name.exe"
-
-    Copy-Item -LiteralPath $sourceExe -Destination $targetExe -Force
-
-    $hash = (Get-FileHash -LiteralPath $targetExe -Algorithm SHA256).Hash
-    $targetSha = "$targetExe.sha256"
-
-    [System.IO.File]::WriteAllText(
-        $targetSha,
-        "$hash  $([System.IO.Path]::GetFileName($targetExe))`n",
-        [System.Text.UTF8Encoding]::new($false)
-    )
-
-    Remove-Item -LiteralPath $tempOutput -Recurse -Force
+# 發布後斷言：輸出目錄只有單一 MinecraftServerManager.exe，不得有 .dll、.pdb、.pri 或子資料夾
+$outputItems = @(Get-ChildItem -LiteralPath $outputRoot)
+$extraneousItems = @($outputItems | Where-Object { $_.Name -ne "MinecraftServerManager.exe" })
+if ($extraneousItems.Count -gt 0)
+{
+    $itemNames = ($extraneousItems | Select-Object -ExpandProperty Name) -join ", "
+    throw "發布目錄存在非預期的額外檔案或子目錄（單檔模式斷言失敗）：$itemNames"
 }
 
-Write-Host "=== 還原發布套件 (win-x64) ==="
-& dotnet restore $projectPath -r win-x64 -m:$maxCpuCount
-if ($LASTEXITCODE -ne 0) {
-    throw "C# 還原套件失敗"
+$targetExe = Join-Path $outputRoot "MinecraftServerManager.exe"
+if (-not (Test-Path -LiteralPath $targetExe -PathType Leaf))
+{
+    throw "發布成功但找不到預期的 EXE：$targetExe"
 }
 
-Publish-App -Name "self-contained" -SelfContained "true"
-Publish-App -Name "framework-dependent" -SelfContained "false"
+# 啟動煙霧測試：於雜湊產生前執行，確保 EXE 旁零新檔案的斷言不受 .sha256 影響
+if ($SkipSmokeTest)
+{
+    Write-Warning "已指定 -SkipSmokeTest，略過啟動煙霧測試"
+}
+else
+{
+    Write-Host "=== 執行啟動煙霧測試 (--smoke-test) ==="
+    $smokeDataDir = Join-Path ([System.IO.Path]::GetTempPath()) ("msm_smoke_" + [Guid]::NewGuid().ToString("N"))
+    [System.IO.Directory]::CreateDirectory($smokeDataDir) | Out-Null
+    $smokeProc = $null
+    try
+    {
+        $smokePsi = [System.Diagnostics.ProcessStartInfo]::new($targetExe, "--smoke-test")
+        $smokePsi.EnvironmentVariables["MSM_USER_DATA_DIR"] = $smokeDataDir
+        $smokePsi.UseShellExecute = $false
+        $smokeProc = [System.Diagnostics.Process]::Start($smokePsi)
+        if (-not $smokeProc.WaitForExit(30000))
+        {
+            $smokeProc.Kill($true)
+            throw "煙霧測試逾時（30 秒未正常結束）"
+        }
+        if ($smokeProc.ExitCode -ne 0)
+        {
+            throw "煙霧測試失敗，結束代碼：$($smokeProc.ExitCode)"
+        }
+        $afterItems = @(Get-ChildItem -LiteralPath $outputRoot | Select-Object -ExpandProperty Name)
+        $newItems = @($afterItems | Where-Object { $_ -ne "MinecraftServerManager.exe" })
+        if ($newItems.Count -gt 0)
+        {
+            throw "煙霧測試後 EXE 旁出現新檔案或資料夾：$($newItems -join ', ')"
+        }
+        Write-Host "煙霧測試通過：30 秒內正常以結束代碼 0 離開，且 EXE 旁零新檔案。" -ForegroundColor Green
+    }
+    finally
+    {
+        if ($null -ne $smokeProc)
+        {
+            $smokeProc.Dispose()
+        }
+        if (Test-Path -LiteralPath $smokeDataDir)
+        {
+            try
+            {
+                Remove-Item -LiteralPath $smokeDataDir -Recurse -Force
+            }
+            catch
+            {
+                Write-Warning "無法清理煙霧測試暫存目錄 ${smokeDataDir}：$($_.Exception.Message)"
+            }
+        }
+    }
+}
+
+$targetSha = Write-Sha256File -LiteralPath $targetExe
 
 $elapsed = (Get-Date) - $publishStartedAt
-Write-Host "=== 雙版本發布摘要 ==="
+Write-Host "=== 發布摘要 ==="
 Write-Host ("總耗時：{0}" -f $elapsed.ToString("hh\:mm\:ss\.fff"))
-
-Get-ChildItem -LiteralPath $outputRoot -Filter "*.exe" -File | Sort-Object Name | ForEach-Object {
-    Write-Host "----------------------------------------"
-    Write-Host "成品名稱：$($_.Name)"
-    Write-Host ("檔案大小：{0:N2} MB" -f ($_.Length / 1MB))
-    $hashFile = "$($_.FullName).sha256"
-    if (Test-Path -LiteralPath $hashFile) {
-        $hashContent = Get-Content -LiteralPath $hashFile -Raw
-        Write-Host "SHA-256 ：$($hashContent.Trim())"
-    }
-}
+Write-Host "----------------------------------------"
+Write-Host "成品名稱：$([System.IO.Path]::GetFileName($targetExe))"
+Write-Host ("檔案大小：{0:N2} MB" -f ((Get-Item -LiteralPath $targetExe).Length / 1MB))
+Write-Host "SHA-256 ：$((Get-Content -LiteralPath $targetSha -Raw).Trim())"

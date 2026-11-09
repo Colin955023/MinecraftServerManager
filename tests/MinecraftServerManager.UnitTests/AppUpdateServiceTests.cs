@@ -5,8 +5,9 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class AppUpdateServiceTests : IDisposable
+public sealed partial class AppUpdateServiceTests : IDisposable
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AppUpdateServiceTests));
     private readonly string _testDir;
 
     public AppUpdateServiceTests()
@@ -24,7 +25,10 @@ public sealed class AppUpdateServiceTests : IDisposable
                 Directory.Delete(_testDir, recursive: true);
             }
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+        }
     }
 
     private sealed class FakeDownloadHttpPort : IHttpPort
@@ -33,6 +37,9 @@ public sealed class AppUpdateServiceTests : IDisposable
         public Exception? ChecksumException { get; set; }
         public byte[]? FileBytesToDownload { get; set; }
         public bool DownloadInvoked { get; private set; }
+
+        public Task<HttpJsonResponse<System.Text.Json.JsonDocument>> GetJsonDocumentAsync(Uri uri, CancellationToken cancellationToken = default) =>
+            TestHttpJson.FromTextAsync(this, uri, cancellationToken);
 
         public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default)
         {

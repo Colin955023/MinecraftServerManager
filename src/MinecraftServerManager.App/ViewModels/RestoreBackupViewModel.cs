@@ -1,10 +1,10 @@
-using MinecraftServerManager.Infrastructure.Logging;
-using MinecraftServerManager.App.Collections;
-using MinecraftServerManager.App.Services;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MinecraftServerManager.App.Collections;
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
@@ -14,6 +14,7 @@ namespace MinecraftServerManager.App.ViewModels;
 public sealed class BackupDisplayItem(string fileName, long sizeBytes, DateTimeOffset createdAt)
 {
     public string FileName { get; } = fileName;
+    public long SizeBytes { get; } = sizeBytes;
     public string SizeFormatted { get; } = Core.Utilities.UnitFormatter.FormatBytes(sizeBytes);
     public string CreatedAtFormatted { get; } = createdAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 }
@@ -23,7 +24,7 @@ public sealed class BackupDisplayItem(string fileName, long sizeBytes, DateTimeO
 /// </summary>
 public sealed partial class RestoreBackupViewModel : ViewModelBase
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("RestoreBackup");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(RestoreBackupViewModel));
     private readonly IUiService _ui;
 
     private readonly IServerBackupService _backupService;
@@ -52,13 +53,10 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
         _serverName = serverName;
         _backupDirectory = backupDirectory ?? string.Empty;
         _isServerRunningCheck = isServerRunningCheck;
-        WindowTitle = $"備份還原 — {serverName}";
         Backups = [];
 
         _ = RunSafeAsync(RefreshBackupsAsync, "重新整理備份清單", Logger);
     }
-
-    public string WindowTitle { get; }
 
     public BulkObservableCollection<BackupDisplayItem> Backups { get; }
 
@@ -85,8 +83,13 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
                 StatusMessage = "此伺服器目前尚無任何備份檔案";
             }
         }
+        catch (OperationCanceledException)
+        {
+            Logger.Information("備份操作已取消");
+        }
         catch (Exception ex)
         {
+            Logger.Warning(ex, "讀取備份清單失敗：{Message}", ex.Message);
             StatusMessage = $"讀取備份失敗：{ex.Message}";
         }
         finally
@@ -111,10 +114,10 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
             return;
         }
 
-        if (!_ui.Confirm(
+        if (!await _ui.ConfirmAsync(
             $"確定要將備份「{SelectedBackup.FileName}」還原至伺服器「{_serverName}」嗎？\n\n⚠️ 此操作將以備份內容覆蓋現有伺服器檔案，且無法復原。",
             "確認還原備份",
-            UiMessageLevel.Warning))
+            UiMessageLevel.Warning).ConfigureAwait(true))
         {
             return;
         }
@@ -142,14 +145,20 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
             else
             {
                 StatusMessage = "還原失敗，伺服器資料未變更";
-                _ui.ShowWarning("還原失敗，伺服器檔案未變更。", "還原失敗");
+                await _ui.ShowWarningAsync("還原失敗，伺服器檔案未變更。", "還原失敗").ConfigureAwait(true);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            progressDialog.Complete();
+            StatusMessage = "已取消備份還原操作";
         }
         catch (Exception ex)
         {
             progressDialog.Complete();
+            Logger.Error(ex, "還原備份失敗：{Message}", ex.Message);
             StatusMessage = $"還原異常：{ex.Message}";
-            _ui.ShowWarning($"還原過程發生未預期異常：{ex.Message}", "還原異常");
+            await _ui.ShowWarningAsync($"還原過程發生未預期異常：{ex.Message}", "還原異常").ConfigureAwait(true);
         }
         finally
         {
@@ -167,10 +176,10 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
         }
 
         var toDelete = SelectedBackup;
-        if (!_ui.Confirm(
+        if (!await _ui.ConfirmAsync(
             $"確定要永久刪除備份檔案「{toDelete.FileName}」嗎？\n此操作無法復原。",
             "確認刪除備份",
-            UiMessageLevel.Warning))
+            UiMessageLevel.Warning).ConfigureAwait(true))
         {
             return;
         }
@@ -190,9 +199,15 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
                 StatusMessage = "刪除備份失敗";
             }
         }
+        catch (OperationCanceledException)
+        {
+            Logger.Information("備份操作已取消");
+        }
         catch (Exception ex)
         {
+            Logger.Error(ex, "刪除備份失敗：{Message}", ex.Message);
             StatusMessage = $"刪除異常：{ex.Message}";
+            await _ui.ShowWarningAsync($"刪除備份失敗：{ex.Message}", "刪除失敗").ConfigureAwait(true);
         }
         finally
         {

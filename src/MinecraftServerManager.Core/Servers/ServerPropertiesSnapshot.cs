@@ -12,8 +12,6 @@ public enum ServerPropertiesReadStatus
 public enum ServerPropertiesUpdateError
 {
     None,
-    MissingServer,
-    UnsafePath,
     ReadFailed,
     Conflict,
     Invalid,

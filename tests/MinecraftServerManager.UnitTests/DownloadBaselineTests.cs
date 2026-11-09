@@ -1,12 +1,11 @@
 using System.Diagnostics;
 using System.Net;
-using System.Net.Http;
 using MinecraftServerManager.Infrastructure.Http;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class DownloadBaselineTests(ITestOutputHelper output)
+public sealed partial class DownloadBaselineTests(ITestOutputHelper output)
 {
     private const long BatchFileBytes = 64 * 1024;
     private const long LargeFileBytes = 1024 * 1024;
@@ -135,7 +134,7 @@ public sealed class DownloadBaselineTests(ITestOutputHelper output)
         long managedMemoryBefore = GC.GetTotalMemory(forceFullCollection: false);
         var stopwatch = Stopwatch.StartNew();
 
-        int[] indices = Enumerable.Range(0, fileCount).ToArray();
+        int[] indices = [.. Enumerable.Range(0, fileCount)];
         await Parallel.ForEachAsync(indices, new ParallelOptions { MaxDegreeOfParallelism = maxConcurrentDownloads }, async (index, ct) =>
         {
             string target = Path.Combine(root, $"{scenario.Replace(' ', '-')}-{index}.bin");
@@ -160,7 +159,6 @@ public sealed class DownloadBaselineTests(ITestOutputHelper output)
     {
         string line = FormatMeasurement(measurement);
         output.WriteLine(line);
-        Console.WriteLine("[BENCHMARK] " + line);
     }
 
     private static string FormatMeasurement(DownloadMeasurement measurement)
@@ -186,7 +184,7 @@ public sealed class DownloadBaselineTests(ITestOutputHelper output)
         return Task.FromResult(new[] { IPAddress.Parse("93.184.216.34") });
     }
 
-    private sealed class DownloadResponseHandler(long contentLength, TimeSpan latency, bool enableRanges = false) : HttpMessageHandler
+    private sealed partial class DownloadResponseHandler(long contentLength, TimeSpan latency, bool enableRanges = false) : HttpMessageHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -223,7 +221,7 @@ public sealed class DownloadBaselineTests(ITestOutputHelper output)
         }
     }
 
-    private sealed class ZeroStream(long length) : Stream
+    private sealed partial class ZeroStream(long length) : Stream
     {
         private long _position;
 

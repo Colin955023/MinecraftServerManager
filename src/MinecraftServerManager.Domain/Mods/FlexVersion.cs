@@ -49,18 +49,7 @@ public sealed class FlexVersion : IComparable<FlexVersion>, IEquatable<FlexVersi
             }
 
             // 文字或不同類型比較 (區段代碼 Unicode 順序)
-            int minLen = Math.Min(Value.Length, other.Value.Length);
-            for (int i = 0; i < minLen; i++)
-            {
-                char a = Value[i];
-                char b = other.Value[i];
-                if (a != b)
-                {
-                    return a.CompareTo(b);
-                }
-            }
-
-            return Value.Length.CompareTo(other.Value.Length);
+            return string.CompareOrdinal(Value, other.Value);
         }
 
         public static bool operator <(Section left, Section right) => left.CompareTo(right) < 0;

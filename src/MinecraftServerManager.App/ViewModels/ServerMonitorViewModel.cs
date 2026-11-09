@@ -1,13 +1,13 @@
 using MinecraftServerManager.App.Services;
 using System.Diagnostics;
 using System.Buffers;
-using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.App.Collections;
+using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Servers;
@@ -24,7 +24,7 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
 {
     private readonly IUiService _ui;
 
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerMonitor");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerMonitorViewModel));
     private readonly IServerRuntime _serverRuntime;
     private readonly IUiTimer _flushTimer;
     private readonly IUiTimer _statsTimer;
@@ -185,8 +185,8 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        Logs.ReplaceAll(history.Concat(Logs).ToList());
-        TrimDisplayedLogs();
+        string[] combined = [.. history, .. Logs];
+        Logs.ReplaceAll(combined.Length > DisplayedLogsHighWatermark ? combined[^DisplayedLogsLowWatermark..] : combined);
         Logger.Information("已載入歷史 latest.log，共 {Count} 行", Logs.Count);
     }
 
@@ -286,7 +286,7 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
             UptimeText = $"{elapsed:hh\\:mm\\:ss}";
 
             long? workingSet = _serverRuntime.GetWorkingSet64();
-            MemoryUsageText = workingSet.HasValue ? $"{workingSet.Value / (1024 * 1024)} MB" : "-";
+            MemoryUsageText = workingSet.HasValue ? UnitFormatter.FormatBytes(workingSet.Value) : "-";
         }
         else
         {
@@ -653,17 +653,6 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
     }
 
     private void AddLogLine(string line) => _logBuffer.Writer.TryWrite(line);
-
-    private void TrimDisplayedLogs()
-    {
-        if (Logs.Count > DisplayedLogsHighWatermark)
-        {
-            int removeCount = Math.Max(
-                DisplayedLogsHighWatermark - DisplayedLogsLowWatermark,
-                Logs.Count - DisplayedLogsLowWatermark);
-            Logs.RemoveRange(0, removeCount);
-        }
-    }
 
 
     public void Dispose()

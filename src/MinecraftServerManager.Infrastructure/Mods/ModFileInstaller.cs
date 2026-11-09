@@ -1,4 +1,6 @@
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Core.Mods;
+using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Infrastructure.FileSystem;
@@ -11,7 +13,7 @@ namespace MinecraftServerManager.Infrastructure.Mods;
 /// </summary>
 public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ModFileInstaller");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModFileInstaller));
     public Task<LocalModMutationResult> SetModStateAsync(
         string modsDirectory,
         string modId,
@@ -24,7 +26,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
 
         string stableModsDir = SafeFileSystem.ResolveStableDirectory(modsDirectory, create: true);
         var (enabledFile, disabledFile) = ResolveModFilePaths(stableModsDir, modId);
-        string cleanModId = Path.GetFileNameWithoutExtension(enabledFile);
+        string cleanModId = ModHelpers.ModFilenameStem(Path.GetFileName(enabledFile));
 
         string srcFile = enable ? disabledFile : enabledFile;
         string dstFile = enable ? enabledFile : disabledFile;
@@ -82,7 +84,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         {
             cancellationToken.ThrowIfCancellationRequested();
             var (enabledPath, disabledPath) = ResolveModFilePaths(stableModsDir, modId);
-            string cleanModId = Path.GetFileNameWithoutExtension(enabledPath);
+            string cleanModId = ModHelpers.ModFilenameStem(Path.GetFileName(enabledPath));
 
             bool deleted = false;
             if (SafeFileSystem.FileExists(enabledPath))
@@ -134,7 +136,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         }
 
         string fileName = Path.GetFileName(sourceFilePath);
-        if (!fileName.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
+        if (!ModHelpers.IsJarFileName(fileName))
         {
             return Task.FromResult(LocalModMutationResult.Failure("匯入失敗", "僅支援 .jar 格式模組檔案"));
         }
@@ -165,7 +167,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         cancellationToken.ThrowIfCancellationRequested();
 
         string safeFileName = Path.GetFileName(fileName);
-        if (!safeFileName.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
+        if (!ModHelpers.IsJarFileName(safeFileName))
         {
             return ModFileOperationResult.Fail("僅支援 .jar 格式模組檔案", false);
         }
@@ -176,7 +178,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         string stagingDir = Path.Combine(stagingRoot, Guid.NewGuid().ToString("N"));
         SafeFileSystem.ResolveStableDirectory(stagingDir, create: true);
 
-        string tempFilePath = Path.Combine(stagingDir, $"{safeFileName}.{Guid.NewGuid():N}.tmp");
+        string tempFilePath = AtomicFileWriter.CreateTempSiblingPath(Path.Combine(stagingDir, safeFileName));
         string finalTargetPath = Path.Combine(stableModsDir, safeFileName);
         string? backupFilePath = null;
         string algo = !string.IsNullOrEmpty(hashAlgorithm) ? hashAlgorithm : "sha512";
@@ -187,7 +189,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
             var downloadResult = await httpPort.DownloadAsync(
                 new Uri(downloadUrl),
                 tempFilePath,
-                progress: progress is not null ? new Progress<HttpProgress>(p =>
+                progress: progress is not null ? new SynchronousProgress<HttpProgress>(p =>
                 {
                     if (p.TotalBytes > 0)
                     {
@@ -307,24 +309,18 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
 
     private static (string EnabledPath, string DisabledPath) ResolveModFilePaths(string stableModsDir, string modId)
     {
-        string raw = modId.Trim();
+        ReadOnlySpan<char> raw = modId.AsSpan().Trim();
         int hashIdx = raw.IndexOf('#');
         if (hashIdx >= 0)
         {
             raw = raw[..hashIdx];
         }
-        string cleanModId = Path.GetFileName(raw.Trim('\'', '"', ' ', '\r', '\n', '\t'));
-        if (cleanModId.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
-        {
-            cleanModId = cleanModId[..^4];
-        }
-        else if (cleanModId.EndsWith(".jar.disabled", StringComparison.OrdinalIgnoreCase))
-        {
-            cleanModId = cleanModId[..^13];
-        }
 
-        string enabledPath = Path.Combine(stableModsDir, $"{cleanModId}.jar");
-        string disabledPath = Path.Combine(stableModsDir, $"{cleanModId}.jar.disabled");
+        ReadOnlySpan<char> cleanSpan = ModHelpers.ModFilenameStem(Path.GetFileName(raw.Trim("'\" \r\n\t")));
+        string cleanModId = cleanSpan.ToString();
+
+        string enabledPath = Path.Combine(stableModsDir, ModHelpers.ToEnabledModFileName(cleanModId));
+        string disabledPath = Path.Combine(stableModsDir, ModHelpers.ToDisabledModFileName(cleanModId));
 
         if (SafeFileSystem.FileExists(enabledPath) || SafeFileSystem.FileExists(disabledPath))
         {
@@ -332,39 +328,30 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         }
 
         var matched = SafeFileSystem.ListBoundedDirectory(stableModsDir)
-            .Where(f => !f.IsDirectory && (f.FullPath.EndsWith(".jar", StringComparison.OrdinalIgnoreCase) || f.FullPath.EndsWith(".jar.disabled", StringComparison.OrdinalIgnoreCase)))
             .FirstOrDefault(f =>
             {
-                string fileName = Path.GetFileName(f.FullPath);
-                string stem = fileName;
-                if (stem.EndsWith(".jar.disabled", StringComparison.OrdinalIgnoreCase))
+                if (f.IsDirectory)
                 {
-                    stem = stem[..^13];
-                }
-                else if (stem.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
-                {
-                    stem = stem[..^4];
+                    return false;
                 }
 
-                return string.Equals(stem, cleanModId, StringComparison.OrdinalIgnoreCase)
-                    || stem.StartsWith($"{cleanModId}-", StringComparison.OrdinalIgnoreCase)
-                    || stem.StartsWith($"{cleanModId}_", StringComparison.OrdinalIgnoreCase);
+                ReadOnlySpan<char> fileName = Path.GetFileName(f.FullPath.AsSpan());
+                if (!ModHelpers.IsModFileName(fileName))
+                {
+                    return false;
+                }
+
+                ReadOnlySpan<char> stem = ModHelpers.ModFilenameStem(fileName);
+                return stem.Equals(cleanModId, StringComparison.OrdinalIgnoreCase)
+                    || (stem.Length > cleanModId.Length
+                        && stem.StartsWith(cleanModId, StringComparison.OrdinalIgnoreCase)
+                        && stem[cleanModId.Length] is '-' or '_');
             });
 
         if (matched is not null)
         {
-            string fileName = Path.GetFileName(matched.FullPath);
-            string stem = fileName;
-            if (stem.EndsWith(".jar.disabled", StringComparison.OrdinalIgnoreCase))
-            {
-                stem = stem[..^13];
-            }
-            else if (stem.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
-            {
-                stem = stem[..^4];
-            }
-
-            return (Path.Combine(stableModsDir, $"{stem}.jar"), Path.Combine(stableModsDir, $"{stem}.jar.disabled"));
+            ReadOnlySpan<char> stem = ModHelpers.ModFilenameStem(Path.GetFileName(matched.FullPath.AsSpan()));
+            return (Path.Combine(stableModsDir, ModHelpers.ToEnabledModFileName(stem)), Path.Combine(stableModsDir, ModHelpers.ToDisabledModFileName(stem)));
         }
 
         return (enabledPath, disabledPath);

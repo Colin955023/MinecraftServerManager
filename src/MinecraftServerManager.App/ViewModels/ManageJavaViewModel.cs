@@ -1,6 +1,5 @@
 using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Services;
-using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.Core.Ports;
@@ -34,11 +33,19 @@ public sealed partial class JavaItemViewModel : ObservableObject
     public partial string StatusText { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Java 主要版本選項
+/// </summary>
+public sealed record JavaMajorOption(int Major, string DisplayName)
+{
+    public override string ToString() => DisplayName;
+}
+
 public sealed partial class ManageJavaViewModel : ViewModelBase
 {
     private readonly IUiService _ui;
 
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ManageJava");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ManageJavaViewModel));
     private readonly IJavaRuntimeDetector? _javaDetector;
     private readonly IMinecraftJavaRequirementService? _javaRequirementService;
     private readonly IJavaInstaller? _javaInstaller;
@@ -59,6 +66,9 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
     public partial int SelectedInstallMajor { get; set; }
 
     [ObservableProperty]
+    public partial JavaMajorOption? SelectedInstallMajorOption { get; set; }
+
+    [ObservableProperty]
     public partial bool IsBusy { get; set; }
 
     [ObservableProperty]
@@ -66,6 +76,7 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
 
     public BulkObservableCollection<JavaItemViewModel> InstalledJavas { get; } = [];
     public BulkObservableCollection<int> AvailableInstallMajors { get; } = [];
+    public BulkObservableCollection<JavaMajorOption> AvailableInstallOptions { get; } = [];
 
     public string? ResultJavaPath { get; private set; }
 
@@ -86,7 +97,7 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
         _javaInstaller = javaInstaller;
 
         MinecraftVersionText = minecraftVersion;
-        var lk = Enum.TryParse<LoaderKind>(loaderName, ignoreCase: true, out var kind) ? kind : LoaderKind.Unknown;
+        var lk = LoaderKinds.ParseOrDefault(loaderName);
         RequiredMajor = _javaRequirementService?.GetCachedJavaMajor(minecraftVersion, lk);
 
         RequiredMajorText = RequiredMajor.HasValue
@@ -100,8 +111,44 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
             ? RequiredMajor.Value
             : (AvailableInstallMajors.Count > 0 ? AvailableInstallMajors[^1] : 0);
 
+        var options = majors.Select(m => new JavaMajorOption(m, $"Java {m}")).ToList();
+        AvailableInstallOptions.ReplaceAll(options);
+        SelectedInstallMajorOption = options.FirstOrDefault(o => o.Major == SelectedInstallMajor) ?? options.LastOrDefault();
+
         ResultJavaPath = currentJavaPath;
         _ = RunSafeAsync(() => LoadInstalledJavasAsync(currentJavaPath), "載入已安裝 Java 清單", Logger);
+
+        if (!RequiredMajor.HasValue && !string.IsNullOrWhiteSpace(minecraftVersion) && _javaRequirementService is not null)
+        {
+            _ = RunSafeAsync(async () =>
+            {
+                try
+                {
+                    int major = await _javaRequirementService.GetRequiredJavaMajorAsync(minecraftVersion, lk).ConfigureAwait(true);
+                    RequiredMajor = major;
+                    await LoadInstalledJavasAsync(ResultJavaPath, forceRefresh: false).ConfigureAwait(true);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning("非同步補齊 Minecraft 版本「{Version}」指定 Java 需求失敗: {Message}", minecraftVersion, ex.Message);
+                }
+            }, "補齊 Java 版本需求", Logger);
+        }
+    }
+
+    partial void OnRequiredMajorChanged(int? value)
+    {
+        RequiredMajorText = value.HasValue
+            ? $"Java {value.Value}"
+            : "未限定 (依需求選擇)";
+    }
+
+    partial void OnSelectedInstallMajorOptionChanged(JavaMajorOption? value)
+    {
+        if (value is not null)
+        {
+            SelectedInstallMajor = value.Major;
+        }
     }
 
     [RelayCommand]
@@ -141,6 +188,10 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
             {
                 StatusMessage = "本機尚未安裝符合需求的 Java 版本";
             }
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "已取消自動偵測";
         }
         catch (Exception ex)
         {
@@ -201,11 +252,15 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
             }
             StatusMessage = $"成功安裝並選取 Java {targetMajor}";
         }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "已取消安裝 Java";
+        }
         catch (Exception ex)
         {
             Logger.Error(ex, "winget 安裝 Java {Major} 失敗: {Message}", targetMajor, ex.Message);
             StatusMessage = $"安裝失敗：{ex.Message}";
-            _ui.ShowError($"安裝 Java {targetMajor} 失敗或被拒絕：\n{ex.Message}", "Java 安裝失敗");
+            await _ui.ShowErrorAsync($"安裝 Java {targetMajor} 失敗或被拒絕：\n{ex.Message}", "Java 安裝失敗");
         }
         finally
         {
@@ -214,9 +269,9 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    public void BrowseFile()
+    public async Task BrowseFileAsync()
     {
-        if (_ui.PickFiles("選取 Java 執行檔", "Java 執行檔 (javaw.exe;java.exe)|javaw.exe;java.exe|所有檔案 (*.*)|*.*") is { Count: > 0 } picked)
+        if (await _ui.PickFilesAsync("選取 Java 執行檔", "Java 執行檔 (javaw.exe;java.exe)|javaw.exe;java.exe|所有檔案 (*.*)|*.*") is { Count: > 0 } picked)
         {
             string path = picked[0];
             var existing = InstalledJavas.FirstOrDefault(j => string.Equals(j.ExecutablePath, path, StringComparison.OrdinalIgnoreCase));
@@ -271,7 +326,7 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
             foreach (var j in detected)
             {
                 if (string.IsNullOrWhiteSpace(j.ExecutablePath) ||
-                    !Path.IsPathRooted(j.ExecutablePath) ||
+                    !Path.IsPathFullyQualified(j.ExecutablePath) ||
                     string.Equals(Path.GetFileName(j.ExecutablePath), j.ExecutablePath, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
@@ -308,6 +363,10 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
 
             InstalledJavas.ReplaceAll(items);
             SelectedJava = toSelect ?? InstalledJavas.FirstOrDefault();
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "已取消載入 Java 清單";
         }
         catch (Exception ex)
         {

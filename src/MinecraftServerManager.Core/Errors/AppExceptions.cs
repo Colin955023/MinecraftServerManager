@@ -5,6 +5,11 @@ namespace MinecraftServerManager.Core.Errors;
 /// </summary>
 public class AppException : Exception
 {
+    public AppException()
+        : base()
+    {
+    }
+
     public AppException(string message)
         : base(message)
     {
@@ -23,16 +28,30 @@ public sealed class JavaInstallException : AppException
 {
     public int? ExitCode { get; }
 
-    public JavaInstallException(string message, int? exitCode = null)
+    public JavaInstallException()
+        : base()
+    {
+    }
+
+    public JavaInstallException(string message)
+        : base(message)
+    {
+    }
+
+    public JavaInstallException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+
+    public JavaInstallException(string message, int? exitCode)
         : base(message)
     {
         ExitCode = exitCode;
     }
 
-    public JavaInstallException(string message, Exception innerException, int? exitCode = null)
+    public JavaInstallException(string message, Exception innerException, int? exitCode)
         : base(message, innerException)
     {
         ExitCode = exitCode;
     }
 }
-

@@ -1,9 +1,9 @@
 using MinecraftServerManager.App.Services;
-using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
+using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
@@ -13,8 +13,8 @@ namespace MinecraftServerManager.App.ViewModels;
 public sealed partial class ImportServerViewModel(IServerManager serverManager,
     IUiService? uiService = null) : ObservableObject
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ImportServerViewModel));
     private readonly IUiService _ui = uiService ?? NoOpUiService.Instance;
-
     private readonly IServerManager _serverManager = serverManager;
 
     [ObservableProperty]
@@ -22,6 +22,9 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
 
     [ObservableProperty]
     public partial string ServerName { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial ImportTransferMode TransferMode { get; set; } = ImportTransferMode.Copy;
 
     [ObservableProperty]
     public partial string StatusMessage { get; set; } = string.Empty;
@@ -32,14 +35,44 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
 
     public bool IsNotBusy => !IsBusy;
 
+    public bool IsCopyMode
+    {
+        get => TransferMode == ImportTransferMode.Copy;
+        set
+        {
+            if (value)
+            {
+                TransferMode = ImportTransferMode.Copy;
+            }
+        }
+    }
+
+    public bool IsMoveMode
+    {
+        get => TransferMode == ImportTransferMode.Move;
+        set
+        {
+            if (value)
+            {
+                TransferMode = ImportTransferMode.Move;
+            }
+        }
+    }
+
     public string? ImportedServerName { get; private set; }
 
     public event Action<bool>? RequestClose;
 
-    [RelayCommand]
-    public void BrowseZip()
+    partial void OnTransferModeChanged(ImportTransferMode value)
     {
-        if (_ui.PickFiles("選取 Minecraft 伺服器 ZIP 壓縮檔", "ZIP 壓縮檔 (*.zip)|*.zip|所有檔案 (*.*)|*.*") is { Count: > 0 } picked)
+        OnPropertyChanged(nameof(IsCopyMode));
+        OnPropertyChanged(nameof(IsMoveMode));
+    }
+
+    [RelayCommand]
+    public async Task BrowseZipAsync()
+    {
+        if (await _ui.PickFilesAsync("選取 Minecraft 伺服器 ZIP 壓縮檔", "ZIP 壓縮檔 (*.zip)|*.zip|所有檔案 (*.*)|*.*").ConfigureAwait(true) is { Count: > 0 } picked)
         {
             SourcePath = picked[0];
             ServerName = Path.GetFileNameWithoutExtension(picked[0]);
@@ -47,37 +80,64 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
     }
 
     [RelayCommand]
-    public void BrowseFolder()
+    public async Task BrowseFolderAsync()
     {
-        if (_ui.PickFolder("選取 Minecraft 伺服器目錄") is { } folder)
+        if (await _ui.PickFolderAsync("選取 Minecraft 伺服器目錄").ConfigureAwait(true) is { } folder)
         {
             SourcePath = folder;
             ServerName = Path.GetFileName(folder);
         }
     }
 
-    [RelayCommand]
-    public async Task ImportAsync()
+    /// <summary>
+    /// 驗證輸入欄位是否合法有效
+    /// </summary>
+    public bool ValidateInputs()
     {
         if (string.IsNullOrWhiteSpace(SourcePath))
         {
             StatusMessage = "請先選取來源目錄或 ZIP 壓縮檔";
-            return;
+            return false;
         }
 
         if (string.IsNullOrWhiteSpace(ServerName))
         {
             StatusMessage = "請輸入匯入後的伺服器名稱";
-            return;
+            return false;
+        }
+
+        StatusMessage = string.Empty;
+        return true;
+    }
+
+    /// <summary>
+    /// 執行伺服器匯入核心流程並顯示獨立進度視窗
+    /// </summary>
+    public async Task<bool> ExecuteImportAsync()
+    {
+        if (!ValidateInputs())
+        {
+            return false;
+        }
+
+        string targetName = ServerName.Trim();
+        string source = SourcePath.Trim();
+
+        if (TransferMode == ImportTransferMode.Move)
+        {
+            bool confirmed = await _ui.ConfirmAsync(
+                $"您選擇了「遷移」模式，匯入完成後將會移除原始來源：\n{source}\n\n確定要繼續遷移匯入嗎？",
+                "確認遷移匯入",
+                UiMessageLevel.Warning).ConfigureAwait(true);
+            if (!confirmed)
+            {
+                return false;
+            }
         }
 
         IsBusy = true;
         StatusMessage = string.Empty;
 
-        string targetName = ServerName.Trim();
-        string source = SourcePath.Trim();
-
-        // 開啟獨立進度視窗並在背景非同步執行匯入
         var progressDialog = _ui.ShowServerImportProgress(targetName);
         var progress = progressDialog.Progress;
 
@@ -86,7 +146,7 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
             var result = await _serverManager.ImportServerAsync(
                 source,
                 targetName,
-                ImportTransferMode.Copy,
+                TransferMode,
                 progress).ConfigureAwait(true);
 
             progressDialog.Complete();
@@ -94,23 +154,41 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
             if (result.Completed)
             {
                 ImportedServerName = targetName;
-                RequestClose?.Invoke(true);
+                return true;
             }
             else
             {
                 StatusMessage = $"匯入失敗：{result.Message}";
-                _ui.ShowWarning($"匯入伺服器被拒絕或失敗：\n{result.Message}", "匯入伺服器失敗");
+                await _ui.ShowWarningAsync($"匯入伺服器被拒絕或失敗：\n{result.Message}", "匯入伺服器失敗").ConfigureAwait(true);
+                return false;
             }
+        }
+        catch (OperationCanceledException)
+        {
+            progressDialog.Complete();
+            StatusMessage = "匯入已取消";
+            return false;
         }
         catch (Exception ex)
         {
             progressDialog.Complete();
+            Logger.Error(ex, "匯入伺服器異常: {Message}", ex.Message);
             StatusMessage = $"匯入異常：{ex.Message}";
-            _ui.ShowError($"匯入伺服器時發生錯誤：\n{ex.Message}", "匯入伺服器異常");
+            await _ui.ShowErrorAsync($"匯入伺服器時發生錯誤：\n{ex.Message}", "匯入伺服器異常").ConfigureAwait(true);
+            return false;
         }
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    public async Task ImportAsync()
+    {
+        if (await ExecuteImportAsync().ConfigureAwait(true))
+        {
+            RequestClose?.Invoke(true);
         }
     }
 

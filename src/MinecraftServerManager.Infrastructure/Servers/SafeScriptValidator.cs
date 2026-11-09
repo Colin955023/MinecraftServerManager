@@ -11,7 +11,7 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 /// </summary>
 public static class SafeScriptValidator
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("SafeScriptValidator");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(SafeScriptValidator));
 
     /// <summary>
     /// 批次命令中嚴格禁止出現的危險字元（防範命令串接、管道、重新導向與逸出逃逸）
@@ -94,9 +94,7 @@ public static class SafeScriptValidator
             }
 
             // 若為絕對路徑或包含相對路徑，確認其位於伺服器目錄內
-            string targetFullPath = Path.IsPathRooted(targetRelativePath)
-                ? Path.GetFullPath(targetRelativePath)
-                : Path.GetFullPath(Path.Combine(stableServerDir, targetRelativePath));
+            string targetFullPath = Path.GetFullPath(targetRelativePath, stableServerDir);
 
             if (!SafeFileSystem.IsPathWithin(stableServerDir, targetFullPath, strict: false))
             {
@@ -260,7 +258,7 @@ public static class SafeScriptValidator
         // Java 啟動指令：依規範嚴格排除純 java 或 java.exe，只接受合規之絕對路徑
         if (TryExtractLaunchExecutable(line, out string exePath))
         {
-            if (Path.IsPathRooted(exePath))
+            if (Path.IsPathFullyQualified(exePath))
             {
                 try
                 {

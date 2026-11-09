@@ -63,7 +63,7 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
             ? javaPath
             : "java";
 
-        int min = config.MemoryMinMb ?? (config.MemoryMaxMb > ServerDefaults.DefaultMemoryMinMb ? ServerDefaults.DefaultMemoryMinMb : config.MemoryMaxMb);
+        int min = MemoryUtils.ResolveEffectiveMinMemoryMb(config.MemoryMinMb, config.MemoryMaxMb);
         var args = new List<string>
         {
             $"-Xms{min}M",

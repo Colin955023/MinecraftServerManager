@@ -29,14 +29,14 @@ public static class SourceScanner
     public static string SolutionRoot => SolutionRootLazy.Value;
 
     /// <summary>
-    /// 尋找儲存庫根目錄（依據 MinecraftServerManager.sln 或 Directory.Build.props 向上遞迴查詢）
+    /// 尋找儲存庫根目錄（依據 MinecraftServerManager.slnx 或 Directory.Build.props 向上遞迴查詢）
     /// </summary>
     private static string ResolveSolutionRoot()
     {
         string? current = AppContext.BaseDirectory;
         while (!string.IsNullOrEmpty(current))
         {
-            if (File.Exists(Path.Combine(current, "MinecraftServerManager.sln")) ||
+            if (File.Exists(Path.Combine(current, "MinecraftServerManager.slnx")) ||
                 File.Exists(Path.Combine(current, "Directory.Build.props")))
             {
                 return Path.GetFullPath(current);
@@ -64,7 +64,7 @@ public static class SourceScanner
         string fullDirectory = Path.Combine(SolutionRoot, relativeDirectory);
         if (!Directory.Exists(fullDirectory))
         {
-            return Array.Empty<(string, string)>();
+            return [];
         }
 
         var results = new List<(string RelativePath, string FullPath)>();
@@ -95,7 +95,39 @@ public static class SourceScanner
     /// </summary>
     /// <param name="sourceCode">原始 C# 程式碼字串</param>
     /// <returns>清洗後之程式碼字串</returns>
-    public static string StripCommentsAndStrings(string sourceCode)
+    public static string StripCommentsAndStrings(string sourceCode) => StripCore(sourceCode, commentRanges: null);
+
+    /// <summary>
+    /// 僅清除 C# 原始碼中的註解（保留字串字面值內容），供需比對字串常值之架構規則使用；換行與長度完全對齊。
+    /// </summary>
+    /// <param name="sourceCode">原始 C# 程式碼字串</param>
+    /// <returns>僅移除註解後之程式碼字串</returns>
+    public static string StripCommentsOnly(string sourceCode)
+    {
+        if (string.IsNullOrEmpty(sourceCode))
+        {
+            return string.Empty;
+        }
+
+        var commentRanges = new List<(int Start, int End)>();
+        _ = StripCore(sourceCode, commentRanges);
+
+        char[] chars = sourceCode.ToCharArray();
+        foreach (var (start, end) in commentRanges)
+        {
+            for (int k = start; k < end; k++)
+            {
+                if (chars[k] is not '\r' and not '\n')
+                {
+                    chars[k] = ' ';
+                }
+            }
+        }
+
+        return new string(chars);
+    }
+
+    private static string StripCore(string sourceCode, List<(int Start, int End)>? commentRanges)
     {
         if (string.IsNullOrEmpty(sourceCode))
         {
@@ -114,6 +146,7 @@ public static class SourceScanner
             // 1. 單行註解 //
             if (c == '/' && next == '/')
             {
+                int commentStart = i;
                 chars[i] = ' ';
                 chars[i + 1] = ' ';
                 i += 2;
@@ -127,12 +160,14 @@ public static class SourceScanner
                     i++;
                 }
 
+                commentRanges?.Add((commentStart, i));
                 continue;
             }
 
             // 2. 多行註解 /* ... */
             if (c == '/' && next == '*')
             {
+                int commentStart = i;
                 chars[i] = ' ';
                 chars[i + 1] = ' ';
                 i += 2;
@@ -154,6 +189,7 @@ public static class SourceScanner
                     i++;
                 }
 
+                commentRanges?.Add((commentStart, i));
                 continue;
             }
 
@@ -450,13 +486,15 @@ public static class SourceScanner
     /// <param name="ruleId">規則代號</param>
     /// <param name="ruleDescription">規則說明</param>
     /// <param name="isWhitelisted">白名單判定委派（傳入檔案相對路徑，回傳 true 則跳過檢查）</param>
+    /// <param name="preserveStrings">true 時僅移除註解並保留字串內容（供字串常值規則比對）</param>
     /// <returns>違規清單</returns>
     public static List<SourceViolation> ScanViolations(
         IEnumerable<(string RelativePath, string FullPath)> files,
         Regex pattern,
         string ruleId,
         string ruleDescription,
-        Func<string, bool> isWhitelisted)
+        Func<string, bool> isWhitelisted,
+        bool preserveStrings = false)
     {
         var violations = new List<SourceViolation>();
 
@@ -468,7 +506,7 @@ public static class SourceScanner
             }
 
             string rawText = File.ReadAllText(fullPath);
-            string stripped = StripCommentsAndStrings(rawText);
+            string stripped = preserveStrings ? StripCommentsOnly(rawText) : StripCommentsAndStrings(rawText);
 
             string[] originalLines = rawText.Split('\n');
             string[] strippedLines = stripped.Split('\n');

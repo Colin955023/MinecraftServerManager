@@ -6,8 +6,9 @@ namespace MinecraftServerManager.UnitTests;
 /// <summary>
 /// 模組快取索引持久化測試
 /// </summary>
-public sealed class ModIndexPersistenceTests : IDisposable
+public sealed partial class ModIndexPersistenceTests : IDisposable
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModIndexPersistenceTests));
     private readonly string _testDir;
 
     public ModIndexPersistenceTests()
@@ -25,7 +26,10 @@ public sealed class ModIndexPersistenceTests : IDisposable
                 Directory.Delete(_testDir, recursive: true);
             }
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+        }
     }
 
     [Fact]

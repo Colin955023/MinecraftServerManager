@@ -4,7 +4,8 @@ namespace MinecraftServerManager.Domain.ValueObjects;
 
 public readonly record struct ServerName
 {
-    private static readonly SearchValues<char> InvalidWindowsChars = SearchValues.Create("<>:\"/\\|?*");
+    private static readonly SearchValues<char> InvalidWindowsChars = SearchValues.Create(
+        "\0\u0001\u0002\u0003\u0004\u0005\u0006\u0007\u0008\t\n\u000B\u000C\r\u000E\u000F\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001A\u001B\u001C\u001D\u001E\u001F\u007F\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008A\u008B\u008C\u008D\u008E\u008F\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009A\u009B\u009C\u009D\u009E\u009F<>:\"/\\|?*");
 
     public const int DefaultMaxLength = 100;
 
@@ -44,37 +45,39 @@ public readonly record struct ServerName
         normalized = value ?? string.Empty;
         int effectiveMaxLength = Math.Max(1, maxLength);
 
-        if (normalized.Length == 0 || normalized != normalized.Trim())
+        ReadOnlySpan<char> span = normalized.AsSpan();
+        if (span.IsEmpty || span.Trim().Length != span.Length)
         {
             error = "伺服器名稱不可為空白或包含前後空白";
             return false;
         }
 
-        if (normalized.Length > effectiveMaxLength)
+        if (span.Length > effectiveMaxLength)
         {
             error = $"伺服器名稱過長（上限 {effectiveMaxLength} 字元）";
             return false;
         }
 
-        if (normalized is "." or ".."
-            || normalized.EndsWith('.')
-            || normalized.EndsWith(' ')
-            || ContainsInvalidCharacter(normalized.AsSpan()))
+        if (span is "." or ".."
+            || span[^1] is '.' or ' '
+            || ContainsInvalidCharacter(span))
         {
             error = "伺服器名稱不可包含路徑片段或不合法字元";
             return false;
         }
 
-        int dotIndex = normalized.IndexOf('.');
-        string baseName = (dotIndex >= 0 ? normalized[..dotIndex] : normalized).TrimEnd(' ', '.');
-        if (baseName.Length == 0 || IsWindowsDeviceName(baseName))
+        int dotIndex = span.IndexOf('.');
+        ReadOnlySpan<char> baseName = (dotIndex >= 0 ? span[..dotIndex] : span).TrimEnd(" .");
+        if (baseName.IsEmpty || IsWindowsDeviceName(span))
         {
             error = "伺服器名稱不符合 Windows 檔名規則";
             return false;
         }
 
-        string comparisonName = normalized.ToLowerInvariant();
-        if (comparisonName is ".issues" or "servers.json" or "servers_config.json" || comparisonName.StartsWith(".msm-", StringComparison.Ordinal))
+        if (span.Equals(".issues", StringComparison.OrdinalIgnoreCase)
+            || span.Equals("servers.json", StringComparison.OrdinalIgnoreCase)
+            || span.Equals("servers_config.json", StringComparison.OrdinalIgnoreCase)
+            || span.StartsWith(".msm-", StringComparison.OrdinalIgnoreCase))
         {
             error = "伺服器名稱與程式內部保留路徑衝突";
             return false;
@@ -84,26 +87,17 @@ public readonly record struct ServerName
         return true;
     }
 
-    private static bool ContainsInvalidCharacter(ReadOnlySpan<char> span)
+    private static bool ContainsInvalidCharacter(ReadOnlySpan<char> span) =>
+        span.ContainsAny(InvalidWindowsChars);
+
+    /// <summary>
+    /// 檢查單一路徑區段或檔名是否為 Windows 保留裝置名稱（如 CON、PRN、AUX、NUL、CLOCK$、COM1..9、LPT1..9 及上標變體）。
+    /// </summary>
+    public static bool IsWindowsDeviceName(ReadOnlySpan<char> value)
     {
-        if (span.IndexOfAny(InvalidWindowsChars) >= 0)
-        {
-            return true;
-        }
-
-        for (int i = 0; i < span.Length; i++)
-        {
-            if (char.IsControl(span[i]))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool IsWindowsDeviceName(string baseName)
-    {
+        ReadOnlySpan<char> trimmed = value.TrimEnd(" .");
+        int dotIndex = trimmed.IndexOf('.');
+        ReadOnlySpan<char> baseName = (dotIndex >= 0 ? trimmed[..dotIndex] : trimmed).TrimEnd(" .");
         if (baseName.Equals("CON", StringComparison.OrdinalIgnoreCase)
             || baseName.Equals("PRN", StringComparison.OrdinalIgnoreCase)
             || baseName.Equals("AUX", StringComparison.OrdinalIgnoreCase)
@@ -113,14 +107,9 @@ public readonly record struct ServerName
             return true;
         }
 
-        if (baseName.Length == 4
+        return baseName.Length == 4
             && (baseName.StartsWith("COM", StringComparison.OrdinalIgnoreCase)
-                || baseName.StartsWith("LPT", StringComparison.OrdinalIgnoreCase)))
-        {
-            string suffix = baseName[3..];
-            return suffix.All(static character => character is (>= '1' and <= '9') or '¹' or '²' or '³');
-        }
-
-        return false;
+                || baseName.StartsWith("LPT", StringComparison.OrdinalIgnoreCase))
+            && baseName[3] is (>= '1' and <= '9') or '¹' or '²' or '³';
     }
 }

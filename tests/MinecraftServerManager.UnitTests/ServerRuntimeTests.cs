@@ -6,6 +6,7 @@ namespace MinecraftServerManager.UnitTests;
 
 public sealed class ServerRuntimeTests : IAsyncLifetime
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerRuntimeTests));
     private readonly string _testDir;
 
     public ServerRuntimeTests()
@@ -37,7 +38,10 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
             {
                 await Task.Delay(50).ConfigureAwait(false);
             }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+            }
         }
     }
 

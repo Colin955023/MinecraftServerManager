@@ -1,14 +1,15 @@
 using System.Reflection;
 using MinecraftServerManager.App;
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
-using MinecraftServerManager.Core.Servers;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests.Composition;
 
-public sealed class AppCompositionRootTests : IDisposable
+public sealed partial class AppCompositionRootTests : IDisposable
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AppCompositionRootTests));
     private readonly string _testRoot;
 
     public AppCompositionRootTests()
@@ -26,13 +27,16 @@ public sealed class AppCompositionRootTests : IDisposable
                 Directory.Delete(_testRoot, recursive: true);
             }
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+        }
     }
 
     [Fact]
     public async Task ConstructsCompleteObjectGraphSuccessfully()
     {
-        await using var root = new AppCompositionRoot(_testRoot);
+        await using var root = new AppCompositionRoot(_testRoot, NoOpUiService.Instance);
 
         Assert.NotNull(root.MainViewModel);
         Assert.NotNull(root.Dependencies);
@@ -56,7 +60,7 @@ public sealed class AppCompositionRootTests : IDisposable
     [Fact]
     public async Task EnsuresSingleInstanceOfSharedServicesAcrossConsumers()
     {
-        await using var root = new AppCompositionRoot(_testRoot);
+        await using var root = new AppCompositionRoot(_testRoot, NoOpUiService.Instance);
 
         IServerDirectorySizeService sharedSizeService = root.Dependencies.DirectorySizeService;
         IServerInspector inspector = root.Dependencies.ServerInspector;

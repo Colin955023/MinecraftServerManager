@@ -4,8 +4,9 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-public sealed class MainViewModelTests : IDisposable
+public sealed partial class MainViewModelTests : IDisposable
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(MainViewModelTests));
     private readonly string _testDir;
 
     public MainViewModelTests()
@@ -22,7 +23,10 @@ public sealed class MainViewModelTests : IDisposable
                 Directory.Delete(_testDir, recursive: true);
             }
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+        }
     }
 
     private MainViewModel CreateIsolatedViewModel(string themeMode = "dark", IUiService? uiService = null)
@@ -160,6 +164,6 @@ public sealed class MainViewModelTests : IDisposable
 
     private sealed class ConfirmingImportUiService : NoOpUiService
     {
-        public override bool? ShowImportServer(ImportServerViewModel viewModel) => true;
+        public override Task<bool?> ShowImportServerAsync(ImportServerViewModel viewModel) => Task.FromResult<bool?>(true);
     }
 }

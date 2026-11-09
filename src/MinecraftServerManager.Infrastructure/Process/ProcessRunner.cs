@@ -2,17 +2,19 @@ using System.Buffers;
 using System.Collections.Frozen;
 using System.Diagnostics;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading.Channels;
+using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
+
+using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Process;
 
 public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ProcessRunner");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ProcessRunner));
 
     private static readonly FrozenSet<string> AllowedOpenFileExtensions =
         new[] { ".txt", ".log", ".json", ".toml", ".properties", ".yml", ".yaml", ".ini", ".cfg", ".md", ".csv", ".html", ".htm", ".xlsx", ".xml" }
@@ -163,7 +165,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
         if (isBatchScript && !specification.UseShellExecute)
         {
             string comSpec = Environment.GetEnvironmentVariable("ComSpec") ??
-                             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
+                             Path.Combine(RuntimePaths.GetSystemDir(), "cmd.exe");
             if (!SafeFileSystem.FileExists(comSpec))
             {
                 throw new FileNotFoundException("找不到系統命令解譯器 (cmd.exe)", comSpec);
@@ -291,7 +293,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
         string basePath = specification.WorkingDirectory ?? Environment.CurrentDirectory;
         string candidatePath = Path.GetFullPath(fileName, basePath);
 
-        if (Path.IsPathRooted(fileName) ||
+        if (Path.IsPathFullyQualified(fileName) ||
             fileName.Contains(Path.DirectorySeparatorChar) ||
             fileName.Contains(Path.AltDirectorySeparatorChar) ||
             SafeFileSystem.FileExists(candidatePath))
@@ -313,7 +315,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
         if (string.Equals(fileName, "winget", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(fileName, "winget.exe", StringComparison.OrdinalIgnoreCase))
         {
-            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string localAppData = RuntimePaths.GetLocalAppDataDir();
             if (!string.IsNullOrEmpty(localAppData))
             {
                 string wingetDefault = Path.Combine(localAppData, "Microsoft", "WindowsApps", "winget.exe");
@@ -335,7 +337,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
             return false;
         }
 
-        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        string localAppData = RuntimePaths.GetLocalAppDataDir();
         if (string.IsNullOrEmpty(localAppData))
         {
             return false;
@@ -596,7 +598,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
             return line;
         }
 
-        string withoutAnsi = line.Contains('\x1B') ? AnsiEscapeRegex().Replace(line, string.Empty) : line;
+        string withoutAnsi = line.Contains('\x1B') ? ModHelpers.StripColorAndFormattingCodes(line) : line;
 
         if (!withoutAnsi.AsSpan().ContainsAny(InvalidControlOrEscapeChars))
         {
@@ -617,7 +619,4 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
 
         return new string(buffer[..written]);
     }
-
-    [GeneratedRegex(@"\x1B\[[0-?]*[ -/]*[@-~]")]
-    private static partial Regex AnsiEscapeRegex();
 }

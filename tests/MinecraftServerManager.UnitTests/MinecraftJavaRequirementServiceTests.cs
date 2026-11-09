@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Java;
@@ -5,8 +6,9 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class MinecraftJavaRequirementServiceTests : IDisposable
+public sealed partial class MinecraftJavaRequirementServiceTests : IDisposable
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(MinecraftJavaRequirementServiceTests));
     private readonly string _testTempDir;
 
     public MinecraftJavaRequirementServiceTests()
@@ -24,7 +26,10 @@ public sealed class MinecraftJavaRequirementServiceTests : IDisposable
                 Directory.Delete(_testTempDir, recursive: true);
             }
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+        }
     }
 
     [Fact]
@@ -70,6 +75,7 @@ public sealed class MinecraftJavaRequirementServiceTests : IDisposable
     }
 
     [Fact]
+    [RequiresUnreferencedCode("Testing reflection")]
     public async Task GetRequiredJavaMajorAsync_WhenCacheFileExists_LoadsAndReturnsWithoutHttp()
     {
         string cacheFile = Path.Combine(_testTempDir, MinecraftJavaRequirementService.RequirementsCacheFileName);
@@ -230,6 +236,9 @@ public sealed class MinecraftJavaRequirementServiceTests : IDisposable
     {
         public Dictionary<Uri, string> Responses { get; } = [];
         public int RequestCount { get; private set; }
+
+        public Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentAsync(Uri uri, CancellationToken cancellationToken = default) =>
+            TestHttpJson.FromTextAsync(this, uri, cancellationToken);
 
         public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default)
         {

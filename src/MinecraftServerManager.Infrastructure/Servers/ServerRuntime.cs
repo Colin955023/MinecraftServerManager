@@ -4,11 +4,13 @@ using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 
+using MinecraftServerManager.Core.Utilities;
+
 namespace MinecraftServerManager.Infrastructure.Servers;
 
 public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerRuntime");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerRuntime));
 
     private IManagedProcess? _process;
     private bool _disposed;
@@ -112,7 +114,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         else
         {
             var args = new List<string>();
-            int min = memoryMinMb ?? (memoryMaxMb > ServerDefaults.DefaultMemoryMinMb ? ServerDefaults.DefaultMemoryMinMb : memoryMaxMb);
+            int min = MemoryUtils.ResolveEffectiveMinMemoryMb(memoryMinMb, memoryMaxMb);
             args.Add($"-Xms{min}M");
             args.Add($"-Xmx{memoryMaxMb}M");
 
@@ -250,11 +252,6 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             IsReady = false;
         }
     }
-    private static string ResolveScriptPath(string stableDir, string scriptExecutable)
-    {
-        string scriptPath = Path.IsPathRooted(scriptExecutable)
-            ? scriptExecutable
-            : Path.Combine(stableDir, scriptExecutable);
-        return Path.GetFullPath(scriptPath);
-    }
+    private static string ResolveScriptPath(string stableDir, string scriptExecutable) =>
+        Path.GetFullPath(scriptExecutable, stableDir);
 }

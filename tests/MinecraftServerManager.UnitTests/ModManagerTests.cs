@@ -8,8 +8,9 @@ namespace MinecraftServerManager.UnitTests;
 /// <summary>
 /// 模組管理外觀服務測試
 /// </summary>
-public sealed class ModManagerTests : IDisposable
+public sealed partial class ModManagerTests : IDisposable
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModManagerTests));
     private readonly string _testDir;
 
     public ModManagerTests()
@@ -27,7 +28,10 @@ public sealed class ModManagerTests : IDisposable
                 Directory.Delete(_testDir, recursive: true);
             }
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+        }
     }
 
     [Fact]

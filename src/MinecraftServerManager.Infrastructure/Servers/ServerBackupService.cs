@@ -1,4 +1,5 @@
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Infrastructure.Utilities;
 using System.Globalization;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.FileSystem;
@@ -10,7 +11,7 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 /// </summary>
 public sealed class ServerBackupService(string serversRoot, int maxRetentionCount = 10) : IServerBackupService
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerBackupService");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerBackupService));
     private readonly string _resolvedServersRoot = SafeFileSystem.ResolveStableDirectory(serversRoot);
     private readonly int _maxRetentionCount = Math.Max(1, maxRetentionCount);
 
@@ -127,7 +128,7 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
                         name.Equals("crash-reports", StringComparison.OrdinalIgnoreCase) ||
                         name.Equals("backups", StringComparison.OrdinalIgnoreCase));
 
-                filesToBackup = entries
+                filesToBackup = [.. entries
                     .Where(static e => !e.IsDirectory)
                     .Where(e =>
                     {
@@ -146,10 +147,9 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
                                               filePath.Equals(legacyBackupsDir, StringComparison.OrdinalIgnoreCase);
 
                         return !isUnderBackups &&
-                               !filePath.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) &&
+                               !filePath.EndsWith(AtomicFileWriter.TempFileExtension, StringComparison.OrdinalIgnoreCase) &&
                                !filePath.EndsWith(".lock", StringComparison.OrdinalIgnoreCase);
-                    })
-                    .ToList();
+                    })];
             }
             catch (SafeFileSystemException ex) when (ex.Message.Contains("安全上限", StringComparison.OrdinalIgnoreCase))
             {
@@ -304,8 +304,9 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
                 progress?.Report(new ServerBackupProgressReport(100, "備份還原完成！", 0, 0));
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Error(ex, "還原備份失敗，執行交易復原");
                 // 發生異常時自動執行交易復原
                 try
                 {
@@ -339,6 +340,11 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
                     CleanDirectorySafe(rollbackDir);
                     CleanDirectorySafe(stagingDir);
                     CleanDirectorySafe(preservedLogsDir);
+                }
+
+                if (ex is OperationCanceledException)
+                {
+                    throw;
                 }
 
                 return false;

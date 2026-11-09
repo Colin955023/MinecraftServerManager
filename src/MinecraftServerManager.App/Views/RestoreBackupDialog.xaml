@@ -1,80 +1,153 @@
 <Window x:Class="MinecraftServerManager.App.Views.RestoreBackupDialog"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="{Binding WindowTitle}"
-        Width="640"
-        Height="460"
-        MinWidth="520"
-        MinHeight="380"
-        WindowStartupLocation="CenterScreen"
-        Background="{DynamicResource WindowBrush}"
-       >
-  <Grid Margin="24">
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="*" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
-    </Grid.RowDefinitions>
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:MinecraftServerManager.App.Controls"
+    xmlns:views="using:MinecraftServerManager.App.Views"
+    xmlns:vm="using:MinecraftServerManager.App.ViewModels">
 
-    <!-- 標題與說明 -->
-    <StackPanel Grid.Row="0" Margin="0,0,0,16">
-      <TextBlock Text="備份還原與管理" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" />
-      <TextBlock Text="選擇備份存檔進行還原（具備 Staging 交易安全防護與自動復原機制）"
-                 Foreground="{DynamicResource MutedTextBrush}" FontSize="12" Margin="0,4,0,0" />
-    </StackPanel>
+    <Grid Background="{ThemeResource WindowBrush}"
+        Padding="20"
+        RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
 
-    <!-- 備份表格 -->
-    <Border Grid.Row="1"
-            Background="{DynamicResource CardBrush}"
-            BorderBrush="{DynamicResource BorderBrush}"
+        <!-- 標題與說明 -->
+        <StackPanel Grid.Row="0"
+            Spacing="4">
+            <TextBlock Text="備份還原與管理"
+                Style="{ThemeResource TitleTextBlockStyle}" />
+            <TextBlock Text="選擇備份存檔進行還原（具備 Staging 交易安全防護與自動復原機制）"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Style="{ThemeResource CaptionTextBlockStyle}" />
+        </StackPanel>
+
+        <!-- 備份表格 ListView -->
+        <Border Grid.Row="1"
+            Background="{ThemeResource CardBrush}"
+            BorderBrush="{ThemeResource BorderBrush}"
             BorderThickness="1"
-            CornerRadius="6"
-            Margin="0,0,0,14">
-      <DataGrid ItemsSource="{Binding Backups}"
-                SelectedItem="{Binding SelectedBackup}"
-                AutoGenerateColumns="False"
-                IsReadOnly="True"
-                SelectionMode="Single"
-                GridLinesVisibility="None"
-                HeadersVisibility="Column"
-                RowHeaderWidth="0"
-                EnableRowVirtualization="True"
-                VirtualizingPanel.VirtualizationMode="Recycling">
-        <DataGrid.Columns>
-          <DataGridTextColumn Header="備份檔案名稱" Binding="{Binding FileName, Mode=OneTime}" Width="*" />
-          <DataGridTextColumn Header="檔案大小" Binding="{Binding SizeFormatted, Mode=OneTime}" Width="100" />
-          <DataGridTextColumn Header="建立時間" Binding="{Binding CreatedAtFormatted, Mode=OneTime}" Width="160" />
-        </DataGrid.Columns>
-      </DataGrid>
-    </Border>
+            CornerRadius="8"
+            Padding="12">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
 
-    <!-- 狀態提示 -->
-    <TextBlock Grid.Row="2"
-               Text="{Binding StatusMessage}"
-               Foreground="{DynamicResource MutedTextBrush}"
-               FontSize="12"
-               Margin="0,0,0,12" />
+                <Border Grid.Row="0"
+                    Background="{ThemeResource CardBrush}"
+                    BorderBrush="{ThemeResource DataGridGridLineBrush}"
+                    BorderThickness="1">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition
+                                Width="{x:Bind views:BackupListColumns.Current.FileNameWidth, Mode=OneWay}" />
+                            <ColumnDefinition
+                                Width="{x:Bind views:BackupListColumns.Current.SizeWidth, Mode=OneWay}" />
+                            <ColumnDefinition
+                                Width="{x:Bind views:BackupListColumns.Current.CreatedWidth, Mode=OneWay}" />
+                        </Grid.ColumnDefinitions>
+                        <controls:SortableTableHeader Grid.Column="0"
+                            Text="備份檔案名稱"
+                            SortPropertyName="FileName"
+                            ColumnWidth="{x:Bind views:BackupListColumns.Current.FileNameWidth, Mode=TwoWay}"
+                            SortRequested="OnHeaderSortRequested"
+                            AutoFitRequested="OnHeaderAutoFitRequested" />
+                        <controls:SortableTableHeader Grid.Column="1"
+                            Text="檔案大小"
+                            SortPropertyName="SizeFormatted"
+                            ColumnWidth="{x:Bind views:BackupListColumns.Current.SizeWidth, Mode=TwoWay}"
+                            SortRequested="OnHeaderSortRequested"
+                            AutoFitRequested="OnHeaderAutoFitRequested" />
+                        <controls:SortableTableHeader Grid.Column="2"
+                            Text="建立時間"
+                            SortPropertyName="CreatedAtFormatted"
+                            ColumnWidth="{x:Bind views:BackupListColumns.Current.CreatedWidth, Mode=TwoWay}"
+                            SortRequested="OnHeaderSortRequested"
+                            AutoFitRequested="OnHeaderAutoFitRequested" />
+                    </Grid>
+                </Border>
 
-    <!-- 底部按鈕區 -->
-    <Grid Grid.Row="3">
-      <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
-        <Button Content="刪除選取備份"
-                Command="{Binding DeleteCommand}"
-                Style="{DynamicResource DangerButtonStyle}"
-                Padding="14,6" />
-      </StackPanel>
+                <Border Grid.Row="1"
+                    BorderBrush="{ThemeResource DataGridGridLineBrush}"
+                    BorderThickness="1,0,1,1">
+                    <ListView ItemsSource="{x:Bind ViewModel.Backups, Mode=OneWay}"
+                        SelectedItem="{x:Bind ViewModel.SelectedBackup, Mode=TwoWay}"
+                        SelectionMode="Single"
+                        ItemContainerStyle="{StaticResource TableListViewItemStyle}">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:BackupDisplayItem">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition
+                                            Width="{x:Bind views:BackupListColumns.Current.FileNameWidth, Mode=OneWay}" />
+                                        <ColumnDefinition
+                                            Width="{x:Bind views:BackupListColumns.Current.SizeWidth, Mode=OneWay}" />
+                                        <ColumnDefinition
+                                            Width="{x:Bind views:BackupListColumns.Current.CreatedWidth, Mode=OneWay}" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0"
+                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
+                                        BorderThickness="0,0,1,0"
+                                        Padding="8,6">
+                                        <TextBlock Text="{x:Bind FileName}"
+                                            TextTrimming="CharacterEllipsis"
+                                            ToolTipService.ToolTip="{x:Bind FileName}"
+                                            VerticalAlignment="Center" />
+                                    </Border>
+                                    <Border Grid.Column="1"
+                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
+                                        BorderThickness="0,0,1,0"
+                                        Padding="8,6">
+                                        <TextBlock Text="{x:Bind SizeFormatted}"
+                                            TextTrimming="CharacterEllipsis"
+                                            ToolTipService.ToolTip="{x:Bind SizeFormatted}"
+                                            VerticalAlignment="Center" />
+                                    </Border>
+                                    <Border Grid.Column="2"
+                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
+                                        BorderThickness="0,0,1,0"
+                                        Padding="8,6">
+                                        <TextBlock Text="{x:Bind CreatedAtFormatted}"
+                                            TextTrimming="CharacterEllipsis"
+                                            ToolTipService.ToolTip="{x:Bind CreatedAtFormatted}"
+                                            VerticalAlignment="Center" />
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Border>
+            </Grid>
+        </Border>
 
-      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-        <Button Content="取消"
-                Command="{Binding CancelCommand}"
-                Margin="0,0,10,0"
-                Padding="16,6" />
-        <Button Content="開始還原"
-                Command="{Binding RestoreCommand}"
-                Style="{DynamicResource PrimaryButtonStyle}"
-                Padding="20,6" />
-      </StackPanel>
+        <!-- 狀態提示 -->
+        <TextBlock Grid.Row="2"
+            Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            Style="{ThemeResource CaptionTextBlockStyle}" />
+
+        <!-- 底部按鈕區 -->
+        <Grid Grid.Row="3">
+            <Button Content="刪除選取備份"
+                Command="{x:Bind ViewModel.DeleteCommand}"
+                HorizontalAlignment="Left" />
+
+            <StackPanel Orientation="Horizontal"
+                HorizontalAlignment="Right"
+                Spacing="10">
+                <Button Content="取消"
+                    Command="{x:Bind ViewModel.CancelCommand}"
+                    MinWidth="80" />
+                <Button Content="開始還原"
+                    Command="{x:Bind ViewModel.RestoreCommand}"
+                    Style="{ThemeResource AccentButtonStyle}"
+                    MinWidth="100" />
+            </StackPanel>
+        </Grid>
     </Grid>
-  </Grid>
 </Window>

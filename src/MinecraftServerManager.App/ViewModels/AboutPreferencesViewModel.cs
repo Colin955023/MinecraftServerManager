@@ -13,17 +13,15 @@ namespace MinecraftServerManager.App.ViewModels;
 /// </summary>
 public sealed partial class AboutPreferencesViewModel : PageViewModel
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("AboutPreferencesViewModel");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AboutPreferencesViewModel));
 
     private readonly IUiService _ui;
-
     private readonly SettingsManager? _settingsManager;
     private readonly IUpdateCheckerService? _updateChecker;
     private readonly IAppUpdateService? _appUpdateService;
     private readonly IExternalLauncher? _launcher;
     private readonly Action<string>? _onThemeModeChanged;
     private readonly Action? _onResetWindowSizeRequested;
-    private readonly Action<double>? _onUiScaleChanged;
     private readonly Action<string, bool>? _notificationSink;
 
     [ObservableProperty]
@@ -36,22 +34,22 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     public partial int SelectedThemeModeIndex { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsCustomScaleVisible))]
-    public partial int SelectedUiScaleIndex { get; set; } = 1;
-
-    [ObservableProperty]
-    public partial string CustomUiScaleText { get; set; } = "100";
-
-    /// <summary>
-    /// 選擇「自訂」時顯示輸入框與百分比提示。
-    /// </summary>
-    public bool IsCustomScaleVisible => SelectedUiScaleIndex == UiScaleOptions.Count - 1;
-
-    [ObservableProperty]
     public partial string ScreenResolutionInfo { get; set; } = "目前螢幕解析度：1920 × 1080";
 
     [ObservableProperty]
     public partial string CurrentWindowSizeInfo { get; set; } = "目前主視窗大小：1350 × 820";
+
+    [ObservableProperty]
+    public partial string? CustomAccentColor { get; set; }
+
+    [ObservableProperty]
+    public partial string AccentColorSummaryText { get; set; } = "使用 Windows 系統強調色（預設）";
+
+    [ObservableProperty]
+    public partial Windows.UI.Color CurrentAccentColor { get; set; } = AccentColorService.GetSystemAccentColor();
+
+    [ObservableProperty]
+    public partial bool IsCustomAccentColor { get; set; }
 
     public AboutPreferencesViewModel(
         SettingsManager? settingsManager = null,
@@ -60,7 +58,6 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         Action? onResetWindowSizeRequested = null,
         Action<string, bool>? notificationSink = null,
         IExternalLauncher? launcher = null,
-        Action<double>? onUiScaleChanged = null,
         IUiService? uiService = null,
         IAppUpdateService? appUpdateService = null)
         : base("about_preferences", "關於與設定", "檢視應用程式資訊、授權條款與視窗偏好設定")
@@ -71,7 +68,6 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         _appUpdateService = appUpdateService;
         _onThemeModeChanged = onThemeModeChanged;
         _onResetWindowSizeRequested = onResetWindowSizeRequested;
-        _onUiScaleChanged = onUiScaleChanged;
         _notificationSink = notificationSink;
         _launcher = launcher;
 
@@ -86,9 +82,22 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
                 _ => 0,
             };
 
-            double scale = _settingsManager.GetUiScale();
-            CustomUiScaleText = ((int)Math.Round(scale * 100)).ToString(System.Globalization.CultureInfo.InvariantCulture);
-            SelectedUiScaleIndex = PresetScales.IndexOf(scale) is int idx && idx >= 0 ? idx : UiScaleOptions.Count - 1;
+            string? savedAccent = _settingsManager.GetCustomAccentColor();
+            if (!string.IsNullOrWhiteSpace(savedAccent) && AccentColorService.ParseColor(savedAccent) is Windows.UI.Color parsed)
+            {
+                CustomAccentColor = savedAccent;
+                CurrentAccentColor = parsed;
+                IsCustomAccentColor = true;
+                AccentColorSummaryText = $"自訂顏色：{savedAccent}";
+                AccentColorService.ApplyAccentColor(savedAccent);
+            }
+            else
+            {
+                CustomAccentColor = null;
+                CurrentAccentColor = AccentColorService.GetSystemAccentColor();
+                IsCustomAccentColor = false;
+                AccentColorSummaryText = "使用 Windows 系統強調色（預設）";
+            }
         }
     }
 
@@ -100,34 +109,11 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
 
     public static string AppAuthor => AppInfo.Author;
 
-    public static string AppLicense => AppInfo.License;
 
     public static string AppTargetFramework => AppInfo.TargetFramework;
 
-    public static IReadOnlyList<string> ThemeModes { get; } = ["依照系統設定", "淺色", "深色"];
-
-    public static IReadOnlyList<string> UiScaleOptions { get; } = ["75%", "100% (預設)", "125%", "150%", "200%", "自訂"];
-
-    private static readonly List<double> PresetScales = [0.75, 1.0, 1.25, 1.5, 2.0];
-
-    /// <summary>
-    /// 由目前選擇換算出實際縮放倍率。
-    /// </summary>
-    public double ResolveUiScale()
-    {
-        if (SelectedUiScaleIndex >= 0 && SelectedUiScaleIndex < PresetScales.Count)
-        {
-            return PresetScales[SelectedUiScaleIndex];
-        }
-
-        if (double.TryParse(CustomUiScaleText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double percent)
-            && percent > 0)
-        {
-            return Math.Clamp(Math.Round(percent / 100.0, 2), 0.5, 3.0);
-        }
-
-        return 1.0;
-    }
+    private static readonly string[] ThemeModesCache = ["依照系統設定", "淺色", "深色"];
+    public static IReadOnlyList<string> ThemeModes => ThemeModesCache;
 
     [RelayCommand]
     partial void OnIsAutoUpdateEnabledChanged(bool value) => _settingsManager?.SetAutoUpdateEnabled(value);
@@ -143,23 +129,6 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
 
         _settingsManager?.SetThemeMode(mode);
         _onThemeModeChanged?.Invoke(mode);
-    }
-
-    partial void OnSelectedUiScaleIndexChanged(int value)
-    {
-        double scale = ResolveUiScale();
-        _settingsManager?.SetUiScale(scale);
-        _onUiScaleChanged?.Invoke(scale);
-    }
-
-    partial void OnCustomUiScaleTextChanged(string value)
-    {
-        if (SelectedUiScaleIndex == UiScaleOptions.Count - 1)
-        {
-            double scale = ResolveUiScale();
-            _settingsManager?.SetUiScale(scale);
-            _onUiScaleChanged?.Invoke(scale);
-        }
     }
 
     [RelayCommand]
@@ -187,6 +156,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         }
         catch (Exception ex)
         {
+            Logger.Warning(ex, "檢查更新失敗：{Message}", ex.Message);
             _notificationSink?.Invoke($"檢查更新失敗：{ex.Message}", true);
         }
     }
@@ -197,10 +167,10 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     public async Task HandleUpdateResultAsync(UpdateCheckResult result, CancellationToken cancellationToken = default)
     {
         string cleanedNotes = CleanReleaseNotes(result.ReleaseNotes);
-        bool confirm = _ui.Confirm(
+        bool confirm = await _ui.ConfirmAsync(
             $"發現新版本 {result.LatestVersion} (目前版本：{result.CurrentVersion})！\n\n更新內容：\n{cleanedNotes}\n\n是否立即更新主程式？",
             "發現新版本",
-            UiMessageLevel.Question);
+            UiMessageLevel.Question).ConfigureAwait(true);
 
         if (!confirm)
         {
@@ -210,10 +180,10 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
 
         if (string.IsNullOrWhiteSpace(result.DownloadUrl) || _appUpdateService is null)
         {
-            bool openWeb = _ui.Confirm(
+            bool openWeb = await _ui.ConfirmAsync(
                 "目前發布版本不支援直接自動安裝，是否前往 GitHub 發布頁面手動下載？",
                 "手動下載更新",
-                UiMessageLevel.Information);
+                UiMessageLevel.Information).ConfigureAwait(true);
             if (openWeb)
             {
                 _launcher?.OpenUrl(result.ReleasePageUrl, isTrusted: true);
@@ -249,10 +219,10 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         {
             progressDialog.Close();
             Logger.Error(ex, "主程式更新流程異常: {Message}", ex.Message);
-            bool fallback = _ui.Confirm(
+            bool fallback = await _ui.ConfirmAsync(
                 $"更新主程式失敗：{ex.Message}\n\n是否改為前往 GitHub 手動下載最新版本？",
                 "更新失敗",
-                UiMessageLevel.Error);
+                UiMessageLevel.Error).ConfigureAwait(true);
             if (fallback)
             {
                 _launcher?.OpenUrl(result.ReleasePageUrl, isTrusted: true);
@@ -309,40 +279,53 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     }
 
     [RelayCommand]
-    private void ResetToDefaultSize()
+    private async Task ResetToDefaultSizeAsync()
     {
-        if (_ui.Confirm("確定要將主視窗大小與位置重設為預設值嗎？", "確認重設視窗大小"))
+        if (await _ui.ConfirmAsync("確定要將主視窗大小與位置重設為預設值嗎？", "確認重設視窗大小").ConfigureAwait(true))
         {
             _onResetWindowSizeRequested?.Invoke();
         }
     }
 
     [RelayCommand]
-    private void ResetAllSettings()
+    private async Task ResetAllSettingsAsync()
     {
-        if (!_ui.Confirm("確定要將所有偏好設定還原為原廠預設值嗎？", "確認還原預設", UiMessageLevel.Warning))
+        if (!await _ui.ConfirmAsync("確定要將所有偏好設定還原為原廠預設值嗎？", "確認還原預設", UiMessageLevel.Warning).ConfigureAwait(true))
         {
             return;
         }
 
         IsAutoUpdateEnabled = true;
         SelectedThemeModeIndex = 0;
-
-        SelectedUiScaleIndex = 1;
-        CustomUiScaleText = "100";
+        ResetAccentColor();
 
         _settingsManager?.SetAutoUpdateEnabled(true);
         _settingsManager?.SetThemeMode("system");
-        _settingsManager?.SetUiScale(1.0);
         _onThemeModeChanged?.Invoke("system");
-        _onUiScaleChanged?.Invoke(1.0);
         _onResetWindowSizeRequested?.Invoke();
-
     }
 
-    public void UpdateDisplayInfo(int screenWidth, int screenHeight, int windowWidth, int windowHeight)
+    [RelayCommand]
+    public void SelectAccentColor(Windows.UI.Color color)
     {
-        ScreenResolutionInfo = $"目前螢幕解析度：{screenWidth} × {screenHeight}";
-        CurrentWindowSizeInfo = $"目前主視窗大小：{windowWidth} × {windowHeight}";
+        string hex = AccentColorService.ToHex(color);
+        CustomAccentColor = hex;
+        CurrentAccentColor = color;
+        IsCustomAccentColor = true;
+        AccentColorSummaryText = $"自訂顏色：{hex}";
+        _settingsManager?.SetCustomAccentColor(hex);
+        AccentColorService.ApplyAccentColor(hex);
     }
+
+    [RelayCommand]
+    public void ResetAccentColor()
+    {
+        CustomAccentColor = null;
+        CurrentAccentColor = AccentColorService.GetSystemAccentColor();
+        IsCustomAccentColor = false;
+        AccentColorSummaryText = "使用 Windows 系統強調色（預設）";
+        _settingsManager?.SetCustomAccentColor(null);
+        AccentColorService.ApplyAccentColor(null);
+    }
+
 }

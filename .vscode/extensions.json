@@ -1,6 +1,9 @@
 {
   "recommendations": [
     "ms-dotnettools.csdevkit",
-    "ms-dotnettools.csharp"
+    "ms-dotnettools.csharp",
+    "redhat.vscode-xml",
+    "redhat.vscode-yaml",
+    "ms-vscode.powershell"
   ]
 }

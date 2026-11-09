@@ -156,6 +156,30 @@ public sealed class SafeFileSystemTests
         }
     }
 
+    [Fact]
+    public void HasAnyFile_DetectsMatchesAndEarlyExits()
+    {
+        string root = CreateTemporaryDirectory();
+        try
+        {
+            string subDir = Path.Combine(root, "sub");
+            Directory.CreateDirectory(subDir);
+            File.WriteAllText(Path.Combine(subDir, "test.jar"), "dummy");
+
+            Assert.False(SafeFileSystem.HasAnyFile(root, "*.jar", SearchOption.TopDirectoryOnly));
+            Assert.True(SafeFileSystem.HasAnyFile(root, "*.jar", SearchOption.AllDirectories));
+            Assert.False(SafeFileSystem.HasAnyFile(root, "*.zip", SearchOption.AllDirectories));
+            Assert.False(SafeFileSystem.HasAnyFile(Path.Combine(root, "non_existent"), "*.jar"));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     private static string CreateTemporaryDirectory()
     {
         string path = Path.Combine(Path.GetTempPath(), "msm-filesystem-" + Guid.NewGuid().ToString("N"));

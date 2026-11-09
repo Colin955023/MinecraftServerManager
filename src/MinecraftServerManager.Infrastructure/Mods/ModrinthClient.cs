@@ -12,8 +12,10 @@ namespace MinecraftServerManager.Infrastructure.Mods;
 /// </summary>
 public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ModrinthClient");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModrinthClient));
     private const string BaseUrl = "https://api.modrinth.com/v2";
+    private static readonly string[] ProjectTypeFacet = ["project_type:mod"];
+    private static readonly string[] ServerSideFacet = ["server_side:required", "server_side:optional"];
 
     public async Task<IReadOnlyList<OnlineModInfo>> SearchModsAsync(
         string query,
@@ -26,24 +28,24 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var facets = new List<string>
+        var facets = new List<string[]>
         {
-            "[\"project_type:mod\"]",
-            "[\"server_side:required\",\"server_side:optional\"]"
+            ProjectTypeFacet,
+            ServerSideFacet
         };
         if (!string.IsNullOrWhiteSpace(loader) && !loader.Equals("unknown", StringComparison.OrdinalIgnoreCase) && !loader.Equals("vanilla", StringComparison.OrdinalIgnoreCase))
         {
-            facets.Add($"[\"categories:{loader.Trim().ToLowerInvariant()}\"]");
+            facets.Add([$"categories:{loader.Trim().ToLowerInvariant()}"]);
         }
         if (!string.IsNullOrWhiteSpace(minecraftVersion) && !minecraftVersion.Equals("unknown", StringComparison.OrdinalIgnoreCase))
         {
-            facets.Add($"[\"versions:{minecraftVersion.Trim()}\"]");
+            facets.Add([$"versions:{minecraftVersion.Trim()}"]);
         }
 
-        string facetsParam = Uri.EscapeDataString($"[{string.Join(",", facets)}]");
+        string facetsParam = Uri.EscapeDataString(JsonCodec.Serialize(facets.ToArray()));
         string queryParam = Uri.EscapeDataString(query ?? string.Empty);
         string indexParam = Uri.EscapeDataString(string.IsNullOrWhiteSpace(index) ? "relevance" : index.Trim());
-        string url = $"{BaseUrl}/search?query={queryParam}&facets={facetsParam}&index={indexParam}&limit={Math.Max(1, Math.Min(100, limit))}&offset={Math.Max(0, offset)}";
+        string url = $"{BaseUrl}/search?query={queryParam}&facets={facetsParam}&index={indexParam}&limit={Math.Clamp(limit, 1, 100)}&offset={Math.Max(0, offset)}";
 
         string? json = await httpPort.GetTextAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(json))
@@ -134,11 +136,11 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         var queryParams = new List<string>();
         if (!string.IsNullOrWhiteSpace(loader) && !loader.Equals("unknown", StringComparison.OrdinalIgnoreCase) && !loader.Equals("vanilla", StringComparison.OrdinalIgnoreCase))
         {
-            queryParams.Add($"loaders={Uri.EscapeDataString($"[\"{loader.Trim().ToLowerInvariant()}\"]")}");
+            queryParams.Add($"loaders={Uri.EscapeDataString(JsonCodec.Serialize(new[] { loader.Trim().ToLowerInvariant() }))}");
         }
         if (!string.IsNullOrWhiteSpace(minecraftVersion) && !minecraftVersion.Equals("unknown", StringComparison.OrdinalIgnoreCase))
         {
-            queryParams.Add($"game_versions={Uri.EscapeDataString($"[\"{minecraftVersion.Trim()}\"]")}");
+            queryParams.Add($"game_versions={Uri.EscapeDataString(JsonCodec.Serialize(new[] { minecraftVersion.Trim() }))}");
         }
 
         string queryString = queryParams.Count > 0 ? $"?{string.Join("&", queryParams)}" : string.Empty;

@@ -8,7 +8,7 @@ using Xunit;
 namespace MinecraftServerManager.UnitTests;
 
 [Collection("EnvironmentVariableCollection")]
-public sealed class SettingsAndLoggingTests
+public sealed partial class SettingsAndLoggingTests
 {
     [Fact]
     public void SettingsRoundTripPreservesTypedValues()
@@ -85,13 +85,13 @@ public sealed class SettingsAndLoggingTests
     public void ComponentLoggerBindsStructuredContext()
     {
         var logger = new CapturingLogger();
-        var componentLogger = new ComponentLogger(logger).Bind("component", "SettingsManager");
+        var Logger = new ComponentLogger(logger).Bind("component", nameof(SettingsManager));
 
-        componentLogger.Information("已載入 {Count} 筆設定", 3);
+        Logger.Information("已載入 {Count} 筆設定", 3);
 
         Assert.Equal(LogLevel.Information, logger.Level);
         Assert.Equal("已載入 3 筆設定", logger.Message);
-        Assert.Equal("SettingsManager", Assert.IsType<string>(logger.Scope!["component"]));
+        Assert.Equal(nameof(SettingsManager), Assert.IsType<string>(logger.Scope!["component"]));
         Assert.Equal(3, logger.Arguments![0]);
     }
 
@@ -174,7 +174,7 @@ public sealed class SettingsAndLoggingTests
         }
     }
 
-    private sealed class NoopDisposable : IDisposable
+    private sealed partial class NoopDisposable : IDisposable
     {
         public static NoopDisposable Instance { get; } = new();
 

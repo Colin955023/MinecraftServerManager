@@ -13,6 +13,7 @@ namespace MinecraftServerManager.UnitTests;
 [Collection("EnvironmentVariableCollection")]
 public sealed class RotatingFileLoggerTests
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(RotatingFileLoggerTests));
     [Fact]
     public void MaskerHidesPasswordsAndTokens()
     {
@@ -36,7 +37,7 @@ public sealed class RotatingFileLoggerTests
             var options = new RotatingFileLoggerOptions
             {
                 LogDirectory = tempDir,
-                MinimumLevel = LogLevel.Debug,
+                MinimumLevel = LogLevel.Information,
                 ProcessId = 1234,
                 OutputToConsole = false,
             };
@@ -76,7 +77,7 @@ public sealed class RotatingFileLoggerTests
             var options = new RotatingFileLoggerOptions
             {
                 LogDirectory = tempDir,
-                MinimumLevel = LogLevel.Debug,
+                MinimumLevel = LogLevel.Information,
                 ProcessId = 5678,
                 OutputToConsole = false,
             };
@@ -119,7 +120,7 @@ public sealed class RotatingFileLoggerTests
                 LogDirectory = tempDir,
                 MaxFileBytes = 300, // 極小限制以觸發輪替
                 MaxArchiveFiles = 5,
-                MinimumLevel = LogLevel.Debug,
+                MinimumLevel = LogLevel.Information,
                 ProcessId = 9999,
                 OutputToConsole = false,
             };
@@ -220,7 +221,10 @@ public sealed class RotatingFileLoggerTests
                     Directory.Delete(tempDir, recursive: true);
                 }
             }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+            }
         }
     }
 
@@ -298,7 +302,7 @@ public sealed class RotatingFileLoggerTests
             var options = new RotatingFileLoggerOptions
             {
                 LogDirectory = tempDir,
-                MinimumLevel = LogLevel.Debug,
+                MinimumLevel = LogLevel.Information,
                 ProcessId = 7777,
                 OutputToConsole = false,
             };
@@ -306,8 +310,8 @@ public sealed class RotatingFileLoggerTests
             AppLogging.Shutdown();
             AppLogging.Initialize(options);
 
-            var logger = AppLogging.CreateComponentLogger("AppTest");
-            logger.Information("AppLogging 初始化完成");
+            var Logger = AppLogging.CreateComponentLogger(nameof(RotatingFileLoggerTests));
+            Logger.Information("AppLogging 初始化完成");
 
             AppLogging.Shutdown();
 
@@ -315,7 +319,7 @@ public sealed class RotatingFileLoggerTests
             string item = Assert.Single(logFiles);
 
             string content = File.ReadAllText(item);
-            Assert.Contains(" | INFO     | AppTest | AppLogging 初始化完成", content, StringComparison.Ordinal);
+            Assert.Contains($" | INFO     | {nameof(RotatingFileLoggerTests)} | AppLogging 初始化完成", content, StringComparison.Ordinal);
         }
         finally
         {

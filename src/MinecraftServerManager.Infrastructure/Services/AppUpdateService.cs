@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Text.RegularExpressions;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Utilities;
@@ -12,7 +13,7 @@ namespace MinecraftServerManager.Infrastructure.Services;
 /// </summary>
 public sealed partial class AppUpdateService : IAppUpdateService
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("AppUpdateService");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AppUpdateService));
 
     [GeneratedRegex(@"\b[a-fA-F0-9]{64}\b")]
     private static partial Regex Sha256Regex();
@@ -86,7 +87,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
         }
 
         progress?.Report((10, "正在下載主程式更新檔..."));
-        var httpProgress = progress is null ? null : new Progress<HttpProgress>(p =>
+        var httpProgress = progress is null ? null : new SynchronousProgress<HttpProgress>(p =>
         {
             int percent = p.TotalBytes > 0 ? (int)Math.Clamp((p.BytesDownloaded * 80 / p.TotalBytes) + 10, 10, 90) : 50;
             string msg = p.TotalBytes > 0
@@ -181,7 +182,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
             _processRunner.StartDetached(new ProcessStartSpec(
                 currentExePath,
                 [],
-                WorkingDirectory: AppDomain.CurrentDomain.BaseDirectory,
+                WorkingDirectory: Path.GetDirectoryName(currentExePath) ?? AppDomain.CurrentDomain.BaseDirectory,
                 CreateNoWindow: false));
 
             Logger.Information("新版主程式已成功替換並啟動: Target={Target}, OldBackup={Backup}", currentExePath, oldExePath);
@@ -254,7 +255,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
                 return false;
             }
 
-            int peOffset = BitConverter.ToInt32(dos[0x3C..0x40]);
+            int peOffset = BinaryPrimitives.ReadInt32LittleEndian(dos[0x3C..0x40]);
             long peOffsetLimit = fs.Length - 4;
             if (peOffset < 64 || peOffset > peOffsetLimit)
             {

@@ -1,0 +1,28 @@
+<Solution>
+    <Configurations>
+        <BuildType Name="Debug" />
+        <BuildType Name="Release" />
+        <Platform Name="x64" />
+    </Configurations>
+    <Folder Name="/Solution Items/">
+        <File Path=".editorconfig" />
+        <File Path=".gitattributes" />
+        <File Path=".gitignore" />
+        <File Path="Directory.Build.props" />
+        <File Path="Directory.Packages.props" />
+        <File Path="global.json" />
+    </Folder>
+    <Folder Name="/src/">
+        <Project Path="src/MinecraftServerManager.Domain/MinecraftServerManager.Domain.csproj" />
+        <Project Path="src/MinecraftServerManager.Core/MinecraftServerManager.Core.csproj" />
+        <Project
+            Path="src/MinecraftServerManager.Infrastructure/MinecraftServerManager.Infrastructure.csproj" />
+        <Project Path="src/MinecraftServerManager.App/MinecraftServerManager.App.csproj" />
+    </Folder>
+    <Folder Name="/tests/">
+        <Project
+            Path="tests/MinecraftServerManager.IntegrationTests/MinecraftServerManager.IntegrationTests.csproj" />
+        <Project
+            Path="tests/MinecraftServerManager.UnitTests/MinecraftServerManager.UnitTests.csproj" />
+    </Folder>
+</Solution>

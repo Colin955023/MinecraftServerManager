@@ -19,8 +19,6 @@ public sealed class SettingsManager
         _settings = LoadSettings();
     }
 
-    public string SettingsPath => _settingsPath;
-
     public UserSettings Snapshot
     {
         get
@@ -32,7 +30,7 @@ public sealed class SettingsManager
         }
     }
 
-    public static string NormalizeServersRootPath(string? path)
+    public static string NormalizeExactServersRootPath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -42,12 +40,7 @@ public sealed class SettingsManager
         try
         {
             string resolved = Path.GetFullPath(path.Trim());
-            if (!string.Equals(Path.GetFileName(resolved), "servers", StringComparison.OrdinalIgnoreCase))
-            {
-                resolved = Path.Combine(resolved, "servers");
-            }
-
-            return Path.TrimEndingDirectorySeparator(Path.GetFullPath(resolved));
+            return Path.TrimEndingDirectorySeparator(resolved);
         }
         catch (ArgumentException)
         {
@@ -59,7 +52,21 @@ public sealed class SettingsManager
         }
     }
 
+    public static string NormalizeServersRootPath(string? path)
+    {
+        string resolved = NormalizeExactServersRootPath(path);
+        if (string.IsNullOrEmpty(resolved))
+        {
+            return string.Empty;
+        }
 
+        if (!string.Equals(Path.GetFileName(resolved), "servers", StringComparison.OrdinalIgnoreCase))
+        {
+            resolved = Path.Combine(resolved, "servers");
+        }
+
+        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(resolved));
+    }
 
     public string GetServersRoot()
     {
@@ -79,6 +86,16 @@ public sealed class SettingsManager
         Update(settings => settings with { ServersRoot = normalized });
     }
 
+    public void SetExactServersRoot(string? path)
+    {
+        string normalized = NormalizeExactServersRootPath(path);
+        if (!string.IsNullOrEmpty(normalized))
+        {
+            SafeFileSystem.ResolveStableDirectory(normalized, create: true);
+        }
+        Update(settings => settings with { ServersRoot = normalized });
+    }
+
     public string GetValidatedServersRootPath(bool create = false)
     {
         string serversRoot = GetServersRoot();
@@ -87,7 +104,7 @@ public sealed class SettingsManager
             throw new ConfigurationException("尚未設定伺服器主資料夾");
         }
 
-        serversRoot = NormalizeServersRootPath(serversRoot);
+        serversRoot = NormalizeExactServersRootPath(serversRoot);
         if (SafeFileSystem.FileExists(serversRoot))
         {
             throw new ConfigurationException($"伺服器資料夾路徑無效： {serversRoot}");
@@ -136,29 +153,6 @@ public sealed class SettingsManager
 
     public void MarkFirstRunCompleted() => Update(static settings => settings with { FirstRunCompleted = true });
 
-    /// <summary>
-    /// 全域 UI 縮放比例（0.5～3.0，預設 1.0）
-    /// </summary>
-    public double GetUiScale()
-    {
-        lock (_syncRoot)
-        {
-            return NormalizeUiScale(_settings.UiScale);
-        }
-    }
-
-    public void SetUiScale(double scale) => Update(settings => settings with { UiScale = NormalizeUiScale(scale) });
-
-    private static double NormalizeUiScale(double scale)
-    {
-        if (double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0)
-        {
-            return 1.0;
-        }
-
-        return Math.Clamp(Math.Round(scale, 2), 0.5, 3.0);
-    }
-
     public WindowPreferences GetWindowPreferences()
     {
         lock (_syncRoot)
@@ -181,6 +175,10 @@ public sealed class SettingsManager
 
     public void SetThemeMode(string? mode) => UpdateWindowPreferences(preferences => preferences with { ThemeMode = NormalizeThemeMode(mode) });
 
+    public string? GetCustomAccentColor() => GetWindowPreferences().CustomAccentColor;
+
+    public void SetCustomAccentColor(string? hex) => UpdateWindowPreferences(preferences => preferences with { CustomAccentColor = string.IsNullOrWhiteSpace(hex) ? null : hex.Trim() });
+
     private static WindowPreferences NormalizeWindowPreferences(WindowPreferences? preferences)
     {
         preferences ??= new WindowPreferences();
@@ -189,6 +187,7 @@ public sealed class SettingsManager
         {
             ThemeMode = NormalizeThemeMode(preferences.ThemeMode),
             MainWindow = mainWindow,
+            CustomAccentColor = string.IsNullOrWhiteSpace(preferences.CustomAccentColor) ? null : preferences.CustomAccentColor.Trim(),
         };
     }
 
@@ -235,7 +234,7 @@ public sealed class SettingsManager
     {
         return settings with
         {
-            ServersRoot = NormalizeServersRootPath(settings.ServersRoot).Trim(),
+            ServersRoot = NormalizeExactServersRootPath(settings.ServersRoot).Trim(),
             WindowPreferences = NormalizeWindowPreferences(settings.WindowPreferences),
         };
     }

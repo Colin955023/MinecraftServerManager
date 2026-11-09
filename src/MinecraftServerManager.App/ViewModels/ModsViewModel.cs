@@ -1,13 +1,13 @@
 using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.App.Controls;
 using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Services;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Globalization;
-using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using MinecraftServerManager.App.Views;
+using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Domain.Servers;
@@ -27,7 +27,7 @@ public sealed partial class LocalModRowItem : ObservableObject
 
     public string Version { get; init; } = string.Empty;
 
-    public string FileName { get; init; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
 
     public string FileSize { get; init; } = "-";
 
@@ -66,7 +66,7 @@ public sealed class OnlineModRowItem
 
     public string? Slug { get; init; }
 
-    public string Title { get; init; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
 
     public string Author { get; init; } = string.Empty;
 
@@ -88,27 +88,27 @@ public sealed class OnlineModRowItem
 /// </summary>
 public sealed class ModInstallQueueItem
 {
-    public string ProjectId { get; init; } = string.Empty;
+    public string ProjectId { get; set; } = string.Empty;
 
-    public string Title { get; init; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
 
-    public string VersionNumber { get; init; } = string.Empty;
+    public string VersionNumber { get; set; } = string.Empty;
 
-    public string? CurrentVersion { get; init; }
+    public string? CurrentVersion { get; set; }
 
-    public string FileName { get; init; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
 
-    public string? OldFileName { get; init; }
+    public string? OldFileName { get; set; }
 
-    public string DownloadUrl { get; init; } = string.Empty;
+    public string DownloadUrl { get; set; } = string.Empty;
 
-    public string? ExpectedHash { get; init; }
+    public string? ExpectedHash { get; set; }
 
-    public string HashAlgorithm { get; init; } = "sha512";
+    public string HashAlgorithm { get; set; } = "sha512";
 
-    public IReadOnlyList<string> Dependencies { get; init; } = [];
+    public IReadOnlyList<string> Dependencies { get; set; } = (string[])[];
 
-    public ModInstallAction Action { get; init; } = ModInstallAction.Install;
+    public ModInstallAction Action { get; set; } = ModInstallAction.Install;
 
     public string ActionText => Action == ModInstallAction.Update ? "更新" : "安裝";
 
@@ -116,7 +116,7 @@ public sealed class ModInstallQueueItem
         ? $"{CurrentVersion} ➔ {VersionNumber}"
         : VersionNumber;
 
-    public string Reason { get; init; } = "全新安裝";
+    public string Reason { get; set; } = "全新安裝";
 }
 
 /// <summary>
@@ -126,7 +126,8 @@ public sealed partial class ModsViewModel : PageViewModel
 {
     private readonly IUiService _ui;
 
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("Mods");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModsViewModel));
+    private const string NoServerPlaceholder = "請選擇伺服器";
 
     private readonly Action<string, bool>? _notificationSink;
     private readonly IServerManager? _serverManager;
@@ -150,7 +151,7 @@ public sealed partial class ModsViewModel : PageViewModel
     private bool _isLoadingServers;
 
     [ObservableProperty]
-    public partial string SelectedServer { get; set; } = "請選擇伺服器";
+    public partial string SelectedServer { get; set; } = NoServerPlaceholder;
 
     [ObservableProperty]
     public partial bool HasSelectedServer { get; set; }
@@ -214,16 +215,19 @@ public sealed partial class ModsViewModel : PageViewModel
     /// <summary>
     /// 待安裝模組佇列。
     /// </summary>
-    public ObservableCollection<ModInstallQueueItem> InstallQueue { get; } = [];
+    public BulkObservableCollection<ModInstallQueueItem> InstallQueue { get; } = [];
 
     public BulkObservableCollection<LocalModRowItem> LocalMods { get; } = [];
 
     public BulkObservableCollection<OnlineModRowItem> OnlineMods { get; } = [];
 
-    public static IReadOnlyList<string> LocalFilterOptions { get; } = ["全部", "已啟用", "已停用"];
+    private static readonly string[] LocalFilterOptionsCache = ["全部", "已啟用", "已停用"];
+    public static IReadOnlyList<string> LocalFilterOptions => LocalFilterOptionsCache;
 
-    public static IReadOnlyList<string> OnlineSortOptions { get; } = ["相關性", "下載量", "最新發布", "最近更新", "名稱"];
-    public static IReadOnlyList<string> PlatformOptions { get; } = ["Modrinth", "CurseForge"];
+    private static readonly string[] OnlineSortOptionsCache = ["相關性", "下載量", "最新發布", "最近更新", "名稱"];
+    public static IReadOnlyList<string> OnlineSortOptions => OnlineSortOptionsCache;
+    private static readonly string[] PlatformOptionsCache = ["Modrinth", "CurseForge"];
+    public static IReadOnlyList<string> PlatformOptions => PlatformOptionsCache;
 
     public ModsViewModel(
         IServerManager? serverManager = null,
@@ -304,7 +308,7 @@ public sealed partial class ModsViewModel : PageViewModel
 
     partial void OnSelectedServerChanged(string value)
     {
-        HasSelectedServer = !string.IsNullOrWhiteSpace(value) && value != "請選擇伺服器";
+        HasSelectedServer = !string.IsNullOrWhiteSpace(value) && value != NoServerPlaceholder;
         _ = RunSafeAsync(LoadLocalModsAsync, "載入本機模組清單", Logger);
     }
 
@@ -360,8 +364,8 @@ public sealed partial class ModsViewModel : PageViewModel
                 }
             }
 
-            Servers.Add("請選擇伺服器");
-            SelectedServer = "請選擇伺服器";
+            Servers.Add(NoServerPlaceholder);
+            SelectedServer = NoServerPlaceholder;
         }
         catch (Exception ex)
         {
@@ -399,7 +403,7 @@ public sealed partial class ModsViewModel : PageViewModel
             CanDeleteMod = false;
             DeleteSelectedModCommand.NotifyCanExecuteChanged();
 
-            if (_serverManager is null || _modManager is null || string.IsNullOrWhiteSpace(SelectedServer) || SelectedServer == "請選擇伺服器")
+            if (_serverManager is null || _modManager is null || !HasSelectedServer)
             {
                 OnlineFilterHint = "請先選擇伺服器以篩選相容模組";
                 return;
@@ -481,8 +485,9 @@ public sealed partial class ModsViewModel : PageViewModel
                 .ToLocalTime()
                 .ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("轉換模組發布時間失敗: {0}", ex.Message);
             return "-";
         }
     }
@@ -544,7 +549,7 @@ public sealed partial class ModsViewModel : PageViewModel
     [RelayCommand]
     public async Task ToggleModAsync(LocalModRowItem? mod)
     {
-        if (mod is null || _serverManager is null || _modManager is null || string.IsNullOrWhiteSpace(SelectedServer) || SelectedServer == "請選擇伺服器")
+        if (mod is null || _serverManager is null || _modManager is null || !HasSelectedServer)
         {
             return;
         }
@@ -581,7 +586,7 @@ public sealed partial class ModsViewModel : PageViewModel
             return;
         }
 
-        if (_serverManager is null || _modManager is null || string.IsNullOrWhiteSpace(SelectedServer) || SelectedServer == "請選擇伺服器")
+        if (_serverManager is null || _modManager is null || !HasSelectedServer)
         {
             return;
         }
@@ -677,7 +682,7 @@ public sealed partial class ModsViewModel : PageViewModel
             return;
         }
 
-        if (_serverManager is null || _modrinthClient is null || string.IsNullOrWhiteSpace(SelectedServer) || SelectedServer == "請選擇伺服器")
+        if (_serverManager is null || _modrinthClient is null || !HasSelectedServer)
         {
             _notificationSink?.Invoke("請先選擇伺服器以檢查更新", true);
             return;
@@ -701,24 +706,26 @@ public sealed partial class ModsViewModel : PageViewModel
         {
             progressDialog?.UpdateProgress(0, targets.Count, $"正在向 Modrinth 批次查詢 {targets.Count} 個模組雜湊資訊...");
 
-            // 階段 1：收集所有雜湊，以 1 次批量請求反查官方 ProjectId
-            var sha512Hashes = targets
-                .Where(m => !string.IsNullOrWhiteSpace(m.CurrentHash) && string.Equals(m.HashAlgorithm, "sha512", StringComparison.OrdinalIgnoreCase))
-                .Select(m => m.CurrentHash!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            var sha1Hashes = targets
-                .Where(m => !string.IsNullOrWhiteSpace(m.CurrentHash) && string.Equals(m.HashAlgorithm, "sha1", StringComparison.OrdinalIgnoreCase))
-                .Select(m => m.CurrentHash!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
+            // 階段 1：收集所有雜湊，以批量請求反查官方 ProjectId
             var projectMapByHash = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            if (sha512Hashes.Count > 0)
+            await PopulateProjectMapByHashAsync("sha512").ConfigureAwait(true);
+            await PopulateProjectMapByHashAsync("sha1").ConfigureAwait(true);
+
+            async Task PopulateProjectMapByHashAsync(string algorithm)
             {
+                var hashes = targets
+                    .Where(m => !string.IsNullOrWhiteSpace(m.CurrentHash) && string.Equals(m.HashAlgorithm, algorithm, StringComparison.OrdinalIgnoreCase))
+                    .Select(m => m.CurrentHash!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (hashes.Count == 0)
+                {
+                    return;
+                }
+
                 try
                 {
-                    var lookupResults = await _modrinthClient.LookupVersionsByHashesAsync(sha512Hashes, "sha512").ConfigureAwait(true);
+                    var lookupResults = await _modrinthClient.LookupVersionsByHashesAsync(hashes, algorithm).ConfigureAwait(true);
                     foreach (var (hash, result) in lookupResults)
                     {
                         if (!string.IsNullOrWhiteSpace(result?.ProjectId))
@@ -729,25 +736,7 @@ public sealed partial class ModsViewModel : PageViewModel
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warning("批次查詢 SHA-512 雜湊失敗: {Error}", ex.Message);
-                }
-            }
-            if (sha1Hashes.Count > 0)
-            {
-                try
-                {
-                    var lookupResults = await _modrinthClient.LookupVersionsByHashesAsync(sha1Hashes, "sha1").ConfigureAwait(true);
-                    foreach (var (hash, result) in lookupResults)
-                    {
-                        if (!string.IsNullOrWhiteSpace(result?.ProjectId))
-                        {
-                            projectMapByHash[hash] = result.ProjectId;
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning("批次查詢 SHA-1 雜湊失敗: {Error}", ex.Message);
+                    Logger.Warning("批次查詢 {Algorithm} 雜湊失敗: {Error}", algorithm, ex.Message);
                 }
             }
 
@@ -813,24 +802,14 @@ public sealed partial class ModsViewModel : PageViewModel
                         if (compatibleLatest is not null)
                         {
                             var primaryFile = compatibleLatest.PrimaryFile!;
-                            string? sha512 = null;
-                            string? sha1 = null;
-                            if (primaryFile.Hashes is not null)
-                            {
-                                primaryFile.Hashes.TryGetValue("sha512", out sha512);
-                                primaryFile.Hashes.TryGetValue("sha1", out sha1);
-                            }
+                            string? expectedHash = ModHelpers.ResolveHash(primaryFile, out string resolvedAlgo);
+                            string? hashAlgo = expectedHash is not null ? resolvedAlgo : null;
 
                             // 1. 雜湊比對：若本地模組雜湊與線上最新版本之雜湊相符，代表已是同一檔案最新版
-                            bool hashMatches = false;
-                            if (!string.IsNullOrWhiteSpace(mod.CurrentHash))
-                            {
-                                if ((sha512 is not null && string.Equals(mod.CurrentHash, sha512, StringComparison.OrdinalIgnoreCase)) ||
-                                    (sha1 is not null && string.Equals(mod.CurrentHash, sha1, StringComparison.OrdinalIgnoreCase)))
-                                {
-                                    hashMatches = true;
-                                }
-                            }
+                            bool hashMatches = !string.IsNullOrWhiteSpace(mod.CurrentHash) &&
+                                primaryFile.Hashes is not null &&
+                                ((primaryFile.Hashes.TryGetValue("sha512", out string? sha512) && string.Equals(mod.CurrentHash, sha512, StringComparison.OrdinalIgnoreCase)) ||
+                                 (primaryFile.Hashes.TryGetValue("sha1", out string? sha1) && string.Equals(mod.CurrentHash, sha1, StringComparison.OrdinalIgnoreCase)));
 
                             // 2. 語意版本比對：依據 FlexVersion 規格比對，線上最新版本必須大於本地版本
                             int versionComparison = FlexVersion.Compare(compatibleLatest.VersionNumber, mod.Version);
@@ -838,9 +817,6 @@ public sealed partial class ModsViewModel : PageViewModel
                             // 只有在版本更大且雜湊不同時，才判定為有可用更新，杜絕降級與虛假更新
                             if (!hashMatches && versionComparison > 0)
                             {
-                                string? expectedHash = sha512 ?? sha1;
-                                string? hashAlgo = sha512 is not null ? "sha512" : (sha1 is not null ? "sha1" : null);
-
                                 candidates.Add(new ModUpdateCandidateItem
                                 {
                                     ModName = mod.Name,
@@ -874,7 +850,7 @@ public sealed partial class ModsViewModel : PageViewModel
 
             if (sortedCandidates.Count > 0)
             {
-                if (_ui.ShowModUpdates(sortedCandidates) is { } toUpdate)
+                if (await _ui.ShowModUpdatesAsync(sortedCandidates) is { } toUpdate)
                 {
                     if (toUpdate.Count > 0)
                     {
@@ -908,7 +884,7 @@ public sealed partial class ModsViewModel : PageViewModel
             string msg = "下列模組更新下載來源非官方 Modrinth CDN：\n" +
                          string.Join("\n", unofficial.Select(static u => $"• {u.ModName}: {u.DownloadUrl}")) +
                          "\n\n非官方來源可能存在安全風險，是否仍要繼續下載並更新？";
-            if (!_ui.Confirm(msg, "非官方下載來源警告", UiMessageLevel.Warning))
+            if (!await _ui.ConfirmAsync(msg, "非官方下載來源警告", UiMessageLevel.Warning))
             {
                 return;
             }
@@ -939,7 +915,7 @@ public sealed partial class ModsViewModel : PageViewModel
                         item.HashAlgorithm,
                         cancellationToken: token).ConfigureAwait(false);
 
-                    if (installResult?.Completed == true)
+                    if (installResult?.Completed == true && item.LocalMod is not null)
                     {
                         if (!item.LocalMod.IsEnabled)
                         {
@@ -949,7 +925,7 @@ public sealed partial class ModsViewModel : PageViewModel
                         if (!string.Equals(item.LocalMod.FileName, item.FileName, StringComparison.OrdinalIgnoreCase))
                         {
                             string oldTarget = !string.IsNullOrEmpty(item.LocalMod.FileName) ? item.LocalMod.FileName : item.LocalMod.Id;
-                            await modManager.DeleteModsAsync(serverPath, [oldTarget], cancellationToken: token).ConfigureAwait(false);
+                            await modManager.DeleteModsAsync(serverPath, (string[])[oldTarget], cancellationToken: token).ConfigureAwait(false);
                         }
 
                         Logger.Information("成功更新模組「{Name}」至版本 {Version}", item.ModName, item.NewVersion);
@@ -980,7 +956,7 @@ public sealed partial class ModsViewModel : PageViewModel
     [RelayCommand]
     public async Task OpenModsFolderAsync()
     {
-        if (_serverManager is null || string.IsNullOrWhiteSpace(SelectedServer) || SelectedServer == "請選擇伺服器")
+        if (_serverManager is null || !HasSelectedServer)
         {
             _notificationSink?.Invoke("請先選擇伺服器", true);
             return;
@@ -1011,7 +987,7 @@ public sealed partial class ModsViewModel : PageViewModel
             return;
         }
 
-        if (_serverManager is null || string.IsNullOrWhiteSpace(SelectedServer) || SelectedServer == "請選擇伺服器")
+        if (_serverManager is null || !HasSelectedServer)
         {
             return;
         }
@@ -1066,7 +1042,7 @@ public sealed partial class ModsViewModel : PageViewModel
     [RelayCommand]
     public async Task ImportModsAsync()
     {
-        if (_serverManager is null || _modManager is null || string.IsNullOrWhiteSpace(SelectedServer) || SelectedServer == "請選擇伺服器")
+        if (_serverManager is null || _modManager is null || !HasSelectedServer)
         {
             _notificationSink?.Invoke("請先選擇伺服器以匯入模組", true);
             return;
@@ -1078,7 +1054,7 @@ public sealed partial class ModsViewModel : PageViewModel
             return;
         }
 
-        if (_ui.PickFiles("選取要匯入的 Minecraft 模組檔案 (.jar)", "Minecraft 模組 (*.jar)|*.jar|所有檔案 (*.*)|*.*", multiselect: true) is { } files)
+        if (await _ui.PickFilesAsync("選取要匯入的 Minecraft 模組檔案 (.jar)", "Minecraft 模組 (*.jar)|*.jar|所有檔案 (*.*)|*.*", multiselect: true) is { } files)
         {
             int count = 0;
             foreach (string file in files)
@@ -1111,7 +1087,7 @@ public sealed partial class ModsViewModel : PageViewModel
             return;
         }
 
-        if (_serverManager is null || _modManager is null || string.IsNullOrWhiteSpace(SelectedServer) || SelectedServer == "請選擇伺服器")
+        if (_serverManager is null || _modManager is null || !HasSelectedServer)
         {
             return;
         }
@@ -1126,7 +1102,7 @@ public sealed partial class ModsViewModel : PageViewModel
             ? $"確定要刪除模組「{targets[0].Name}」嗎？\n此操作將永久刪除對應檔案，無法復原。"
             : $"確定要刪除選取的 {targets.Count} 個模組嗎？\n此操作將永久刪除對應檔案，無法復原。";
 
-        if (!_ui.Confirm(confirmMsg, "確認刪除模組", UiMessageLevel.Warning))
+        if (!await _ui.ConfirmAsync(confirmMsg, "確認刪除模組", UiMessageLevel.Warning))
         {
             return;
         }
@@ -1162,16 +1138,16 @@ public sealed partial class ModsViewModel : PageViewModel
     }
 
     [RelayCommand]
-    public void ExportModList()
+    public async Task ExportModListAsync()
     {
-        if (string.IsNullOrWhiteSpace(SelectedServer) || SelectedServer == "請選擇伺服器" || _allLocalMods.Count == 0)
+        if (!HasSelectedServer || _allLocalMods.Count == 0)
         {
             _notificationSink?.Invoke("目前伺服器沒有可匯出的本地模組", true);
             return;
         }
 
         var rows = _allLocalMods.Select(ToExportRow).ToList();
-        _ui.ShowExportModList(SelectedServer, rows, _modListExporter, _launcher);
+        await _ui.ShowExportModListAsync(SelectedServer, rows, _modListExporter, _launcher);
     }
 
 
@@ -1202,7 +1178,7 @@ public sealed partial class ModsViewModel : PageViewModel
             string? loader = null;
             string? mcVersion = null;
 
-            if (_serverManager is not null && !string.IsNullOrWhiteSpace(SelectedServer) && SelectedServer != "請選擇伺服器")
+            if (_serverManager is not null && HasSelectedServer)
             {
                 var server = await _serverManager.GetServerAsync(SelectedServer);
                 if (server is not null)
@@ -1272,7 +1248,7 @@ public sealed partial class ModsViewModel : PageViewModel
         IEnumerable<OnlineModRowItem> sorted = SelectedOnlineSort switch
         {
             "下載量" => _allOnlineMods.OrderByDescending(static m => m.DownloadCountRaw),
-            "名稱" => _allOnlineMods.OrderBy(static m => m.Title, StringComparer.OrdinalIgnoreCase),
+            "名稱" => _allOnlineMods.OrderBy(static m => m.Title, StringNaturalComparer.Instance),
             _ => _allOnlineMods
         };
 
@@ -1280,7 +1256,10 @@ public sealed partial class ModsViewModel : PageViewModel
     }
 
     /// <summary>
-    /// 取得所有相容版本並彈出版本選擇對話方塊。
+    /// 完成相依性評估後統一批次下載安裝。
+    /// </summary>
+    /// <summary>
+    /// 取得所有相容版本並彈出版本選擇對話方塊，將選定版本與必要相依模組加入安裝清單。
     /// </summary>
     [RelayCommand]
     public async Task PickOnlineModVersionAsync(OnlineModRowItem? mod)
@@ -1292,153 +1271,154 @@ public sealed partial class ModsViewModel : PageViewModel
         }
 
         // 偵測伺服器端環境相容性，防範純用戶端模組造成伺服器當機
-        if (string.Equals(mod.ServerSide, "unsupported", StringComparison.OrdinalIgnoreCase))
-        {
-            bool proceed = _ui.Confirm(
+        if (string.Equals(mod.ServerSide, "unsupported", StringComparison.OrdinalIgnoreCase)
+            && !await _ui.ConfirmAsync(
                 $"模組「{mod.Title}」在 Modrinth 標記為純用戶端模組 (server_side: unsupported)，在伺服器端執行可能引發當機！\n\n是否仍要強行挑選版本並加入安裝清單？",
                 "伺服器端環境不相容警告",
-                UiMessageLevel.Warning);
-            if (!proceed)
-            {
-                return;
-            }
-        }
-
-        string? loader = null;
-        string? mcVersion = null;
-        if (_serverManager is not null && HasSelectedServer)
-        {
-            var server = await _serverManager.GetServerAsync(SelectedServer);
-            if (server is not null)
-            {
-                loader = server.LoaderType.ToString().ToLowerInvariant();
-                mcVersion = server.MinecraftVersion.Value;
-            }
-        }
-
-        var pickerVm = new ModVersionPickerViewModel(_modrinthClient, mod.Id, mod.Title, loader, mcVersion);
-        if (_ui.ShowModVersionPicker(pickerVm) != true || pickerVm.QueuedVersion is null)
+                UiMessageLevel.Warning).ConfigureAwait(true))
         {
             return;
         }
 
-        var chosen = pickerVm.QueuedVersion;
-        var queueItem = new ModInstallQueueItem
+        ServerConfig? server = null;
+        if (_serverManager is not null && HasSelectedServer)
         {
-            ProjectId = mod.Id,
-            Title = mod.Title,
-            VersionNumber = chosen.VersionNumber,
-            FileName = chosen.FileName,
-            DownloadUrl = chosen.DownloadUrl,
-            ExpectedHash = chosen.ExpectedHash,
-            HashAlgorithm = chosen.HashAlgorithm,
-            Dependencies = chosen.Dependencies
-        };
-
-        if (!InstallQueue.Any(i => string.Equals(i.FileName, queueItem.FileName, StringComparison.OrdinalIgnoreCase)))
-        {
-            InstallQueue.Add(queueItem);
+            server = await _serverManager.GetServerAsync(SelectedServer).ConfigureAwait(true);
         }
 
-        if (chosen.Dependencies.Count > 0 && _serverManager is not null && HasSelectedServer && _modManager is not null && _modrinthClient is not null)
+        var pickerVm = new ModVersionPickerViewModel(
+            _modrinthClient,
+            mod.Id,
+            mod.Title,
+            server?.LoaderType.ToString().ToLowerInvariant(),
+            server?.MinecraftVersion.Value);
+
+        if (await _ui.ShowModVersionPickerAsync(pickerVm).ConfigureAwait(true) != true || pickerVm.QueuedVersion is not { } chosen)
         {
-            try
+            return;
+        }
+
+        if (!InstallQueue.Any(i => string.Equals(i.FileName, chosen.FileName, StringComparison.OrdinalIgnoreCase)))
+        {
+            InstallQueue.Add(new ModInstallQueueItem
             {
-                var server = await _serverManager.GetServerAsync(SelectedServer);
-                if (server is not null)
-                {
-                    var installed = await _modManager.GetModsAsync(server.Path);
-                    var rawDeps = chosen.Dependencies
-                        .Select(d => new OnlineModDependency(d, ModDependencyType.Required))
-                        .ToList();
+                ProjectId = mod.Id,
+                Title = mod.Title,
+                VersionNumber = chosen.VersionNumber,
+                FileName = chosen.FileName,
+                DownloadUrl = chosen.DownloadUrl,
+                ExpectedHash = chosen.ExpectedHash,
+                HashAlgorithm = chosen.HashAlgorithm,
+                Dependencies = chosen.Dependencies
+            });
+        }
 
-                    var missingDeps = await _dependencyPlanner.ResolveDependenciesRecursivelyAsync(
-                        _modrinthClient,
-                        rawDeps,
-                        server.MinecraftVersion.Value,
-                        server.LoaderType.ToString(),
-                        installed);
-
-                    var toAdd = missingDeps
-                        .Where(plan => plan.TargetVersion.PrimaryFile is not null && !InstallQueue.Any(q => string.Equals(q.FileName, plan.TargetVersion.PrimaryFile.Filename, StringComparison.OrdinalIgnoreCase)))
-                        .ToList();
-
-                    if (toAdd.Count > 0)
-                    {
-                        var installItems = toAdd.Where(p => p.Action == ModInstallAction.Install).ToList();
-                        var updateItems = toAdd.Where(p => p.Action == ModInstallAction.Update).ToList();
-
-                        var sb = new System.Text.StringBuilder();
-                        sb.AppendLine(CultureInfo.InvariantCulture, $"模組「{mod.Title}」偵測到 {toAdd.Count} 個必要相依模組規劃：");
-
-                        if (installItems.Count > 0)
-                        {
-                            sb.AppendLine("\n【全新安裝】");
-                            foreach (var item in installItems)
-                            {
-                                sb.AppendLine(CultureInfo.InvariantCulture, $"• {item.TargetVersion.DisplayName} ({item.TargetVersion.PrimaryFile?.Filename})");
-                            }
-                        }
-
-                        if (updateItems.Count > 0)
-                        {
-                            sb.AppendLine("\n【更新升級】");
-                            foreach (var item in updateItems)
-                            {
-                                sb.AppendLine(CultureInfo.InvariantCulture, $"• {item.TargetVersion.DisplayName} ({item.ExistingLocalMod?.Version} ➔ {item.TargetVersion.VersionNumber})");
-                            }
-                        }
-
-                        sb.AppendLine("\n是否將這些相依模組一併加入安裝清單？");
-
-                        bool confirm = _ui.Confirm(sb.ToString(), "發現必要相依模組");
-
-                        if (confirm)
-                        {
-                            foreach (var plan in toAdd)
-                            {
-                                var depVer = plan.TargetVersion;
-                                var pf = depVer.PrimaryFile!;
-                                string? hash = ExtractHash(pf, out string algo);
-                                string projId = !string.IsNullOrWhiteSpace(depVer.ProjectId) ? depVer.ProjectId : depVer.VersionId;
-                                InstallQueue.Add(new ModInstallQueueItem
-                                {
-                                    ProjectId = projId,
-                                    Title = depVer.DisplayName,
-                                    VersionNumber = depVer.VersionNumber,
-                                    CurrentVersion = plan.ExistingLocalMod?.Version,
-                                    FileName = pf.Filename,
-                                    OldFileName = plan.ExistingLocalMod?.Filename,
-                                    DownloadUrl = pf.Url,
-                                    ExpectedHash = hash,
-                                    HashAlgorithm = algo,
-                                    Dependencies = [.. depVer.Dependencies.Select(d => d.ProjectId ?? string.Empty).Where(id => id.Length > 0)],
-                                    Action = plan.Action,
-                                    Reason = plan.Reason
-                                });
-                            }
-                            _notificationSink?.Invoke($"已將 {toAdd.Count} 個相依模組加入安裝清單", false);
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning("檢查相依模組時發生異常: {Message}", ex.Message);
-            }
+        if (server is not null && chosen.Dependencies.Count > 0 && _modManager is not null)
+        {
+            await QueueMissingDependenciesAsync(mod.Title, chosen.Dependencies, server).ConfigureAwait(true);
         }
 
         UpdateInstallQueueHint();
 
         if (pickerVm.InstallImmediately)
         {
-            await InstallQueuedModsAsync();
+            await InstallQueuedModsAsync().ConfigureAwait(true);
         }
     }
 
-    /// <summary>
-    /// 完成相依性評估後統一批次下載安裝。
-    /// </summary>
+    private async Task QueueMissingDependenciesAsync(string modTitle, IReadOnlyList<string> dependencyIds, ServerConfig server)
+    {
+        try
+        {
+            var installed = await _modManager!.GetModsAsync(server.Path).ConfigureAwait(true);
+            var rawDeps = dependencyIds
+                .Select(static d => new OnlineModDependency(d, ModDependencyType.Required))
+                .ToList();
+
+            var plans = await _dependencyPlanner.ResolveDependenciesRecursivelyAsync(
+                _modrinthClient!,
+                rawDeps,
+                server.MinecraftVersion.Value,
+                server.LoaderType.ToString(),
+                installed).ConfigureAwait(true);
+
+            var toAdd = plans
+                .Where(plan => plan.TargetVersion.PrimaryFile is { } pf
+                    && !InstallQueue.Any(q => string.Equals(q.FileName, pf.Filename, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+
+            if (toAdd.Count == 0)
+            {
+                return;
+            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine(CultureInfo.InvariantCulture, $"模組「{modTitle}」偵測到 {toAdd.Count} 個必要相依模組規劃：");
+
+            AppendPlanSection(sb, "【全新安裝】", toAdd.Where(static p => p.Action == ModInstallAction.Install),
+                static p => $"• {p.TargetVersion.DisplayName} ({p.TargetVersion.PrimaryFile?.Filename})");
+            AppendPlanSection(sb, "【更新升級】", toAdd.Where(static p => p.Action == ModInstallAction.Update),
+                static p => $"• {p.TargetVersion.DisplayName} ({p.ExistingLocalMod?.Version} ➔ {p.TargetVersion.VersionNumber})");
+
+            sb.AppendLine("\n是否將這些相依模組一併加入安裝清單？");
+
+            if (!await _ui.ConfirmAsync(sb.ToString(), "發現必要相依模組").ConfigureAwait(true))
+            {
+                return;
+            }
+
+            foreach (var plan in toAdd)
+            {
+                var depVer = plan.TargetVersion;
+                var pf = depVer.PrimaryFile!;
+                InstallQueue.Add(new ModInstallQueueItem
+                {
+                    ProjectId = !string.IsNullOrWhiteSpace(depVer.ProjectId) ? depVer.ProjectId : depVer.VersionId,
+                    Title = depVer.DisplayName,
+                    VersionNumber = depVer.VersionNumber,
+                    CurrentVersion = plan.ExistingLocalMod?.Version,
+                    FileName = pf.Filename,
+                    OldFileName = plan.ExistingLocalMod?.Filename,
+                    DownloadUrl = pf.Url,
+                    ExpectedHash = ModHelpers.ResolveHash(pf, out string algo),
+                    HashAlgorithm = algo,
+                    Dependencies = (string[])[.. depVer.Dependencies.Select(static d => d.ProjectId ?? string.Empty).Where(static id => id.Length > 0)],
+                    Action = plan.Action,
+                    Reason = plan.Reason
+                });
+            }
+
+            _notificationSink?.Invoke($"已將 {toAdd.Count} 個相依模組加入安裝清單", false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "檢查相依模組時發生異常: {Message}", ex.Message);
+        }
+    }
+
+    private static void AppendPlanSection(
+        System.Text.StringBuilder sb,
+        string header,
+        IEnumerable<ModDependencyPlanItem> items,
+        Func<ModDependencyPlanItem, string> format)
+    {
+        bool first = true;
+        foreach (var item in items)
+        {
+            if (first)
+            {
+                sb.AppendLine().AppendLine(header);
+                first = false;
+            }
+
+            sb.AppendLine(format(item));
+        }
+    }
+
     [RelayCommand]
     public async Task InstallQueuedModsAsync(CancellationToken cancellationToken = default)
     {
@@ -1496,7 +1476,7 @@ public sealed partial class ModsViewModel : PageViewModel
             string msg = "下列待安裝模組下載來源非官方 Modrinth CDN：\n" +
                          string.Join("\n", unofficial.Select(u => $"• {u.Title}: {u.DownloadUrl}")) +
                          "\n\n非官方來源可能存在安全風險，是否仍要繼續下載並安裝？";
-            if (!_ui.Confirm(msg, "非官方下載來源警告", UiMessageLevel.Warning))
+            if (!await _ui.ConfirmAsync(msg, "非官方下載來源警告", UiMessageLevel.Warning))
             {
                 IsInstallingMod = false;
                 return;
@@ -1602,9 +1582,9 @@ public sealed partial class ModsViewModel : PageViewModel
     /// 檢視待安裝佇列清單視窗
     /// </summary>
     [RelayCommand]
-    public void ViewInstallQueue()
+    public async Task ViewInstallQueueAsync()
     {
-        bool? confirmed = _ui.ShowModInstallQueue(InstallQueue);
+        bool? confirmed = await _ui.ShowModInstallQueueAsync(InstallQueue);
         UpdateInstallQueueHint();
 
         if (confirmed == true && InstallQueue.Count > 0)
@@ -1666,29 +1646,6 @@ public sealed partial class ModsViewModel : PageViewModel
         InstallQueueHint = updates > 0
             ? $"安裝清單：{installs} 個新增，{updates} 個更新"
             : $"安裝清單：{installs} 個項目待安裝";
-    }
-
-    private static string? ExtractHash(ModFile? file, out string algorithm)
-    {
-        algorithm = "sha512";
-        if (file?.Hashes is null)
-        {
-            return null;
-        }
-
-        if (file.Hashes.TryGetValue("sha512", out string? sha512) && !string.IsNullOrWhiteSpace(sha512))
-        {
-            algorithm = "sha512";
-            return sha512;
-        }
-
-        if (file.Hashes.TryGetValue("sha1", out string? sha1) && !string.IsNullOrWhiteSpace(sha1))
-        {
-            algorithm = "sha1";
-            return sha1;
-        }
-
-        return null;
     }
 }
 

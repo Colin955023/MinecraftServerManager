@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Servers;
@@ -13,7 +14,7 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 
 public sealed partial class ServerInspector : IServerInspector
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerInspector");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerInspector));
     private readonly IServerDirectorySizeService _directorySizeService;
 
     public ServerInspector(IServerDirectorySizeService directorySizeService)
@@ -191,7 +192,7 @@ public sealed partial class ServerInspector : IServerInspector
         // 搜尋其他 jar 檔案（paper*.jar 優先置前）
         foreach (string file in files)
         {
-            if (file.EndsWith(".jar", StringComparison.OrdinalIgnoreCase) && !candidates.Contains(file))
+            if (ModHelpers.IsJarFileName(file) && !candidates.Contains(file))
             {
                 if (file.StartsWith("paper", StringComparison.OrdinalIgnoreCase))
                 {
@@ -264,7 +265,7 @@ public sealed partial class ServerInspector : IServerInspector
             {
                 primaryJarPath = Path.Combine(directory, "server.jar");
             }
-            else if (!string.IsNullOrEmpty(target.Value) && target.Value.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
+            else if (!string.IsNullOrEmpty(target.Value) && ModHelpers.IsJarFileName(target.Value))
             {
                 primaryJarPath = Path.Combine(directory, target.Value);
             }
@@ -402,7 +403,7 @@ public sealed partial class ServerInspector : IServerInspector
         if (loaderType is null)
         {
             if (target.Value.StartsWith("paper", StringComparison.OrdinalIgnoreCase) ||
-                files.Any(static f => f.StartsWith("paper-", StringComparison.OrdinalIgnoreCase) && f.EndsWith(".jar", StringComparison.OrdinalIgnoreCase)) ||
+                files.Any(static f => f.StartsWith("paper-", StringComparison.OrdinalIgnoreCase) && ModHelpers.IsJarFileName(f)) ||
                 files.Contains("paper-global.yml") || files.Contains("paper.yml") || files.Contains("paper-world-defaults.yml"))
             {
                 loaderType = "paper";
@@ -632,15 +633,7 @@ public sealed partial class ServerInspector : IServerInspector
 
         try
         {
-            long fileLength = SafeFileSystem.GetFileLength(jsonPath);
-            if (fileLength > MaxMetadataBytes)
-            {
-                Logger.Warning("version.json 檔案超過安全大小上限 ({Size} bytes)，略過解析", fileLength);
-                return null;
-            }
-
-            using var stream = SafeFileSystem.OpenRead(jsonPath);
-            byte[]? payload = ReadBoundedBytes(stream, MaxMetadataBytes);
+            byte[]? payload = SafeFileSystem.ReadRegularFile(jsonPath, MaxMetadataBytes);
             if (payload is null)
             {
                 return null;
@@ -677,26 +670,21 @@ public sealed partial class ServerInspector : IServerInspector
         {
             using var zip = SafeZipArchive.OpenRead(jarPath);
             var versionEntry = zip.GetEntry("version.json");
-            if (versionEntry is not null && versionEntry.Length <= MaxMetadataBytes)
+            if (versionEntry is not null && SafeZipArchive.ReadEntryBytesBounded(versionEntry, (int)MaxMetadataBytes) is { } versionBytes)
             {
-                using var stream = versionEntry.Open();
-                byte[]? versionBytes = ReadBoundedBytes(stream, MaxMetadataBytes);
-                if (versionBytes is not null)
+                using var doc = JsonCodec.ParseDocument(versionBytes);
+                var root = doc.RootElement;
+                foreach (string prop in VersionJsonCandidateProperties)
                 {
-                    using var doc = JsonCodec.ParseDocument(versionBytes);
-                    var root = doc.RootElement;
-                    foreach (string prop in VersionJsonCandidateProperties)
+                    if (root.TryGetProperty(prop, out var val))
                     {
-                        if (root.TryGetProperty(prop, out var val))
+                        string? str = val.GetString();
+                        if (!string.IsNullOrEmpty(str))
                         {
-                            string? str = val.GetString();
-                            if (!string.IsNullOrEmpty(str))
+                            string? extracted = MinecraftVersionSemantics.ExtractMinecraftVersionFromText(str);
+                            if (!string.IsNullOrEmpty(extracted))
                             {
-                                string? extracted = MinecraftVersionSemantics.ExtractMinecraftVersionFromText(str);
-                                if (!string.IsNullOrEmpty(extracted))
-                                {
-                                    return extracted;
-                                }
+                                return extracted;
                             }
                         }
                     }
@@ -704,18 +692,12 @@ public sealed partial class ServerInspector : IServerInspector
             }
 
             var manifestEntry = zip.GetEntry("META-INF/MANIFEST.MF");
-            if (manifestEntry is not null && manifestEntry.Length <= MaxMetadataBytes)
+            if (manifestEntry is not null && SafeZipArchive.ReadEntryTextBounded(manifestEntry, (int)MaxMetadataBytes) is { } manifestText)
             {
-                using var stream = manifestEntry.Open();
-                byte[]? manifestBytes = ReadBoundedBytes(stream, MaxMetadataBytes);
-                if (manifestBytes is not null)
+                string? extracted = MinecraftVersionSemantics.ExtractMinecraftVersionFromText(manifestText);
+                if (!string.IsNullOrEmpty(extracted))
                 {
-                    string manifestText = Encoding.UTF8.GetString(manifestBytes);
-                    string? extracted = MinecraftVersionSemantics.ExtractMinecraftVersionFromText(manifestText);
-                    if (!string.IsNullOrEmpty(extracted))
-                    {
-                        return extracted;
-                    }
+                    return extracted;
                 }
             }
         }
@@ -724,24 +706,6 @@ public sealed partial class ServerInspector : IServerInspector
             Logger.Warning("解析 JAR 清單版本失敗: {Message}", ex.Message);
         }
         return null;
-    }
-
-    private static byte[]? ReadBoundedBytes(Stream stream, long maxBytes)
-    {
-        using var memoryStream = new MemoryStream();
-        byte[] buffer = new byte[8192];
-        int read;
-        while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
-        {
-            if (memoryStream.Length + read > maxBytes)
-            {
-                return null;
-            }
-
-            memoryStream.Write(buffer, 0, read);
-        }
-
-        return memoryStream.ToArray();
     }
 
     private static (int? MaxMb, int? MinMb) TryExtractMemoryFromFile(string filePath)

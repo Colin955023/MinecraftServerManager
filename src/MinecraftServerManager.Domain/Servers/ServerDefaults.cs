@@ -64,14 +64,4 @@ public static class ServerDefaults
     /// Windows 標準啟動批次檔名
     /// </summary>
     public const string StartServerBatFileName = "start_server.bat";
-
-    /// <summary>
-    /// 載入器標準執行檔名 (run.bat)
-    /// </summary>
-    public const string RunBatFileName = "run.bat";
-
-    /// <summary>
-    /// 載入器標準執行檔名 (run.sh)
-    /// </summary>
-    public const string RunShFileName = "run.sh";
 }

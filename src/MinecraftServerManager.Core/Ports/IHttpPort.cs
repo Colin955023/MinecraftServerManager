@@ -51,7 +51,7 @@ public interface IHttpPort
     /// </summary>
     public Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentAsync(
         Uri uri,
-        CancellationToken cancellationToken = default) => GetJsonDocumentFallbackAsync(this, uri, cancellationToken);
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 安全取得遠端文字內容
@@ -67,27 +67,5 @@ public interface IHttpPort
         Uri uri,
         string jsonPayload,
         CancellationToken cancellationToken = default);
-
-    private static async Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentFallbackAsync(
-        IHttpPort port,
-        Uri uri,
-        CancellationToken cancellationToken)
-    {
-        string? text = await port.GetTextAsync(uri, cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return new HttpJsonResponse<JsonDocument>(404, default, "not_found");
-        }
-
-        try
-        {
-            var doc = JsonDocument.Parse(text);
-            return new HttpJsonResponse<JsonDocument>(200, doc, string.Empty);
-        }
-        catch (JsonException)
-        {
-            return new HttpJsonResponse<JsonDocument>(200, default, "invalid_response");
-        }
-    }
 }
 

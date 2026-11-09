@@ -13,7 +13,7 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 /// </summary>
 public static class ServerPropertiesMigrationService
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerPropertiesMigration");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerPropertiesMigrationService));
 
     private static readonly FrozenDictionary<string, string> GamemodeMap = new Dictionary<string, string>
     {
@@ -36,8 +36,18 @@ public static class ServerPropertiesMigrationService
         ["default"] = "minecraft:normal",
         ["flat"] = "minecraft:flat",
         ["largebiomes"] = "minecraft:large_biomes",
+        ["large_biomes"] = "minecraft:large_biomes",
         ["amplified"] = "minecraft:amplified"
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly FrozenDictionary<string, string>.AlternateLookup<ReadOnlySpan<char>> GamemodeSpanLookup =
+        GamemodeMap.GetAlternateLookup<ReadOnlySpan<char>>();
+
+    private static readonly FrozenDictionary<string, string>.AlternateLookup<ReadOnlySpan<char>> DifficultySpanLookup =
+        DifficultyMap.GetAlternateLookup<ReadOnlySpan<char>>();
+
+    private static readonly FrozenDictionary<string, string>.AlternateLookup<ReadOnlySpan<char>> LevelTypeSpanLookup =
+        LevelTypeNormalizedMap.GetAlternateLookup<ReadOnlySpan<char>>();
 
     private static readonly FrozenDictionary<string, string> DeprecatedKeys = new Dictionary<string, string>
     {
@@ -80,13 +90,13 @@ public static class ServerPropertiesMigrationService
             }
         }
 
-        if (newProps.TryGetValue("gamemode", out string? rawGm) && GamemodeMap.TryGetValue(rawGm.Trim(), out string? mappedGm))
+        if (newProps.TryGetValue("gamemode", out string? rawGm) && GamemodeSpanLookup.TryGetValue(rawGm.AsSpan().Trim(), out string? mappedGm))
         {
             newProps["gamemode"] = mappedGm;
             changes.Add($"遊戲模式轉換：gamemode={rawGm} ➔ {mappedGm} (1.14+)");
         }
 
-        if (newProps.TryGetValue("difficulty", out string? rawDiff) && DifficultyMap.TryGetValue(rawDiff.Trim(), out string? mappedDiff))
+        if (newProps.TryGetValue("difficulty", out string? rawDiff) && DifficultySpanLookup.TryGetValue(rawDiff.AsSpan().Trim(), out string? mappedDiff))
         {
             newProps["difficulty"] = mappedDiff;
             changes.Add($"遊戲難度轉換：difficulty={rawDiff} ➔ {mappedDiff} (1.14+)");
@@ -94,8 +104,7 @@ public static class ServerPropertiesMigrationService
 
         if (IsVersionAtLeast119(minecraftVersion) && newProps.TryGetValue("level-type", out string? rawLt))
         {
-            string lookupKey = rawLt.Trim().ToLowerInvariant().Replace("_", string.Empty);
-            if (LevelTypeNormalizedMap.TryGetValue(lookupKey, out string? mappedLt) && !string.Equals(rawLt, mappedLt, StringComparison.Ordinal))
+            if (LevelTypeSpanLookup.TryGetValue(rawLt.AsSpan().Trim(), out string? mappedLt) && !string.Equals(rawLt, mappedLt, StringComparison.Ordinal))
             {
                 newProps["level-type"] = mappedLt;
                 changes.Add($"地圖類型命名空間轉換：level-type={rawLt} ➔ {mappedLt} (1.19+)");

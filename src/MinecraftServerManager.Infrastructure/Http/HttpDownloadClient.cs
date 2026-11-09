@@ -5,8 +5,10 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using MinecraftServerManager.Core;
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Utilities;
 
@@ -44,12 +46,9 @@ public sealed record HttpRequestRetryOptions
 
 public sealed class HttpDownloadClient : IHttpPort
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("HttpDownloadClient");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(HttpDownloadClient));
     public const long MaxJsonBytes = 16L * 1024 * 1024;
     public const long MaxTextBytes = 64L * 1024 * 1024;
-    public const long DefaultMaxDownloadBytes = 512L * 1024 * 1024;
-    public const int DefaultMaxRedirects = 10;
-    public const int DefaultMaxAttempts = 3;
 
     private static readonly HttpStatusCode[] RetryableStatusesSource =
     [
@@ -65,17 +64,17 @@ public sealed class HttpDownloadClient : IHttpPort
 
     private readonly HttpClient _client;
     private readonly Func<string, CancellationToken, Task<IPAddress[]>>? _resolver;
-    private readonly JsonSerializerOptions? _jsonCodecOptions;
+    private readonly JsonSerializerContext? _jsonContext;
 
     public HttpDownloadClient(
         HttpClient client,
         Func<string, CancellationToken, Task<IPAddress[]>>? resolver = null,
-        JsonSerializerOptions? jsonSerializerOptions = null)
+        JsonSerializerContext? jsonContext = null)
     {
         ArgumentNullException.ThrowIfNull(client);
         _client = client;
         _resolver = resolver;
-        _jsonCodecOptions = jsonSerializerOptions;
+        _jsonContext = jsonContext;
     }
 
     /// <summary>
@@ -91,7 +90,7 @@ public sealed class HttpDownloadClient : IHttpPort
     {
         IProgress<HttpDownloadProgress>? downloadProgress = progress is null
             ? null
-            : new ProgressBridge(progress);
+            : new SynchronousProgress<HttpDownloadProgress>(value => progress.Report(new HttpProgress(value.BytesDownloaded, value.TotalBytes)));
 
         var result = await DownloadAsync(
             uri,
@@ -165,6 +164,10 @@ public sealed class HttpDownloadClient : IHttpPort
             }
             catch (OperationCanceledException)
             {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
                 return failureFactory("timeout", null);
             }
             catch (IOException)
@@ -262,7 +265,9 @@ public sealed class HttpDownloadClient : IHttpPort
                 ReadOnlySpan<byte> utf8Span = stream.TryGetBuffer(out ArraySegment<byte> segment)
                     ? segment
                     : stream.ToArray();
-                var payload = JsonCodec.Deserialize<T>(utf8Span, _jsonCodecOptions);
+                T? payload = _jsonContext is not null
+                    ? (_jsonContext.GetTypeInfo(typeof(T)) is System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo ? JsonCodec.Deserialize(utf8Span, typeInfo) : throw new JsonException($"型別 '{typeof(T).FullName}' 尚未在指定的 JsonSerializerContext 中註冊。"))
+                    : JsonCodec.Deserialize<T>(utf8Span);
                 return ValueTask.FromResult((payload is not null, payload));
             },
             cancellationToken);
@@ -392,8 +397,9 @@ public sealed class HttpDownloadClient : IHttpPort
         {
             throw;
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("POST JSON 請求失敗: {0}", ex.Message);
             return null;
         }
     }
@@ -492,8 +498,9 @@ public sealed class HttpDownloadClient : IHttpPort
                     existingBytes = 0;
                 }
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.Warning("讀取續傳暫存檔長度失敗，改為重新下載: {0}", ex.Message);
                 existingBytes = 0;
             }
         }
@@ -585,7 +592,7 @@ public sealed class HttpDownloadClient : IHttpPort
         catch (HttpRequestException exception) when (attempt < options.MaxAttempts)
         {
             await Task.Delay(ScaleDelay(options.RetryDelay, attempt), cancellationToken).ConfigureAwait(false);
-            _ = exception;
+            Logger.Warning("HTTP 下載要求失敗，準備進行第 {0} 次重試: {1}", attempt, exception.Message);
             return (true, null, knownETag);
         }
         catch (HttpRequestException exception)
@@ -707,7 +714,7 @@ public sealed class HttpDownloadClient : IHttpPort
             memoryStream.Position = 0;
             return memoryStream;
         }
-        catch
+        catch (Exception)
         {
             await memoryStream.DisposeAsync().ConfigureAwait(false);
             throw;
@@ -806,14 +813,7 @@ public sealed class HttpDownloadClient : IHttpPort
         }
 
         string normalized = expectedHash.Trim().ToLowerInvariant();
-        int expectedLength = algorithm.Trim().ToLowerInvariant() switch
-        {
-            "sha1" => 40,
-            "sha256" => 64,
-            "sha512" => 128,
-            _ => 0,
-        };
-        if (expectedLength == 0 || normalized.Length != expectedLength || normalized.Any(static character => !Uri.IsHexDigit(character)))
+        if (!HashCalculator.TryResolveAlgorithm(algorithm, out _, out int expectedLength) || !HashCalculator.IsHexDigest(normalized, expectedLength))
         {
             throw new ArgumentException("預期雜湊格式無效", nameof(expectedHash));
         }
@@ -821,13 +821,10 @@ public sealed class HttpDownloadClient : IHttpPort
         return normalized;
     }
 
-    private static HashAlgorithmName CreateHashAlgorithmName(string algorithm) => algorithm.Trim().ToLowerInvariant() switch
-    {
-        "sha1" => HashAlgorithmName.SHA1,
-        "sha256" => HashAlgorithmName.SHA256,
-        "sha512" => HashAlgorithmName.SHA512,
-        _ => throw new ArgumentException("不支援的雜湊演算法", nameof(algorithm)),
-    };
+    private static HashAlgorithmName CreateHashAlgorithmName(string algorithm) =>
+        HashCalculator.TryResolveAlgorithm(algorithm, out var name, out _)
+            ? name
+            : throw new ArgumentException("不支援的雜湊演算法", nameof(algorithm));
 
     private static Task DelayBeforeRetryAsync(
         HttpResponseMessage response,
@@ -883,11 +880,5 @@ public sealed class HttpDownloadClient : IHttpPort
         {
             Logger.Warning("清理暫存下載檔失敗（已忽略）: {0}", ex.Message);
         }
-    }
-
-    private sealed class ProgressBridge(IProgress<HttpProgress> target) : IProgress<HttpDownloadProgress>
-    {
-        public void Report(HttpDownloadProgress value) =>
-            target.Report(new HttpProgress(value.BytesDownloaded, value.TotalBytes));
     }
 }

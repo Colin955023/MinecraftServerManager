@@ -6,7 +6,6 @@ using MinecraftServerManager.Core.Loaders;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
-using MinecraftServerManager.Infrastructure.Java;
 using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Infrastructure.Servers;
 using MinecraftServerManager.Infrastructure.Utilities;
@@ -18,7 +17,7 @@ public sealed partial class LoaderInstallerService(
     IProcessRunner processRunner,
     string installerCacheDirectory) : ILoaderInstallerService
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("LoaderInstallerService");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(LoaderInstallerService));
     private static readonly SearchValues<char> HashSeparators = SearchValues.Create(" \t\r\n");
     private readonly string _cacheDir = SafeFileSystem.ResolveStableDirectory(installerCacheDirectory, create: true);
 
@@ -56,7 +55,7 @@ public sealed partial class LoaderInstallerService(
             string serverJarPath = Path.Combine(stableServerDir, "server.jar");
             if (!SafeFileSystem.FileExists(serverJarPath))
             {
-                var vanillaProgress = progress is null ? null : new Progress<LoaderInstallProgress>(vp =>
+                IProgress<LoaderInstallProgress>? vanillaProgress = progress is null ? null : new SynchronousProgress<LoaderInstallProgress>(vp =>
                 {
                     int mapped = (int)(vp.PercentCompleted * 0.35); // 0% ~ 35%
                     SafeReport("vanilla_prepare", vp.Message, mapped);
@@ -111,11 +110,11 @@ public sealed partial class LoaderInstallerService(
     {
         progress?.Report(new LoaderInstallProgress("fetching", "正在取得 PaperMC 伺服器下載資訊...", 10));
 
-        string buildEndpoint = string.IsNullOrWhiteSpace(loaderVersion) || loaderVersion.Contains("最新", StringComparison.OrdinalIgnoreCase) || loaderVersion.Equals("latest", StringComparison.OrdinalIgnoreCase)
-            ? $"https://fill.papermc.io/v3/projects/paper/versions/{minecraftVersion}/builds/latest"
-            : $"https://fill.papermc.io/v3/projects/paper/versions/{minecraftVersion}/builds/{loaderVersion.Trim()}";
+        Uri buildEndpoint = string.IsNullOrWhiteSpace(loaderVersion) || loaderVersion.Contains("最新", StringComparison.OrdinalIgnoreCase) || loaderVersion.Equals("latest", StringComparison.OrdinalIgnoreCase)
+            ? MojangVersionCatalog.PaperBuildUri(minecraftVersion, null)
+            : MojangVersionCatalog.PaperBuildUri(minecraftVersion, loaderVersion);
 
-        string? buildJson = await httpPort.GetTextAsync(new Uri(buildEndpoint), cancellationToken).ConfigureAwait(false);
+        string? buildJson = await httpPort.GetTextAsync(buildEndpoint, cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(buildJson))
         {
             throw new InvalidOperationException($"無法取得 PaperMC {minecraftVersion} 的建置下載資訊");
@@ -135,7 +134,7 @@ public sealed partial class LoaderInstallerService(
         var downloadResult = await httpPort.DownloadAsync(
             new Uri(downloadUrl),
             targetJarPath,
-            new Progress<HttpProgress>(p =>
+            new SynchronousProgress<HttpProgress>(p =>
             {
                 int pct = p.TotalBytes > 0 ? (int)(20 + ((double)p.BytesDownloaded / p.TotalBytes * 75)) : 20;
                 progress?.Report(new LoaderInstallProgress("downloading", $"正在下載 {targetJarName} ({UnitFormatter.FormatBytes(p.BytesDownloaded)})...", pct));
@@ -195,51 +194,13 @@ public sealed partial class LoaderInstallerService(
     {
         progress?.Report(new LoaderInstallProgress("fetching", "正在取得官方原版伺服器下載資訊...", 10));
 
-        string? versionMetaUrl = null;
-        string versionsCachePath = Path.Combine(RuntimePaths.GetVersionCacheDir(), "mc_versions_cache.json");
-        if (SafeFileSystem.FileExists(versionsCachePath))
-        {
-            try
-            {
-                using var stream = SafeFileSystem.OpenRead(versionsCachePath, FileShare.ReadWrite | FileShare.Delete, FileOptions.Asynchronous | FileOptions.SequentialScan);
-                using var doc = await JsonCodec.ParseDocumentAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
-                if (doc.RootElement.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var elem in doc.RootElement.EnumerateArray())
-                    {
-                        if (elem.TryGetProperty("Version", out var vProp) &&
-                            string.Equals(vProp.GetString(), minecraftVersion, StringComparison.OrdinalIgnoreCase) &&
-                            elem.TryGetProperty("Url", out var uProp))
-                        {
-                            versionMetaUrl = uProp.GetString();
-                            break;
-                        }
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Logger.Warning("解析官方版本 Manifest 異常: {0}", ex.Message);
-            }
-        }
-
+        string cacheDirectory = RuntimePaths.GetVersionCacheDir();
+        string? versionMetaUrl = MojangVersionCatalog.TryGetCachedPackageUrl(cacheDirectory, minecraftVersion);
         if (string.IsNullOrEmpty(versionMetaUrl))
         {
-            var manifestResp = await httpPort.GetJsonDocumentAsync(new Uri(MinecraftJavaRequirementService.ManifestV2Url), cancellationToken).ConfigureAwait(false);
-            if (!manifestResp.IsSuccess || manifestResp.Payload is null)
-            {
-                manifestResp = await httpPort.GetJsonDocumentAsync(new Uri(MinecraftJavaRequirementService.ManifestFallbackUrl), cancellationToken).ConfigureAwait(false);
-            }
-
-            if (!manifestResp.IsSuccess || manifestResp.Payload is null)
-            {
-                throw new InvalidOperationException("無法取得 Minecraft 官方版本清單");
-            }
-
-            using (manifestResp.Payload)
-            {
-                versionMetaUrl = ExtractVersionMetaUrl(manifestResp.Payload, minecraftVersion);
-            }
+            var manifest = await MojangVersionCatalog.FetchManifestAsync(httpPort, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("無法取得 Minecraft 官方版本清單");
+            versionMetaUrl = manifest.FirstOrDefault(v => string.Equals(v.Version, minecraftVersion, StringComparison.Ordinal))?.Url;
         }
 
         if (string.IsNullOrEmpty(versionMetaUrl))
@@ -271,7 +232,7 @@ public sealed partial class LoaderInstallerService(
         var downloadResult = await httpPort.DownloadAsync(
             new Uri(serverDownloadUrl),
             targetJar,
-            new Progress<HttpProgress>(p =>
+            new SynchronousProgress<HttpProgress>(p =>
             {
                 int pct = p.TotalBytes > 0 ? (int)(30 + ((double)p.BytesDownloaded / p.TotalBytes * 65)) : 30;
                 progress?.Report(new LoaderInstallProgress("downloading", $"正在下載原版 server.jar ({UnitFormatter.FormatBytes(p.BytesDownloaded)})...", pct));
@@ -333,9 +294,9 @@ public sealed partial class LoaderInstallerService(
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // 遠端 Maven 若無校驗檔或網路異常，容許降級為一般下載
+                Logger.Warning("遠端 Maven 若無校驗檔或網路異常，容許降級為一般下載: {0}", ex.Message);
             }
 
             var result = await httpPort.DownloadAsync(
@@ -364,17 +325,9 @@ public sealed partial class LoaderInstallerService(
         int separatorIdx = span.IndexOfAny(HashSeparators);
         ReadOnlySpan<char> firstToken = separatorIdx >= 0 ? span[..separatorIdx] : span;
 
-        if (firstToken.Length != expectedLength)
+        if (!HashCalculator.IsHexDigest(firstToken, expectedLength))
         {
             return null;
-        }
-
-        foreach (char c in firstToken)
-        {
-            if (!Uri.IsHexDigit(c))
-            {
-                return null;
-            }
         }
 
         return firstToken.ToString();
@@ -431,28 +384,6 @@ public sealed partial class LoaderInstallerService(
             FileName: javaExecutablePath,
             Arguments: args,
             WorkingDirectory: serverDirectory);
-    }
-
-    internal static string? ExtractVersionMetaUrl(string manifestJson, string targetVersion)
-    {
-        using var doc = JsonCodec.ParseDocument(manifestJson);
-        return ExtractVersionMetaUrl(doc, targetVersion);
-    }
-
-    private static string? ExtractVersionMetaUrl(JsonDocument doc, string targetVersion)
-    {
-        if (doc.RootElement.TryGetProperty("versions", out var versionsElem))
-        {
-            foreach (var elem in versionsElem.EnumerateArray())
-            {
-                if (elem.GetProperty("id").GetString() == targetVersion &&
-                    elem.TryGetProperty("url", out var urlElem))
-                {
-                    return urlElem.GetString();
-                }
-            }
-        }
-        return null;
     }
 
     internal static (string? Url, string? Sha1) ExtractServerDownloadInfo(string metaJson)

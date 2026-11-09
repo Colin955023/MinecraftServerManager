@@ -5,7 +5,7 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class ServerManagerTests : IDisposable
+public sealed partial class ServerManagerTests : IDisposable
 {
     private readonly string _testRoot;
     private readonly ServerManager _manager;
@@ -185,20 +185,98 @@ public sealed class ServerManagerTests : IDisposable
     {
         string externalDir = Path.Combine(Path.GetTempPath(), "msm-external-server-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(externalDir);
+        try
+        {
+            File.WriteAllText(Path.Combine(externalDir, "server.jar"), "dummy jar");
+            File.WriteAllText(Path.Combine(externalDir, "eula.txt"), "eula=true\n");
+            File.WriteAllText(Path.Combine(externalDir, "server.properties"), "server-port=25565\n");
 
-        File.WriteAllText(Path.Combine(externalDir, "server.jar"), "dummy jar");
-        File.WriteAllText(Path.Combine(externalDir, "eula.txt"), "eula=true\n");
-        File.WriteAllText(Path.Combine(externalDir, "server.properties"), "server-port=25565\n");
+            var importResult = await _manager.ImportServerAsync(externalDir, "ImportedServer", ImportTransferMode.Copy);
 
-        var importResult = await _manager.ImportServerAsync(externalDir, "ImportedServer", ImportTransferMode.Copy);
+            Assert.True(importResult.Completed);
+            Assert.NotNull(importResult.Config);
+            Assert.Equal("ImportedServer", importResult.Config.Name.Value);
 
-        Assert.True(importResult.Completed);
-        Assert.NotNull(importResult.Config);
-        Assert.Equal("ImportedServer", importResult.Config.Name.Value);
+            string importedDir = Path.Combine(_testRoot, "ImportedServer");
+            Assert.True(Directory.Exists(importedDir));
+            Assert.True(File.Exists(Path.Combine(importedDir, "server.jar")));
+            Assert.True(Directory.Exists(externalDir));
+        }
+        finally
+        {
+            if (Directory.Exists(externalDir))
+            {
+                Directory.Delete(externalDir, recursive: true);
+            }
+        }
+    }
 
-        string importedDir = Path.Combine(_testRoot, "ImportedServer");
-        Assert.True(Directory.Exists(importedDir));
-        Assert.True(File.Exists(Path.Combine(importedDir, "server.jar")));
+    [Fact]
+    public async Task ImportsExistingServerDirectoryWithMoveModeRemovesSource()
+    {
+        string externalDir = Path.Combine(Path.GetTempPath(), "msm-external-move-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(externalDir);
+        try
+        {
+            File.WriteAllText(Path.Combine(externalDir, "server.jar"), "dummy jar");
+            File.WriteAllText(Path.Combine(externalDir, "eula.txt"), "eula=true\n");
+            File.WriteAllText(Path.Combine(externalDir, "server.properties"), "server-port=25565\n");
+
+            var importResult = await _manager.ImportServerAsync(externalDir, "MovedServer", ImportTransferMode.Move);
+
+            Assert.True(importResult.Completed);
+            string importedDir = Path.Combine(_testRoot, "MovedServer");
+            Assert.True(Directory.Exists(importedDir));
+            Assert.True(File.Exists(Path.Combine(importedDir, "server.jar")));
+            Assert.False(Directory.Exists(externalDir));
+        }
+        finally
+        {
+            if (Directory.Exists(externalDir))
+            {
+                Directory.Delete(externalDir, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ServersRootRelocator_ValidatesAndRelocatesAllContent()
+    {
+        var plan = ServerCreationPlan.Create(
+            name: ServerName.Parse("RelocateSrv"),
+            minecraftVersion: MinecraftVersion.Parse("1.20.4"),
+            loaderType: LoaderKind.Vanilla,
+            memoryMaxMb: 2048);
+        var created = await _manager.CreateServerAsync(plan);
+        Assert.True(created.Completed);
+
+        string subDir = Path.Combine(_testRoot, "sub");
+        string serversRoot = Path.Combine(_testRoot, "servers");
+        Assert.Equal(RelocationPathCheckResult.SameAsCurrent, ServersRootRelocator.ValidateTargetRoot(serversRoot, _testRoot, out _, out _));
+        Assert.Equal(RelocationPathCheckResult.SubdirectoryOfCurrent, ServersRootRelocator.ValidateTargetRoot(_testRoot, _testRoot, out _, out string forcedNew));
+        Assert.Equal(serversRoot, forcedNew);
+        Assert.Equal(RelocationPathCheckResult.SubdirectoryOfCurrent, ServersRootRelocator.ValidateTargetRoot(_testRoot, subDir, out _, out _));
+
+        string newRoot = Path.Combine(Path.GetTempPath(), "msm-relocated-root-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Assert.True(ServersRootRelocator.HasStoredContent(_testRoot));
+            Assert.True(ServersRootRelocator.IsTargetDirectoryEmpty(newRoot));
+
+            ServersRootRelocator.RelocateAllContent(_testRoot, newRoot);
+
+            Assert.True(Directory.Exists(Path.Combine(newRoot, "servers", "RelocateSrv")));
+            Assert.True(File.Exists(Path.Combine(newRoot, "servers", "servers.json")));
+            string registryJson = await File.ReadAllTextAsync(Path.Combine(newRoot, "servers", "servers.json"));
+            Assert.Contains(newRoot.Replace("\\", "\\\\", StringComparison.Ordinal), registryJson);
+        }
+        finally
+        {
+            if (Directory.Exists(newRoot))
+            {
+                Directory.Delete(newRoot, recursive: true);
+            }
+        }
     }
 
     [Fact]

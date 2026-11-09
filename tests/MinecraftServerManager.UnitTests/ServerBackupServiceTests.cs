@@ -3,8 +3,9 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class ServerBackupServiceTests : IDisposable
+public sealed partial class ServerBackupServiceTests : IDisposable
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerBackupServiceTests));
     private readonly string _testRoot;
     private readonly string _serverDir;
     private readonly string _externalBackupsDir;
@@ -33,7 +34,10 @@ public sealed class ServerBackupServiceTests : IDisposable
                 Directory.Delete(_testRoot, recursive: true);
             }
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+        }
 
         try
         {
@@ -42,7 +46,10 @@ public sealed class ServerBackupServiceTests : IDisposable
                 Directory.Delete(_externalBackupsDir, recursive: true);
             }
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+        }
     }
 
     [Fact]
@@ -131,7 +138,10 @@ public sealed class ServerBackupServiceTests : IDisposable
                     Directory.Delete(extraDir, recursive: true);
                 }
             }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+            }
         }
     }
 

@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Servers;
+using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
@@ -15,6 +16,7 @@ public sealed partial class ServerMemoryViewModel(
     long? systemMemoryMb = null,
     IUiService? uiService = null) : ObservableObject
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerMemoryViewModel));
     private readonly ServerConfig _config = config;
     private readonly Func<int, int?, Task<bool>> _saveCallback = saveCallback;
     private readonly long _systemMemoryMb = systemMemoryMb ?? MemoryUtils.GetTotalSystemMemoryMb();
@@ -79,6 +81,10 @@ public sealed partial class ServerMemoryViewModel(
     {
         if (!Validate(out int max, out int? min))
         {
+            if (!string.IsNullOrWhiteSpace(ErrorMessage))
+            {
+                await _ui.ShowWarningAsync(ErrorMessage, "記憶體數值無效").ConfigureAwait(true);
+            }
             return;
         }
 
@@ -92,11 +98,18 @@ public sealed partial class ServerMemoryViewModel(
             else
             {
                 ErrorMessage = "儲存記憶體設定失敗";
+                await _ui.ShowWarningAsync("儲存記憶體設定失敗，請確認伺服器檔案是否具備寫入權限。", "儲存失敗").ConfigureAwait(true);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.Information("記憶體設定操作已取消");
         }
         catch (Exception ex)
         {
+            Logger.Error(ex, "儲存記憶體設定出錯：{Message}", ex.Message);
             ErrorMessage = $"儲存出錯：{ex.Message}";
+            await _ui.ShowErrorAsync($"儲存記憶體設定時發生錯誤：\n{ex.Message}", "儲存錯誤").ConfigureAwait(true);
         }
     }
 
@@ -104,20 +117,20 @@ public sealed partial class ServerMemoryViewModel(
         !string.Equals(MaxMemoryMb.Trim(), _config.MemoryMaxMb.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal) ||
         !string.Equals(MinMemoryMb.Trim(), _config.MemoryMinMb.HasValue ? _config.MemoryMinMb.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty, StringComparison.Ordinal);
 
-    public bool ConfirmDiscard()
+    public async Task<bool> ConfirmDiscardAsync()
     {
         if (!HasUnsavedChanges)
         {
             return true;
         }
 
-        return _ui.Confirm("有尚未儲存的記憶體設定變更，確定要捨棄變更並關閉嗎？", "捨棄變更", UiMessageLevel.Warning);
+        return await _ui.ConfirmAsync("有尚未儲存的記憶體設定變更，確定要捨棄變更並關閉嗎？", "捨棄變更", UiMessageLevel.Warning).ConfigureAwait(true);
     }
 
     [RelayCommand]
-    public void Cancel()
+    public async Task CancelAsync()
     {
-        if (ConfirmDiscard())
+        if (await ConfirmDiscardAsync().ConfigureAwait(true))
         {
             RequestClose?.Invoke(false);
         }

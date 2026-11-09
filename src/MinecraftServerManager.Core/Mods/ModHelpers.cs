@@ -11,20 +11,79 @@ namespace MinecraftServerManager.Core.Mods;
 public static partial class ModHelpers
 {
     public const string PreferredHashAlgorithm = "sha512";
+    public const string JarExtension = ".jar";
+    public const string DisabledModExtension = ".jar.disabled";
     private static readonly SearchValues<char> FormattingChars = SearchValues.Create("\x1B§\\");
 
-    public static string ModFilenameStem(string? filename)
+    /// <summary>
+    /// 判斷檔名是否以 .jar 結尾（不分大小寫）
+    /// </summary>
+    public static bool IsJarFileName(ReadOnlySpan<char> fileName) =>
+        fileName.EndsWith(JarExtension, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 判斷檔名是否為已停用模組（.jar.disabled）
+    /// </summary>
+    public static bool IsDisabledModFileName(ReadOnlySpan<char> fileName) =>
+        fileName.EndsWith(DisabledModExtension, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 判斷檔名是否為模組檔案（啟用中 .jar 或已停用 .jar.disabled）
+    /// </summary>
+    public static bool IsModFileName(ReadOnlySpan<char> fileName) =>
+        IsJarFileName(fileName) || IsDisabledModFileName(fileName);
+
+    /// <summary>
+    /// 由模組檔名主幹組成啟用中模組檔名（stem.jar）
+    /// </summary>
+    public static string ToEnabledModFileName(ReadOnlySpan<char> stem) => string.Concat(stem, JarExtension);
+
+    /// <summary>
+    /// 由模組檔名主幹組成已停用模組檔名（stem.jar.disabled）
+    /// </summary>
+    public static string ToDisabledModFileName(ReadOnlySpan<char> stem) => string.Concat(stem, DisabledModExtension);
+
+    public static string ModFilenameStem(string? filename) =>
+        ModFilenameStem((filename ?? string.Empty).AsSpan()).ToString();
+
+    public static ReadOnlySpan<char> ModFilenameStem(ReadOnlySpan<char> filename)
     {
-        string raw = (filename ?? string.Empty).Trim();
-        if (raw.EndsWith(".jar.disabled", StringComparison.OrdinalIgnoreCase))
+        ReadOnlySpan<char> raw = filename.Trim();
+        if (IsDisabledModFileName(raw))
         {
-            return raw[..^13];
+            return raw[..^DisabledModExtension.Length];
         }
-        if (raw.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
+        if (IsJarFileName(raw))
         {
-            return raw[..^4];
+            return raw[..^JarExtension.Length];
         }
         return raw;
+    }
+
+    /// <summary>
+    /// 從線上模組檔案中挑選最佳雜湊值（優先 sha512，次選 sha1）並回傳對應演算法名稱。
+    /// </summary>
+    public static string? ResolveHash(ModFile? file, out string algorithm)
+    {
+        algorithm = PreferredHashAlgorithm;
+        if (file?.Hashes is null)
+        {
+            return null;
+        }
+
+        if (file.Hashes.TryGetValue("sha512", out string? sha512) && !string.IsNullOrWhiteSpace(sha512))
+        {
+            algorithm = "sha512";
+            return sha512;
+        }
+
+        if (file.Hashes.TryGetValue("sha1", out string? sha1) && !string.IsNullOrWhiteSpace(sha1))
+        {
+            algorithm = "sha1";
+            return sha1;
+        }
+
+        return null;
     }
 
     public static string NormalizeIdentifier(string? value) =>

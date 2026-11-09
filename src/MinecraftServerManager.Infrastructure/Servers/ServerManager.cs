@@ -2,7 +2,6 @@ using System.Collections.Frozen;
 using System.Globalization;
 using System.Text;
 using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
 using MinecraftServerManager.Core.Loaders;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Servers;
@@ -21,7 +20,7 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 /// </summary>
 public sealed partial class ServerManager : IServerManager
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerManager");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerManager));
     private readonly string _serversRoot;
     private readonly string _registryFilePath;
     private readonly IServerInspector _inspector;
@@ -66,22 +65,9 @@ public sealed partial class ServerManager : IServerManager
             var result = new List<ServerConfig>();
             foreach (var payload in registry.Values)
             {
-                bool validName = ServerName.TryParse(payload.Name, out var name);
-                bool validMc = MinecraftVersion.TryParse(payload.MinecraftVersion, out var mcVer);
-                bool validLoader = Enum.TryParse<LoaderKind>(payload.LoaderType, ignoreCase: true, out var loader);
-
-                if (validName && validMc && validLoader)
+                if (TryCreateServerConfig(payload, _serversRoot, out var config))
                 {
-                    result.Add(new ServerConfig(
-                        name: name,
-                        minecraftVersion: mcVer,
-                        loaderType: loader,
-                        loaderVersion: payload.LoaderVersion ?? string.Empty,
-                        memoryMaxMb: payload.MemoryMaxMb > 0 ? payload.MemoryMaxMb : ServerDefaults.DefaultMemoryMaxMb,
-                        memoryMinMb: payload.MemoryMinMb,
-                        path: payload.Path ?? Path.Combine(_serversRoot, payload.Name),
-                        jvmArgs: payload.JvmArgs,
-                        backupPath: payload.BackupPath ?? string.Empty));
+                    result.Add(config!);
                 }
             }
 
@@ -96,30 +82,33 @@ public sealed partial class ServerManager : IServerManager
         lock (_lock)
         {
             var registry = LoadRegistry();
-            if (registry.TryGetValue(name, out var payload))
-            {
-                bool validName = ServerName.TryParse(payload.Name, out var serverName);
-                bool validMc = MinecraftVersion.TryParse(payload.MinecraftVersion, out var mcVer);
-                bool validLoader = Enum.TryParse<LoaderKind>(payload.LoaderType, ignoreCase: true, out var loader);
-
-                if (validName && validMc && validLoader)
-                {
-                    var config = new ServerConfig(
-                        name: serverName,
-                        minecraftVersion: mcVer,
-                        loaderType: loader,
-                        loaderVersion: payload.LoaderVersion ?? string.Empty,
-                        memoryMaxMb: payload.MemoryMaxMb > 0 ? payload.MemoryMaxMb : ServerDefaults.DefaultMemoryMaxMb,
-                        memoryMinMb: payload.MemoryMinMb,
-                        path: payload.Path ?? Path.Combine(_serversRoot, payload.Name),
-                        jvmArgs: payload.JvmArgs,
-                        backupPath: payload.BackupPath ?? string.Empty);
-                    return Task.FromResult<ServerConfig?>(config);
-                }
-            }
-
-            return Task.FromResult<ServerConfig?>(null);
+            return registry.TryGetValue(name, out var payload) && TryCreateServerConfig(payload, _serversRoot, out var config)
+                ? Task.FromResult(config)
+                : Task.FromResult<ServerConfig?>(null);
         }
+    }
+
+    private static bool TryCreateServerConfig(ServerConfigPayload payload, string serversRoot, out ServerConfig? config)
+    {
+        if (ServerName.TryParse(payload.Name, out var name)
+            && MinecraftVersion.TryParse(payload.MinecraftVersion, out var mcVer)
+            && LoaderKinds.TryParse(payload.LoaderType, out var loader))
+        {
+            config = new ServerConfig(
+                name: name,
+                minecraftVersion: mcVer,
+                loaderType: loader,
+                loaderVersion: payload.LoaderVersion ?? string.Empty,
+                memoryMaxMb: payload.MemoryMaxMb > 0 ? payload.MemoryMaxMb : ServerDefaults.DefaultMemoryMaxMb,
+                memoryMinMb: payload.MemoryMinMb,
+                path: payload.Path ?? Path.Combine(serversRoot, payload.Name),
+                jvmArgs: payload.JvmArgs,
+                backupPath: payload.BackupPath ?? string.Empty);
+            return true;
+        }
+
+        config = null;
+        return false;
     }
 
     public async Task<ServerCreationResult> CreateServerAsync(
@@ -195,11 +184,12 @@ public sealed partial class ServerManager : IServerManager
             if (_loaderInstaller is not null)
             {
                 int lastArtifactPct = 15;
-                var loaderProgress = progress is null ? null : new Progress<LoaderInstallProgress>(lp =>
+                Lock artifactProgressLock = new();
+                var loaderProgress = progress is null ? null : new SynchronousProgress<LoaderInstallProgress>(lp =>
                 {
                     int mappedPct = 15 + (int)(lp.PercentCompleted * 0.70); // 15% ~ 85%
                     int clamped = Math.Clamp(mappedPct, 15, 85);
-                    lock (plan)
+                    lock (artifactProgressLock)
                     {
                         clamped = Math.Max(lastArtifactPct, clamped);
                         lastArtifactPct = clamped;
@@ -340,9 +330,9 @@ public sealed partial class ServerManager : IServerManager
         LoaderKind loader = LoaderKind.Unknown)
     {
         string resolvedPath = javaPath ?? string.Empty;
-        if (!Path.IsPathRooted(resolvedPath))
+        if (!Path.IsPathFullyQualified(resolvedPath))
         {
-            string pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            string pf = RuntimePaths.GetProgramFilesDir();
             resolvedPath = Path.Combine(pf, "Java", "bin", "java.exe");
         }
 
@@ -424,26 +414,10 @@ public sealed partial class ServerManager : IServerManager
         }
 
         string content = SafeFileSystem.ReadAllText(scriptPath);
-        int minMb = config.MemoryMinMb ?? (config.MemoryMaxMb > ServerDefaults.DefaultMemoryMinMb ? ServerDefaults.DefaultMemoryMinMb : config.MemoryMaxMb);
+        int minMb = MemoryUtils.ResolveEffectiveMinMemoryMb(config.MemoryMinMb, config.MemoryMaxMb);
         int maxMb = config.MemoryMaxMb;
 
-        bool hasXmx = ScriptXmxRegex().IsMatch(content);
-        bool hasXms = ScriptXmsRegex().IsMatch(content);
-
-        if (hasXmx)
-        {
-            content = ScriptXmxRegex().Replace(content, $"-Xmx{maxMb}M");
-        }
-
-        if (hasXms)
-        {
-            content = ScriptXmsRegex().Replace(content, $"-Xms{minMb}M");
-        }
-        else if (hasXmx)
-        {
-            content = ScriptXmxRegex().Replace(content, match => $"-Xms{minMb}M " + match.Value, 1);
-        }
-
+        content = MemoryUtils.ApplyMemoryFlags(content, minMb, maxMb);
         AtomicFileWriter.WriteText(scriptPath, content);
         Logger.Information("已更新統一啟動腳本記憶體設定: {Path} (-Xms{Min}M -Xmx{Max}M)", scriptPath, minMb, maxMb);
     }
@@ -568,13 +542,6 @@ public sealed partial class ServerManager : IServerManager
             Logger.Warning("清理多餘啟動腳本失敗: {Message}", ex.Message);
         }
     }
-
-
-    [GeneratedRegex(@"(?i)-Xmx[0-9]+[kmgt]?\b")]
-    private static partial Regex ScriptXmxRegex();
-
-    [GeneratedRegex(@"(?i)-Xms[0-9]+[kmgt]?\b")]
-    private static partial Regex ScriptXmsRegex();
 
     public async Task<ServerOperationResult> DeleteServerAsync(string name, CancellationToken cancellationToken = default)
     {
@@ -761,7 +728,7 @@ public sealed partial class ServerManager : IServerManager
             }
 
             progress?.Report(new ServerImportProgressReport(85, "正在維護受管啟動腳本..."));
-            var loaderKind = Enum.TryParse<LoaderKind>(inspection.LoaderType, ignoreCase: true, out var lk) ? lk : LoaderKind.Vanilla;
+            var loaderKind = LoaderKinds.ParseOrDefault(inspection.LoaderType, LoaderKind.Vanilla);
             string launchTarget = !string.IsNullOrWhiteSpace(inspection.LaunchTarget.Value)
                 ? inspection.LaunchTarget.Value
                 : ServerLaunchTargetResolver.ResolveLaunchTarget(stableStaging, loaderKind);
@@ -815,9 +782,33 @@ public sealed partial class ServerManager : IServerManager
                 SaveRegistry(registry);
             }
 
-            progress?.Report(new ServerImportProgressReport(100, "伺服器匯入完成！"));
-
             completedSuccessfully = true;
+
+            if (mode == ImportTransferMode.Move)
+            {
+                progress?.Report(new ServerImportProgressReport(96, "正在移除原始來源檔案..."));
+                try
+                {
+                    if (isZip)
+                    {
+                        if (SafeFileSystem.FileExists(sourceDirectory))
+                        {
+                            SafeFileSystem.DeleteFile(sourceDirectory);
+                        }
+                    }
+                    else if (SafeFileSystem.DirectoryExists(sourceDirectory))
+                    {
+                        SafeFileSystem.DeleteDirectory(sourceDirectory, recursive: true);
+                    }
+                    Logger.Information("伺服器「{Name}」以遷移模式匯入，已移除原始來源: {Source}", targetName, sourceDirectory);
+                }
+                catch (Exception moveCleanEx) when (moveCleanEx is not OperationCanceledException)
+                {
+                    Logger.Warning(moveCleanEx, "遷移匯入完成後移除原始來源失敗: {0}", sourceDirectory);
+                }
+            }
+
+            progress?.Report(new ServerImportProgressReport(100, "伺服器匯入完成！"));
             Logger.Information("伺服器「{Name}」匯入成功！目標路徑: {Path}, MC: {MC}, Loader: {Loader}", targetName, targetDir, mcVersion.Value, loaderKind);
             return ServerImportResult.Success(targetName, config);
         }
@@ -875,7 +866,7 @@ public sealed partial class ServerManager : IServerManager
         var registeredPaths = snapshot.Values
             .Select(static p => p.Path)
             .Where(static p => !string.IsNullOrWhiteSpace(p))
-            .Select(static p => Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar))
+            .Select(static p => Path.TrimEndingDirectorySeparator(Path.GetFullPath(p)))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (string directory in SafeFileSystem.EnumerateDirectories(_serversRoot))
@@ -890,7 +881,7 @@ public sealed partial class ServerManager : IServerManager
                 continue;
             }
 
-            string fullPath = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar);
+            string fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
             if (registeredPaths.Contains(fullPath) || snapshot.ContainsKey(folderName))
             {
                 alreadyManaged++;
@@ -922,7 +913,7 @@ public sealed partial class ServerManager : IServerManager
                 continue;
             }
 
-            var loaderKind = Enum.TryParse<LoaderKind>(inspection.LoaderType, ignoreCase: true, out var lk) ? lk : LoaderKind.Vanilla;
+            var loaderKind = LoaderKinds.ParseOrDefault(inspection.LoaderType, LoaderKind.Vanilla);
             var mcVersion = MinecraftVersion.TryParse(inspection.MinecraftVersion, out var mv) ? mv : MinecraftVersion.Parse("1.20.4");
 
             var config = new ServerConfig(
@@ -980,8 +971,9 @@ public sealed partial class ServerManager : IServerManager
             _lastRegistryWriteTimeUtc = lastWrite;
             return new Dictionary<string, ServerConfigPayload>(_cachedRegistry, StringComparer.OrdinalIgnoreCase);
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Warning(ex, "讀取伺服器註冊表失敗，使用空白清單: {Path}", _registryFilePath);
             return new Dictionary<string, ServerConfigPayload>(StringComparer.OrdinalIgnoreCase);
         }
     }

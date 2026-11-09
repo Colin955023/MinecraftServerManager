@@ -5,6 +5,30 @@ namespace MinecraftServerManager.Infrastructure.Http;
 
 public static class HttpUrlPolicy
 {
+    private static readonly IPNetwork[] PrivateIPv4Networks =
+    [
+        IPNetwork.Parse("0.0.0.0/8"),
+        IPNetwork.Parse("10.0.0.0/8"),
+        IPNetwork.Parse("100.64.0.0/10"),
+        IPNetwork.Parse("127.0.0.0/8"),
+        IPNetwork.Parse("169.254.0.0/16"),
+        IPNetwork.Parse("172.16.0.0/12"),
+        IPNetwork.Parse("192.0.0.0/24"),
+        IPNetwork.Parse("192.0.2.0/24"),
+        IPNetwork.Parse("192.168.0.0/16"),
+        IPNetwork.Parse("198.18.0.0/15"),
+        IPNetwork.Parse("198.51.100.0/24"),
+        IPNetwork.Parse("203.0.113.0/24"),
+        IPNetwork.Parse("224.0.0.0/4"),
+    ];
+
+    private static readonly IPNetwork[] PrivateIPv6Networks =
+    [
+        IPNetwork.Parse("fc00::/7"),
+        IPNetwork.Parse("ff00::/8"),
+        IPNetwork.Parse("2001:db8::/32"),
+        IPNetwork.Parse("100::/64"),
+    ];
     public static async ValueTask<Stream> ConnectAsync(
         SocketsHttpConnectionContext context,
         CancellationToken cancellationToken)
@@ -21,36 +45,13 @@ public static class HttpUrlPolicy
         ArgumentNullException.ThrowIfNull(endpoint);
         string host = endpoint.Host.TrimEnd('.');
         if (string.IsNullOrWhiteSpace(host)
-            || host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-            || host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase)
+            || IsLocalhostName(host)
             || endpoint.Port is < 1 or > 65535)
         {
             throw new HttpSecurityException("連線目標無效或不安全");
         }
 
-        IPAddress[] addresses;
-        if (IPAddress.TryParse(host, out var literal))
-        {
-            addresses = [literal];
-        }
-        else
-        {
-            Func<string, CancellationToken, Task<IPAddress[]>> resolve = resolver
-                ?? (static (name, token) => Dns.GetHostAddressesAsync(name, token));
-            try
-            {
-                addresses = await resolve(host, cancellationToken).ConfigureAwait(false);
-            }
-            catch (SocketException exception)
-            {
-                throw new HttpSecurityException("URL hostname 無法解析", exception);
-            }
-        }
-
-        if (addresses.Length == 0 || addresses.Any(static address => !IsPublicAddress(address)))
-        {
-            throw new HttpSecurityException("URL hostname 解析至非公開位址");
-        }
+        IPAddress[] addresses = await ResolvePublicAddressesAsync(host, resolver, cancellationToken).ConfigureAwait(false);
 
         SocketException? lastException = null;
         foreach (IPAddress address in addresses)
@@ -90,8 +91,7 @@ public static class HttpUrlPolicy
             throw new HttpSecurityException("URL 格式或 credential 不安全");
         }
 
-        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-            || host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase))
+        if (IsLocalhostName(host))
         {
             throw new HttpSecurityException("拒絕 localhost URL");
         }
@@ -113,34 +113,47 @@ public static class HttpUrlPolicy
         CancellationToken cancellationToken = default)
     {
         ValidateStatic(uri);
-        string host = uri.Host.TrimEnd('.');
+        await ResolvePublicAddressesAsync(uri.Host.TrimEnd('.'), resolver, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 解析主機名稱（或 IP 字面值）並確認所有位址皆為公開位址，否則擲出 HttpSecurityException
+    /// </summary>
+    private static async Task<IPAddress[]> ResolvePublicAddressesAsync(
+        string host,
+        Func<string, CancellationToken, Task<IPAddress[]>>? resolver,
+        CancellationToken cancellationToken)
+    {
+        IPAddress[] addresses;
         if (IPAddress.TryParse(host, out var literal))
         {
-            if (!IsPublicAddress(literal))
+            addresses = [literal];
+        }
+        else
+        {
+            Func<string, CancellationToken, Task<IPAddress[]>> resolve = resolver
+                ?? (static (name, token) => Dns.GetHostAddressesAsync(name, token));
+            try
             {
-                throw new HttpSecurityException("拒絕非公開 IP URL");
+                addresses = await resolve(host, cancellationToken).ConfigureAwait(false);
             }
-
-            return;
-        }
-
-        Func<string, CancellationToken, Task<IPAddress[]>> resolve = resolver
-            ?? (static (h, token) => Dns.GetHostAddressesAsync(h, token));
-        IPAddress[] addresses;
-        try
-        {
-            addresses = await resolve(host, cancellationToken).ConfigureAwait(false);
-        }
-        catch (SocketException exception)
-        {
-            throw new HttpSecurityException("URL hostname 無法解析", exception);
+            catch (SocketException exception)
+            {
+                throw new HttpSecurityException("URL hostname 無法解析", exception);
+            }
         }
 
         if (addresses.Length == 0 || addresses.Any(static address => !IsPublicAddress(address)))
         {
             throw new HttpSecurityException("URL hostname 解析至非公開位址");
         }
+
+        return addresses;
     }
+
+    private static bool IsLocalhostName(string host) =>
+        host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+        || host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase);
 
     public static bool IsPublicAddress(IPAddress address)
     {
@@ -163,18 +176,7 @@ public static class HttpUrlPolicy
         var span = bytes[..bytesWritten];
         if (normalized.AddressFamily == AddressFamily.InterNetwork)
         {
-            return !(span[0] == 0
-                || span[0] == 10
-                || (span[0] == 100 && span[1] is >= 64 and <= 127)
-                || span[0] == 127
-                || (span[0] == 169 && span[1] == 254)
-                || (span[0] == 172 && span[1] is >= 16 and <= 31)
-                || (span[0] == 192 && span[1] == 0 && (span[2] == 0 || span[2] == 2))
-                || (span[0] == 192 && span[1] == 168)
-                || (span[0] == 198 && span[1] is >= 18 and <= 19)
-                || (span[0] == 198 && span[1] == 51 && span[2] == 100)
-                || (span[0] == 203 && span[1] == 0 && span[2] == 113)
-                || span[0] >= 224);
+            return !PrivateIPv4Networks.Any(net => net.Contains(normalized));
         }
 
         if (IsIPv4Compatible(span))
@@ -197,10 +199,7 @@ public static class HttpUrlPolicy
         return !normalized.IsIPv6LinkLocal
             && !normalized.IsIPv6SiteLocal
             && !normalized.IsIPv6Teredo
-            && (span[0] & 0xFE) != 0xFC
-            && span[0] != 0xFF
-            && !(span[0] == 0x20 && span[1] == 0x01 && span[2] == 0x0D && span[3] == 0xB8)
-            && !(span[0] == 0x01 && span[1] == 0x00);
+            && !PrivateIPv6Networks.Any(net => net.Contains(normalized));
     }
 
     private static bool IsIPv4Compatible(ReadOnlySpan<byte> bytes)
@@ -210,14 +209,7 @@ public static class HttpUrlPolicy
             return false;
         }
 
-        for (int i = 0; i < 12; i++)
-        {
-            if (bytes[i] != 0)
-            {
-                return false;
-            }
-        }
-
-        return !(bytes[12] == 0 && bytes[13] == 0 && bytes[14] == 0 && bytes[15] <= 1);
+        return bytes[..12].IndexOfAnyExcept((byte)0) < 0
+            && !(bytes[12] == 0 && bytes[13] == 0 && bytes[14] == 0 && bytes[15] <= 1);
     }
 }

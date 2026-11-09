@@ -3,8 +3,8 @@ using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.App.Collections;
+using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
-using MinecraftServerManager.Domain.Mods;
 
 namespace MinecraftServerManager.App.ViewModels;
 
@@ -39,7 +39,7 @@ public sealed class ModVersionDisplayItem
 /// </summary>
 public sealed partial class ModVersionPickerViewModel : ViewModelBase
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ModVersionPicker");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModVersionPickerViewModel));
     private readonly IModrinthClient _modrinthClient;
     private readonly string _projectId;
     private readonly string? _loader;
@@ -67,13 +67,10 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
         _minecraftVersion = minecraftVersion;
 
         ProjectTitle = projectTitle;
-        WindowTitle = $"選擇模組版本 — {projectTitle}";
         Versions = [];
 
         _ = RunSafeAsync(LoadVersionsAsync, "載入模組版本清單", Logger);
     }
-
-    public string WindowTitle { get; }
 
     public string ProjectTitle { get; }
 
@@ -113,9 +110,9 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
                     DatePublished = FormatPublishedDate(version.DatePublished),
                     FileName = file?.Filename ?? "-",
                     DownloadUrl = file?.Url ?? string.Empty,
-                    ExpectedHash = ResolveHash(file, out string algorithm),
+                    ExpectedHash = ModHelpers.ResolveHash(file, out string algorithm),
                     HashAlgorithm = algorithm,
-                    Dependencies = [.. version.Dependencies
+                    Dependencies = (string[])[.. version.Dependencies
                         .Select(static d => d.ProjectId ?? string.Empty)
                         .Where(static id => id.Length > 0)]
                 };
@@ -135,6 +132,7 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
         }
         catch (Exception exception)
         {
+            Logger.Warning(exception, "讀取模組版本清單失敗：{Message}", exception.Message);
             StatusMessage = $"讀取版本清單失敗：{exception.Message}";
         }
         finally
@@ -186,29 +184,6 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
 
         QueuedVersion = SelectedVersion;
         return true;
-    }
-
-    private static string? ResolveHash(ModFile? file, out string algorithm)
-    {
-        algorithm = "sha512";
-        if (file?.Hashes is null)
-        {
-            return null;
-        }
-
-        if (file.Hashes.TryGetValue("sha512", out string? sha512) && !string.IsNullOrWhiteSpace(sha512))
-        {
-            algorithm = "sha512";
-            return sha512;
-        }
-
-        if (file.Hashes.TryGetValue("sha1", out string? sha1) && !string.IsNullOrWhiteSpace(sha1))
-        {
-            algorithm = "sha1";
-            return sha1;
-        }
-
-        return null;
     }
 
     private static string FormatPublishedDate(string raw)

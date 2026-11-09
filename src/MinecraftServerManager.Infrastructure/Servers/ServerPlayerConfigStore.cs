@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
@@ -10,6 +11,7 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 /// </summary>
 public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerPlayerConfigStore));
     private const string OpsFileName = ServerDefaults.OpsFileName;
     private const string WhitelistFileName = ServerDefaults.WhitelistFileName;
     private const string BannedPlayersFileName = ServerDefaults.BannedPlayersFileName;
@@ -73,8 +75,13 @@ public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
 
             return JsonCodec.Deserialize<List<T>>(bytes);
         }
-        catch
+        catch (OperationCanceledException)
         {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "讀取伺服器玩家設定檔失敗: {FileName}", fileName);
             return null;
         }
     }

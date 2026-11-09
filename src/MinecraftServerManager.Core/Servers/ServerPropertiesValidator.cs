@@ -23,6 +23,7 @@ public static class ServerPropertiesValidator
     /// <returns>若合法回傳 (true, null)；若非法回傳 (false, 錯誤描述)</returns>
     public static (bool IsValid, string? Error) ValidateProperty(string key, string value, string defaultValue)
     {
+        ArgumentNullException.ThrowIfNull(value);
         string val = value.Trim();
 
         // 1. server-ip 位址驗證
@@ -189,7 +190,7 @@ public static class ServerPropertiesValidator
             }
         }
 
-        if (looksLikeIp && val.Contains('.'))
+        if (looksLikeIp && val.Contains('.', StringComparison.Ordinal))
         {
             return false;
         }

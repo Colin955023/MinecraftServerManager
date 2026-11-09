@@ -12,7 +12,7 @@ namespace MinecraftServerManager.Infrastructure.Mods;
 /// </summary>
 public sealed class ModDependencyPlanner : IModDependencyPlanner
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ModDependencyPlanner");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModDependencyPlanner));
 
     /// <summary>
     /// 常見核心相依庫之 Modrinth Project ID 與本地 Mod ID / Slug 別名對映表

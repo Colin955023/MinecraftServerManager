@@ -5,8 +5,9 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class LoaderInstallerServiceTests : IDisposable
+public sealed partial class LoaderInstallerServiceTests : IDisposable
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(LoaderInstallerServiceTests));
     private readonly string _testRoot;
     private readonly string _cacheDir;
     private readonly string _serverDir;
@@ -29,7 +30,10 @@ public sealed class LoaderInstallerServiceTests : IDisposable
                 Directory.Delete(_testRoot, recursive: true);
             }
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+        }
     }
 
     [Fact]
@@ -224,6 +228,9 @@ public sealed class LoaderInstallerServiceTests : IDisposable
         public Func<Uri, string?>? CustomGetText { get; init; }
         public string? LastDownloadExpectedHash { get; private set; }
         public string? LastDownloadExpectedAlgorithm { get; private set; }
+
+        public Task<HttpJsonResponse<System.Text.Json.JsonDocument>> GetJsonDocumentAsync(Uri uri, CancellationToken cancellationToken = default) =>
+            TestHttpJson.FromTextAsync(this, uri, cancellationToken);
 
         public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default)
         {

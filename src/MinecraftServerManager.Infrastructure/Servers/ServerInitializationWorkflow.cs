@@ -10,7 +10,7 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 /// </summary>
 public sealed class ServerInitializationWorkflow : IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerInitializationWorkflow");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerInitializationWorkflow));
     private static readonly TimeSpan ReadyStopTimeout = TimeSpan.FromSeconds(30);
 
     private readonly IServerRuntime _runtime;

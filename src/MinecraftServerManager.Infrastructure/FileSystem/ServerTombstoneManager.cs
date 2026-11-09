@@ -1,4 +1,5 @@
 using MinecraftServerManager.Domain.ValueObjects;
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.FileSystem;
@@ -17,6 +18,8 @@ public sealed record DeleteTombstoneRecord(
 /// </summary>
 public static class ServerTombstoneManager
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerTombstoneManager));
+
     public const string DeletePrefix = ".msm-delete-";
     public const string DeleteMarker = ".msm-delete-marker.json";
 
@@ -98,8 +101,9 @@ public static class ServerTombstoneManager
                 {
                     record = JsonCodec.Deserialize<DeleteTombstoneRecord>(SafeFileSystem.ReadAllText(markerPath));
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Logger.Warning("反序列化墓碑內部標記失敗: {0}", ex.Message);
                     record = null;
                 }
             }
@@ -110,8 +114,9 @@ public static class ServerTombstoneManager
                 {
                     record = JsonCodec.Deserialize<DeleteTombstoneRecord>(SafeFileSystem.ReadAllText(journalPath));
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Logger.Warning("反序列化墓碑外部記錄失敗: {0}", ex.Message);
                     record = null;
                 }
             }
@@ -147,9 +152,9 @@ public static class ServerTombstoneManager
                 SafeFileSystem.DeleteWithin(root, journalPath);
                 onRecovered?.Invoke(record.ServerName);
             }
-            catch
+            catch (Exception ex)
             {
-                // 若還原失敗則保留目錄供管理員檢視
+                Logger.Warning("還原伺服器目錄失敗，保留目錄供管理員檢視: {0}", ex.Message);
             }
         }
     }

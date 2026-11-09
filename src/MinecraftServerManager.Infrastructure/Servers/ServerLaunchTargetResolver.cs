@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
@@ -10,7 +11,7 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 /// </summary>
 internal static partial class ServerLaunchTargetResolver
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerLaunchTargetResolver");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerLaunchTargetResolver));
 
     internal static readonly string[] PreferredLaunchJars =
     [
@@ -62,7 +63,7 @@ internal static partial class ServerLaunchTargetResolver
 
         // 3. 若指定了載入器，優先依照載入器特徵尋找目標 JAR
         var jarFiles = SafeFileSystem.ListBoundedDirectory(stableDir, rejectReparse: false)
-            .Where(static e => !e.IsDirectory && e.FullPath.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
+            .Where(static e => !e.IsDirectory && ModHelpers.IsJarFileName(e.FullPath))
             .Select(static e => Path.GetFileName(e.FullPath))
             .ToList();
 
@@ -113,25 +114,23 @@ internal static partial class ServerLaunchTargetResolver
         return "server.jar";
     }
 
+    private static readonly (string Group, string Artifact)[] LibraryWinArgsCandidates =
+    [
+        ("minecraftforge", "forge"),
+        ("neoforged", "neoforge")
+    ];
+
     internal static string? FindLibraryWinArgs(string directory)
     {
-        string forgeLib = Path.Combine(directory, "libraries", "net", "minecraftforge", "forge");
-        if (SafeFileSystem.DirectoryExists(forgeLib))
+        foreach (var (group, artifact) in LibraryWinArgsCandidates)
         {
-            foreach (string sub in SafeFileSystem.EnumerateDirectories(forgeLib))
+            string libDir = Path.Combine(directory, "libraries", "net", group, artifact);
+            if (!SafeFileSystem.DirectoryExists(libDir))
             {
-                string winArgs = Path.Combine(sub, "win_args.txt");
-                if (SafeFileSystem.FileExists(winArgs))
-                {
-                    return "@" + Path.GetRelativePath(directory, winArgs).Replace('\\', '/');
-                }
+                continue;
             }
-        }
 
-        string neoLib = Path.Combine(directory, "libraries", "net", "neoforged", "neoforge");
-        if (SafeFileSystem.DirectoryExists(neoLib))
-        {
-            foreach (string sub in SafeFileSystem.EnumerateDirectories(neoLib))
+            foreach (string sub in SafeFileSystem.EnumerateDirectories(libDir))
             {
                 string winArgs = Path.Combine(sub, "win_args.txt");
                 if (SafeFileSystem.FileExists(winArgs))

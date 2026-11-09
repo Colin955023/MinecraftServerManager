@@ -17,11 +17,10 @@ public sealed class RotatingFileLoggerOptions
 
     public int MaxArchiveFiles { get; set; } = DefaultMaxArchiveFiles;
 
-    public LogLevel MinimumLevel { get; set; } = RuntimePaths.IsDevelopmentEnvironment()
-        ? LogLevel.Debug
-        : LogLevel.Information;
+    public LogLevel MinimumLevel { get; set; } = LogLevel.Information;
 
     public int ProcessId { get; set; } = Environment.ProcessId;
 
     public bool OutputToConsole { get; set; } = RuntimePaths.IsDevelopmentEnvironment();
+
 }

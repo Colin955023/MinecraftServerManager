@@ -92,6 +92,20 @@ dotnet_diagnostic.IDE0003.severity = warning
 dotnet_diagnostic.IDE0044.severity = warning
 dotnet_diagnostic.IDE1006.severity = warning
 
+# 設計與架構規範（排除與 WinUI 3 XAML / 領域模型衝突之老舊規則）
+dotnet_diagnostic.CA1031.severity = none
+dotnet_diagnostic.CA1515.severity = none
+dotnet_diagnostic.CA1054.severity = none
+dotnet_diagnostic.CA1056.severity = none
+dotnet_diagnostic.CA1003.severity = none
+dotnet_diagnostic.CA1308.severity = none
+dotnet_diagnostic.CA1724.severity = none
+dotnet_diagnostic.CA1034.severity = none
+dotnet_diagnostic.CA1028.severity = none
+dotnet_diagnostic.CA1062.severity = none
+dotnet_diagnostic.IDE0008.severity = none
+dotnet_diagnostic.IDE0058.severity = none
+
 # .NET Code Quality
 dotnet_diagnostic.CA1822.severity = warning
 dotnet_diagnostic.CA1823.severity = error
@@ -125,7 +139,8 @@ dotnet_diagnostic.CA1873.severity = warning
 
 # 現代語法風格（支援 dotnet format 自動修復）
 dotnet_style_prefer_simplified_interpolation = true:warning
-csharp_style_prefer_collection_expression = true:warning
+csharp_style_prefer_collection_expression = when_types_exact_match:warning
+dotnet_diagnostic.CsWinRT1030.severity = none
 csharp_style_prefer_null_check_over_type_check = true:warning
 csharp_style_prefer_utf8_string_literals = true:warning
 
@@ -137,12 +152,15 @@ dotnet_diagnostic.CA3075.severity = error
 dotnet_diagnostic.CA5390.severity = error
 
 # 測試專案 / UI 專案的必要例外
-# WPF UI 需要 SynchronizationContext，因此允許 await 捕獲 UI context。
-[src/MinecraftServerManager.App/**/*.cs]
+# WinUI 3 UI 需要 SynchronizationContext，且 XAML 標記事件處理器無法由 C# 靜態語法樹探知，排除 IDE0051/IDE0052/IDE0060 避免 dotnet format 誤刪事件處理常式與未使用引數。
+[src/MinecraftServerManager.App/**.cs]
 dotnet_diagnostic.CA2007.severity = none
+dotnet_diagnostic.IDE0051.severity = none
+dotnet_diagnostic.IDE0052.severity = none
+dotnet_diagnostic.IDE0060.severity = none
 
 # Tests 測試專案排除非必要約束
-[tests/**/*.cs]
+[tests/**.cs]
 dotnet_diagnostic.IDE0005.severity = none
 dotnet_diagnostic.CA1707.severity = none
 dotnet_diagnostic.CA1806.severity = none

@@ -1,4 +1,7 @@
+using System.Buffers;
 using System.Text.RegularExpressions;
+
+using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Logging;
 
@@ -8,8 +11,11 @@ namespace MinecraftServerManager.Infrastructure.Logging;
 public static partial class LogDataMasker
 {
     private const string MaskReplacement = "***";
-    private static readonly string CachedUserProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    private static readonly string CachedUserProfile = RuntimePaths.GetUserProfileDir();
     private static readonly string CachedUserProfileSlash = CachedUserProfile.Replace('\\', '/');
+
+    private static readonly SearchValues<string> SensitiveKeywords =
+        SearchValues.Create(["pass", "pwd", "secret", "token", "key", "bearer"], StringComparison.OrdinalIgnoreCase);
 
     [GeneratedRegex(@"(?i)(password|passwd|pwd|secret|token|api[_-]?key)\s*([=:]|\s+)\s*([^\s,;""'&]+)")]
     private static partial Regex SensitiveKeyValueRegex();
@@ -62,10 +68,5 @@ public static partial class LogDataMasker
     }
 
     private static bool MayContainSensitiveData(string text) =>
-        text.Contains("pass", StringComparison.OrdinalIgnoreCase) ||
-        text.Contains("pwd", StringComparison.OrdinalIgnoreCase) ||
-        text.Contains("secret", StringComparison.OrdinalIgnoreCase) ||
-        text.Contains("token", StringComparison.OrdinalIgnoreCase) ||
-        text.Contains("key", StringComparison.OrdinalIgnoreCase) ||
-        text.Contains("bearer", StringComparison.OrdinalIgnoreCase);
+        text.AsSpan().ContainsAny(SensitiveKeywords);
 }

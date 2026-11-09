@@ -1,8 +1,6 @@
 using MinecraftServerManager.Infrastructure.Logging;
-using System.Buffers;
 using System.Collections.Concurrent;
 using System.IO.Compression;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using MinecraftServerManager.Core.Mods;
@@ -19,7 +17,7 @@ namespace MinecraftServerManager.Infrastructure.Mods;
 /// </summary>
 public sealed partial class LocalModScanner(IModIndexPersistence? indexPersistence = null) : ILocalModScanner
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("LocalModScanner");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(LocalModScanner));
     private const int MaxMetadataEntryBytes = 256 * 1024;
 
     public async Task<IReadOnlyList<LocalModInfo>> ScanModsAsync(string modsDirectory, CancellationToken cancellationToken = default)
@@ -29,8 +27,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
 
         string stableModsDir = SafeFileSystem.ResolveStableDirectory(modsDirectory, create: true);
         var entries = SafeFileSystem.ListBoundedDirectory(stableModsDir, rejectReparse: false)
-            .Where(e => !e.IsDirectory && (e.FullPath.EndsWith(".jar", StringComparison.OrdinalIgnoreCase) ||
-                                          e.FullPath.EndsWith(".jar.disabled", StringComparison.OrdinalIgnoreCase)))
+            .Where(e => !e.IsDirectory && ModHelpers.IsModFileName(e.FullPath))
             .OrderBy(e => Path.GetFileName(e.FullPath), StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -79,7 +76,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
 
         FileSystemMetadata fileInfo = SafeFileSystem.GetFileMetadata(filePath);
         string fileName = fileInfo.Name;
-        bool isEnabled = !fileName.EndsWith(".jar.disabled", StringComparison.OrdinalIgnoreCase);
+        bool isEnabled = !ModHelpers.IsDisabledModFileName(fileName);
         string baseStem = ModHelpers.ModFilenameStem(fileName);
 
         // 讀取快取（若為 ModIndexPersistence 則一併檢查檔案大小與最後修改時間）
@@ -142,89 +139,6 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
         return Task.FromResult<LocalModInfo?>(modInfo);
     }
 
-    private static string? ReadEntryTextBounded(ZipArchiveEntry entry, int maxBytes = MaxMetadataEntryBytes)
-    {
-        if (entry.Length > maxBytes)
-        {
-            return null;
-        }
-
-        int rentSize = (int)Math.Min(entry.Length > 0 ? entry.Length + 1 : 4096, maxBytes + 1);
-        using var stream = entry.Open();
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(rentSize);
-        try
-        {
-            int totalRead = 0;
-            while (totalRead < rentSize)
-            {
-                int read = stream.Read(buffer, totalRead, rentSize - totalRead);
-                if (read == 0)
-                {
-                    break;
-                }
-                totalRead += read;
-            }
-
-            // 若 entry.Length 未知且資料超出初始租用大小，回退至完整讀取
-            if (totalRead == rentSize && rentSize < maxBytes + 1)
-            {
-                int nextByte = stream.ReadByte();
-                if (nextByte != -1)
-                {
-                    byte[] largeBuffer = ArrayPool<byte>.Shared.Rent(maxBytes + 1);
-                    try
-                    {
-                        Buffer.BlockCopy(buffer, 0, largeBuffer, 0, totalRead);
-                        largeBuffer[totalRead++] = (byte)nextByte;
-                        while (totalRead <= maxBytes)
-                        {
-                            int read = stream.Read(largeBuffer, totalRead, maxBytes + 1 - totalRead);
-                            if (read == 0)
-                            {
-                                break;
-                            }
-                            totalRead += read;
-                        }
-
-                        if (totalRead > maxBytes)
-                        {
-                            return null;
-                        }
-
-                        ReadOnlySpan<byte> largeSpan = largeBuffer.AsSpan(0, totalRead);
-                        if (largeSpan.StartsWith(Encoding.UTF8.Preamble))
-                        {
-                            largeSpan = largeSpan[Encoding.UTF8.Preamble.Length..];
-                        }
-
-                        return Encoding.UTF8.GetString(largeSpan);
-                    }
-                    finally
-                    {
-                        ArrayPool<byte>.Shared.Return(largeBuffer);
-                    }
-                }
-            }
-
-            if (totalRead > maxBytes)
-            {
-                return null;
-            }
-
-            ReadOnlySpan<byte> span = buffer.AsSpan(0, totalRead);
-            if (span.StartsWith(Encoding.UTF8.Preamble))
-            {
-                span = span[Encoding.UTF8.Preamble.Length..];
-            }
-
-            return Encoding.UTF8.GetString(span);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
-    }
-
     private static LocalModMetadataBuilder ExtractMetadataFromJar(string filePath, string fallbackName)
     {
         var meta = new LocalModMetadataBuilder { Name = fallbackName };
@@ -235,7 +149,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
 
             // 1. fabric.mod.json / quilt.mod.json
             var fabricEntry = archive.GetEntry("fabric.mod.json") ?? archive.GetEntry("quilt.mod.json");
-            if (fabricEntry is not null && ReadEntryTextBounded(fabricEntry) is { } fabricJson)
+            if (fabricEntry is not null && SafeZipArchive.ReadEntryTextBounded(fabricEntry, MaxMetadataEntryBytes) is { } fabricJson)
             {
                 using var doc = JsonCodec.ParseDocument(fabricJson);
                 ParseFabricJson(doc.RootElement, meta, archive);
@@ -244,7 +158,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
 
             // 2. META-INF/mods.toml / META-INF/neoforge.mods.toml (Forge / NeoForge)
             var forgeEntry = archive.GetEntry("META-INF/mods.toml") ?? archive.GetEntry("META-INF/neoforge.mods.toml");
-            if (forgeEntry is not null && ReadEntryTextBounded(forgeEntry) is { } content)
+            if (forgeEntry is not null && SafeZipArchive.ReadEntryTextBounded(forgeEntry, MaxMetadataEntryBytes) is { } content)
             {
                 ParseForgeToml(content, meta, archive);
                 return meta;
@@ -252,7 +166,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
 
             // 3. mcmod.info (Legacy Forge)
             var legacyEntry = archive.GetEntry("mcmod.info");
-            if (legacyEntry is not null && ReadEntryTextBounded(legacyEntry) is { } legacyJson)
+            if (legacyEntry is not null && SafeZipArchive.ReadEntryTextBounded(legacyEntry, MaxMetadataEntryBytes) is { } legacyJson)
             {
                 using var doc = JsonCodec.ParseDocument(legacyJson);
                 ParseLegacyMcModInfo(doc.RootElement, meta);
@@ -281,41 +195,41 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
         string? manifestVersion = null;
 
         var mfEntry = archive.GetEntry("META-INF/MANIFEST.MF");
-        if (mfEntry is not null && mfEntry.Length <= MaxMetadataEntryBytes)
+        if (mfEntry is not null)
         {
             try
             {
-                using var stream = mfEntry.Open();
-                using var reader = new StreamReader(stream, Encoding.UTF8);
-                string? line;
-                while ((line = reader.ReadLine()) is not null)
+                if (SafeZipArchive.ReadEntryTextBounded(mfEntry, MaxMetadataEntryBytes) is { } mfText)
                 {
-                    int colon = line.IndexOf(':');
-                    if (colon <= 0)
+                    foreach (ReadOnlySpan<char> line in mfText.AsSpan().EnumerateLines())
                     {
-                        continue;
-                    }
+                        int colon = line.IndexOf(':');
+                        if (colon <= 0)
+                        {
+                            continue;
+                        }
 
-                    string key = line[..colon].Trim();
-                    string val = line[(colon + 1)..].Trim();
+                        ReadOnlySpan<char> key = line[..colon].Trim();
+                        ReadOnlySpan<char> val = line[(colon + 1)..].Trim();
 
-                    if (key.Equals("Embedded-Dependencies-Mod", StringComparison.OrdinalIgnoreCase))
-                    {
-                        embeddedPath = val;
-                    }
-                    else if (key.Equals("Specification-Title", StringComparison.OrdinalIgnoreCase) ||
-                             key.Equals("Implementation-Title", StringComparison.OrdinalIgnoreCase))
-                    {
-                        manifestTitle ??= val;
-                    }
-                    else if (key.Equals("Specification-Vendor", StringComparison.OrdinalIgnoreCase) ||
-                             key.Equals("Implementation-Vendor", StringComparison.OrdinalIgnoreCase))
-                    {
-                        manifestVendor ??= val;
-                    }
-                    else if (key.Equals("Implementation-Version", StringComparison.OrdinalIgnoreCase))
-                    {
-                        manifestVersion ??= val;
+                        if (key.Equals("Embedded-Dependencies-Mod", StringComparison.OrdinalIgnoreCase))
+                        {
+                            embeddedPath = val.ToString();
+                        }
+                        else if (key.Equals("Specification-Title", StringComparison.OrdinalIgnoreCase) ||
+                                 key.Equals("Implementation-Title", StringComparison.OrdinalIgnoreCase))
+                        {
+                            manifestTitle ??= val.ToString();
+                        }
+                        else if (key.Equals("Specification-Vendor", StringComparison.OrdinalIgnoreCase) ||
+                                 key.Equals("Implementation-Vendor", StringComparison.OrdinalIgnoreCase))
+                        {
+                            manifestVendor ??= val.ToString();
+                        }
+                        else if (key.Equals("Implementation-Version", StringComparison.OrdinalIgnoreCase))
+                        {
+                            manifestVersion ??= val.ToString();
+                        }
                     }
                 }
             }
@@ -335,26 +249,19 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
         innerJarEntry ??= archive.Entries.FirstOrDefault(static e =>
             (e.FullName.StartsWith("META-INF/jarjar/", StringComparison.OrdinalIgnoreCase) ||
              e.FullName.StartsWith("META-INF/jars/", StringComparison.OrdinalIgnoreCase)) &&
-            e.FullName.EndsWith(".jar", StringComparison.OrdinalIgnoreCase) &&
+            ModHelpers.IsJarFileName(e.FullName) &&
             e.Length <= 10 * 1024 * 1024);
 
-        if (innerJarEntry is { Length: <= 10 * 1024 * 1024 })
+        if (innerJarEntry is not null && SafeZipArchive.ReadEntryBytesBounded(innerJarEntry, 10 * 1024 * 1024) is { } innerJarBytes)
         {
             try
             {
-                using var innerStream = innerJarEntry.Open();
-                int initialCapacity = innerJarEntry.Length > 0 ? (int)Math.Min(innerJarEntry.Length, 10 * 1024 * 1024) : 0;
-                using var ms = new MemoryStream(initialCapacity);
-                innerStream.CopyTo(ms);
-                ms.Position = 0;
+                using var ms = new MemoryStream(innerJarBytes, writable: false);
                 using var innerZip = SafeZipArchive.OpenRead(ms, leaveOpen: true, maxArchiveBytes: 10 * 1024 * 1024);
 
                 var innerToml = innerZip.GetEntry("META-INF/mods.toml") ?? innerZip.GetEntry("META-INF/neoforge.mods.toml");
-                if (innerToml is not null && innerToml.Length <= MaxMetadataEntryBytes)
+                if (innerToml is not null && SafeZipArchive.ReadEntryTextBounded(innerToml, MaxMetadataEntryBytes) is { } tomlContent)
                 {
-                    using var s = innerToml.Open();
-                    using var r = new StreamReader(s);
-                    string tomlContent = r.ReadToEnd();
                     ParseForgeToml(tomlContent, meta, innerZip);
                     if (string.IsNullOrWhiteSpace(meta.Version) && !string.IsNullOrWhiteSpace(manifestVersion))
                     {
@@ -364,10 +271,9 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                 }
 
                 var innerFabric = innerZip.GetEntry("fabric.mod.json") ?? innerZip.GetEntry("quilt.mod.json");
-                if (innerFabric is not null && innerFabric.Length <= MaxMetadataEntryBytes)
+                if (innerFabric is not null && SafeZipArchive.ReadEntryTextBounded(innerFabric, MaxMetadataEntryBytes) is { } innerFabricJson)
                 {
-                    using var s = innerFabric.Open();
-                    using var doc = JsonCodec.ParseDocument(s);
+                    using var doc = JsonCodec.ParseDocument(innerFabricJson);
                     ParseFabricJson(doc.RootElement, meta, innerZip);
                     if (string.IsNullOrWhiteSpace(meta.Version) && !string.IsNullOrWhiteSpace(manifestVersion))
                     {
@@ -835,25 +741,22 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
         try
         {
             var manifestEntry = archive.GetEntry("META-INF/MANIFEST.MF");
-            if (manifestEntry is null)
+            if (manifestEntry is null || SafeZipArchive.ReadEntryTextBounded(manifestEntry, MaxMetadataEntryBytes) is not { } manifestText)
             {
                 return null;
             }
 
-            using var stream = manifestEntry.Open();
-            using var reader = new StreamReader(stream);
-            string? line;
-            while ((line = reader.ReadLine()) is not null)
+            foreach (ReadOnlySpan<char> line in manifestText.AsSpan().EnumerateLines())
             {
                 if (line.StartsWith("Implementation-Version:", StringComparison.OrdinalIgnoreCase))
                 {
                     int colonIdx = line.IndexOf(':');
                     if (colonIdx >= 0)
                     {
-                        string val = line[(colonIdx + 1)..].Trim();
-                        if (!string.IsNullOrEmpty(val) && val != "${projectversion}")
+                        ReadOnlySpan<char> val = line[(colonIdx + 1)..].Trim();
+                        if (!val.IsEmpty && !val.Equals("${projectversion}", StringComparison.Ordinal))
                         {
-                            return val;
+                            return val.ToString();
                         }
                     }
                 }

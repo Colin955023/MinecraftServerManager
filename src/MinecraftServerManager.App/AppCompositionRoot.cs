@@ -1,6 +1,7 @@
 using System.Net;
-using System.Net.Http;
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
+using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Http;
 using MinecraftServerManager.Infrastructure.Java;
 using MinecraftServerManager.Infrastructure.Loaders;
@@ -19,7 +20,7 @@ namespace MinecraftServerManager.App;
 /// </summary>
 public sealed class AppCompositionRoot : IAsyncDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("AppCompositionRoot");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AppCompositionRoot));
 
     private readonly SocketsHttpHandler _httpHandler;
     private readonly HttpClient _sharedHttpClient;
@@ -29,17 +30,19 @@ public sealed class AppCompositionRoot : IAsyncDisposable
     private readonly JavaRuntimeDetector _javaDetector;
     private readonly LoaderCatalogService _loaderCatalog;
     private readonly MainViewModel _mainViewModel;
-    private readonly Services.WpfUiService _uiService;
+    private readonly IUiService _uiService;
 
     public MainViewModel MainViewModel => _mainViewModel;
-    public Services.IUiService UiService => _uiService;
+    public IUiService UiService => _uiService;
     public SettingsManager Settings => _settingsManager;
+    public IProcessRunner ProcessRunner => _sharedProcessRunner;
     public bool IsServerRunning => _sharedServerRuntime.IsRunning;
     public MainViewModelDependencies Dependencies { get; }
 
-    public AppCompositionRoot(string serversRoot, SettingsManager? settingsManager = null)
+    public AppCompositionRoot(string serversRoot, IUiService uiService, SettingsManager? settingsManager = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serversRoot);
+        _uiService = uiService ?? throw new ArgumentNullException(nameof(uiService));
 
         _httpHandler = new SocketsHttpHandler
         {
@@ -82,8 +85,6 @@ public sealed class AppCompositionRoot : IAsyncDisposable
         var updateCheckerService = new UpdateCheckerService(httpPort);
         var appUpdateService = new AppUpdateService(httpPort, processRunner: _sharedProcessRunner);
 
-        _uiService = new Services.WpfUiService();
-
         var dependencies = new MainViewModelDependencies(
             SettingsManager: _settingsManager,
             JavaDetector: _javaDetector,
@@ -108,6 +109,7 @@ public sealed class AppCompositionRoot : IAsyncDisposable
             PlayerConfigStore: playerConfigStore,
             PropertiesStore: propertiesStore);
 
+        AccentColorService.ApplyAccentColor(_settingsManager.GetCustomAccentColor());
         _mainViewModel = new MainViewModel(dependencies);
         Dependencies = dependencies;
     }
@@ -125,7 +127,7 @@ public sealed class AppCompositionRoot : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                Logger.Warning("背景預熱過程發生部分異常: {Message}", ex.Message);
+                Logger.Warning("背景預熱過程發生部分異常: {0}", ex.Message);
             }
         });
     }

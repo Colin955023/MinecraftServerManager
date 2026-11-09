@@ -1,68 +1,49 @@
-<Window x:Class="MinecraftServerManager.App.Views.NotificationDialog"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="系統提示"
-        Width="460"
-        SizeToContent="Height"
-        MinWidth="380"
-        MaxWidth="560"
-        WindowStartupLocation="CenterScreen"
-        ResizeMode="NoResize"
-        ShowInTaskbar="False"
-        Background="{DynamicResource WindowBrush}"
-        Foreground="{DynamicResource TextBrush}"
-        MouseEnter="Window_MouseEnter"
-        MouseLeave="Window_MouseLeave"
-        Loaded="Window_Loaded">
-  <Border Padding="22" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="12" CornerRadius="8">
-    <Grid>
-      <Grid.RowDefinitions>
-        <RowDefinition Height="Auto" />
-        <RowDefinition Height="Auto" />
-        <RowDefinition Height="Auto" />
-      </Grid.RowDefinitions>
+<ContentDialog x:Class="MinecraftServerManager.App.Views.NotificationDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="{x:Bind DialogTitle, Mode=OneTime}"
+    PrimaryButtonText="{x:Bind ButtonText, Mode=OneWay}"
+    DefaultButton="Primary"
+    PointerEntered="Dialog_PointerEntered"
+    PointerExited="Dialog_PointerExited"
+    PrimaryButtonClick="Dialog_PrimaryButtonClick">
 
-      <!-- 標題與圖示 -->
-      <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,14" VerticalAlignment="Center">
-        <TextBlock x:Name="IconText" FontSize="22" Margin="0,0,10,0" VerticalAlignment="Center" />
-        <TextBlock x:Name="TitleText" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
-      </StackPanel>
+    <Grid Margin="0,12,0,0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
 
-      <!-- 訊息內容 -->
-      <TextBlock Grid.Row="1"
-                 x:Name="MessageText"
-                 TextWrapping="Wrap"
-                 FontSize="13"
-                 LineHeight="20"
-                 Foreground="{DynamicResource TextBrush}"
-                 Margin="0,0,0,20" />
+        <!-- 訊息內容與圖示 -->
+        <Grid Grid.Row="0"
+            Margin="0,0,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
 
-      <!-- 按鈕與倒數區域 -->
-      <Grid Grid.Row="2">
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="Auto" />
-        </Grid.ColumnDefinitions>
+            <TextBlock Text="{x:Bind IconGlyph, Mode=OneTime}"
+                FontSize="26"
+                VerticalAlignment="Top"
+                Margin="0,0,14,0" />
 
-        <ProgressBar x:Name="CountdownProgress"
-                     Height="4"
-                     VerticalAlignment="Center"
-                     Margin="0,0,16,0"
-                     Maximum="100"
-                     Value="100"
-                     Background="{DynamicResource BorderBrush}"
-                     Foreground="{DynamicResource AccentBrush}"
-                     BorderThickness="0" />
+            <TextBlock Grid.Column="1"
+                Text="{x:Bind Message, Mode=OneTime}"
+                TextWrapping="Wrap"
+                FontSize="14"
+                VerticalAlignment="Center"
+                Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+        </Grid>
 
-        <Button Grid.Column="1"
-                x:Name="OkButton"
-                Content="確定"
-                Style="{DynamicResource PrimaryButtonStyle}"
-                MinWidth="105"
-                Height="32"
-                Click="OkButton_Click"
-                IsDefault="True" />
-      </Grid>
+        <!-- 倒數進度條 -->
+        <ProgressBar Grid.Row="1"
+            x:Name="CountdownProgress"
+            Height="4"
+            Maximum="100"
+            Value="100"
+            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
     </Grid>
-  </Border>
-</Window>
+</ContentDialog>

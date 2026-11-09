@@ -48,6 +48,5 @@ public enum LaunchTargetKind
 {
     Script,
     Jar,
-    Args,
     None
 }

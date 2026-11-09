@@ -6,7 +6,56 @@
   ],
   "prHourlyLimit": 10,
   "prConcurrentLimit": 5,
+  "minimumReleaseAge": "3 days",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "build-release.yml 釘選的 Microsoft SBOM Tool 版本",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/build-release\\.yml$/"
+      ],
+      "matchStrings": [
+        "SBOM_TOOL_VERSION:\\s*(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "microsoft/sbom-tool",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "validate-renovate.yml 以 npx 執行的 Renovate 版本",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/validate-renovate\\.yml$/"
+      ],
+      "matchStrings": [
+        "--package renovate@(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "renovate",
+      "datasourceTemplate": "npm"
+    }
+  ],
   "packageRules": [
+    {
+      "matchPackageNames": [
+        "Microsoft.Windows.SDK.BuildTools"
+      ],
+      "allowedVersions": "/^10\\.0\\.28000\\./"
+    },
+    {
+      "description": ".NET major 固定為 10；升級 major 屬擁有者決策",
+      "matchPackageNames": [
+        "dotnet-sdk",
+        "Microsoft.Extensions.*",
+        "System.*"
+      ],
+      "allowedVersions": "<11"
+    },
+    {
+      "description": "Windows App SDK major 固定為 2",
+      "matchPackageNames": [
+        "Microsoft.WindowsAppSDK"
+      ],
+      "allowedVersions": "<3"
+    },
     {
       "matchUpdateTypes": [
         "minor",
@@ -41,6 +90,23 @@
       "matchManagers": [
         "github-actions"
       ]
+    },
+    {
+      "groupName": "CI tools",
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "schedule": [
+        "before 6am on monday"
+      ]
+    },
+    {
+      "matchDepNames": [
+        "microsoft/sbom-tool"
+      ],
+      "prBodyNotes": [
+        "⚠️ 必須同步更新 `build-release.yml` 中的 `SBOM_TOOL_SHA256`（`sbom-tool-win-x64.exe` 的 SHA-256），否則發布流程會因雜湊不符而中止。"
+      ]
     }
   ],
   "vulnerabilityAlerts": {
@@ -49,6 +115,7 @@
       "security"
     ],
     "prConcurrentLimit": 3,
+    "minimumReleaseAge": null,
     "vulnerabilityFixStrategy": "lowest"
   },
   "dependencyDashboard": true,

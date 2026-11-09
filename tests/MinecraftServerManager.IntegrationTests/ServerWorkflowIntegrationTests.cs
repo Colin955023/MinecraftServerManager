@@ -314,6 +314,9 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
 
         public Task<HttpJsonResponse<T>> GetJsonAsync<T>(Uri uri, CancellationToken cancellationToken = default) => Task.FromResult(new HttpJsonResponse<T>(404, default, "Not Found"));
 
+        public Task<HttpJsonResponse<System.Text.Json.JsonDocument>> GetJsonDocumentAsync(Uri uri, CancellationToken cancellationToken = default) =>
+            TestHttpJson.FromTextAsync(this, uri, cancellationToken);
+
         public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
 
         public Task<string?> PostJsonAsync(Uri uri, string jsonPayload, CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);

@@ -10,7 +10,7 @@ namespace MinecraftServerManager.Infrastructure.Java;
 
 public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRuntimeDetector
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("JavaRuntimeDetector");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(JavaRuntimeDetector));
     private const int MaxJavaDirectoryEntries = 128;
     private const string CacheFileName = "java_candidates_cache.json";
     private static readonly string[] CommonVendors =
@@ -84,8 +84,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         }).ConfigureAwait(false);
 
         var sorted = detectedBag
-            .GroupBy(item => item.ExecutablePath, StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.First())
+            .DistinctBy(item => item.ExecutablePath, StringComparer.OrdinalIgnoreCase)
             .OrderBy(item => item.MajorVersion)
             .ThenByDescending(item => item.Is64Bit)
             .ThenBy(item => item.ExecutablePath, StringComparer.OrdinalIgnoreCase)
@@ -132,13 +131,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         }
 
         var list = new List<string>();
-        ReadOnlySpan<char> span = pathEnv.AsSpan();
-        while (!span.IsEmpty)
+        foreach (var range in pathEnv.AsSpan().Split(Path.PathSeparator))
         {
-            int sepIndex = span.IndexOf(Path.PathSeparator);
-            ReadOnlySpan<char> folderSpan = (sepIndex >= 0 ? span[..sepIndex] : span).Trim();
-            span = sepIndex >= 0 ? span[(sepIndex + 1)..] : [];
-
+            var folderSpan = pathEnv.AsSpan(range).Trim();
             if (!folderSpan.IsEmpty)
             {
                 list.Add(folderSpan.ToString());
@@ -285,7 +280,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         }
 
         // 使用者目錄
-        string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string userProfile = RuntimePaths.GetUserProfileDir();
         if (!string.IsNullOrWhiteSpace(userProfile))
         {
             string jdksDir = Path.Combine(userProfile, ".jdks");
@@ -312,15 +307,15 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
     private static HashSet<string> GetJavaRoots()
     {
         var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        AddRoot(roots, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles));
-        AddRoot(roots, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86));
+        AddRoot(roots, RuntimePaths.GetProgramFilesDir());
+        AddRoot(roots, RuntimePaths.GetProgramFilesX86Dir());
         AddRoot(roots, Environment.GetEnvironmentVariable("ProgramW6432"));
         return roots;
     }
 
     private static void AddCandidate(HashSet<string> candidates, string path)
     {
-        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathRooted(path))
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
         {
             return;
         }
@@ -371,8 +366,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
 
             return false;
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("檢查 Java 路徑重解析點失敗，視為不安全路徑: {0}", ex.Message);
             return true;
         }
     }
@@ -420,8 +416,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
 
             return full;
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("解析 Java 執行檔連結目標失敗: {0}", ex.Message);
             return path;
         }
     }
@@ -457,7 +454,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!string.IsNullOrWhiteSpace(item.Path) &&
-                    Path.IsPathRooted(item.Path) &&
+                    Path.IsPathFullyQualified(item.Path) &&
                     !string.Equals(Path.GetFileName(item.Path), item.Path, StringComparison.OrdinalIgnoreCase) &&
                     SafeFileSystem.FileExists(item.Path) &&
                     !IsIgnoredJavaPath(item.Path) &&
@@ -523,8 +520,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             }
 
             var deduped = validRuntimes
-                .GroupBy(static r => r.ExecutablePath, StringComparer.OrdinalIgnoreCase)
-                .Select(static g => g.First())
+                .DistinctBy(static r => r.ExecutablePath, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             if (hadInvalidEntries || deduped.Count != validRuntimes.Count)
@@ -550,11 +546,10 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
 
             var entries = runtimes
                 .Where(static r => !string.IsNullOrWhiteSpace(r.ExecutablePath) &&
-                            Path.IsPathRooted(r.ExecutablePath) &&
+                            Path.IsPathFullyQualified(r.ExecutablePath) &&
                             !string.Equals(Path.GetFileName(r.ExecutablePath), r.ExecutablePath, StringComparison.OrdinalIgnoreCase) &&
                             SafeFileSystem.FileExists(r.ExecutablePath))
-                .GroupBy(static r => r.ExecutablePath, StringComparer.OrdinalIgnoreCase)
-                .Select(static g => g.First())
+                .DistinctBy(static r => r.ExecutablePath, StringComparer.OrdinalIgnoreCase)
                 .OrderBy(static r => r.MajorVersion)
                 .ThenBy(static r => r.ExecutablePath, StringComparer.OrdinalIgnoreCase)
                 .Select(static r =>
@@ -587,9 +582,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             string json = JsonCodec.Serialize(payload, indented: true);
             AtomicFileWriter.WriteText(cachePath, json);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // 快取寫入失敗不影響主要功能
+            Logger.Warning("寫入 Java 探測快取失敗: {0}", ex.Message);
         }
     }
 }

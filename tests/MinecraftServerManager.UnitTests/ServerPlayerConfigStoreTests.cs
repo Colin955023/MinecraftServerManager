@@ -4,8 +4,9 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class ServerPlayerConfigStoreTests : IDisposable
+public sealed partial class ServerPlayerConfigStoreTests : IDisposable
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerPlayerConfigStoreTests));
     private readonly string _testDir;
     private readonly ServerPlayerConfigStore _store;
 
@@ -25,7 +26,10 @@ public sealed class ServerPlayerConfigStoreTests : IDisposable
                 Directory.Delete(_testDir, recursive: true);
             }
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
+        }
     }
 
     [Fact]
