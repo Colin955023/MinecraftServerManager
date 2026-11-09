@@ -77,4 +77,17 @@ public sealed class OpenXmlSpreadsheetBuilderTests
         Assert.Contains("Sodium", sheetContent);
         Assert.Contains("0.92.0", sheetContent);
     }
+
+    [Fact]
+    public void BuildWorkbook_EscapesSpecialCharactersIntoWellFormedXml()
+    {
+        var rows = new List<IReadOnlyList<string>> { new[] { "A&B <C> \"D\" 'E'", "😀" } };
+
+        using var archive = new ZipArchive(new MemoryStream(OpenXmlSpreadsheetBuilder.BuildWorkbook("S", rows)), ZipArchiveMode.Read);
+        using var sheetStream = archive.GetEntry("xl/worksheets/sheet1.xml")!.Open();
+        var document = System.Xml.Linq.XDocument.Load(sheetStream);
+
+        string[] texts = [.. document.Descendants().Where(static e => e.Name.LocalName == "t").Select(static e => e.Value)];
+        Assert.Equal(["A&B <C> \"D\" 'E'", "😀"], texts);
+    }
 }

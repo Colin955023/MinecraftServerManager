@@ -16,13 +16,12 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AboutPreferencesViewModel));
 
     private readonly IUiService _ui;
-    private readonly SettingsManager? _settingsManager;
-    private readonly IUpdateCheckerService? _updateChecker;
-    private readonly IAppUpdateService? _appUpdateService;
-    private readonly IExternalLauncher? _launcher;
-    private readonly Action<string>? _onThemeModeChanged;
-    private readonly Action? _onResetWindowSizeRequested;
-    private readonly Action<string, bool>? _notificationSink;
+    private readonly SettingsManager _settingsManager;
+    private readonly IUpdateCheckerService _updateChecker;
+    private readonly IAppUpdateService _appUpdateService;
+    private readonly IExternalLauncher _launcher;
+    private readonly Action<string> _onThemeModeChanged;
+    private readonly Action _onResetWindowSizeRequested;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsManualCheckVisible))]
@@ -52,60 +51,61 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     public partial bool IsCustomAccentColor { get; set; }
 
     public AboutPreferencesViewModel(
-        SettingsManager? settingsManager = null,
-        IUpdateCheckerService? updateChecker = null,
-        Action<string>? onThemeModeChanged = null,
-        Action? onResetWindowSizeRequested = null,
-        Action<string, bool>? notificationSink = null,
-        IExternalLauncher? launcher = null,
-        IUiService? uiService = null,
-        IAppUpdateService? appUpdateService = null)
-        : base("about_preferences", "關於與設定", "檢視應用程式資訊、授權條款與視窗偏好設定")
+        IUiService uiService,
+        SettingsManager settingsManager,
+        IUpdateCheckerService updateChecker,
+        Action<string> onThemeModeChanged,
+        Action onResetWindowSizeRequested,
+        IExternalLauncher launcher,
+        IAppUpdateService appUpdateService)
+        : base("關於與設定")
     {
-        _ui = uiService ?? NoOpUiService.Instance;
+        ArgumentNullException.ThrowIfNull(uiService);
+        ArgumentNullException.ThrowIfNull(settingsManager);
+        ArgumentNullException.ThrowIfNull(updateChecker);
+        ArgumentNullException.ThrowIfNull(onThemeModeChanged);
+        ArgumentNullException.ThrowIfNull(onResetWindowSizeRequested);
+        ArgumentNullException.ThrowIfNull(launcher);
+        ArgumentNullException.ThrowIfNull(appUpdateService);
+
+        _ui = uiService;
         _settingsManager = settingsManager;
         _updateChecker = updateChecker;
         _appUpdateService = appUpdateService;
         _onThemeModeChanged = onThemeModeChanged;
         _onResetWindowSizeRequested = onResetWindowSizeRequested;
-        _notificationSink = notificationSink;
         _launcher = launcher;
 
-        if (_settingsManager is not null)
+        IsAutoUpdateEnabled = _settingsManager.IsAutoUpdateEnabled();
+        string theme = _settingsManager.GetThemeMode();
+        SelectedThemeModeIndex = theme switch
         {
-            IsAutoUpdateEnabled = _settingsManager.IsAutoUpdateEnabled();
-            string theme = _settingsManager.GetThemeMode();
-            SelectedThemeModeIndex = theme switch
-            {
-                "light" => 1,
-                "dark" => 2,
-                _ => 0,
-            };
+            "light" => 1,
+            "dark" => 2,
+            _ => 0,
+        };
 
-            string? savedAccent = _settingsManager.GetCustomAccentColor();
-            if (!string.IsNullOrWhiteSpace(savedAccent) && AccentColorService.ParseColor(savedAccent) is Windows.UI.Color parsed)
-            {
-                CustomAccentColor = savedAccent;
-                CurrentAccentColor = parsed;
-                IsCustomAccentColor = true;
-                AccentColorSummaryText = $"自訂顏色：{savedAccent}";
-                AccentColorService.ApplyAccentColor(savedAccent);
-            }
-            else
-            {
-                CustomAccentColor = null;
-                CurrentAccentColor = AccentColorService.GetSystemAccentColor();
-                IsCustomAccentColor = false;
-                AccentColorSummaryText = "使用 Windows 系統強調色（預設）";
-            }
+        string? savedAccent = _settingsManager.GetCustomAccentColor();
+        if (!string.IsNullOrWhiteSpace(savedAccent) && AccentColorService.ParseColor(savedAccent) is Windows.UI.Color parsed)
+        {
+            CustomAccentColor = savedAccent;
+            CurrentAccentColor = parsed;
+            IsCustomAccentColor = true;
+            AccentColorSummaryText = $"自訂顏色：{savedAccent}";
+            AccentColorService.ApplyAccentColor(savedAccent);
+        }
+        else
+        {
+            CustomAccentColor = null;
+            CurrentAccentColor = AccentColorService.GetSystemAccentColor();
+            IsCustomAccentColor = false;
+            AccentColorSummaryText = "使用 Windows 系統強調色（預設）";
         }
     }
 
     public static string AppVersion => AppInfo.Version;
 
     public static string AppDescription => AppInfo.AppName;
-
-    public static string GithubUrl => AppInfo.RepositoryUrl;
 
     public static string AppAuthor => AppInfo.Author;
 
@@ -115,8 +115,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     private static readonly string[] ThemeModesCache = ["依照系統設定", "淺色", "深色"];
     public static IReadOnlyList<string> ThemeModes => ThemeModesCache;
 
-    [RelayCommand]
-    partial void OnIsAutoUpdateEnabledChanged(bool value) => _settingsManager?.SetAutoUpdateEnabled(value);
+    partial void OnIsAutoUpdateEnabledChanged(bool value) => _settingsManager.SetAutoUpdateEnabled(value);
 
     partial void OnSelectedThemeModeIndexChanged(int value)
     {
@@ -127,21 +126,16 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
             _ => "system",
         };
 
-        _settingsManager?.SetThemeMode(mode);
-        _onThemeModeChanged?.Invoke(mode);
+        _settingsManager.SetThemeMode(mode);
+        _onThemeModeChanged(mode);
     }
 
     [RelayCommand]
-    public void OpenGithub() => _launcher?.OpenUrl(GithubUrl, isTrusted: true);
+    public void OpenGithub() => _launcher.OpenUrl(AppInfo.RepositoryUrl, isTrusted: true);
 
     [RelayCommand]
     private async Task CheckForUpdatesAsync()
     {
-        if (_updateChecker is null)
-        {
-            return;
-        }
-
         try
         {
             var result = await _updateChecker.CheckForUpdateAsync();
@@ -151,13 +145,13 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
             }
             else
             {
-                _notificationSink?.Invoke($"目前已是最新版本 (v{result.CurrentVersion})", false);
+                _ui.Notify($"目前已是最新版本 (v{result.CurrentVersion})", NotificationType.Info);
             }
         }
         catch (Exception ex)
         {
             Logger.Warning(ex, "檢查更新失敗：{Message}", ex.Message);
-            _notificationSink?.Invoke($"檢查更新失敗：{ex.Message}", true);
+            _ui.Notify($"檢查更新失敗：{ex.Message}", NotificationType.Error);
         }
     }
 
@@ -178,7 +172,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(result.DownloadUrl) || _appUpdateService is null)
+        if (string.IsNullOrWhiteSpace(result.DownloadUrl))
         {
             bool openWeb = await _ui.ConfirmAsync(
                 "目前發布版本不支援直接自動安裝，是否前往 GitHub 發布頁面手動下載？",
@@ -186,24 +180,26 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
                 UiMessageLevel.Information).ConfigureAwait(true);
             if (openWeb)
             {
-                _launcher?.OpenUrl(result.ReleasePageUrl, isTrusted: true);
+                _launcher.OpenUrl(result.ReleasePageUrl, isTrusted: true);
             }
             return;
         }
 
-        var progressDialog = _ui.ShowModOperationProgress("主程式自動更新", "準備下載更新檔案...");
         try
         {
-            var progress = new Progress<(int Percentage, string StatusMessage)>(p =>
+            string installerPath;
+            using (var progressDialog = _ui.ShowModOperationProgress("主程式自動更新", "準備下載更新檔案..."))
             {
-                progressDialog.UpdateProgress(p.Percentage, 100, p.StatusMessage);
-            });
+                var progress = new Progress<(int Percentage, string StatusMessage)>(p =>
+                {
+                    progressDialog.UpdateProgress(p.Percentage, 100, p.StatusMessage);
+                });
 
-            string installerPath = await _appUpdateService.DownloadAndVerifyUpdateAsync(result, progress, cancellationToken).ConfigureAwait(true);
+                installerPath = await _appUpdateService.DownloadAndVerifyUpdateAsync(result, progress, cancellationToken).ConfigureAwait(true);
 
-            progressDialog.UpdateProgress(100, 100, "更新檔案驗證成功，即將重新啟動並套用更新...");
-            await Task.Delay(1000, cancellationToken).ConfigureAwait(true);
-            progressDialog.Close();
+                progressDialog.UpdateProgress(100, 100, "更新檔案驗證成功，即將重新啟動並套用更新...");
+                await Task.Delay(1000, cancellationToken).ConfigureAwait(true);
+            }
 
             _appUpdateService.ApplyUpdateAndRestart(installerPath);
             _ui.PostToUi(() =>
@@ -213,11 +209,10 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         }
         catch (OperationCanceledException)
         {
-            progressDialog.Close();
+            Logger.Information("使用者取消主程式更新");
         }
         catch (Exception ex)
         {
-            progressDialog.Close();
             Logger.Error(ex, "主程式更新流程異常: {Message}", ex.Message);
             bool fallback = await _ui.ConfirmAsync(
                 $"更新主程式失敗：{ex.Message}\n\n是否改為前往 GitHub 手動下載最新版本？",
@@ -225,7 +220,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
                 UiMessageLevel.Error).ConfigureAwait(true);
             if (fallback)
             {
-                _launcher?.OpenUrl(result.ReleasePageUrl, isTrusted: true);
+                _launcher.OpenUrl(result.ReleasePageUrl, isTrusted: true);
             }
         }
     }
@@ -283,7 +278,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     {
         if (await _ui.ConfirmAsync("確定要將主視窗大小與位置重設為預設值嗎？", "確認重設視窗大小").ConfigureAwait(true))
         {
-            _onResetWindowSizeRequested?.Invoke();
+            _onResetWindowSizeRequested();
         }
     }
 
@@ -299,13 +294,12 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         SelectedThemeModeIndex = 0;
         ResetAccentColor();
 
-        _settingsManager?.SetAutoUpdateEnabled(true);
-        _settingsManager?.SetThemeMode("system");
-        _onThemeModeChanged?.Invoke("system");
-        _onResetWindowSizeRequested?.Invoke();
+        _settingsManager.SetAutoUpdateEnabled(true);
+        _settingsManager.SetThemeMode("system");
+        _onThemeModeChanged("system");
+        _onResetWindowSizeRequested();
     }
 
-    [RelayCommand]
     public void SelectAccentColor(Windows.UI.Color color)
     {
         string hex = AccentColorService.ToHex(color);
@@ -313,7 +307,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         CurrentAccentColor = color;
         IsCustomAccentColor = true;
         AccentColorSummaryText = $"自訂顏色：{hex}";
-        _settingsManager?.SetCustomAccentColor(hex);
+        _settingsManager.SetCustomAccentColor(hex);
         AccentColorService.ApplyAccentColor(hex);
     }
 
@@ -324,7 +318,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         CurrentAccentColor = AccentColorService.GetSystemAccentColor();
         IsCustomAccentColor = false;
         AccentColorSummaryText = "使用 Windows 系統強調色（預設）";
-        _settingsManager?.SetCustomAccentColor(null);
+        _settingsManager.SetCustomAccentColor(null);
         AccentColorService.ApplyAccentColor(null);
     }
 

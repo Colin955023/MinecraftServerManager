@@ -23,11 +23,10 @@ public sealed record WindowPreferences(
 public sealed record UserSettings(
     [property: JsonPropertyName("servers_root")] string ServersRoot = "",
     [property: JsonPropertyName("auto_update_enabled")] bool AutoUpdateEnabled = true,
-    [property: JsonPropertyName("first_run_completed")] bool FirstRunCompleted = false,
     [property: JsonPropertyName("window_preferences")] WindowPreferences WindowPreferences = null!)
 {
     public UserSettings()
-        : this("", true, false, new WindowPreferences())
+        : this("", true, new WindowPreferences())
     {
     }
 }

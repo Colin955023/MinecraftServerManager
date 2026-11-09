@@ -31,7 +31,7 @@ public sealed class JavaWingetInstaller(IProcessRunner processRunner) : IJavaIns
 
     private static readonly string[] WingetVersionArgs = ["--version"];
 
-    public async Task<bool> IsWingetAvailableAsync(CancellationToken cancellationToken = default)
+    private async Task<bool> IsWingetAvailableAsync(CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(processRunner);
 

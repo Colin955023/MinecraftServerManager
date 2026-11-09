@@ -1,22 +1,12 @@
 using System.Text;
+using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Settings;
 using MinecraftServerManager.Infrastructure.Utilities;
+using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
-
-/// <summary>
-/// 伺服器存放根目錄遷移目標路徑檢查結果
-/// </summary>
-public enum RelocationPathCheckResult
-{
-    Valid,
-    EmptyTarget,
-    TargetIsFile,
-    SameAsCurrent,
-    SubdirectoryOfCurrent,
-}
 
 /// <summary>
 /// 負責伺服器存放根目錄變更時之路徑驗證、既有內容探測、全量資料遷移、跨磁碟區搬移、失敗回滾與註冊表路徑更新。
@@ -84,7 +74,7 @@ public static class ServersRootRelocator
 
             if (entries.Count == 1 &&
                 !entries[0].IsDirectory &&
-                string.Equals(Path.GetFileName(entries[0].FullPath), "servers.json", StringComparison.OrdinalIgnoreCase))
+                string.Equals(Path.GetFileName(entries[0].FullPath), ServerDefaults.RegistryFileName, StringComparison.OrdinalIgnoreCase))
             {
                 string json = SafeFileSystem.ReadAllText(entries[0].FullPath, Encoding.UTF8);
                 var registry = JsonCodec.Deserialize<Dictionary<string, ServerConfigPayload>>(json);
@@ -171,6 +161,7 @@ public static class ServersRootRelocator
             progress?.Report((100, "資料遷移完成！"));
 
             Logger.Information("已將伺服器根目錄全部內容從 {OldRoot} 遷移至 {NewRoot}（共 {Count} 項）", srcRoot, dstRoot, movedItems.Count);
+            TryDeleteEmptySourceRoot(srcRoot);
         }
         catch (Exception ex)
         {
@@ -192,6 +183,27 @@ public static class ServersRootRelocator
             }
 
             throw;
+        }
+    }
+
+    /// <summary>
+    /// 遷移完成後，若原根目錄已無任何內容則刪除；仍有內容（含無法搬移之項目）則保留。失敗僅記錄，不影響遷移結果。
+    /// </summary>
+    private static void TryDeleteEmptySourceRoot(string srcRoot)
+    {
+        try
+        {
+            if (!SafeFileSystem.DirectoryExists(srcRoot) || SafeFileSystem.ListBoundedDirectory(srcRoot, maxEntries: 1).Count > 0)
+            {
+                return;
+            }
+
+            SafeFileSystem.DeleteDirectory(srcRoot);
+            Logger.Information("原伺服器根目錄已清空並刪除: {OldRoot}", srcRoot);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Warning(ex, "刪除已清空的原伺服器根目錄失敗，予以保留: {0}", srcRoot);
         }
     }
 
@@ -226,7 +238,7 @@ public static class ServersRootRelocator
 
     private static void RewriteRegistryPaths(string registryDirectory, string oldRoot, string newRoot)
     {
-        string registryPath = Path.Combine(registryDirectory, "servers.json");
+        string registryPath = Path.Combine(registryDirectory, ServerDefaults.RegistryFileName);
         if (!SafeFileSystem.FileExists(registryPath))
         {
             return;

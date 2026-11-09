@@ -1,41 +1,28 @@
-# 強制文字檔的換行字元一致性（跨平台開發）
+# 強制文字檔的換行字元一致性
 
 # Auto detect text files and normalize line endings to LF
 * text=auto
 
 # C# / .NET / Visual Studio：CRLF（Windows 原生 WinUI 3 專案）
 *.cs text eol=crlf
-*.sln text eol=crlf
 *.slnx text eol=crlf
 *.csproj text eol=crlf
 *.props text eol=crlf
-*.targets text eol=crlf
 *.xaml text eol=crlf
 
-# Batch / PowerShell：CRLF（Windows 標準）
-*.bat text eol=crlf
-*.cmd text eol=crlf
+# PowerShell：CRLF（Windows 標準）
 *.ps1 text eol=crlf
-*.ps1xml text eol=crlf
-
-# Shell：LF
-*.sh text eol=lf
-*.bash text eol=lf
 
 # 設定檔：LF
 *.toml text eol=lf
 *.json text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
-*.ini text eol=lf
-*.cfg text eol=lf
 *.xml text eol=lf
 
 # 文件：LF
 *.md text eol=lf
 *.txt text eol=lf
-*.rst text eol=lf
-*.changelog text eol=lf
 
 # 二進位檔案（不進行轉換）
 *.exe binary

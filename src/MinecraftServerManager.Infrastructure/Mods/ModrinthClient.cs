@@ -1,4 +1,5 @@
 using MinecraftServerManager.Infrastructure.Logging;
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MinecraftServerManager.Core.Ports;
@@ -12,9 +13,13 @@ namespace MinecraftServerManager.Infrastructure.Mods;
 /// </summary>
 public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
 {
+    private static string GetStringOrEmpty(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var value) ? value.GetString() ?? string.Empty : string.Empty;
+
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModrinthClient));
     private const string BaseUrl = "https://api.modrinth.com/v2";
     private static readonly string[] ProjectTypeFacet = ["project_type:mod"];
+    private readonly ConcurrentDictionary<string, string> _projectTitleCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly string[] ServerSideFacet = ["server_side:required", "server_side:optional"];
 
     public async Task<IReadOnlyList<OnlineModInfo>> SearchModsAsync(
@@ -155,35 +160,70 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         return ParseVersionList(json);
     }
 
-    public async Task<ModrinthVersionLookupResult?> LookupVersionByHashAsync(
-        string hash,
-        string algorithm = "sha512",
+    public async Task<IReadOnlyDictionary<string, string>> GetProjectTitlesAsync(
+        IReadOnlyCollection<string> projectIdsOrSlugs,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(hash);
-        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(projectIdsOrSlugs);
 
-        string cleanHash = hash.Trim().ToLowerInvariant();
-        string url = $"{BaseUrl}/version_file/{Uri.EscapeDataString(cleanHash)}?algorithm={Uri.EscapeDataString(algorithm)}";
-
-        string? json = await httpPort.GetTextAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(json))
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var pending = new List<string>();
+        foreach (string key in projectIdsOrSlugs.Where(static k => !string.IsNullOrWhiteSpace(k)).Select(static k => k.Trim()).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            return null;
+            if (_projectTitleCache.TryGetValue(key, out string? cached))
+            {
+                result[key] = cached;
+            }
+            else
+            {
+                pending.Add(key);
+            }
         }
 
-        try
+        foreach (string[] chunk in pending.Chunk(50))
         {
-            using var doc = JsonCodec.ParseDocument(json);
-            var version = ParseSingleVersion(doc.RootElement);
-            string projectId = doc.RootElement.TryGetProperty("project_id", out var pElem) ? pElem.GetString() ?? string.Empty : string.Empty;
-            return new ModrinthVersionLookupResult(cleanHash, algorithm, projectId, version);
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                string idsParam = Uri.EscapeDataString(JsonCodec.Serialize(chunk));
+                string? json = await httpPort.GetTextAsync(new Uri($"{BaseUrl}/projects?ids={idsParam}"), cancellationToken).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    continue;
+                }
+
+                using var doc = JsonCodec.ParseDocument(json);
+                if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (var project in doc.RootElement.EnumerateArray())
+                {
+                    string title = GetStringOrEmpty(project, "title");
+                    if (title.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    // 呼叫端可能傳入 ID 或 slug，兩者皆建立對應
+                    foreach (string key in new[] { GetStringOrEmpty(project, "id"), GetStringOrEmpty(project, "slug") })
+                    {
+                        if (key.Length > 0)
+                        {
+                            _projectTitleCache[key] = title;
+                            result[key] = title;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Logger.Warning(ex, "批次取得專案名稱失敗，改以代碼顯示");
+            }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning(ex, "解析雜湊對應之 Modrinth 版本失敗");
-            return null;
-        }
+
+        return result;
     }
 
     public async Task<IReadOnlyDictionary<string, ModrinthVersionLookupResult>> LookupVersionsByHashesAsync(
@@ -220,8 +260,8 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
                 {
                     string fileHash = prop.Name;
                     var version = ParseSingleVersion(prop.Value);
-                    string projectId = prop.Value.TryGetProperty("project_id", out var pElem) ? pElem.GetString() ?? string.Empty : string.Empty;
-                    result[fileHash] = new ModrinthVersionLookupResult(fileHash, algorithm, projectId, version);
+                    string projectId = GetStringOrEmpty(prop.Value, "project_id");
+                    result[fileHash] = new ModrinthVersionLookupResult(algorithm, projectId, version);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -247,45 +287,21 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
             foreach (var hit in hitsElem.EnumerateArray())
             {
                 string projectId = hit.GetProperty("project_id").GetString() ?? string.Empty;
-                string slug = hit.TryGetProperty("slug", out var sElem) ? sElem.GetString() ?? string.Empty : string.Empty;
-                string title = hit.TryGetProperty("title", out var tElem) ? tElem.GetString() ?? string.Empty : string.Empty;
-                string author = hit.TryGetProperty("author", out var aElem) ? aElem.GetString() ?? string.Empty : string.Empty;
-                string desc = hit.TryGetProperty("description", out var dElem) ? dElem.GetString() ?? string.Empty : string.Empty;
-                string latestVer = hit.TryGetProperty("latest_version", out var lvElem) ? lvElem.GetString() ?? string.Empty : string.Empty;
-                int downloads = hit.TryGetProperty("downloads", out var dlElem) ? dlElem.GetInt32() : 0;
-                string iconUrl = hit.TryGetProperty("icon_url", out var iconElem) ? iconElem.GetString() ?? string.Empty : string.Empty;
-
-                var categories = hit.TryGetProperty("categories", out var catElem)
-                    ? [.. catElem.EnumerateArray().Select(static c => c.GetString() ?? string.Empty)]
-                    : new List<string>();
-
-                var versions = hit.TryGetProperty("versions", out var verElem)
-                    ? [.. verElem.EnumerateArray().Select(static v => v.GetString() ?? string.Empty)]
-                    : new List<string>();
-
-                string serverSide = hit.TryGetProperty("server_side", out var ssElem) ? ssElem.GetString() ?? string.Empty : string.Empty;
-                string clientSide = hit.TryGetProperty("client_side", out var csElem) ? csElem.GetString() ?? string.Empty : string.Empty;
+                string slug = GetStringOrEmpty(hit, "slug");
+                string title = GetStringOrEmpty(hit, "title");
+                string author = GetStringOrEmpty(hit, "author");
+                string desc = GetStringOrEmpty(hit, "description");
+                string latestVer = GetStringOrEmpty(hit, "latest_version");
+                int downloads = hit.TryGetProperty("downloads", out var dlElem) && dlElem.TryGetInt64(out long dl) ? (int)Math.Min(dl, int.MaxValue) : 0;
+                string serverSide = GetStringOrEmpty(hit, "server_side");
+                string clientSide = GetStringOrEmpty(hit, "client_side");
 
                 if (serverSide.Equals("unsupported", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                list.Add(new OnlineModInfo(
-                    projectId: projectId,
-                    slug: slug,
-                    name: title,
-                    author: author,
-                    description: desc,
-                    latestVersion: latestVer,
-                    downloadCount: downloads,
-                    homepageUrl: $"https://modrinth.com/mod/{slug}",
-                    url: $"https://modrinth.com/mod/{slug}",
-                    iconUrl: iconUrl,
-                    categories: categories,
-                    versions: versions,
-                    serverSide: serverSide,
-                    clientSide: clientSide));
+                list.Add(new OnlineModInfo(projectId, slug, title, author, desc, latestVer, downloads, serverSide, clientSide));
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -321,11 +337,10 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
     private static OnlineModVersion ParseSingleVersion(JsonElement elem)
     {
         string id = elem.GetProperty("id").GetString() ?? string.Empty;
-        string versionNumber = elem.TryGetProperty("version_number", out var vn) ? vn.GetString() ?? string.Empty : string.Empty;
+        string versionNumber = GetStringOrEmpty(elem, "version_number");
         string name = elem.TryGetProperty("name", out var n) ? n.GetString() ?? versionNumber : versionNumber;
         string versionType = elem.TryGetProperty("version_type", out var vt) ? vt.GetString() ?? "release" : "release";
-        string datePublished = elem.TryGetProperty("date_published", out var dp) ? dp.GetString() ?? string.Empty : string.Empty;
-        string changelog = elem.TryGetProperty("changelog", out var cl) ? cl.GetString() ?? string.Empty : string.Empty;
+        string datePublished = GetStringOrEmpty(elem, "date_published");
 
         var gameVersions = elem.TryGetProperty("game_versions", out var gv)
             ? [.. gv.EnumerateArray().Select(static v => v.GetString() ?? string.Empty)]
@@ -376,9 +391,9 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
             }
         }
 
-        string projectId = elem.TryGetProperty("project_id", out var projElem) ? projElem.GetString() ?? string.Empty : string.Empty;
+        string projectId = GetStringOrEmpty(elem, "project_id");
 
-        return new OnlineModVersion(id, versionNumber, name, gameVersions, loaders, versionType, datePublished, changelog, files, dependencies, projectId: projectId);
+        return new OnlineModVersion(id, versionNumber, name, gameVersions, loaders, versionType, datePublished, files, dependencies, projectId: projectId);
     }
 }
 

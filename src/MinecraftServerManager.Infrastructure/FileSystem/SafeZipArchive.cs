@@ -12,11 +12,11 @@ namespace MinecraftServerManager.Infrastructure.FileSystem;
 public static class SafeZipArchive
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(SafeZipArchive));
-    public const int DefaultMaxMembers = 100_000;
-    public const long DefaultMaxMemberBytes = 2L * 1024 * 1024 * 1024; // 2 GB
-    public const long DefaultMaxTotalBytes = 32L * 1024 * 1024 * 1024; // 32 GB
-    public const long DefaultMaxArchiveBytes = DefaultMaxTotalBytes + (64L * 1024 * 1024);
-    public const int DefaultMaxCompressionRatio = 200;
+    private const int DefaultMaxMembers = 100_000;
+    private const long DefaultMaxMemberBytes = 2L * 1024 * 1024 * 1024; // 2 GB
+    private const long DefaultMaxTotalBytes = 32L * 1024 * 1024 * 1024; // 32 GB
+    private const long DefaultMaxArchiveBytes = DefaultMaxTotalBytes + (64L * 1024 * 1024);
+    private const int DefaultMaxCompressionRatio = 200;
 
     public static void WriteArchive(
         string archivePath,
@@ -57,17 +57,7 @@ public static class SafeZipArchive
 
         try
         {
-            var archive = ZipFile.OpenRead(path);
-            try
-            {
-                ValidateArchive(archive, maxMembers, DefaultMaxTotalBytes);
-                return archive;
-            }
-            catch (Exception)
-            {
-                archive.Dispose();
-                throw;
-            }
+            return ValidateOrDispose(ZipFile.OpenRead(path), maxMembers);
         }
         catch (InvalidDataException exception)
         {
@@ -89,16 +79,21 @@ public static class SafeZipArchive
             throw new SafeArchiveException("壓縮檔串流無法讀取或超過安全大小上限");
         }
 
-        ZipArchive archive;
         try
         {
-            archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen);
+            return ValidateOrDispose(new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen), maxMembers);
         }
         catch (InvalidDataException exception)
         {
             throw new SafeArchiveException("ZIP 檔案格式無效", exception);
         }
+    }
 
+    /// <summary>
+    /// 驗證已開啟之壓縮檔；驗證失敗時先釋放再重新擲出，避免洩漏檔案控制代碼
+    /// </summary>
+    private static ZipArchive ValidateOrDispose(ZipArchive archive, int maxMembers)
+    {
         try
         {
             ValidateArchive(archive, maxMembers, DefaultMaxTotalBytes);
@@ -125,77 +120,19 @@ public static class SafeZipArchive
             return null;
         }
 
+        // 依中央目錄宣告長度精確讀取；實際解壓量與宣告不符（含宣告 0 卻有資料）一律拒絕，防止長度造假之解壓縮炸彈
+        int targetLength = (int)declaredLength;
+        byte[] buffer = targetLength == 0 ? [] : new byte[targetLength];
         using var stream = entry.Open();
-        if (declaredLength > 0)
-        {
-            int targetLength = (int)declaredLength;
-            byte[] exactBuffer = new byte[targetLength];
-            int read = stream.ReadAtLeast(exactBuffer, targetLength, throwOnEndOfStream: false);
-            return read == targetLength && stream.ReadByte() == -1 ? exactBuffer : null;
-        }
-
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(maxBytes + 1);
-        try
-        {
-            int totalRead = stream.ReadAtLeast(buffer.AsSpan(0, maxBytes + 1), maxBytes + 1, throwOnEndOfStream: false);
-            return totalRead > maxBytes ? null : buffer.AsSpan(0, totalRead).ToArray();
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
+        int read = stream.ReadAtLeast(buffer, targetLength, throwOnEndOfStream: false);
+        return read == targetLength && stream.ReadByte() == -1 ? buffer : null;
     }
 
     /// <summary>
     /// 受限讀取單一壓縮檔成員之 UTF-8 文字（自動剝除 UTF-8 BOM；若超過 <paramref name="maxBytes"/> 則回傳 <see langword="null"/>）。
     /// </summary>
-    public static string? ReadEntryTextBounded(ZipArchiveEntry entry, int maxBytes)
-    {
-        ArgumentNullException.ThrowIfNull(entry);
-        ArgumentOutOfRangeException.ThrowIfNegative(maxBytes);
-
-        if (entry.Length < 0 || entry.Length > maxBytes)
-        {
-            return null;
-        }
-
-        int rentSize = (int)Math.Min(entry.Length > 0 ? entry.Length + 1 : 4096, maxBytes + 1);
-        using var stream = entry.Open();
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(rentSize);
-        try
-        {
-            int totalRead = stream.ReadAtLeast(buffer.AsSpan(0, rentSize), rentSize, throwOnEndOfStream: false);
-            if (totalRead == rentSize && rentSize < maxBytes + 1)
-            {
-                int nextByte = stream.ReadByte();
-                if (nextByte != -1)
-                {
-                    byte[] largeBuffer = ArrayPool<byte>.Shared.Rent(maxBytes + 1);
-                    try
-                    {
-                        buffer.AsSpan(0, totalRead).CopyTo(largeBuffer);
-                        largeBuffer[totalRead++] = (byte)nextByte;
-                        totalRead += stream.ReadAtLeast(
-                            largeBuffer.AsSpan(totalRead, maxBytes + 1 - totalRead),
-                            maxBytes + 1 - totalRead,
-                            throwOnEndOfStream: false);
-
-                        return totalRead > maxBytes ? null : DecodeUtf8WithoutBom(largeBuffer.AsSpan(0, totalRead));
-                    }
-                    finally
-                    {
-                        ArrayPool<byte>.Shared.Return(largeBuffer);
-                    }
-                }
-            }
-
-            return totalRead > maxBytes ? null : DecodeUtf8WithoutBom(buffer.AsSpan(0, totalRead));
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
-    }
+    public static string? ReadEntryTextBounded(ZipArchiveEntry entry, int maxBytes) =>
+        ReadEntryBytesBounded(entry, maxBytes) is { } bytes ? DecodeUtf8WithoutBom(bytes) : null;
 
     private static string DecodeUtf8WithoutBom(ReadOnlySpan<byte> span)
     {
@@ -219,7 +156,7 @@ public static class SafeZipArchive
         var parentPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (ZipArchiveEntry entry in archive.Entries)
         {
-            ValidateEntry(entry, DefaultMaxMemberBytes, DefaultMaxCompressionRatio);
+            ValidateEntry(entry);
             string relativePath = SanitizeMemberName(entry.FullName);
             ValidatePathCollision(entry, relativePath, paths, parentPaths);
             totalBytes = checked(totalBytes + entry.Length);
@@ -233,26 +170,19 @@ public static class SafeZipArchive
     public static void Extract(
         string archivePath,
         string destinationDirectory,
-        Action<long, long>? progress = null,
-        int maxMembers = DefaultMaxMembers,
-        long maxTotalUncompressedBytes = DefaultMaxTotalBytes,
-        long maxMemberUncompressedBytes = DefaultMaxMemberBytes,
-        int maxCompressionRatio = DefaultMaxCompressionRatio,
-        long maxArchiveBytes = DefaultMaxArchiveBytes)
+        Action<long, long>? progress = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationDirectory);
-        ArgumentOutOfRangeException.ThrowIfNegative(maxTotalUncompressedBytes);
-        ArgumentOutOfRangeException.ThrowIfNegative(maxMemberUncompressedBytes);
-        ArgumentOutOfRangeException.ThrowIfNegative(maxCompressionRatio);
 
         string destination = SafeFileSystem.ResolveStableDirectory(destinationDirectory, create: true);
-        using var archive = OpenRead(archivePath, maxMembers, maxArchiveBytes);
-        var members = PrepareMembers(
-            archive,
-            destination,
-            maxTotalUncompressedBytes,
-            maxMemberUncompressedBytes,
-            maxCompressionRatio);
+
+        // OpenRead 已完成成員數、總量、單檔大小、壓縮比、符號連結與路徑衝突驗證，這裡只需正規化成員相對路徑
+        using var archive = OpenRead(archivePath);
+        var members = new List<PreparedMember>(archive.Entries.Count);
+        foreach (ZipArchiveEntry entry in archive.Entries)
+        {
+            members.Add(new PreparedMember(entry, SanitizeMemberName(entry.FullName)));
+        }
 
         long totalBytes = members.Sum(static member => member.Entry.Length);
         EnsureSufficientDiskSpace(destination, totalBytes);
@@ -290,7 +220,7 @@ public static class SafeZipArchive
                         FileMode.Create,
                         FileAccess.Write,
                         FileShare.None,
-                        81920,
+                        0,
                         FileOptions.SequentialScan);
 
                     int read;
@@ -298,7 +228,7 @@ public static class SafeZipArchive
                     {
                         memberBytes += read;
                         extractedBytes += read;
-                        if (memberBytes > maxMemberUncompressedBytes || extractedBytes > maxTotalUncompressedBytes)
+                        if (memberBytes > DefaultMaxMemberBytes || extractedBytes > DefaultMaxTotalBytes)
                         {
                             throw new SafeArchiveException("壓縮檔實際解壓縮大小超過安全上限");
                         }
@@ -366,56 +296,21 @@ public static class SafeZipArchive
         }
     }
 
-    private static List<PreparedMember> PrepareMembers(
-        ZipArchive archive,
-        string destination,
-        long maxTotalUncompressedBytes,
-        long maxMemberUncompressedBytes,
-        int maxCompressionRatio)
-    {
-        var members = new List<PreparedMember>(archive.Entries.Count);
-        var paths = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-        var parentPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        long totalBytes = 0;
-
-        foreach (var entry in archive.Entries)
-        {
-            ValidateEntry(entry, maxMemberUncompressedBytes, maxCompressionRatio);
-            string relativePath = SanitizeMemberName(entry.FullName);
-            string target = Path.Combine(destination, relativePath);
-            if (!SafeFileSystem.IsPathWithin(destination, target, strict: false))
-            {
-                throw new SafeArchiveException($"壓縮檔嘗試路徑穿越： {entry.FullName}");
-            }
-
-            ValidatePathCollision(entry, relativePath, paths, parentPaths);
-            totalBytes += entry.Length;
-            if (totalBytes > maxTotalUncompressedBytes)
-            {
-                throw new SafeArchiveException("壓縮檔解壓縮後大小超過安全上限");
-            }
-
-            members.Add(new PreparedMember(entry, relativePath));
-        }
-
-        return members;
-    }
-
-    private static void ValidateEntry(ZipArchiveEntry entry, long maxMemberBytes, int maxCompressionRatio)
+    private static void ValidateEntry(ZipArchiveEntry entry)
     {
         if (IsSymlink(entry))
         {
             throw new SafeArchiveException($"壓縮檔包含不支援的符號連結： {entry.FullName}");
         }
 
-        if (entry.Length > maxMemberBytes)
+        if (entry.Length > DefaultMaxMemberBytes)
         {
             throw new SafeArchiveException($"壓縮檔成員過大： {entry.FullName}");
         }
 
         if (entry.Length > 0)
         {
-            if (entry.CompressedLength <= 0 || entry.Length / (double)entry.CompressedLength > maxCompressionRatio)
+            if (entry.CompressedLength <= 0 || entry.Length / (double)entry.CompressedLength > DefaultMaxCompressionRatio)
             {
                 throw new SafeArchiveException($"壓縮檔成員壓縮比例過高： {entry.FullName}");
             }
@@ -444,7 +339,7 @@ public static class SafeZipArchive
         foreach (Range range in trimmed.SplitAny("/\\"))
         {
             ReadOnlySpan<char> part = trimmed[range];
-            if (part.IsEmpty || part is "." or ".." || IsReservedWindowsName(part))
+            if (part.IsEmpty || part is "." or ".." || ServerName.IsWindowsDeviceName(part))
             {
                 throw new SafeArchiveException($"壓縮檔包含不安全的成員名稱： {memberName}");
             }
@@ -499,9 +394,6 @@ public static class SafeZipArchive
         return unixMode == 0xA000;
     }
 
-    private static bool IsReservedWindowsName(ReadOnlySpan<char> value) =>
-        ServerName.IsWindowsDeviceName(value);
-
     public sealed class BoundedZipWriter : IDisposable
     {
         private readonly string _targetPath;
@@ -531,7 +423,7 @@ public static class SafeZipArchive
                 FileAccess.ReadWrite,
                 FileShare.None,
                 1024 * 1024,
-                FileOptions.WriteThrough);
+                FileOptions.None);
             _archive = new ZipArchive(_stream, ZipArchiveMode.Create, leaveOpen: true);
         }
 
@@ -539,15 +431,6 @@ public static class SafeZipArchive
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             _archive.Comment = comment;
-        }
-
-        public void WriteBytes(string memberName, ReadOnlySpan<byte> content)
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            string normalized = PrepareMember(memberName, content.Length);
-            var entry = _archive.CreateEntry(normalized, CompressionLevel.Optimal);
-            using var target = entry.Open();
-            target.Write(content);
         }
 
         public long WriteFile(string memberName, string sourcePath)
@@ -626,7 +509,7 @@ public static class SafeZipArchive
             {
                 _archive.Dispose();
                 _stream.Dispose();
-                TryDeleteTemporaryFile();
+                SafeFileSystem.TryDeleteFile(_temporaryPath);
             }
         }
 
@@ -663,18 +546,6 @@ public static class SafeZipArchive
             _paths.Add(key);
             _totalBytes += size;
             return normalized;
-        }
-
-        private void TryDeleteTemporaryFile()
-        {
-            try
-            {
-                SafeFileSystem.DeleteFile(_temporaryPath);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                Logger.Warning(ex, "清理暫存壓縮檔案失敗: {0}", _temporaryPath);
-            }
         }
     }
 

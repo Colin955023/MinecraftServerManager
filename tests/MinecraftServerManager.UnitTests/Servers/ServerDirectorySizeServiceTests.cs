@@ -71,17 +71,12 @@ public sealed partial class ServerDirectorySizeServiceTests : IDisposable
         long initialSize = await _sizeService.CalculateServerSizeAsync(_testDir);
         Assert.Equal(500, initialSize);
 
-        // 在目錄中新增檔案（不清除快取的情況下呼叫）
+        // 在目錄中新增檔案
         File.WriteAllBytes(Path.Combine(_testDir, "extra.bin"), new byte[300]);
 
         long cachedSize = await _sizeService.CalculateServerSizeAsync(_testDir);
         // 應該命中快取，仍為 500
         Assert.Equal(500, cachedSize);
-
-        // 失效快取後重新計算
-        _sizeService.InvalidateCache(_testDir);
-        long refreshedSize = await _sizeService.CalculateServerSizeAsync(_testDir);
-        Assert.Equal(800, refreshedSize);
     }
 
     [Fact]
@@ -98,7 +93,7 @@ public sealed partial class ServerDirectorySizeServiceTests : IDisposable
     public async Task CalculateServerSizeAsync_FailedCalculation_DoesNotCacheAndReturnsNegativeOne()
     {
         // 建立一個嚴格限制最大項目數為 2 的服務實例
-        var strictService = new ServerDirectorySizeService(maxEntries: 2);
+        var strictService = new ServerDirectorySizeService(TimeSpan.FromSeconds(5), maxEntries: 2);
 
         // 在目錄中建立 5 個檔案以超出上限
         string overflowDir = Path.Combine(_testDir, "overflowDir");

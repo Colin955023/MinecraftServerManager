@@ -23,7 +23,6 @@ public sealed class ColorIconsResourceTests
     [InlineData("IconSearch")]
     [InlineData("IconRefresh")]
     [InlineData("IconWarning")]
-    [InlineData("IconGlobe")]
     [InlineData("IconCheck")]
     [InlineData("IconUserGroup")]
     public void ColorIconsShouldContainAllRequiredKeys(string resourceKey)

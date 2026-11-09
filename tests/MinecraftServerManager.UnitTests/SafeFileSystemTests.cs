@@ -88,6 +88,37 @@ public sealed class SafeFileSystemTests
     }
 
     [Fact]
+    public void DeleteWithin_DeletesNestedReadOnlyHiddenEntriesAndReadOnlyDirectories()
+    {
+        string root = CreateTemporaryDirectory();
+        try
+        {
+            string targetDir = Path.Combine(root, "outer");
+            string nestedDir = Path.Combine(targetDir, "level1", "level2");
+            Directory.CreateDirectory(nestedDir);
+            string hiddenReadOnly = Path.Combine(nestedDir, "hidden.txt");
+            string topReadOnly = Path.Combine(targetDir, "top.txt");
+            File.WriteAllText(hiddenReadOnly, "hidden");
+            File.WriteAllText(topReadOnly, "top");
+            File.SetAttributes(hiddenReadOnly, FileAttributes.ReadOnly | FileAttributes.Hidden);
+            File.SetAttributes(topReadOnly, FileAttributes.ReadOnly);
+            File.SetAttributes(nestedDir, FileAttributes.Directory | FileAttributes.ReadOnly);
+
+            bool deleted = SafeFileSystem.DeleteWithin(root, targetDir);
+
+            Assert.True(deleted);
+            Assert.False(Directory.Exists(targetDir));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                SafeFileSystem.DeleteDirectory(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void EnumerateBoundedTree_PrunesExcludedDirectories()
     {
         string root = CreateTemporaryDirectory();

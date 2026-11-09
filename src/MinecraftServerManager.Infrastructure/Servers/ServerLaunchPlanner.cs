@@ -10,14 +10,13 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 /// </summary>
 public sealed class ServerLaunchPlanner : IServerLaunchPlanner
 {
-    public ServerLaunchPlan CreatePlan(ServerConfig config, ServerInspection inspection, string? javaPath = null)
+    public ServerLaunchPlan CreatePlan(ServerConfig config, string launchTarget, string? javaPath = null)
     {
         ArgumentNullException.ThrowIfNull(config);
-        ArgumentNullException.ThrowIfNull(inspection);
 
         string stableDir = SafeFileSystem.ResolveStableDirectory(config.Path);
-        string targetFile = !string.IsNullOrWhiteSpace(inspection.LaunchTarget.Value)
-            ? inspection.LaunchTarget.Value.Trim()
+        string targetFile = !string.IsNullOrWhiteSpace(launchTarget)
+            ? launchTarget.Trim()
             : "server.jar";
 
         // 防範 Path Traversal：僅允許相對於 stableDir 的內部檔案
@@ -38,7 +37,7 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
 
             if (config.LoaderType is LoaderKind.Forge or LoaderKind.NeoForge || SafeFileSystem.FileExists(Path.Combine(stableDir, ServerDefaults.UserJvmArgsFileName)))
             {
-                ServerManager.UpdateForgeUserJvmArgs(stableDir, config);
+                StartScriptWriter.UpdateUserJvmArgs(stableDir, config);
             }
 
             IReadOnlyDictionary<string, string?>? env = null;
@@ -62,6 +61,13 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
         string executableJava = !string.IsNullOrWhiteSpace(javaPath)
             ? javaPath
             : "java";
+
+        // 指定的 Java 路徑須為實體 java 執行檔（拒絕 reparse point 與非 java 檔名）；純檔名（如 java.exe）交由 PATH 搜尋
+        if (!string.IsNullOrWhiteSpace(javaPath) && Path.GetFileName(javaPath.Trim()) != javaPath.Trim()
+            && !SafeScriptValidator.IsSafeJavaExecutable(javaPath.Trim()))
+        {
+            throw new InvalidOperationException($"指定的 Java 執行檔未通過安全性檢驗：{javaPath}");
+        }
 
         int min = MemoryUtils.ResolveEffectiveMinMemoryMb(config.MemoryMinMb, config.MemoryMaxMb);
         var args = new List<string>
@@ -134,7 +140,7 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
         string currentPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
         string newPath = string.IsNullOrWhiteSpace(javaBinDir)
             ? currentPath
-            : $"{javaBinDir};{currentPath}";
+            : $"{javaBinDir}{Path.PathSeparator}{currentPath}";
 
         return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {

@@ -46,7 +46,7 @@ public sealed class ModrinthClientTests
         """;
 
         string? requestedUrl = null;
-        var fakeHttp = new FakeHttpPort(uri =>
+        var fakeHttp = CreateHttpPort(uri =>
         {
             string s = uri.AbsoluteUri;
             if (s.Contains("/search"))
@@ -72,8 +72,6 @@ public sealed class ModrinthClientTests
         Assert.Equal("Fabric API", mod.Name);
         Assert.Equal(25000000, mod.Downloads);
         Assert.Equal("0.5.8", mod.LatestVersion);
-        Assert.Equal("https://cdn.modrinth.com/icon.png", mod.IconUrl);
-        Assert.Contains("fabric", mod.Loaders);
 
         Assert.NotNull(requestedUrl);
         Assert.Contains("server_side", Uri.UnescapeDataString(requestedUrl));
@@ -105,7 +103,7 @@ public sealed class ModrinthClientTests
         }
         """;
 
-        var fakeHttp = new FakeHttpPort(uri => uri.AbsoluteUri.Contains("/search") ? jsonResponse : null);
+        var fakeHttp = CreateHttpPort(uri => uri.AbsoluteUri.Contains("/search") ? jsonResponse : null);
         var client = new ModrinthClient(fakeHttp);
 
         var results = await client.SearchModsAsync("sodium", loader: "fabric", minecraftVersion: "1.20.1");
@@ -150,13 +148,13 @@ public sealed class ModrinthClientTests
         ]
         """;
 
-        var fakeHttp = new FakeHttpPort(uri => uri.AbsoluteUri.Contains("/version") ? jsonResponse : null);
+        var fakeHttp = CreateHttpPort(uri => uri.AbsoluteUri.Contains("/version") ? jsonResponse : null);
         var client = new ModrinthClient(fakeHttp);
 
         var versions = await client.GetProjectVersionsAsync("sodium");
 
         var ver = Assert.Single(versions);
-        Assert.Equal("v12345", ver.Id);
+        Assert.Equal("v12345", ver.VersionId);
         Assert.Equal("0.5.8", ver.VersionNumber);
         var file = Assert.Single(ver.Files);
         Assert.Equal("sodium-fabric-0.5.8.jar", file.Filename);
@@ -167,36 +165,39 @@ public sealed class ModrinthClientTests
     }
 
     [Fact]
-    public async Task GetVersionByHashAsyncShouldReturnMatchingVersion()
+    public async Task LookupVersionsByHashesAsyncShouldReturnMatchingVersion()
     {
         string jsonResponse = """
         {
-            "id": "v999",
-            "project_id": "proj1",
-            "name": "Version 1.0",
-            "version_number": "1.0",
-            "game_versions": ["1.20.1"],
-            "loaders": ["fabric"],
-            "files": [
-                {
-                    "url": "https://example.com/mod.jar",
-                    "filename": "mod.jar",
-                    "primary": true,
-                    "size": 500,
-                    "hashes": { "sha1": "testsha1" }
-                }
-            ],
-            "dependencies": []
+            "testsha1": {
+                "id": "v999",
+                "project_id": "proj1",
+                "name": "Version 1.0",
+                "version_number": "1.0",
+                "game_versions": ["1.20.1"],
+                "loaders": ["fabric"],
+                "files": [
+                    {
+                        "url": "https://example.com/mod.jar",
+                        "filename": "mod.jar",
+                        "primary": true,
+                        "size": 500,
+                        "hashes": { "sha1": "testsha1" }
+                    }
+                ],
+                "dependencies": []
+            }
         }
         """;
 
-        var fakeHttp = new FakeHttpPort(uri => uri.AbsoluteUri.Contains("/version_file/") ? jsonResponse : null);
+        var fakeHttp = CreateHttpPort(uri => uri.AbsoluteUri.Contains("/version_files") ? jsonResponse : null);
         var client = new ModrinthClient(fakeHttp);
 
-        var ver = await client.LookupVersionByHashAsync("testsha1", "sha1");
+        var result = await client.LookupVersionsByHashesAsync(["testsha1"], "sha1");
 
-        Assert.NotNull(ver);
-        Assert.Equal("v999", ver.Version.Id);
+        var ver = Assert.Single(result).Value;
+        Assert.Equal("v999", ver.Version.VersionId);
+        Assert.Equal("proj1", ver.ProjectId);
         Assert.Equal("mod.jar", ver.Version.Files[0].Filename);
     }
 
@@ -205,43 +206,39 @@ public sealed class ModrinthClientTests
     public async Task MalformedJsonResponse_ShouldNotThrowAndReturnSafeFallbacks()
     {
         string malformedJson = "{ invalid json content: true,,, ";
-        var fakeHttp = new FakeHttpPort(_ => malformedJson);
+        var fakeHttp = CreateHttpPort(_ => malformedJson);
         var client = new ModrinthClient(fakeHttp);
 
         // 1. 搜尋在遭遇畸形 JSON 時，安全記錄並回傳空清單，不拋出未捕捉例外
         var searchResults = await client.SearchModsAsync("test");
         Assert.Empty(searchResults);
 
-        // 2. 單一雜湊查詢在遭遇畸形 JSON 時，安全回傳 null
-        var singleHashResult = await client.LookupVersionByHashAsync("abcdef123456");
-        Assert.Null(singleHashResult);
-
-        // 3. 批次雜湊查詢在遭遇畸形 JSON 時，安全回傳空字典
+        // 2. 批次雜湊查詢在遭遇畸形 JSON 時，安全回傳空字典
         var batchHashResult = await client.LookupVersionsByHashesAsync(["hash1", "hash2"]);
         Assert.Empty(batchHashResult);
     }
 
-    private sealed class FakeHttpPort(Func<Uri, string?> handler) : IHttpPort
+    [Fact]
+    public async Task GetProjectTitlesAsyncMapsIdAndSlugToTitleAndCachesResults()
     {
-        public Task<HttpResult> DownloadAsync(
-            Uri uri,
-            string targetPath,
-            IProgress<HttpProgress>? progress = null,
-            string? expectedHash = null,
-            string expectedHashAlgorithm = "sha256",
-            CancellationToken cancellationToken = default) =>
-            throw new NotImplementedException();
+        int requestCount = 0;
+        var client = new ModrinthClient(CreateHttpPort(uri =>
+        {
+            requestCount++;
+            return uri.AbsoluteUri.Contains("/projects?ids=", StringComparison.Ordinal)
+                ? """[{"id":"7tEfOcA7","slug":"geckolib","title":"GeckoLib"}]"""
+                : null;
+        }));
 
-        public Task<HttpJsonResponse<T>> GetJsonAsync<T>(Uri uri, CancellationToken cancellationToken = default) =>
-            throw new NotImplementedException();
+        var first = await client.GetProjectTitlesAsync(["7tEfOcA7", "unknown-project"]);
+        var second = await client.GetProjectTitlesAsync(["geckolib"]);
 
-        public Task<HttpJsonResponse<System.Text.Json.JsonDocument>> GetJsonDocumentAsync(Uri uri, CancellationToken cancellationToken = default) =>
-            TestHttpJson.FromTextAsync(this, uri, cancellationToken);
-
-        public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default) =>
-            Task.FromResult(handler(uri));
-
-        public Task<string?> PostJsonAsync(Uri uri, string jsonPayload, CancellationToken cancellationToken = default) =>
-            Task.FromResult(handler(uri));
+        Assert.Equal("GeckoLib", first["7tEfOcA7"]);
+        Assert.False(first.ContainsKey("unknown-project"));
+        Assert.Equal("GeckoLib", second["geckolib"]);
+        Assert.Equal(1, requestCount);
     }
+
+    private static StubHttpPort CreateHttpPort(Func<Uri, string?> handler) =>
+        new() { TextHandler = handler, PostHandler = (uri, _) => handler(uri) };
 }

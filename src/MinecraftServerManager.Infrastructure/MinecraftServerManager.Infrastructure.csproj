@@ -4,7 +4,6 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="MinecraftServerManager.UnitTests" />
-    <InternalsVisibleTo Include="MinecraftServerManager.IntegrationTests" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />

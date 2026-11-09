@@ -12,6 +12,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(JavaRuntimeDetector));
     private const int MaxJavaDirectoryEntries = 128;
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
     private const string CacheFileName = "java_candidates_cache.json";
     private static readonly string[] CommonVendors =
     [
@@ -43,9 +44,11 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 return _inFlightDetection.WaitAsync(cancellationToken);
             }
 
-            var task = DetectInternalAsync(forceRefresh, cancellationToken);
+            // 偵測由多個呼叫端共用，不綁定任一呼叫端的取消權杖（否則首位呼叫端取消會使其他等待者一併失敗）；
+            // 各呼叫端自行以 WaitAsync 套用自己的取消
+            var task = DetectInternalAsync(forceRefresh, CancellationToken.None);
             _inFlightDetection = task;
-            return task;
+            return task.WaitAsync(cancellationToken);
         }
     }
 
@@ -62,10 +65,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             }
         }
 
-        var candidates = EnumerateCandidates()
-            .Where(c => !string.IsNullOrWhiteSpace(c))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var candidates = EnumerateCandidates();
 
         var detectedBag = new System.Collections.Concurrent.ConcurrentBag<JavaRuntimeInfo>();
         var parallelOptions = new ParallelOptions
@@ -153,7 +153,8 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             try
             {
                 string candidate = Path.Combine(folder, "java.exe");
-                if (SafeFileSystem.FileExists(candidate))
+                // 與完整偵測一致排除 Oracle javapath 等 Shim，避免選到轉址啟動器
+                if (!IsIgnoredJavaPath(candidate) && !IsShimLauncher(candidate) && SafeFileSystem.FileExists(candidate))
                 {
                     return candidate;
                 }
@@ -203,16 +204,20 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 }
             }
 
+            // 探測逾時：避免異常 java.exe 卡住整體偵測；逾時後由 DisposeAsync 強制終止行程
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(ProbeTimeout);
+
             var process = await processRunner.StartAsync(
                 new ProcessStartSpec(probeExecutable, VersionArgs),
-                cancellationToken).ConfigureAwait(false);
+                timeoutCts.Token).ConfigureAwait(false);
 
             var output = new StringBuilder();
             ProcessExitResult result;
             await using (process.ConfigureAwait(false))
             {
                 process.OutputReceived += item => output.AppendLine(item.Text);
-                result = await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+                result = await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
             }
 
             var details = JavaVersionParser.ParseDetails(output.ToString());
@@ -220,20 +225,20 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 ? new JavaRuntimeInfo(
                     ExecutablePath: probeExecutable,
                     MajorVersion: parsed.MajorVersion,
-                    Is64Bit: parsed.Is64Bit,
+                    // 以 PE 標頭判定位元數最準確（32 位元 HotSpot 輸出常不含 "32-Bit" 字樣）
+                    Is64Bit: PortableExecutableInspector.TryReadMachine(probeExecutable) is { } machine
+                        ? PortableExecutableInspector.Is64Bit(machine)
+                        : parsed.Is64Bit,
                     JavawPath: javawPath ?? probeExecutable,
                     Vendor: parsed.Vendor)
                 : null;
         }
-        catch (FileNotFoundException)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            Logger.Warning("Java 版本探測逾時: {0}", executablePath);
             return null;
         }
-        catch (Win32Exception)
-        {
-            return null;
-        }
-        catch (InvalidOperationException)
+        catch (Exception ex) when (ex is FileNotFoundException or Win32Exception or InvalidOperationException)
         {
             return null;
         }
@@ -320,15 +325,10 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             return;
         }
 
-        if (IsIgnoredJavaPath(path) || IsReparseOrJunctionPath(path) || IsShimLauncher(path))
+        // 已排除 reparse point，路徑即為實體檔案，無需再解析連結目標
+        if (!IsIgnoredJavaPath(path) && !IsReparseOrJunctionPath(path) && !IsShimLauncher(path) && SafeFileSystem.FileExists(path))
         {
-            return;
-        }
-
-        string resolved = ResolveActualExecutablePath(path);
-        if (SafeFileSystem.FileExists(resolved) && !IsIgnoredJavaPath(resolved) && !IsReparseOrJunctionPath(resolved) && !IsShimLauncher(resolved))
-        {
-            candidates.Add(resolved);
+            candidates.Add(Path.GetFullPath(path));
         }
     }
 
@@ -398,31 +398,6 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         return false;
     }
 
-    private static string ResolveActualExecutablePath(string path)
-    {
-        try
-        {
-            string full = Path.GetFullPath(path);
-            if (!SafeFileSystem.FileExists(full))
-            {
-                return full;
-            }
-
-            string? targetPath = SafeFileSystem.ResolveFileLinkTarget(full);
-            if (targetPath is not null && SafeFileSystem.FileExists(targetPath))
-            {
-                return targetPath;
-            }
-
-            return full;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning("解析 Java 執行檔連結目標失敗: {0}", ex.Message);
-            return path;
-        }
-    }
-
     private static void AddRoot(HashSet<string> roots, string? path)
     {
         if (!string.IsNullOrWhiteSpace(path) && SafeFileSystem.DirectoryExists(path))
@@ -455,7 +430,6 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!string.IsNullOrWhiteSpace(item.Path) &&
                     Path.IsPathFullyQualified(item.Path) &&
-                    !string.Equals(Path.GetFileName(item.Path), item.Path, StringComparison.OrdinalIgnoreCase) &&
                     SafeFileSystem.FileExists(item.Path) &&
                     !IsIgnoredJavaPath(item.Path) &&
                     !IsReparseOrJunctionPath(item.Path) &&
@@ -483,12 +457,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                         Logger.Warning("讀取 Java 快取檔案中繼資料失敗: {0}", ex.Message);
                     }
 
-                    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
-
                     try
                     {
-                        var runtime = await TryReadRuntimeAsync(item.Path, timeoutCts.Token).ConfigureAwait(false);
+                        var runtime = await TryReadRuntimeAsync(item.Path, cancellationToken).ConfigureAwait(false);
                         if (runtime is not null)
                         {
                             validRuntimes.Add(runtime);
@@ -497,10 +468,6 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                         {
                             hadInvalidEntries = true;
                         }
-                    }
-                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                    {
-                        hadInvalidEntries = true;
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
@@ -530,8 +497,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
 
             return deduped;
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning(ex, "讀取 Java 偵測快取失敗，改為重新偵測");
             return null;
         }
     }
@@ -547,7 +515,6 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             var entries = runtimes
                 .Where(static r => !string.IsNullOrWhiteSpace(r.ExecutablePath) &&
                             Path.IsPathFullyQualified(r.ExecutablePath) &&
-                            !string.Equals(Path.GetFileName(r.ExecutablePath), r.ExecutablePath, StringComparison.OrdinalIgnoreCase) &&
                             SafeFileSystem.FileExists(r.ExecutablePath))
                 .DistinctBy(static r => r.ExecutablePath, StringComparer.OrdinalIgnoreCase)
                 .OrderBy(static r => r.MajorVersion)

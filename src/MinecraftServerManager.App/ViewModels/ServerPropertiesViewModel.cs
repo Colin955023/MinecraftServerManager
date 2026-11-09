@@ -46,10 +46,7 @@ public sealed partial class PropertyEditItem : ObservableObject
     partial void OnBoolValueChanged(bool value) => Value = value ? "true" : "false";
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasError))]
     public partial string? ErrorMessage { get; set; }
-
-    public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
 
     public bool IsBoolean => EditorType == PropertyEditorType.Boolean;
     public bool IsOptions => EditorType == PropertyEditorType.Options;
@@ -150,9 +147,9 @@ public sealed partial class ServerPropertiesViewModel : ViewModelBase
     public event Action<bool>? RequestClose;
 
     public ServerPropertiesViewModel(IServerPropertiesStore propertiesStore, string serverName,
-        IUiService? uiService = null)
+        IUiService uiService)
     {
-        _ui = uiService ?? NoOpUiService.Instance;
+        _ui = uiService;
         _propertiesStore = propertiesStore;
         _serverName = serverName;
 

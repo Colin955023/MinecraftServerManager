@@ -1,6 +1,7 @@
 using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
+using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Infrastructure.FileSystem;
 
@@ -20,8 +21,8 @@ public static class ServerTombstoneManager
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerTombstoneManager));
 
-    public const string DeletePrefix = ".msm-delete-";
-    public const string DeleteMarker = ".msm-delete-marker.json";
+    public const string DeletePrefix = ServerDefaults.InternalPrefix + "delete-";
+    public const string DeleteMarker = ServerDefaults.InternalPrefix + "delete-marker.json";
 
     /// <summary>
     /// 準備伺服器刪除 tombstone 並將目錄安全移入暫存
@@ -49,7 +50,11 @@ public static class ServerTombstoneManager
         string json = JsonCodec.Serialize(record);
 
         // 寫入外部紀錄
-        AtomicFileWriter.WriteText(journalPath, json);
+        // 紀錄是崩潰復原的依據；寫入失敗時不得搬移目錄
+        if (!AtomicFileWriter.WriteText(journalPath, json))
+        {
+            throw new IOException($"無法寫入刪除紀錄： {journalPath}");
+        }
 
         // 嚴格在邊界內移動目錄至 tombstone
         SafeFileSystem.MoveWithinStrict(root, original, tombstonePath);
@@ -66,9 +71,7 @@ public static class ServerTombstoneManager
     /// </summary>
     public static void RecoverDeleteTombstones(
         string serversRoot,
-        Func<string, string?> registeredServerLookup,
-        Action<string>? onRecovered = null,
-        Action<string>? onCleaned = null)
+        Func<string, string?> registeredServerLookup)
     {
         if (!SafeFileSystem.DirectoryExists(serversRoot))
         {
@@ -133,7 +136,6 @@ public static class ServerTombstoneManager
                 // 已從登記中移除，確認已提交刪除，執行安全清理
                 SafeFileSystem.DeleteWithin(root, entry.FullPath);
                 SafeFileSystem.DeleteWithin(root, journalPath);
-                onCleaned?.Invoke(record.ServerName);
                 continue;
             }
 
@@ -150,7 +152,6 @@ public static class ServerTombstoneManager
                 SafeFileSystem.MoveWithinStrict(root, entry.FullPath, targetOriginal);
                 SafeFileSystem.DeleteWithin(targetOriginal, Path.Combine(targetOriginal, DeleteMarker));
                 SafeFileSystem.DeleteWithin(root, journalPath);
-                onRecovered?.Invoke(record.ServerName);
             }
             catch (Exception ex)
             {

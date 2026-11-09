@@ -13,7 +13,7 @@ public sealed class ServerPropertiesStore(string serversRoot) : IServerPropertie
     private const string MissingRevision = "missing";
     private readonly string _serversRoot = serversRoot ?? string.Empty;
 
-    public string GetPropertiesFilePath(string serverName)
+    private string GetPropertiesFilePath(string serverName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverName);
         if (string.IsNullOrWhiteSpace(_serversRoot))
@@ -77,7 +77,8 @@ public sealed class ServerPropertiesStore(string serversRoot) : IServerPropertie
                 }
             }
             string revision = HashCalculator.DigestBytes(bytes);
-            string text = Encoding.UTF8.GetString(bytes);
+            // 略過 UTF-8 BOM，避免第一個鍵帶有 ﻿
+            string text = Encoding.UTF8.GetString(bytes.AsSpan(bytes.AsSpan().StartsWith(Encoding.UTF8.Preamble) ? Encoding.UTF8.Preamble.Length : 0));
             var properties = PropertiesDocumentCodec.Parse(text);
 
             return new ServerPropertiesSnapshot(
@@ -185,28 +186,6 @@ public sealed class ServerPropertiesStore(string serversRoot) : IServerPropertie
                 ErrorKind: ServerPropertiesUpdateError.WriteFailed,
                 Message: ex.Message);
         }
-    }
-
-    public async Task<ServerPropertiesMigrationPlan> MigrateAsync(
-        string serverName,
-        string? minecraftVersion = null,
-        CancellationToken cancellationToken = default)
-    {
-        var snapshot = await ReadAsync(serverName, cancellationToken).ConfigureAwait(false);
-        if (!snapshot.Readable || snapshot.Properties.Count == 0)
-        {
-            return new ServerPropertiesMigrationPlan(false, [], snapshot.Properties);
-        }
-
-        var plan = ServerPropertiesMigrationService.PlanMigration(snapshot.Properties, minecraftVersion);
-        if (plan.NeedsMigration)
-        {
-            string stableRoot = SafeFileSystem.ResolveStableDirectory(_serversRoot);
-            string serverDir = Path.Combine(stableRoot, serverName);
-            ServerPropertiesMigrationService.ApplyMigrationToDirectory(serverDir, plan, createBackup: true);
-        }
-
-        return plan;
     }
 
     private static string? ValidatePatches(IReadOnlyDictionary<string, string> patches)

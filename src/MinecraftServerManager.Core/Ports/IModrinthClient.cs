@@ -29,18 +29,17 @@ public interface IModrinthClient
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 依檔案雜湊查詢版本資訊
-    /// </summary>
-    public Task<ModrinthVersionLookupResult?> LookupVersionByHashAsync(
-        string hash,
-        string algorithm = "sha512",
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// 批次以檔案雜湊清單查詢版本資訊
     /// </summary>
     public Task<IReadOnlyDictionary<string, ModrinthVersionLookupResult>> LookupVersionsByHashesAsync(
         IReadOnlyList<string> hashes,
         string algorithm = "sha512",
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 批次取得專案名稱（輸入專案 ID 或 slug；回傳字典以輸入值為鍵，查詢失敗或不存在者不會出現在結果中）
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, string>> GetProjectTitlesAsync(
+        IReadOnlyCollection<string> projectIdsOrSlugs,
         CancellationToken cancellationToken = default);
 }

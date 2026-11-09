@@ -40,13 +40,6 @@ public interface IHttpPort
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 安全取得遠端 JSON 資料並反序列化
-    /// </summary>
-    public Task<HttpJsonResponse<T>> GetJsonAsync<T>(
-        Uri uri,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// 安全取得遠端 JSON 文件並以串流解析（呼叫端負責處置 JsonDocument）
     /// </summary>
     public Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentAsync(

@@ -8,7 +8,7 @@ using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.App.Views;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
-using MinecraftServerManager.Domain.Servers;
+using MinecraftServerManager.Infrastructure.Logging;
 using Windows.ApplicationModel.DataTransfer;
 using Microsoft.Windows.Storage.Pickers;
 
@@ -19,12 +19,12 @@ namespace MinecraftServerManager.App.Services;
 /// 管理 ContentDialog 佇列（<see cref="DialogStackCoordinator"/>）、模態視窗宿主（<see cref="ModalWindowHost"/>）、
 /// 檔案與資料夾選取器（透過 AppWindow.Id 綁定視窗）、UI 執行緒派送與計時器。
 /// </summary>
-public sealed class WinUiService : IUiService
+public sealed partial class WinUiService : IUiService
 {
-    private static WinUiService? s_instance;
-    public static WinUiService Instance => s_instance ?? throw new InvalidOperationException("WinUiService 尚未初始化。");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(WinUiService));
 
     private readonly DispatcherQueue _dispatcherQueue;
+    private readonly IProcessRunner _processRunner;
     private readonly Stack<Window> _windowStack = new();
     private readonly Lock _windowLock = new();
     private readonly ConditionalWeakTable<XamlRoot, DialogStackCoordinator> _coordinators = [];
@@ -32,10 +32,10 @@ public sealed class WinUiService : IUiService
     public Window? MainWindow { get; private set; }
     public ElementTheme CurrentTheme { get; set; } = ElementTheme.Default;
 
-    public WinUiService(DispatcherQueue dispatcherQueue)
+    public WinUiService(DispatcherQueue dispatcherQueue, IProcessRunner processRunner)
     {
         _dispatcherQueue = dispatcherQueue ?? throw new ArgumentNullException(nameof(dispatcherQueue));
-        s_instance = this;
+        _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
         AccentColorService.SetUiDispatcher(RunOnUi);
         AccentColorService.AccentColorChanged += OnAccentColorChanged;
     }
@@ -218,28 +218,42 @@ public sealed class WinUiService : IUiService
         };
     }
 
-    public void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3)
+    /// <summary>
+    /// 通知提示唯一入口：資訊、成功與警告以 InfoBar 浮動顯示，錯誤以對話方塊顯示（經 DialogStackCoordinator 排隊）
+    /// </summary>
+    public void ShowNotification(string message, string? title = null, NotificationType type = NotificationType.Info)
     {
+        if (NotificationPresentation.UsesDialog(type))
+        {
+            PostToUi(() => _ = ShowErrorDialogSafeAsync(message, title ?? NotificationPresentation.GetDefaultTitle(type)));
+            return;
+        }
+
         PostToUi(() =>
         {
             if (MainWindow is MainWindow mw)
             {
-                mw.ShowToast(message, title, type, durationSeconds);
+                mw.ShowNotification(message, title, type);
             }
         });
     }
 
-    public async Task ShowWarningAsync(string message, string title)
+    private async Task ShowErrorDialogSafeAsync(string message, string title)
     {
-        AudioFeedback.PlayWarning();
-        var dialog = new NotificationDialog(this, title, message, NotificationLevel.Warning);
-        await ShowContentDialogAsync(dialog);
+        try
+        {
+            await ShowErrorAsync(message, title);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning("顯示通知對話方塊失敗: {Message}", ex.Message);
+        }
     }
 
     public async Task ShowErrorAsync(string message, string title)
     {
         AudioFeedback.PlayError();
-        var dialog = new NotificationDialog(this, title, message, NotificationLevel.Error);
+        var dialog = new NotificationDialog(this, title, message);
         await ShowContentDialogAsync(dialog);
     }
 
@@ -281,10 +295,10 @@ public sealed class WinUiService : IUiService
     public void RestartApplication()
     {
         string? exePath = Environment.ProcessPath;
-        if (!string.IsNullOrWhiteSpace(exePath) && App.CompositionRoot?.ProcessRunner is { } runner)
+        if (!string.IsNullOrWhiteSpace(exePath))
         {
             App.ReleaseSingleInstanceLock();
-            runner.StartDetached(new ProcessStartSpec(
+            _processRunner.StartDetached(new ProcessStartSpec(
                 exePath,
                 [],
                 WorkingDirectory: Path.GetDirectoryName(exePath) ?? AppContext.BaseDirectory,
@@ -319,18 +333,18 @@ public sealed class WinUiService : IUiService
     public IUiTimer CreateUiTimer(TimeSpan interval, Action tick) =>
         new WinUiTimer(_dispatcherQueue, interval, tick);
 
-    public async Task<IReadOnlyList<string>?> PickFilesAsync(string title, string filter, bool multiselect = false)
+    public async Task<IReadOnlyList<string>?> PickFilesAsync(string title, FileTypeChoice fileType, bool multiselect = false)
     {
         if (!_dispatcherQueue.HasThreadAccess)
         {
-            return await InvokeOnUiAsync(() => PickFilesAsync(title, filter, multiselect));
+            return await InvokeOnUiAsync(() => PickFilesAsync(title, fileType, multiselect));
         }
 
         var picker = new FileOpenPicker(CurrentActiveWindow.AppWindow.Id)
         {
             Title = title,
         };
-        PopulateFileTypeFilter(filter, picker.FileTypeFilter);
+        picker.FileTypeFilter.Add(fileType.Extension);
 
         if (multiselect)
         {
@@ -344,11 +358,11 @@ public sealed class WinUiService : IUiService
         }
     }
 
-    public async Task<string?> PickSaveFileAsync(string title, string fileName, string filter)
+    public async Task<string?> PickSaveFileAsync(string title, string fileName, FileTypeChoice fileType)
     {
         if (!_dispatcherQueue.HasThreadAccess)
         {
-            return await InvokeOnUiAsync(() => PickSaveFileAsync(title, fileName, filter));
+            return await InvokeOnUiAsync(() => PickSaveFileAsync(title, fileName, fileType));
         }
 
         var picker = new FileSavePicker(CurrentActiveWindow.AppWindow.Id)
@@ -356,7 +370,7 @@ public sealed class WinUiService : IUiService
             Title = title,
             SuggestedFileName = fileName,
         };
-        PopulateFileTypeChoices(filter, picker.FileTypeChoices);
+        picker.FileTypeChoices[fileType.Label] = [fileType.Extension];
 
         var file = await picker.PickSaveFileAsync();
         return file?.Path;
@@ -381,110 +395,34 @@ public sealed class WinUiService : IUiService
         return folder?.Path;
     }
 
-    public async Task<bool?> ShowManageJavaAsync(ManageJavaViewModel viewModel)
-    {
-        var dialog = new ManageJavaDialog(viewModel);
-        return await ModalWindowHost.ShowModalAsync(
-            dialog,
-            CurrentActiveWindow,
-            CurrentTheme,
-            d => d.DialogResult,
-            PushWindow,
-            PopWindow);
-    }
+    public Task<bool?> ShowManageJavaAsync(ManageJavaViewModel viewModel) =>
+        ShowModalAsync(new ManageJavaDialog(viewModel), static d => d.DialogResult);
 
-    public async Task<bool?> ShowJvmArgsAsync(JvmArgsViewModel viewModel)
-    {
-        var dialog = new JvmArgsDialog(viewModel);
-        var result = await ShowContentDialogAsync(dialog);
-        return result == ContentDialogResult.Primary;
-    }
+    public async Task<bool?> ShowJvmArgsAsync(JvmArgsViewModel viewModel) =>
+        await ShowContentDialogAsync(new JvmArgsDialog(viewModel)) == ContentDialogResult.Primary;
 
-    public async Task<bool?> ShowServerPropertiesAsync(ServerPropertiesViewModel viewModel)
-    {
-        var dialog = new ServerPropertiesDialog(viewModel);
-        return await ModalWindowHost.ShowModalAsync(
-            dialog,
-            CurrentActiveWindow,
-            CurrentTheme,
-            d => d.DialogResult,
-            PushWindow,
-            PopWindow);
-    }
+    public Task<bool?> ShowServerPropertiesAsync(ServerPropertiesViewModel viewModel) =>
+        ShowModalAsync(new ServerPropertiesDialog(viewModel), static d => d.DialogResult);
 
-    public async Task<bool?> ShowPlayerManagementAsync(PlayerManagementViewModel viewModel)
-    {
-        var dialog = new PlayerManagementDialog(viewModel);
-        return await ModalWindowHost.ShowModalAsync(
-            dialog,
-            CurrentActiveWindow,
-            CurrentTheme,
-            d => d.DialogResult,
-            PushWindow,
-            PopWindow);
-    }
+    public Task<bool?> ShowPlayerManagementAsync(PlayerManagementViewModel viewModel) =>
+        ShowModalAsync(new PlayerManagementDialog(viewModel), static d => d.DialogResult);
 
-    public async Task<bool?> ShowRestoreBackupAsync(RestoreBackupViewModel viewModel)
-    {
-        var dialog = new RestoreBackupDialog(viewModel);
-        return await ModalWindowHost.ShowModalAsync(
-            dialog,
-            CurrentActiveWindow,
-            CurrentTheme,
-            d => d.DialogResult,
-            PushWindow,
-            PopWindow);
-    }
+    public Task<bool?> ShowRestoreBackupAsync(RestoreBackupViewModel viewModel) =>
+        ShowModalAsync(new RestoreBackupDialog(viewModel), static d => d.DialogResult);
 
-    public async Task<bool?> ShowServerMemoryAsync(ServerMemoryViewModel viewModel)
-    {
-        var dialog = new ServerMemoryDialog(viewModel);
-        var result = await ShowContentDialogAsync(dialog);
-        return result == ContentDialogResult.Primary;
-    }
+    public async Task<bool?> ShowServerMemoryAsync(ServerMemoryViewModel viewModel) =>
+        await ShowContentDialogAsync(new ServerMemoryDialog(viewModel)) == ContentDialogResult.Primary;
 
-    public async Task<bool?> ShowImportServerAsync(ImportServerViewModel viewModel)
-    {
-        var dialog = new ImportServerDialog(viewModel);
-        var result = await ShowContentDialogAsync(dialog);
-        return result == ContentDialogResult.Primary;
-    }
+    public async Task<bool?> ShowImportServerAsync(ImportServerViewModel viewModel) =>
+        await ShowContentDialogAsync(new ImportServerDialog(viewModel)) == ContentDialogResult.Primary;
 
-    public async Task<bool?> ShowModVersionPickerAsync(ModVersionPickerViewModel viewModel)
-    {
-        var dialog = new ModVersionPickerDialog(viewModel);
-        return await ModalWindowHost.ShowModalAsync(
-            dialog,
-            CurrentActiveWindow,
-            CurrentTheme,
-            d => d.DialogResult,
-            PushWindow,
-            PopWindow);
-    }
+    public Task<bool?> ShowModVersionPickerAsync(ModVersionPickerViewModel viewModel) =>
+        ShowModalAsync(new ModVersionPickerDialog(viewModel), static d => d.DialogResult);
 
-    public async Task<bool?> ShowModInstallQueueAsync(ObservableCollection<ModInstallQueueItem> queue)
-    {
-        var dialog = new ModInstallQueueDialog(queue);
-        return await ModalWindowHost.ShowModalAsync(
-            dialog,
-            CurrentActiveWindow,
-            CurrentTheme,
-            d => d.DialogResult,
-            PushWindow,
-            PopWindow);
-    }
+    public Task<bool?> ShowModInstallQueueAsync(ObservableCollection<ModInstallQueueItem> queue) =>
+        ShowModalAsync(new ModInstallQueueDialog(queue), static d => d.DialogResult);
 
-    public async Task<IReadOnlyList<ModUpdateCandidateItem>?> ShowModUpdatesAsync(IEnumerable<ModUpdateCandidateItem> items)
-    {
-        var dialog = new ModUpdatesDialog(items, this);
-        return await ModalWindowHost.ShowModalAsync(
-            dialog,
-            CurrentActiveWindow,
-            CurrentTheme,
-            d => d.DialogResult == true ? d.GetSelectedItems() : null,
-            PushWindow,
-            PopWindow);
-    }
+    public async Task<IReadOnlyList<ModUpdateCandidateItem>?> ShowModUpdatesAsync(IEnumerable<ModUpdateCandidateItem> items) => await ShowModalAsync(new ModUpdatesDialog(items, this), static d => d.DialogResult == true ? d.GetSelectedItems() : null);
 
     public async Task<ServerDeleteDecision> ShowServerDeleteConfirmationAsync(string serverName, int backupCount)
     {
@@ -496,7 +434,7 @@ public sealed class WinUiService : IUiService
             : ServerDeleteDecision.Cancel;
     }
 
-    public async Task ShowExportModListAsync(string serverName, IReadOnlyList<ModListExportRow> rows, IModListExporter exporter, IExternalLauncher? launcher)
+    public async Task ShowExportModListAsync(string serverName, IReadOnlyList<ModListExportRow> rows, IModListExporter exporter, IExternalLauncher launcher)
     {
         var vm = new ExportModListViewModel(serverName, rows, exporter, launcher, this);
         var dialog = new ExportModListDialog();
@@ -511,16 +449,10 @@ public sealed class WinUiService : IUiService
         }
     }
 
-    public async Task<bool> ShowServerInitializationAsync(ServerConfig config, string javaPath, IServerRuntime runtime)
+    public async Task<bool> ShowServerInitializationAsync(ServerInitializationViewModel viewModel)
     {
-        using var dialog = new ServerInitializationDialog(this, runtime, config, javaPath);
-        return await ModalWindowHost.ShowModalAsync(
-            dialog,
-            CurrentActiveWindow,
-            CurrentTheme,
-            d => d.IsSuccess,
-            PushWindow,
-            PopWindow);
+        using var dialog = new ServerInitializationDialog(viewModel);
+        return await ShowModalAsync(dialog, static d => d.IsSuccess);
     }
 
     public IMonitorWindow OpenServerMonitor(ServerMonitorViewModel viewModel)
@@ -533,140 +465,68 @@ public sealed class WinUiService : IUiService
         return handle;
     }
 
-    public IProgressSession<ServerBackupProgressReport> ShowServerBackupProgress(string serverName, string actionTitle = "備份")
-    {
-        var dialog = new OperationProgressDialog(this, $"{actionTitle}伺服器中", $"正在{actionTitle}伺服器「{serverName}」", actionTitle == "還原" ? "正在準備還原環境與解壓縮備份..." : "正在收集伺服器檔案...");
-        _ = ShowContentDialogAsync(dialog);
-        var progress = new Progress<ServerBackupProgressReport>(report =>
-        {
-            int percent = Math.Clamp(report.PercentCompleted, 0, 100);
-            string msg = !string.IsNullOrWhiteSpace(report.CurrentFile)
+    public IProgressSession<ServerBackupProgressReport> ShowServerBackupProgress(string serverName, string actionTitle = "備份") =>
+        ShowProgressSession<ServerBackupProgressReport>(
+            $"正在{actionTitle}伺服器「{serverName}」",
+            actionTitle == "還原" ? "正在準備還原環境與解壓縮備份..." : "正在收集伺服器檔案...",
+            report => (report.PercentCompleted, !string.IsNullOrWhiteSpace(report.CurrentFile)
                 ? $"正在壓縮：{report.CurrentFile}"
-                : (percent >= 100 ? $"{actionTitle}壓縮完成！" : string.Empty);
-            dialog.UpdateProgress(percent, msg);
+                : (report.PercentCompleted >= 100 ? $"{actionTitle}壓縮完成！" : string.Empty)));
+
+    public IProgressSession<ServerImportProgressReport> ShowServerImportProgress(string serverName) =>
+        ShowProgressSession<ServerImportProgressReport>(
+            $"正在匯入伺服器「{serverName}」",
+            "正在驗證伺服器目錄...",
+            static report => (report.Percentage, report.StageText));
+
+    public IProgressSession<ServerCreationProgressReport> ShowServerCreationProgress(string serverName) =>
+        ShowProgressSession<ServerCreationProgressReport>(
+            $"正在建立伺服器「{serverName}」",
+            "正在驗證伺服器名稱與目錄...",
+            static report => (report.PercentCompleted, $"[{report.Phase}] {report.Message}"));
+
+    public IOperationProgress ShowModOperationProgress(string title, string initialMessage) =>
+        new ModOperationProgressHandle(OpenProgressDialog(title, initialMessage));
+
+    /// <summary>
+    /// 以目前作用中視窗為擁有者開啟原生模態視窗並等待結果（統一主題、置中與視窗堆疊）
+    /// </summary>
+    private Task<TResult> ShowModalAsync<TWindow, TResult>(TWindow window, Func<TWindow, TResult> resultSelector)
+        where TWindow : Window =>
+        ModalWindowHost.ShowModalAsync(window, CurrentActiveWindow, CurrentTheme, resultSelector, PushWindow, PopWindow);
+
+    /// <summary>
+    /// 開啟進度對話框；顯示失敗時記錄並關閉，避免作業完成後殘留無法關閉的視窗
+    /// </summary>
+    private OperationProgressDialog OpenProgressDialog(string heading, string initialMessage)
+    {
+        var dialog = new OperationProgressDialog(this, heading, initialMessage);
+        _ = ShowProgressDialogSafeAsync(dialog);
+        return dialog;
+    }
+
+    private async Task ShowProgressDialogSafeAsync(OperationProgressDialog dialog)
+    {
+        try
+        {
+            await ShowContentDialogAsync(dialog).ConfigureAwait(true);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Error(ex, "顯示進度對話框失敗: {Message}", ex.Message);
+            dialog.MarkCompleted();
+        }
+    }
+
+    private ProgressSession<TReport> ShowProgressSession<TReport>(string heading, string initialMessage, Func<TReport, (int Percent, string Message)> map)
+    {
+        var dialog = OpenProgressDialog(heading, initialMessage);
+        var progress = new Progress<TReport>(report =>
+        {
+            var (percent, message) = map(report);
+            dialog.UpdateProgress(percent, message);
         });
-        return new ProgressSession<ServerBackupProgressReport>(progress, dialog, dialog.MarkCompleted);
-    }
-
-    public IProgressSession<ServerImportProgressReport> ShowServerImportProgress(string serverName)
-    {
-        var dialog = new OperationProgressDialog(this, "匯入伺服器中", $"正在匯入伺服器「{serverName}」", "正在驗證伺服器目錄...");
-        _ = ShowContentDialogAsync(dialog);
-        var progress = new Progress<ServerImportProgressReport>(report =>
-        {
-            int percent = Math.Clamp(report.Percentage, 0, 100);
-            dialog.UpdateProgress(percent, report.StageText);
-        });
-        return new ProgressSession<ServerImportProgressReport>(progress, dialog, dialog.MarkCompleted);
-    }
-
-    public IProgressSession<ServerCreationProgressReport> ShowServerCreationProgress(string serverName)
-    {
-        var dialog = new OperationProgressDialog(this, "建立伺服器中", $"正在建立伺服器「{serverName}」", "正在驗證伺服器名稱與目錄...");
-        _ = ShowContentDialogAsync(dialog);
-        var progress = new Progress<ServerCreationProgressReport>(report =>
-        {
-            int percent = Math.Clamp(report.PercentCompleted, 0, 100);
-            dialog.UpdateProgress(percent, $"[{report.Phase}] {report.Message}");
-        });
-        return new ProgressSession<ServerCreationProgressReport>(progress, dialog, dialog.MarkCompleted);
-    }
-
-    public IOperationProgress ShowModOperationProgress(string title, string initialMessage)
-    {
-        var dialog = new OperationProgressDialog(this, title, title, initialMessage);
-        _ = ShowContentDialogAsync(dialog);
-        return new ModOperationProgressHandle(dialog);
-    }
-
-    private static void PopulateFileTypeFilter(string filter, IList<string> filterList)
-    {
-        filterList.Clear();
-        ReadOnlySpan<char> filterSpan = filter.AsSpan();
-        int partIndex = 0;
-
-        foreach (Range partRange in filterSpan.Split('|'))
-        {
-            if ((partIndex++ & 1) == 0)
-            {
-                continue;
-            }
-
-            ReadOnlySpan<char> patternSpan = filterSpan[partRange];
-            foreach (Range extRange in patternSpan.Split(';'))
-            {
-                ReadOnlySpan<char> trimmed = patternSpan[extRange].Trim();
-                if (trimmed is "*.*" or "*")
-                {
-                    if (!filterList.Contains("*"))
-                    {
-                        filterList.Add("*");
-                    }
-                }
-                else if (trimmed.StartsWith("*.", StringComparison.Ordinal))
-                {
-                    string ext = trimmed[1..].ToString();
-                    if (!filterList.Contains(ext))
-                    {
-                        filterList.Add(ext);
-                    }
-                }
-                else if (trimmed.StartsWith('.'))
-                {
-                    string ext = trimmed.ToString();
-                    if (!filterList.Contains(ext))
-                    {
-                        filterList.Add(ext);
-                    }
-                }
-            }
-        }
-
-        if (filterList.Count == 0)
-        {
-            filterList.Add("*");
-        }
-    }
-
-    private static void PopulateFileTypeChoices(string filter, IDictionary<string, IList<string>> choices)
-    {
-        choices.Clear();
-        ReadOnlySpan<char> filterSpan = filter.AsSpan();
-        var enumerator = filterSpan.Split('|');
-
-        while (enumerator.MoveNext())
-        {
-            ReadOnlySpan<char> labelSpan = filterSpan[enumerator.Current].Trim();
-            if (!enumerator.MoveNext())
-            {
-                break;
-            }
-
-            ReadOnlySpan<char> patternSpan = filterSpan[enumerator.Current].Trim();
-            var list = new List<string>();
-            foreach (Range extRange in patternSpan.Split(';'))
-            {
-                ReadOnlySpan<char> trimmed = patternSpan[extRange].Trim();
-                if (trimmed.StartsWith("*.", StringComparison.Ordinal))
-                {
-                    list.Add(trimmed[1..].ToString());
-                }
-                else if (trimmed.StartsWith('.'))
-                {
-                    list.Add(trimmed.ToString());
-                }
-            }
-
-            if (list.Count > 0)
-            {
-                choices[labelSpan.ToString()] = list;
-            }
-        }
-
-        if (choices.Count == 0)
-        {
-            choices["所有檔案"] = ["."];
-        }
+        return new ProgressSession<TReport>(progress, dialog);
     }
 
     private sealed class WinUiTimer : IUiTimer
@@ -708,20 +568,14 @@ public sealed class WinUiService : IUiService
         public void BringToFront() => _window.Activate();
     }
 
-    private sealed class ProgressSession<TReport>(IProgress<TReport> progress, OperationProgressDialog dialog, Action onComplete) : IProgressSession<TReport>
+    private sealed partial class ProgressSession<TReport>(IProgress<TReport> progress, OperationProgressDialog dialog) : IProgressSession<TReport>
     {
         public IProgress<TReport> Progress { get; } = progress;
-        private readonly OperationProgressDialog _dialog = dialog;
-        private readonly Action _onComplete = onComplete;
 
-        public void Complete()
-        {
-            _onComplete();
-            _dialog.Close();
-        }
+        public void Dispose() => dialog.Close();
     }
 
-    private sealed class ModOperationProgressHandle(OperationProgressDialog dialog) : IOperationProgress
+    private sealed partial class ModOperationProgressHandle(OperationProgressDialog dialog) : IOperationProgress
     {
         private readonly OperationProgressDialog _dialog = dialog;
 
@@ -731,6 +585,6 @@ public sealed class WinUiService : IUiService
             _dialog.UpdateProgress(percent, message);
         }
 
-        public void Close() => _dialog.Close();
+        public void Dispose() => _dialog.Close();
     }
 }

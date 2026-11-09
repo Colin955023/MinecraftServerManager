@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Domain.Mods;
 
 namespace MinecraftServerManager.App.ViewModels;
 
@@ -88,7 +89,6 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
 
     public event Action<bool>? RequestClose;
 
-    [RelayCommand]
     public async Task LoadVersionsAsync()
     {
         IsBusy = true;
@@ -112,7 +112,9 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
                     DownloadUrl = file?.Url ?? string.Empty,
                     ExpectedHash = ModHelpers.ResolveHash(file, out string algorithm),
                     HashAlgorithm = algorithm,
+                    // 僅必要相依才需要補齊；選用、內嵌與不相容項目不可當成必要相依
                     Dependencies = (string[])[.. version.Dependencies
+                        .Where(static d => d.DependencyType == ModDependencyType.Required)
                         .Select(static d => d.ProjectId ?? string.Empty)
                         .Where(static id => id.Length > 0)]
                 };

@@ -1,4 +1,3 @@
-using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using MinecraftServerManager.App.Services;
 
@@ -32,11 +31,6 @@ public sealed partial class ServerDeleteConfirmationDialog : ContentDialog
             Message = $"確定要刪除伺服器「{serverName}」嗎？\n\n⚠️ 這將永久刪除伺服器檔案，無法復原！";
             PrimaryText = "確定刪除";
             SecondaryText = string.Empty;
-        }
-
-        if (Application.Current.Resources.TryGetValue("DangerButtonStyle", out object? styleObj) && styleObj is Style dangerStyle)
-        {
-            PrimaryButtonStyle = dangerStyle;
         }
     }
 

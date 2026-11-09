@@ -1,4 +1,7 @@
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Core.Servers;
+using MinecraftServerManager.Domain.Servers;
+using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.Servers;
 using Xunit;
 
@@ -45,19 +48,19 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         }
     }
 
+    private ServerLaunchPlan CreatePlan(string target, string javaPath, int maxMb, int? minMb = null, IReadOnlyList<string>? jvmArgs = null) =>
+        new ServerLaunchPlanner().CreatePlan(
+            new ServerConfig(ServerName.Parse("RuntimeTest"), MinecraftVersion.Parse("1.21.4"), LoaderKind.Vanilla, string.Empty, maxMb, minMb, path: _testDir, jvmArgs: jvmArgs),
+            target,
+            javaPath);
+
     [Fact]
     public async Task StartAsyncWithJarBuildsCorrectJvmArguments()
     {
         var runner = new FakeProcessRunner();
         await using var runtime = new ServerRuntime(runner);
 
-        await runtime.StartAsync(
-            javaExecutablePath: "java.exe",
-            serverDirectory: _testDir,
-            executableName: "server.jar",
-            memoryMaxMb: 4096,
-            memoryMinMb: 2048,
-            customJvmArgs: ["-Dfile.encoding=UTF-8"]);
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 4096, 2048, ["-Dfile.encoding=UTF-8"]));
 
         Assert.True(runtime.IsRunning);
         Assert.Equal(1234, runtime.Pid);
@@ -80,11 +83,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         var runner = new FakeProcessRunner();
         await using var runtime = new ServerRuntime(runner);
 
-        await runtime.StartAsync(
-            javaExecutablePath: "java.exe",
-            serverDirectory: _testDir,
-            executableName: "run.bat",
-            memoryMaxMb: 2048);
+        await runtime.StartAsync(CreatePlan("run.bat", "java.exe", 2048));
 
         Assert.True(runtime.IsRunning);
 
@@ -102,11 +101,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         await using var runtime = new ServerRuntime(runner);
 
         string fakeJava = Path.Combine(_testDir, "custom-jdk", "bin", "java.exe");
-        await runtime.StartAsync(
-            javaExecutablePath: fakeJava,
-            serverDirectory: _testDir,
-            executableName: "run.bat",
-            memoryMaxMb: 2048);
+        await runtime.StartAsync(CreatePlan("run.bat", fakeJava, 2048));
 
         Assert.True(runtime.IsRunning);
 
@@ -126,10 +121,10 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         var runner = new FakeProcessRunner();
         await using var runtime = new ServerRuntime(runner);
 
-        await runtime.StartAsync("java.exe", _testDir, "server.jar", 1024);
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            runtime.StartAsync("java.exe", _testDir, "server.jar", 1024));
+            runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024)));
     }
 
     [Fact]
@@ -138,7 +133,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         var runner = new FakeProcessRunner();
         await using var runtime = new ServerRuntime(runner);
 
-        await runtime.StartAsync("java.exe", _testDir, "server.jar", 1024);
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
 
         bool sent = await runtime.SendCommandAsync("say hello");
         Assert.True(sent);
@@ -167,7 +162,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         var outputs = new List<string>();
         runtime.OutputLineReceived += line => outputs.Add(line);
 
-        await runtime.StartAsync("java.exe", _testDir, "server.jar", 1024);
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
 
         runner.LastCreatedProcess!.RaiseOutput("Server started!");
 
@@ -184,7 +179,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         bool readyFired = false;
         runtime.ServerReady += () => readyFired = true;
 
-        await runtime.StartAsync("java.exe", _testDir, "server.jar", 1024);
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
         Assert.False(runtime.IsReady);
 
         runner.LastCreatedProcess!.RaiseOutput("[Server thread/INFO]: Preparing spawn area: 98%");
@@ -202,7 +197,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         var runner = new FakeProcessRunner();
         await using var runtime = new ServerRuntime(runner);
 
-        await runtime.StartAsync("java.exe", _testDir, "server.jar", 1024);
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
 
         var result = await runtime.StopAsync(TimeSpan.FromSeconds(5));
 

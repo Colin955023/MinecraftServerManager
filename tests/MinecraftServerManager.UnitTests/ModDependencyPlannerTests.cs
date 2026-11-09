@@ -21,7 +21,6 @@ public sealed class ModDependencyPlannerTests
             loaders: ["fabric"],
             versionType: "release",
             datePublished: "",
-            changelog: "",
             files: [new ModFile("https://example.com/mod.jar", "mod.jar", true, 100, new Dictionary<string, string>())],
             dependencies: [new OnlineModDependency("fabric-api", ModDependencyType.Required)]);
 
@@ -32,9 +31,9 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "fabric", installedMods);
 
-        Assert.True(report.Compatible);
+        Assert.True(report.IsCompatible);
         Assert.Empty(report.HardErrors);
-        Assert.Empty(report.MissingRequired);
+        Assert.Empty(report.MissingRequiredDependencies);
     }
 
     [Fact]
@@ -51,7 +50,7 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "fabric", []);
 
-        Assert.False(report.Compatible);
+        Assert.False(report.IsCompatible);
         Assert.Contains(report.HardErrors, static e => e.Contains("載入器", StringComparison.Ordinal));
     }
 
@@ -70,8 +69,8 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "fabric", []);
 
-        Assert.False(report.Compatible);
-        Assert.Contains("cloth-config", report.MissingRequired);
+        Assert.False(report.IsCompatible);
+        Assert.Contains("cloth-config", report.MissingRequiredDependencies);
     }
 
     [Fact]
@@ -94,8 +93,8 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "fabric", installedMods);
 
-        Assert.False(report.Compatible);
-        Assert.Contains("optifine", report.Incompatible);
+        Assert.False(report.IsCompatible);
+        Assert.Contains("optifine", report.IncompatibleInstalled);
     }
 
     [Fact]
@@ -197,7 +196,7 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "fabric", [], serverSide: "unsupported");
 
-        Assert.False(report.Compatible);
+        Assert.False(report.IsCompatible);
         Assert.Contains(report.HardErrors, static e => e.Contains("僅支援用戶端", StringComparison.Ordinal));
     }
 
@@ -215,7 +214,7 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "quilt", []);
 
-        Assert.True(report.Compatible);
+        Assert.True(report.IsCompatible);
         Assert.Empty(report.HardErrors);
     }
 
@@ -233,7 +232,7 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "neoforge", []);
 
-        Assert.True(report.Compatible);
+        Assert.True(report.IsCompatible);
         Assert.Empty(report.HardErrors);
     }
 
@@ -251,7 +250,7 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "paper", []);
 
-        Assert.False(report.Compatible);
+        Assert.False(report.IsCompatible);
         Assert.Contains(report.HardErrors, static e => e.Contains("不支援", StringComparison.Ordinal));
     }
 
@@ -277,8 +276,8 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "fabric", installedMods);
 
-        Assert.True(report.Compatible);
-        Assert.Empty(report.MissingRequired);
+        Assert.True(report.IsCompatible);
+        Assert.Empty(report.MissingRequiredDependencies);
     }
 
     [Fact]
@@ -318,6 +317,8 @@ public sealed class ModDependencyPlannerTests
     {
         public Dictionary<string, IReadOnlyList<OnlineModVersion>> Versions { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+        public Dictionary<string, string> Titles { get; } = new(StringComparer.OrdinalIgnoreCase);
+
         public Task<IReadOnlyList<OnlineModVersion>> GetProjectVersionsAsync(string projectIdOrSlug, string? loader = null, string? minecraftVersion = null, CancellationToken cancellationToken = default)
         {
             if (Versions.TryGetValue(projectIdOrSlug, out var list))
@@ -330,10 +331,10 @@ public sealed class ModDependencyPlannerTests
         public Task<IReadOnlyList<OnlineModInfo>> SearchModsAsync(string query, string? loader = null, string? minecraftVersion = null, int limit = 20, int offset = 0, string index = "relevance", CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<OnlineModInfo>>([]);
 
-        public Task<ModrinthVersionLookupResult?> LookupVersionByHashAsync(string hash, string algorithm = "sha512", CancellationToken cancellationToken = default) =>
-            Task.FromResult<ModrinthVersionLookupResult?>(null);
-
         public Task<IReadOnlyDictionary<string, ModrinthVersionLookupResult>> LookupVersionsByHashesAsync(IReadOnlyList<string> hashes, string algorithm = "sha512", CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyDictionary<string, ModrinthVersionLookupResult>>(new Dictionary<string, ModrinthVersionLookupResult>());
+
+        public Task<IReadOnlyDictionary<string, string>> GetProjectTitlesAsync(IReadOnlyCollection<string> projectIdsOrSlugs, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<string, string>>(Titles.Where(t => projectIdsOrSlugs.Contains(t.Key, StringComparer.OrdinalIgnoreCase)).ToDictionary(StringComparer.OrdinalIgnoreCase));
     }
 }

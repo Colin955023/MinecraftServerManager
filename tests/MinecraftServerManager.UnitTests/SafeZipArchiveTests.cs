@@ -76,13 +76,15 @@ public sealed class SafeZipArchiveTests
         {
             string archivePath = Path.Combine(root, "managed.zip");
             string sourcePath = Path.Combine(root, "source.txt");
+            string metadataPath = Path.Combine(root, "metadata.json");
             File.WriteAllText(sourcePath, "來源");
+            File.WriteAllText(metadataPath, "{}");
 
             SafeZipArchive.WriteArchive(
                 archivePath,
                 writer =>
                 {
-                    writer.WriteBytes("metadata.json", "{}"u8);
+                    writer.WriteFile("metadata.json", metadataPath);
                     writer.WriteFile("source.txt", sourcePath);
                 });
 
@@ -103,13 +105,15 @@ public sealed class SafeZipArchiveTests
         try
         {
             string archivePath = Path.Combine(root, "limited.zip");
+            string sourcePath = Path.Combine(root, "source.txt");
+            File.WriteAllText(sourcePath, "1");
 
             Assert.Throws<SafeArchiveException>(() => SafeZipArchive.WriteArchive(
                 archivePath,
                 writer =>
                 {
-                    writer.WriteBytes("one.txt", "1"u8);
-                    writer.WriteBytes("two.txt", "2"u8);
+                    writer.WriteFile("one.txt", sourcePath);
+                    writer.WriteFile("two.txt", sourcePath);
                 },
                 maxMembers: 1));
             Assert.False(File.Exists(archivePath));

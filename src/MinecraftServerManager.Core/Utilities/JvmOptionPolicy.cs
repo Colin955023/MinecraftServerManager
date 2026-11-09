@@ -161,8 +161,8 @@ public static class JvmOptionPolicy
             args.Add(("--enable-native-access=ALL-UNNAMED", "允許未命名模組呼叫原生方法消除 Java 22+ 警告"));
         }
 
-        string normalizedLoader = loaderType.Trim().ToLowerInvariant();
-        if (normalizedLoader is "forge" or "neoforge")
+        ReadOnlySpan<char> loader = loaderType.AsSpan().Trim();
+        if (loader.Equals("forge", StringComparison.OrdinalIgnoreCase) || loader.Equals("neoforge", StringComparison.OrdinalIgnoreCase))
         {
             args.Add(("-Dfml.readTimeout=120", "增加 FML 讀取逾時至 120 秒避免大型模組包斷線"));
             args.Add(("-Dfml.queryResult=confirm", "自動確認 FML 模組變更警告避免啟動卡住"));

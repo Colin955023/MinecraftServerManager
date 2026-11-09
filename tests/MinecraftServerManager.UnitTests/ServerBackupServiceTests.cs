@@ -229,4 +229,34 @@ public sealed partial class ServerBackupServiceTests : IDisposable
         Assert.DoesNotContain(entryNames, static n => n.StartsWith("crash-reports/", StringComparison.OrdinalIgnoreCase) || n.StartsWith("crash-reports\\", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(entryNames, static n => n.StartsWith("backups/", StringComparison.OrdinalIgnoreCase) || n.StartsWith("backups\\", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public async Task CreateBackupAsync_KeepsNestedFoldersNamedLikeExcludedDirectories()
+    {
+        string pluginBackups = Path.Combine(_serverDir, "plugins", "CoreProtect", "backups");
+        string configLogs = Path.Combine(_serverDir, "config", "mod", "logs");
+        Directory.CreateDirectory(pluginBackups);
+        Directory.CreateDirectory(configLogs);
+        File.WriteAllText(Path.Combine(pluginBackups, "data.db"), "plugin data");
+        File.WriteAllText(Path.Combine(configLogs, "settings.json"), "{}");
+
+        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir);
+
+        using var archive = Infrastructure.FileSystem.SafeZipArchive.OpenRead(Path.Combine(_externalBackupsDir, backup.FileName));
+        var entryNames = archive.Entries.Select(static e => e.FullName.Replace('\\', '/')).ToList();
+        Assert.Contains("plugins/CoreProtect/backups/data.db", entryNames, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("config/mod/logs/settings.json", entryNames, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("a", "backup-a-20260101-120000.zip", true)]
+    [InlineData("a", "backup-a-20260101-120000-1a2b3c.zip", true)]
+    [InlineData("a", "a-20260101-120000.zip", true)]
+    [InlineData("a", "backup-a.zip", true)]
+    [InlineData("a", "a.zip", true)]
+    [InlineData("A", "backup-a-20260101-120000.zip", true)]
+    [InlineData("a", "backup-a-b-20260101-120000.zip", false)]
+    [InlineData("a", "a-b-20260101-120000.zip", false)]
+    [InlineData("a", "backup-ab.zip", false)]
+    public void IsBackupFileFor_MatchesOnlyTimestampedOwnBackups(string serverName, string fileName, bool expected) => Assert.Equal(expected, ServerBackupService.IsBackupFileFor(serverName, fileName));
 }

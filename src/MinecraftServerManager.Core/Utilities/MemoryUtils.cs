@@ -5,47 +5,19 @@ using MinecraftServerManager.Domain.Servers;
 namespace MinecraftServerManager.Core.Utilities;
 
 /// <summary>
-/// 記憶體驗證與正規化結果
+/// 記憶體設定檢查等級
 /// </summary>
-public sealed record MemoryValidationResult
+public enum MemoryCheckLevel
 {
-    public bool IsValid { get; init; }
-    public int MemoryMaxMb { get; init; }
-    public int? MemoryMinMb { get; init; }
-    public bool AdjustedMax { get; init; }
-    public bool AdjustedMin { get; init; }
-    public string? ErrorMessage { get; init; }
-    public IReadOnlyList<string> WarningMessages { get; init; }
-
-    public MemoryValidationResult(
-        bool isValid,
-        int memoryMaxMb = 0,
-        int? memoryMinMb = null,
-        bool adjustedMax = false,
-        bool adjustedMin = false,
-        string? errorMessage = null,
-        IEnumerable<string>? warningMessages = null)
-    {
-        IsValid = isValid;
-        MemoryMaxMb = memoryMaxMb;
-        MemoryMinMb = memoryMinMb;
-        AdjustedMax = adjustedMax;
-        AdjustedMin = adjustedMin;
-        ErrorMessage = errorMessage;
-        WarningMessages = [.. warningMessages ?? []];
-    }
-
-    public static MemoryValidationResult Valid(
-        int memoryMaxMb,
-        int? memoryMinMb = null,
-        bool adjustedMax = false,
-        bool adjustedMin = false,
-        IEnumerable<string>? warningMessages = null) =>
-        new(true, memoryMaxMb, memoryMinMb, adjustedMax, adjustedMin, null, warningMessages);
-
-    public static MemoryValidationResult Invalid(string errorMessage) =>
-        new(false, errorMessage: errorMessage);
+    Ok,
+    Warning,
+    Error,
 }
+
+/// <summary>
+/// 記憶體設定檢查結果（Error 不可儲存；Warning 可儲存但需提示）
+/// </summary>
+public readonly record struct MemoryCheckResult(MemoryCheckLevel Level, string Message, int MaxMb = 0, int? MinMb = null);
 
 /// <summary>
 /// 伺服器記憶體工具類別
@@ -113,8 +85,9 @@ public static partial class MemoryUtils
             long megabytes = unit switch
             {
                 'k' => value / 1024,
-                'g' => value * 1024,
-                't' => value * 1024 * 1024,
+                // 乘法前先檢查上限，避免溢位後意外落入合法範圍（-1 會被下方範圍檢查排除）
+                'g' => value <= int.MaxValue / 1024 ? value * 1024 : -1,
+                't' => value <= int.MaxValue / (1024 * 1024) ? value * 1024 * 1024 : -1,
                 _ => value
             };
 
@@ -161,66 +134,56 @@ public static partial class MemoryUtils
     }
 
     /// <summary>
-    /// 驗證並正規化伺服器記憶體設定
+    /// 檢查伺服器記憶體設定文字（建立伺服器與調整記憶體共用同一套規則）；
+    /// <paramref name="clampToSystem"/> 為 true 時超出系統總記憶體之數值自動調降為上限並回傳警告，否則視為錯誤
     /// </summary>
-    public static MemoryValidationResult ValidateAndNormalizeServerMemory(
-        string? maxMemoryText,
-        string? minMemoryText = "",
-        int totalMemoryMb = 0)
+    public static MemoryCheckResult CheckServerMemory(string? maxMemoryText, string? minMemoryText, long systemMemoryMb, bool clampToSystem = false)
     {
-        string maxStr = maxMemoryText?.Trim() ?? string.Empty;
-        string minStr = minMemoryText?.Trim() ?? string.Empty;
-
-        if (!int.TryParse(maxStr, CultureInfo.InvariantCulture, out int maxMb))
+        if (!int.TryParse(maxMemoryText?.Trim(), CultureInfo.InvariantCulture, out int maxMb) || maxMb <= 0)
         {
-            return MemoryValidationResult.Invalid("最大記憶體必須是數字");
-        }
-
-        if (maxMb < 1024)
-        {
-            return MemoryValidationResult.Invalid("最大記憶體不可低於 1024 MB");
-        }
-
-        bool adjustedMax = false;
-        var warnings = new List<string>();
-
-        if (totalMemoryMb > 0 && maxMb > totalMemoryMb)
-        {
-            maxMb = totalMemoryMb;
-            adjustedMax = true;
-            warnings.Add($"最大記憶體超出系統總實體記憶體 ({totalMemoryMb} MB)，已自動調整為上限值 {totalMemoryMb} MB");
+            return new(MemoryCheckLevel.Error, "最大記憶體必須為大於 0 的整數 (MB)");
         }
 
         int? minMb = null;
-        bool adjustedMin = false;
-
-        if (!string.IsNullOrEmpty(minStr))
+        if (!string.IsNullOrWhiteSpace(minMemoryText))
         {
-            if (!int.TryParse(minStr, CultureInfo.InvariantCulture, out int parsedMinMb))
+            if (!int.TryParse(minMemoryText.Trim(), CultureInfo.InvariantCulture, out int parsedMin) || parsedMin <= 0)
             {
-                return MemoryValidationResult.Invalid("最小記憶體必須是數字");
+                return new(MemoryCheckLevel.Error, "最小記憶體必須為大於 0 的整數 (MB)");
             }
 
-            if (parsedMinMb <= 0)
+            if (parsedMin > maxMb)
             {
-                return MemoryValidationResult.Invalid("最小記憶體必須大於 0");
+                return new(MemoryCheckLevel.Error, "最小記憶體不可大於最大記憶體");
             }
 
-            minMb = parsedMinMb;
+            minMb = parsedMin;
+        }
 
-            if (totalMemoryMb > 0 && minMb.Value > totalMemoryMb)
+        if (systemMemoryMb > 0)
+        {
+            int peak = Math.Max(maxMb, minMb ?? 0);
+            if (peak > systemMemoryMb)
             {
-                minMb = totalMemoryMb;
-                adjustedMin = true;
-                warnings.Add($"最小記憶體超出系統總實體記憶體 ({totalMemoryMb} MB)，已自動調整為上限值 {totalMemoryMb} MB");
+                if (!clampToSystem)
+                {
+                    return new(MemoryCheckLevel.Error, $"設定記憶體超過系統總記憶體 ({systemMemoryMb} MB)", maxMb, minMb);
+                }
+
+                int limit = (int)Math.Min(systemMemoryMb, int.MaxValue);
+                return new(
+                    MemoryCheckLevel.Warning,
+                    $"設定記憶體超出系統總實體記憶體 ({systemMemoryMb} MB)，已自動調整為上限值 {limit} MB",
+                    Math.Min(maxMb, limit),
+                    minMb is { } min ? Math.Min(min, limit) : null);
             }
 
-            if (minMb.Value > maxMb)
+            if (peak > systemMemoryMb / 2)
             {
-                return MemoryValidationResult.Invalid("最小記憶體不可大於最大記憶體");
+                return new(MemoryCheckLevel.Warning, $"設定記憶體超過系統記憶體的一半 ({systemMemoryMb / 2} MB)", maxMb, minMb);
             }
         }
 
-        return MemoryValidationResult.Valid(maxMb, minMb, adjustedMax, adjustedMin, warnings);
+        return new(MemoryCheckLevel.Ok, string.Empty, maxMb, minMb);
     }
 }

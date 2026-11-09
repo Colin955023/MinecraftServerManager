@@ -162,14 +162,14 @@
       </Grid>
     </Border>
 
-    <!-- 右側主要內容區與右下角浮動 Toast 容器 -->
+    <!-- 右側主要內容區與右上角 InfoBar 通知容器（上緣避開標題列的視窗控制按鈕） -->
     <Grid Grid.Column="1">
       <ContentPresenter x:Name="PageContentHost"
         Margin="28,20,28,20" />
-      <StackPanel x:Name="ToastContainer"
-        VerticalAlignment="Bottom"
+      <StackPanel x:Name="NotificationContainer"
+        VerticalAlignment="Top"
         HorizontalAlignment="Right"
-        Margin="0,0,24,24"
+        Margin="0,44,24,0"
         Spacing="8"
         Canvas.ZIndex="1000" />
     </Grid>

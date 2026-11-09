@@ -22,7 +22,7 @@ public sealed record ServerLaunchPlan(
 public interface IServerLaunchPlanner
 {
     /// <summary>
-    /// 依據伺服器設定與診斷結果建立啟動計畫
+    /// 依據伺服器設定與啟動目標（相對伺服器目錄之 jar、bat 或 @argfile）建立啟動計畫
     /// </summary>
-    public ServerLaunchPlan CreatePlan(ServerConfig config, ServerInspection inspection, string? javaPath = null);
+    public ServerLaunchPlan CreatePlan(ServerConfig config, string launchTarget, string? javaPath = null);
 }

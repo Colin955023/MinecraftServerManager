@@ -42,11 +42,11 @@ public sealed partial class ModIndexPersistenceTests : IDisposable
             ["name"] = "Fabric API",
             ["version"] = "0.92.0"
         };
-        persistence1.CacheMetadata("fabric-api.jar", meta);
+        persistence1.CacheMetadata("fabric-api.jar", meta, 100, 200);
         persistence1.Flush();
 
         var persistence2 = new ModIndexPersistence(_testDir);
-        var retrieved = persistence2.GetCachedMetadata("fabric-api.jar");
+        var retrieved = persistence2.GetCachedMetadata("fabric-api.jar", 100, 200);
 
         Assert.NotNull(retrieved);
         Assert.Equal("fabric-api", retrieved["id"]);
@@ -72,28 +72,15 @@ public sealed partial class ModIndexPersistenceTests : IDisposable
     public void CleanupStaleEntriesShouldRemoveMissingFiles()
     {
         var persistence = new ModIndexPersistence(_testDir);
-        persistence.CacheMetadata("active.jar", new Dictionary<string, string> { ["id"] = "active" });
-        persistence.CacheMetadata("stale.jar", new Dictionary<string, string> { ["id"] = "stale" });
+        persistence.CacheMetadata("active.jar", new Dictionary<string, string> { ["id"] = "active" }, 1, 1);
+        persistence.CacheMetadata("stale.jar", new Dictionary<string, string> { ["id"] = "stale" }, 1, 1);
         persistence.Flush();
 
         persistence.CleanupStaleEntries(["active.jar"]);
         persistence.Flush();
 
         var persistence2 = new ModIndexPersistence(_testDir);
-        Assert.NotNull(persistence2.GetCachedMetadata("active.jar"));
-        Assert.Null(persistence2.GetCachedMetadata("stale.jar"));
-    }
-
-    [Fact]
-    public void ClearIndexShouldWipeAllEntries()
-    {
-        var persistence = new ModIndexPersistence(_testDir);
-        persistence.CacheMetadata("mod1.jar", new Dictionary<string, string> { ["id"] = "1" });
-        persistence.Flush();
-
-        persistence.ClearIndex();
-
-        var persistence2 = new ModIndexPersistence(_testDir);
-        Assert.Null(persistence2.GetCachedMetadata("mod1.jar"));
+        Assert.NotNull(persistence2.GetCachedMetadata("active.jar", 1, 1));
+        Assert.Null(persistence2.GetCachedMetadata("stale.jar", 1, 1));
     }
 }

@@ -1,4 +1,3 @@
-using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using Xunit;
 
@@ -6,19 +5,6 @@ namespace MinecraftServerManager.UnitTests.ViewModels;
 
 public sealed class ViewModelBaseTests
 {
-    private sealed class TestUiService : NoOpUiService
-    {
-        public string? LastErrorMessage { get; private set; }
-        public string? LastErrorTitle { get; private set; }
-
-        public override Task ShowErrorAsync(string message, string title)
-        {
-            LastErrorMessage = message;
-            LastErrorTitle = title;
-            return Task.CompletedTask;
-        }
-    }
-
     [Fact]
     public async Task RunSafeAsync_WhenWorkSucceeds_CompletesWithoutErrors()
     {
@@ -42,42 +28,11 @@ public sealed class ViewModelBaseTests
     }
 
     [Fact]
-    public async Task RunSafeAsync_WhenExceptionThrown_CatchesAndCallsOnException()
+    public async Task RunSafeAsync_WhenExceptionThrown_DoesNotCrashCaller()
     {
-        Exception? captured = null;
-        var expectedEx = new InvalidOperationException("測試錯誤");
+        var task = ViewModelBase.RunSafeAsync(() => Task.FromException(new InvalidOperationException("測試錯誤")), "失敗測試");
+        await task;
 
-        await ViewModelBase.RunSafeAsync(
-            () => Task.FromException(expectedEx),
-            "失敗測試",
-            onException: ex => captured = ex);
-
-        Assert.Same(expectedEx, captured);
-    }
-
-    [Fact]
-    public async Task RunSafeAsync_WhenNotifyUserIsTrue_InvokesUiServiceShowError()
-    {
-        var ui = new TestUiService();
-        var expectedEx = new InvalidOperationException("嚴重失敗");
-
-        await ViewModelBase.RunSafeAsync(
-            () => Task.FromException(expectedEx),
-            "使用者提示測試",
-            uiService: ui,
-            notifyUser: true);
-
-        Assert.NotNull(ui.LastErrorMessage);
-        Assert.Contains("嚴重失敗", ui.LastErrorMessage);
-        Assert.Equal("操作錯誤", ui.LastErrorTitle);
-    }
-
-    [Fact]
-    public async Task RunSafeAsync_WhenOnExceptionThrows_DoesNotCrashCaller()
-    {
-        await ViewModelBase.RunSafeAsync(
-            () => Task.FromException(new InvalidOperationException("初始錯誤")),
-            "雙重異常測試",
-            onException: _ => throw new InvalidOperationException("回呼異常"));
+        Assert.True(task.IsCompletedSuccessfully);
     }
 }

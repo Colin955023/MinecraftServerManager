@@ -2,8 +2,6 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <AssemblyName>MinecraftServerManager</AssemblyName>
-    <Platforms>x64</Platforms>
-    <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <ApplicationIcon>$(RepoRoot)assets\icon.ico</ApplicationIcon>
     <Product>Minecraft Server Manager</Product>
@@ -14,39 +12,28 @@
     <EnableMsixTooling>true</EnableMsixTooling>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
-    <WindowsAppSDKSingleFileVerifyConfiguration>false</WindowsAppSDKSingleFileVerifyConfiguration>
     <SelfContained>true</SelfContained>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <CsWinRTAotOptimizerEnabled>true</CsWinRTAotOptimizerEnabled>
     <CsWinRTAotWarningLevel>2</CsWinRTAotWarningLevel>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-    <PublishReadyToRun>false</PublishReadyToRun>
     <PublishTrimmed>true</PublishTrimmed>
-    <TrimMode>partial</TrimMode>
+    <TrimMode>full</TrimMode>
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
     <UseSharedCompilation>false</UseSharedCompilation>
     <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
     <MetricsSupport>false</MetricsSupport>
-    <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
-    <EnableUnsafeUTF7Encoding>false</EnableUnsafeUTF7Encoding>
-    <StartupHookSupport>false</StartupHookSupport>
-    <CustomResourceTypesSupport>false</CustomResourceTypesSupport>
     <XmlResolverIsNetworkingEnabledByDefault>false</XmlResolverIsNetworkingEnabledByDefault>
     <DebuggerSupport>false</DebuggerSupport>
     <EventSourceSupport>false</EventSourceSupport>
-    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
   </PropertyGroup>
   <ItemGroup>
-    <InternalsVisibleTo Include="MinecraftServerManager.UnitTests" />
-  </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK" />
-    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.DWrite" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" />
     <PackageReference Include="Microsoft.Windows.CsWinRT" />
     <PackageReference Include="CommunityToolkit.Mvvm" />
   </ItemGroup>
@@ -70,17 +57,7 @@
       <_FilteredCompile Remove="@(_FilteredCompile)" />
     </ItemGroup>
   </Target>
-  <!-- 發布單一檔案前精簡移除未使用的巨型 AI / ML 模組、小工具與多餘語系 MUI 資源 -->
-  <Target Name="FilterWindowsAppSdkComponents"
-    BeforeTargets="AddMicrosoftWindowsAppSDKPayloadFilesFromComponents">
-    <ItemGroup>
-      <WindowsAppSdkComponentPackages Remove="@(WindowsAppSdkComponentPackages)"
-        Condition="$([System.String]::Copy('%(Identity)').ToLowerInvariant().Contains('microsoft.windowsappsdk.ai')) or
-                   $([System.String]::Copy('%(Identity)').ToLowerInvariant().Contains('microsoft.windowsappsdk.ml')) or
-                   $([System.String]::Copy('%(Identity)').ToLowerInvariant().Contains('microsoft.windowsappsdk.search')) or
-                   $([System.String]::Copy('%(Identity)').ToLowerInvariant().Contains('microsoft.windowsappsdk.widgets'))" />
-    </ItemGroup>
-  </Target>
+  <!-- 發布單一檔案前精簡移除多餘語系 MUI 資源 -->
   <Target Name="FilterUnusedMuiFiles"
     AfterTargets="AddMicrosoftWindowsAppSDKPayloadFilesFromComponents">
     <ItemGroup>
@@ -90,17 +67,20 @@
                    !$([System.String]::Copy('%(None.Link)').StartsWith('zh-TW'))" />
     </ItemGroup>
   </Target>
-  <!-- 發布單一檔案前精簡移除未使用的巨型 AI / ML 模組與 WebView2 原生組件 -->
+  <!-- 發布單一檔案前精簡移除未使用的 WebView2 原生組件與多餘語系 MUI 資源 -->
   <Target Name="PruneUnusedSingleFilePayload" BeforeTargets="_ComputeFilesToBundle">
     <ItemGroup>
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
-        Condition="'%(Filename)%(Extension)' == 'DirectML.dll' or
-                   '%(Filename)%(Extension)' == 'onnxruntime.dll' or
-                   '%(Filename)%(Extension)' == 'Microsoft.Windows.AI.MachineLearning.dll' or
-                   '%(Filename)%(Extension)' == 'Microsoft.ML.OnnxRuntime.dll' or
-                   '%(Filename)%(Extension)' == 'System.Numerics.Tensors.dll' or
-                   '%(Filename)%(Extension)' == 'WebView2Loader.dll' or
+        Condition="'%(Filename)%(Extension)' == 'WebView2Loader.dll' or
                    '%(Filename)%(Extension)' == 'Microsoft.Web.WebView2.Core.dll'" />
+      <!-- 程式未使用 Bootstrap 初始化（自包含）、背景工作、推播通知、AppInstance.Restart 與 MapControl，其原生檔案不會被載入 -->
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(Filename)%(Extension)' == 'Microsoft.WindowsAppRuntime.Bootstrap.dll' or
+                   '%(Filename)%(Extension)' == 'Microsoft.Windows.ApplicationModel.Background.UniversalBGTask.dll' or
+                   '%(Filename)%(Extension)' == 'PushNotificationsLongRunningTask.ProxyStub.dll' or
+                   '%(Filename)%(Extension)' == 'RestartAgent.exe' or
+                   '%(Filename)%(Extension)' == 'map.html' or
+                   '%(Filename)%(Extension)' == 'Microsoft.UI.Xaml.Controls.pri'" />
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
         Condition="'%(Extension)' == '.mui' and
                    '%(RelativePath)' != '' and

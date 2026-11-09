@@ -14,7 +14,7 @@ namespace MinecraftServerManager.Infrastructure.Mods;
 public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModFileInstaller));
-    public Task<LocalModMutationResult> SetModStateAsync(
+    public async Task<LocalModMutationResult> SetModStateAsync(
         string modsDirectory,
         string modId,
         bool enable,
@@ -34,15 +34,15 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
 
         if (SafeFileSystem.FileExists(dstFile) && !SafeFileSystem.FileExists(srcFile))
         {
-            return Task.FromResult(LocalModMutationResult.Success($"模組已處於{action}狀態", dstFile));
+            return LocalModMutationResult.Success($"模組已處於{action}狀態", dstFile);
         }
 
         if (SafeFileSystem.FileExists(dstFile) && SafeFileSystem.FileExists(srcFile))
         {
-            if (SafeFileSystem.GetFileLength(srcFile) == SafeFileSystem.GetFileLength(dstFile) && HasSameContent(srcFile, dstFile))
+            if (SafeFileSystem.GetFileLength(srcFile) == SafeFileSystem.GetFileLength(dstFile) && await HasSameContentAsync(srcFile, dstFile, cancellationToken).ConfigureAwait(false))
             {
                 SafeFileSystem.DeleteWithin(stableModsDir, srcFile);
-                return Task.FromResult(LocalModMutationResult.Success($"模組已處於{action}狀態並已清理重複檔案", dstFile));
+                return LocalModMutationResult.Success($"模組已處於{action}狀態並已清理重複檔案", dstFile);
             }
 
             string bakFile = Path.Combine(stableModsDir, $"{cleanModId}.conflict.bak");
@@ -51,16 +51,16 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
                 bakFile = Path.Combine(stableModsDir, $"{cleanModId}.conflict.{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.bak");
             }
             SafeFileSystem.MoveWithin(stableModsDir, srcFile, bakFile);
-            return Task.FromResult(LocalModMutationResult.Success($"偵測到衝突檔案，已改名保留備份：{Path.GetFileName(bakFile)}", bakFile));
+            return LocalModMutationResult.Success($"偵測到衝突檔案，已改名保留備份：{Path.GetFileName(bakFile)}", bakFile);
         }
 
         if (SafeFileSystem.FileExists(srcFile))
         {
             SafeFileSystem.MoveWithin(stableModsDir, srcFile, dstFile);
-            return Task.FromResult(LocalModMutationResult.Success($"已成功{action}模組：{Path.GetFileName(dstFile)}", dstFile));
+            return LocalModMutationResult.Success($"已成功{action}模組：{Path.GetFileName(dstFile)}", dstFile);
         }
 
-        return Task.FromResult(LocalModMutationResult.Failure($"{action}失敗", $"找不到模組檔案：{Path.GetFileName(srcFile)}", [cleanModId]));
+        return LocalModMutationResult.Failure($"{action}失敗", $"找不到模組檔案：{Path.GetFileName(srcFile)}");
     }
 
     public Task<LocalModMutationResult> DeleteModsAsync(
@@ -78,13 +78,12 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
 
         string stableModsDir = SafeFileSystem.ResolveStableDirectory(modsDirectory, create: true);
         int deletedCount = 0;
-        var missingIds = new List<string>();
+        int missingCount = 0;
 
         foreach (string modId in modIds)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var (enabledPath, disabledPath) = ResolveModFilePaths(stableModsDir, modId);
-            string cleanModId = ModHelpers.ModFilenameStem(Path.GetFileName(enabledPath));
 
             bool deleted = false;
             if (SafeFileSystem.FileExists(enabledPath))
@@ -104,21 +103,21 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
             }
             else
             {
-                missingIds.Add(cleanModId);
+                missingCount++;
             }
         }
 
-        if (deletedCount > 0 && missingIds.Count == 0)
+        if (deletedCount > 0 && missingCount == 0)
         {
             return Task.FromResult(LocalModMutationResult.Success($"已成功刪除 {deletedCount} 個模組檔案", affectedCount: deletedCount));
         }
 
         if (deletedCount > 0)
         {
-            return Task.FromResult(new LocalModMutationResult("partial", "部分刪除成功", $"已刪除 {deletedCount} 個模組，但有 {missingIds.Count} 個未找到", null, deletedCount, missingIds));
+            return Task.FromResult(new LocalModMutationResult(ModOperationStatus.Partial, "部分刪除成功", $"已刪除 {deletedCount} 個模組，但有 {missingCount} 個未找到", null, deletedCount));
         }
 
-        return Task.FromResult(LocalModMutationResult.Failure("刪除失敗", "找不到任何可刪除的模組檔案", missingIds));
+        return Task.FromResult(LocalModMutationResult.Failure("刪除失敗", "找不到任何可刪除的模組檔案"));
     }
 
     public Task<LocalModMutationResult> ImportLocalModAsync(
@@ -169,7 +168,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         string safeFileName = Path.GetFileName(fileName);
         if (!ModHelpers.IsJarFileName(safeFileName))
         {
-            return ModFileOperationResult.Fail("僅支援 .jar 格式模組檔案", false);
+            return ModFileOperationResult.Fail("僅支援 .jar 格式模組檔案");
         }
 
         string stableModsDir = SafeFileSystem.ResolveStableDirectory(modsDirectory, create: true);
@@ -203,7 +202,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
             if (!downloadResult.Success)
             {
                 Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
-                return ModFileOperationResult.Fail($"下載或雜湊校驗失敗：{downloadResult.Error}", false);
+                return ModFileOperationResult.Fail($"下載或雜湊校驗失敗：{downloadResult.Error}");
             }
 
             // 備份舊檔案（若存在）
@@ -214,7 +213,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
                 {
                     backupFilePath = null;
                     Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
-                    return ModFileOperationResult.Fail("無法備份既有模組檔案", false);
+                    return ModFileOperationResult.Fail("無法備份既有模組檔案");
                 }
             }
 
@@ -222,7 +221,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
             if (!SafeFileSystem.MoveWithin(stableModsDir, tempFilePath, finalTargetPath))
             {
                 Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
-                return ModFileOperationResult.Fail("無法移動模組檔案至目標位置", true);
+                return ModFileOperationResult.Fail("無法移動模組檔案至目標位置");
             }
 
             // 清理備份
@@ -236,12 +235,12 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         catch (OperationCanceledException)
         {
             Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
-            return ModFileOperationResult.Cancel("已取消安裝", rollbackPerformed: true);
+            return ModFileOperationResult.Cancel("已取消安裝");
         }
         catch (Exception ex)
         {
             Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
-            return ModFileOperationResult.Fail($"安裝失敗：{ex.Message}", true);
+            return ModFileOperationResult.Fail($"安裝失敗：{ex.Message}");
         }
         finally
         {
@@ -292,9 +291,12 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
     {
         try
         {
-            if (SafeFileSystem.FileExists(tempPath))
+            foreach (string leftover in (ReadOnlySpan<string>)[tempPath, tempPath + ".part"])
             {
-                SafeFileSystem.DeleteWithin(stableModsDir, tempPath);
+                if (SafeFileSystem.FileExists(leftover))
+                {
+                    SafeFileSystem.DeleteWithin(stableModsDir, leftover);
+                }
             }
             if (backupPath is not null && SafeFileSystem.FileExists(backupPath))
             {
@@ -377,10 +379,10 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         return false;
     }
 
-    private static bool HasSameContent(string firstFile, string secondFile)
+    private static async Task<bool> HasSameContentAsync(string firstFile, string secondFile, CancellationToken cancellationToken)
     {
-        string firstHash = HashCalculator.Shared.ComputeFileHash(firstFile, "sha256");
+        string firstHash = await HashCalculator.Shared.ComputeFileHashAsync(firstFile, "sha256", cancellationToken: cancellationToken).ConfigureAwait(false);
         return !string.IsNullOrEmpty(firstHash)
-            && string.Equals(firstHash, HashCalculator.Shared.ComputeFileHash(secondFile, "sha256"), StringComparison.OrdinalIgnoreCase);
+            && string.Equals(firstHash, await HashCalculator.Shared.ComputeFileHashAsync(secondFile, "sha256", cancellationToken: cancellationToken).ConfigureAwait(false), StringComparison.OrdinalIgnoreCase);
     }
 }

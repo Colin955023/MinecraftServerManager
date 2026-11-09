@@ -32,7 +32,7 @@
             Width="80"
             Height="4"
             VerticalAlignment="Center"
-            Visibility="{x:Bind controls:UiBindHelpers.BoolToVis(ViewModel.IsLoadingVersions), Mode=OneWay}" />
+            Visibility="{x:Bind ViewModel.IsLoadingVersions, Mode=OneWay}" />
           <TextBlock Text="{x:Bind ViewModel.LoadingStatusText, Mode=OneWay}"
             FontSize="12"
             Foreground="{ThemeResource MutedTextBrush}"
@@ -245,7 +245,7 @@
           <TextBlock Text="{x:Bind ViewModel.MemoryWarningText, Mode=OneWay}"
             FontSize="12"
             FontWeight="SemiBold"
-            Foreground="{x:Bind controls:UiBindHelpers.ErrorBrush(ViewModel.IsMemoryError), Mode=OneWay}"
+            controls:ThemeBrush.ForegroundKey="{x:Bind controls:UiBindHelpers.ErrorBrushKey(ViewModel.IsMemoryError), Mode=OneWay}"
             Visibility="{x:Bind controls:UiBindHelpers.NullOrWhitespaceToVis(ViewModel.MemoryWarningText), Mode=OneWay}"
             Margin="0,6,0,0" />
         </StackPanel>

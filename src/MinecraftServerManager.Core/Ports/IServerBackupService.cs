@@ -19,6 +19,26 @@ public sealed record ServerBackupProgressReport(
     long TotalBytes);
 
 /// <summary>
+/// 外部備份資料夾狀態
+/// </summary>
+public enum ServerBackupSummaryStatus
+{
+    NotConfigured,
+    DirectoryMissing,
+    NoBackups,
+    HasBackups,
+    ReadFailed,
+}
+
+/// <summary>
+/// 外部備份資料夾摘要（備份數量與最新備份時間）
+/// </summary>
+public sealed record ServerBackupSummary(
+    ServerBackupSummaryStatus Status,
+    int Count = 0,
+    DateTime? LatestWriteTime = null);
+
+/// <summary>
 /// 伺服器備份與還原管理抽象介面
 /// </summary>
 public interface IServerBackupService
@@ -59,4 +79,19 @@ public interface IServerBackupService
         string backupFileName,
         string? backupDirectory = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 取得外部備份資料夾內指定伺服器的備份摘要（同步執行，呼叫端應於背景執行緒呼叫）
+    /// </summary>
+    public ServerBackupSummary GetBackupSummary(string serverName, string? backupDirectory);
+
+    /// <summary>
+    /// 驗證備份目的地是否位於伺服器存放目錄外；合法時回傳 null，違規時回傳阻擋訊息
+    /// </summary>
+    public string? ValidateBackupDestination(string destinationPath);
+
+    /// <summary>
+    /// 建立備份目的資料夾並產生帶時間戳記的備份檔案完整路徑
+    /// </summary>
+    public string PrepareBackupFilePath(string serverName, string destinationDirectory);
 }

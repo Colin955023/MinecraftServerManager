@@ -24,7 +24,7 @@ public sealed partial class ModUpdatesDialog : Window
         InitializeComponent();
         Title = "發現模組更新";
 
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(800, 540));
+        WindowLayoutHelper.ResizeToDip(this, 800, 540);
     }
 
     public IReadOnlyList<ModUpdateCandidateItem> GetSelectedItems() =>
@@ -56,7 +56,7 @@ public sealed partial class ModUpdatesDialog : Window
     {
         if (!CandidateItems.Any(static i => i.IsSelected))
         {
-            _ui.ShowToast("請至少勾選一個要更新的模組！", "未勾選項目", ToastType.Warning);
+            _ui.ShowNotification("請至少勾選一個要更新的模組！", "未勾選項目", NotificationType.Warning);
             return;
         }
 
@@ -64,44 +64,7 @@ public sealed partial class ModUpdatesDialog : Window
         Close();
     }
 
-    private void OnHeaderSortRequested(object? sender, SortRequestedEventArgs e)
-    {
-        if (CandidateItems.Count <= 1)
-        {
-            return;
-        }
+    private void OnHeaderSortRequested(object? sender, SortRequestedEventArgs e) => CandidateItems.SortBy(TableSortKeys.UpdateCandidates, e);
 
-        CandidateItems.SortBy(e);
-    }
-
-    private void OnHeaderAutoFitRequested(object? sender, string propertyName)
-    {
-        if (CandidateItems.Count == 0)
-        {
-            return;
-        }
-
-        var cols = ModUpdatesListColumns.Current;
-        switch (propertyName)
-        {
-            case "IsSelected":
-                cols.UpdateWidth = new(SortableTableHeader.CalculateAutoFitWidth(ModUpdatesListColumns.DefaultUpdateWidth, [], "更新"));
-                break;
-            case "ModName":
-                cols.NameWidth = new(SortableTableHeader.CalculateAutoFitWidth(ModUpdatesListColumns.DefaultNameWidth, CandidateItems.Select(c => c.ModName), "模組名稱"));
-                break;
-            case "CurrentVersion":
-                cols.CurrentVersionWidth = new(SortableTableHeader.CalculateAutoFitWidth(ModUpdatesListColumns.DefaultCurrentVersionWidth, CandidateItems.Select(c => c.CurrentVersion), "目前版本"));
-                break;
-            case "NewVersion":
-                cols.NewVersionWidth = new(SortableTableHeader.CalculateAutoFitWidth(ModUpdatesListColumns.DefaultNewVersionWidth, CandidateItems.Select(c => c.NewVersion), "最新版本"));
-                break;
-            case "SourcePlatform":
-                cols.PlatformWidth = new(SortableTableHeader.CalculateAutoFitWidth(ModUpdatesListColumns.DefaultPlatformWidth, CandidateItems.Select(c => c.SourcePlatform), "來源平台"));
-                break;
-            case "FileName":
-                cols.FileNameWidth = new(SortableTableHeader.CalculateAutoFitWidth(ModUpdatesListColumns.DefaultFileNameWidth, CandidateItems.Select(c => c.FileName), "新檔案名稱"));
-                break;
-        }
-    }
+    private void OnHeaderAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(CandidateItems, TableSortKeys.UpdateCandidates);
 }

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 
 namespace MinecraftServerManager.UnitTests.Architecture;
@@ -68,8 +69,6 @@ public static class SourceScanner
         }
 
         var results = new List<(string RelativePath, string FullPath)>();
-        var rootUri = new Uri(SolutionRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar);
-
         foreach (string file in Directory.EnumerateFiles(fullDirectory, "*.cs", SearchOption.AllDirectories))
         {
             string normalized = file.Replace('\\', '/');
@@ -81,8 +80,7 @@ public static class SourceScanner
                 continue;
             }
 
-            Uri fileUri = new(file);
-            string relativePath = Uri.UnescapeDataString(rootUri.MakeRelativeUri(fileUri).ToString()).Replace('\\', '/');
+            string relativePath = Path.GetRelativePath(SolutionRoot, file).Replace('\\', '/');
             results.Add((relativePath, file));
         }
 
@@ -479,6 +477,11 @@ public static class SourceScanner
     }
 
     /// <summary>
+    /// 依檔案與清洗模式快取原始行與清洗後行，避免數十條規則重複讀檔與詞法清洗
+    /// </summary>
+    private static readonly ConcurrentDictionary<(string Path, bool PreserveStrings), (string[] Original, string[] Stripped)> LineCache = new();
+
+    /// <summary>
     /// 對目標檔案清單進行正規表示式違規掃描
     /// </summary>
     /// <param name="files">欲掃描之檔案集合</param>
@@ -505,11 +508,12 @@ public static class SourceScanner
                 continue;
             }
 
-            string rawText = File.ReadAllText(fullPath);
-            string stripped = preserveStrings ? StripCommentsOnly(rawText) : StripCommentsAndStrings(rawText);
-
-            string[] originalLines = rawText.Split('\n');
-            string[] strippedLines = stripped.Split('\n');
+            var (originalLines, strippedLines) = LineCache.GetOrAdd((fullPath, preserveStrings), static key =>
+            {
+                string rawText = File.ReadAllText(key.Path);
+                string stripped = key.PreserveStrings ? StripCommentsOnly(rawText) : StripCommentsAndStrings(rawText);
+                return (rawText.Split('\n'), stripped.Split('\n'));
+            });
 
             int lineCount = Math.Min(originalLines.Length, strippedLines.Length);
             for (int lineIdx = 0; lineIdx < lineCount; lineIdx++)

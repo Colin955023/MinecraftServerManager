@@ -6,6 +6,7 @@ using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Java;
 using MinecraftServerManager.Infrastructure.Mods;
 using MinecraftServerManager.Infrastructure.Servers;
+using MinecraftServerManager.Infrastructure.Services;
 using MinecraftServerManager.Infrastructure.Settings;
 
 namespace MinecraftServerManager.Infrastructure.Serialization;
@@ -40,6 +41,7 @@ namespace MinecraftServerManager.Infrastructure.Serialization;
 [JsonSerializable(typeof(string[][]))]
 [JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(ModrinthVersionFilesRequest))]
+[JsonSerializable(typeof(GitHubReleasePayload))]
 [JsonSerializable(typeof(List<ModJsonItem>))]
 [JsonSerializable(typeof(ModJsonItem))]
 [JsonSerializable(typeof(List<ServerUserCacheEntry>))]

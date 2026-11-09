@@ -1,5 +1,6 @@
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
@@ -54,6 +55,6 @@ public sealed class ModManager(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
         string stableServerDir = SafeFileSystem.ResolveStableDirectory(serverDirectory, create: true);
-        return Path.Combine(stableServerDir, "mods");
+        return Path.Combine(stableServerDir, ServerDefaults.ModsDirectoryName);
     }
 }

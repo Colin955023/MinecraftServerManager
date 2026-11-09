@@ -1,13 +1,10 @@
 using System.Collections.Concurrent;
-using System.Text;
-using System.Text.Json;
 using MinecraftServerManager.Core.Loaders;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Loaders;
 using MinecraftServerManager.Infrastructure.Logging;
-using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Java;
 
@@ -20,24 +17,18 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(MinecraftJavaRequirementService));
 
-    public const string RequirementsCacheFileName = "mc_java_requirements_cache.json";
-    public const string VersionsCacheFileName = MojangVersionCatalog.VersionsCacheFileName;
-    public const string ManifestV2Url = MojangVersionCatalog.ManifestV2Url;
-    public const string ManifestFallbackUrl = MojangVersionCatalog.ManifestFallbackUrl;
-
     private readonly IHttpPort _httpPort;
     private readonly string _cacheDirectory;
     private readonly ConcurrentDictionary<string, int> _memoryCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _lock = new();
-    private bool _cacheLoaded;
+    private volatile bool _cacheLoaded;
 
-    public MinecraftJavaRequirementService(IHttpPort httpPort, string? cacheDirectory = null)
+    public MinecraftJavaRequirementService(IHttpPort httpPort, string cacheDirectory)
     {
         ArgumentNullException.ThrowIfNull(httpPort);
+        ArgumentException.ThrowIfNullOrWhiteSpace(cacheDirectory);
         _httpPort = httpPort;
-        _cacheDirectory = SafeFileSystem.ResolveStableDirectory(
-            string.IsNullOrWhiteSpace(cacheDirectory) ? RuntimePaths.GetVersionCacheDir() : cacheDirectory,
-            create: true);
+        _cacheDirectory = SafeFileSystem.ResolveStableDirectory(cacheDirectory, create: true);
     }
 
     /// <inheritdoc />
@@ -116,7 +107,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         var majors = _memoryCache.Values
             .Where(static v => v >= 8)
             .Distinct()
-            .OrderBy(static v => v)
+            .Order()
             .ToList();
 
         return majors.Count > 0 ? majors : [8, 11, 16, 17, 21];
@@ -205,33 +196,6 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
                 return;
             }
 
-            string legacyCachePath = Path.Combine(_cacheDirectory, RequirementsCacheFileName);
-            if (SafeFileSystem.FileExists(legacyCachePath))
-            {
-                try
-                {
-                    string json = SafeFileSystem.ReadAllText(legacyCachePath, Encoding.UTF8);
-                    using var doc = JsonCodec.ParseDocument(json);
-                    if (doc.RootElement.ValueKind == JsonValueKind.Object)
-                    {
-                        foreach (var prop in doc.RootElement.EnumerateObject())
-                        {
-                            if (prop.Value.TryGetInt32(out int major) && major > 0)
-                            {
-                                _memoryCache[prop.Name.Trim()] = major;
-                            }
-                        }
-                    }
-
-                    // 舊檔案已完成記憶體載入遷移，安全清理刪除
-                    SafeFileSystem.DeleteFile(legacyCachePath);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning("讀取舊版 Java requirements 快取失敗 ({Path}): {Error}", legacyCachePath, ex.Message);
-                }
-            }
-
             foreach (var v in MojangVersionCatalog.LoadCachedVersions(MojangVersionCatalog.GetPaperVersionsCachePath(_cacheDirectory)))
             {
                 if (!string.IsNullOrWhiteSpace(v.Version) && v.JavaMajor is > 0)
@@ -268,20 +232,6 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         {
             try
             {
-                // 刪除已廢棄之獨立快取檔案
-                string legacyCachePath = Path.Combine(_cacheDirectory, RequirementsCacheFileName);
-                if (SafeFileSystem.FileExists(legacyCachePath))
-                {
-                    try
-                    {
-                        SafeFileSystem.DeleteFile(legacyCachePath);
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Warning("清理舊版 Java requirements 快取失敗 ({Path}): {Error}", legacyCachePath, ex.Message);
-                    }
-                }
-
                 // 1. 同步更新官方 MC 快取 mc_versions_cache.json
                 string mcCachePath = MojangVersionCatalog.GetVersionsCachePath(_cacheDirectory);
                 var mcVersions = SafeFileSystem.FileExists(mcCachePath) ? MojangVersionCatalog.LoadCachedVersions(mcCachePath) : [];
@@ -369,25 +319,5 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         }
 
         return await MojangVersionCatalog.FetchOfficialJavaMajorAsync(_httpPort, targetUrl, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// 解析 Minecraft version package JSON 中的 javaVersion.majorVersion 或 java_version.major
-    /// </summary>
-    public static int? ParseJavaMajorFromVersionJson(JsonElement root) =>
-        MojangVersionCatalog.ParseJavaMajorFromVersionJson(root);
-
-    public static int? ParseJavaMajorFromVersionJson(JsonDocument doc) =>
-        MojangVersionCatalog.ParseJavaMajorFromVersionJson(doc.RootElement);
-
-    public static int? ParseJavaMajorFromVersionJson(string json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return null;
-        }
-
-        using var doc = JsonCodec.ParseDocument(json);
-        return MojangVersionCatalog.ParseJavaMajorFromVersionJson(doc.RootElement);
     }
 }

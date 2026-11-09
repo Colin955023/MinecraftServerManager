@@ -7,40 +7,25 @@ namespace MinecraftServerManager.UnitTests;
 public sealed class JsonAndAtomicWriterTests
 {
     [Fact]
-    public void JsonCodecReadsTheOriginalBytesAndDocument()
+    public void JsonCodecDeserializesValidBytesAndReturnsDefaultForInvalid()
     {
-        var directory = Directory.CreateTempSubdirectory("msm-json-");
-        try
-        {
-            string file = Path.Combine(directory.FullName, "settings.json");
-            const string content = "{\"enabled\":true}";
-            File.WriteAllText(file, content);
+        var valid = JsonCodec.Deserialize<Infrastructure.Settings.WindowPreferences>("{\"theme_mode\":\"dark\"}"u8);
+        Assert.NotNull(valid);
+        Assert.Equal("dark", valid!.ThemeMode);
 
-            using var result = JsonCodec.ReadJsonWithBytes(file);
-
-            Assert.NotNull(result);
-            Assert.Equal(content, System.Text.Encoding.UTF8.GetString(result!.RawBytes));
-            Assert.True(result.Document.RootElement.GetProperty("enabled").GetBoolean());
-        }
-        finally
-        {
-            directory.Delete(true);
-        }
+        Assert.Null(JsonCodec.Deserialize<Infrastructure.Settings.WindowPreferences>("not-json"u8));
     }
 
     [Fact]
-    public void JsonCodecRejectsInvalidAndOversizedJson()
+    public void ReadRegularFileRejectsOversizedFile()
     {
         var directory = Directory.CreateTempSubdirectory("msm-json-");
         try
         {
-            string invalid = Path.Combine(directory.FullName, "invalid.json");
             string oversized = Path.Combine(directory.FullName, "oversized.json");
-            File.WriteAllText(invalid, "not-json");
             File.WriteAllText(oversized, "{}xxxxx");
 
-            Assert.Null(JsonCodec.ReadJson(invalid));
-            Assert.Null(JsonCodec.ReadJson(oversized, maxBytes: 2));
+            Assert.Throws<IOException>(() => Infrastructure.FileSystem.SafeFileSystem.ReadRegularFile(oversized, maxBytes: 2));
         }
         finally
         {

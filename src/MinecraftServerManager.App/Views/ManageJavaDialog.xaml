@@ -217,7 +217,7 @@
                                         Padding="8,6">
                                         <TextBlock Text="{x:Bind StatusText, Mode=OneWay}"
                                             FontWeight="{x:Bind helpers:UiBindHelpers.FormatStatusWeight(IsRecommended), Mode=OneWay}"
-                                            Foreground="{x:Bind helpers:UiBindHelpers.FormatStatusBrush(IsRecommended), Mode=OneWay}"
+                                            helpers:ThemeBrush.ForegroundKey="{x:Bind helpers:UiBindHelpers.FormatStatusBrushKey(IsRecommended), Mode=OneWay}"
                                             TextTrimming="CharacterEllipsis"
                                             ToolTipService.ToolTip="{x:Bind StatusText, Mode=OneWay}"
                                             VerticalAlignment="Center" />
@@ -248,7 +248,7 @@
             <ProgressBar IsIndeterminate="True"
                 Width="80"
                 Height="4"
-                Visibility="{x:Bind helpers:UiBindHelpers.BoolToVis(ViewModel.IsBusy), Mode=OneWay}"
+                Visibility="{x:Bind ViewModel.IsBusy, Mode=OneWay}"
                 VerticalAlignment="Center" />
             <TextBlock Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
                 Foreground="{ThemeResource MutedTextBrush}"

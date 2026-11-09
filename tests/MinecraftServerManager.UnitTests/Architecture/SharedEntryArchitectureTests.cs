@@ -4,7 +4,7 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests.Architecture;
 /// <summary>
-/// 原生架構測試（A1～A28 規則）：
+/// 原生架構測試（A1～A30 規則）：
 /// 規定「共用工具入口」與架構分層界線；規則編號與 docs/TECHNICAL_OVERVIEW.md 第 11 節對照表一一對應。
 /// 零額外第三方相依、純原生靜態原始碼掃描與專案結構檢查。
 /// </summary>
@@ -41,7 +41,7 @@ public sealed partial class SharedEntryArchitectureTests
 
     #endregion
 
-    #region 架構規則測試（A1～A28）
+    #region 架構規則測試（A1～A30）
 
     /// <summary>
     /// A1：檔案與目錄存在性、走訪、建立、刪除與串流 I/O 一律經由 SafeFileSystem / AtomicFileWriter
@@ -313,7 +313,7 @@ public sealed partial class SharedEntryArchitectureTests
     }
 
     /// <summary>
-    /// A13：App/ViewModels 內禁止出現裸 _ = XxxAsync( 發射後不管呼叫，必須統一呼叫 ViewModelBase.RunSafeAsync
+    /// A13：App/ViewModels 內禁止出現裸 _ = XxxAsync( 或 _ = Task.Run( 發射後不管呼叫，必須統一呼叫 ViewModelBase.RunSafeAsync
     /// 規範：專案規範「例外處理與 Catch 規範」（禁止無聲失敗）；對照表：docs/TECHNICAL_OVERVIEW.md 第 11 節 A13。
     /// </summary>
     [Fact]
@@ -635,9 +635,50 @@ public sealed partial class SharedEntryArchitectureTests
         AssertNoViolations(violations, "A28");
     }
 
+    /// <summary>
+    /// A29：呈現層（ViewModels 與 Views）的檔案 I/O 一律經由 Core 連接埠（ILocalFileSystem、IServerLogReader、IModFileService、IServersRootService、IServerBackupService），
+    /// 禁止直接呼叫 SafeFileSystem、ModFileInstaller、ServersRootRelocator、PropertiesDocumentCodec 靜態成員
+    /// 規範：專案規範「相依方向」、「UI 與 MVVM 規範」；對照表：docs/TECHNICAL_OVERVIEW.md 第 11 節 A29。
+    /// </summary>
+    [Fact]
+    public void A29_PresentationLayerFileIo_ShouldOnlyUseCorePorts()
+    {
+        var files = SourceScanner.GetSourceFiles("src");
+        var violations = SourceScanner.ScanViolations(
+            files,
+            A29Regex(),
+            "A29",
+            "ViewModel 與 View 的檔案 I/O 必須經由 Core 連接埠注入，不得直接呼叫 Infrastructure 靜態工具",
+            path =>
+                !path.StartsWith("src/MinecraftServerManager.App/ViewModels/", StringComparison.OrdinalIgnoreCase) &&
+                !path.StartsWith("src/MinecraftServerManager.App/Views/", StringComparison.OrdinalIgnoreCase));
+
+        AssertNoViolations(violations, "A29");
+    }
+
+    /// <summary>
+    /// A30：視窗尺寸調整一律經由 WindowLayoutHelper.ResizeToDip（邏輯像素依 DPI 換算），禁止直接呼叫 AppWindow.Resize
+    /// 規範：專案規範「UI 與 MVVM 規範」（Per-Monitor V2 高 DPI）；對照表：docs/TECHNICAL_OVERVIEW.md 第 11 節 A30。
+    /// </summary>
+    [Fact]
+    public void A30_WindowResize_ShouldOnlyUseWindowLayoutHelper()
+    {
+        var files = SourceScanner.GetSourceFiles("src");
+        var violations = SourceScanner.ScanViolations(
+            files,
+            A30Regex(),
+            "A30",
+            "視窗尺寸調整必須統一使用 WindowLayoutHelper.ResizeToDip，避免實體像素與邏輯像素混用",
+            path =>
+                string.Equals(path, "src/MinecraftServerManager.App/Services/WindowLayoutHelper.cs", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(path, "src/MinecraftServerManager.App/MainWindow.xaml.cs", StringComparison.OrdinalIgnoreCase));
+
+        AssertNoViolations(violations, "A30");
+    }
+
     #endregion
 
-    #region 規則比對正規式（A1～A28）
+    #region 規則比對正規式（A1～A30）
 
     [GeneratedRegex(@"(?<![\w\.])((System\.IO\.)?(File\.|Directory\.|FileInfo\b|DirectoryInfo\b|FileStream\b|DriveInfo\b))")]
     private static partial Regex A1Regex();
@@ -678,7 +719,7 @@ public sealed partial class SharedEntryArchitectureTests
     [GeneratedRegex(@"(?<![\w\.])((System\.)?Console\.(WriteLine|Write)|(System\.Diagnostics\.)?(Trace|Debug)\.(WriteLine|Write|TraceInformation|TraceWarning|TraceError))\(")]
     private static partial Regex A12Regex();
 
-    [GeneratedRegex(@"(?<![\w\.])_\s*=\s*(?!(?:ViewModelBase\.)?RunSafeAsync\b)([a-zA-Z_]\w*\.)*([a-zA-Z_]\w*Async)\(")]
+    [GeneratedRegex(@"(?<![\w\.])_\s*=\s*(?!(?:ViewModelBase\.)?RunSafeAsync\b)(?:([a-zA-Z_]\w*\.)*([a-zA-Z_]\w*Async)|Task\.Run)\(")]
     private static partial Regex A13Regex();
 
     [GeneratedRegex(@"(?<![\w\.])((System\.Media\.)?(SystemSounds\b|SoundPlayer\b)|MessageBeep\b)")]
@@ -714,7 +755,7 @@ public sealed partial class SharedEntryArchitectureTests
     [GeneratedRegex(@"(?<![\w\.])new\s+(System\.)?Progress<")]
     private static partial Regex A24Regex();
 
-    [GeneratedRegex(@"(?<![\w\.])new\s+WindowsNaturalSortComparer\b")]
+    [GeneratedRegex(@"(?<![\w\.])new\s+SortKeyComparer\b|\bSortKeyComparer\.Instance\b")]
     private static partial Regex A25Regex();
 
     [GeneratedRegex(@"\.tmp""")]
@@ -725,6 +766,12 @@ public sealed partial class SharedEntryArchitectureTests
 
     [GeneratedRegex(@"Enum\.(TryParse|Parse)\s*<\s*LoaderKind\s*>")]
     private static partial Regex A28Regex();
+
+    [GeneratedRegex(@"(?<![\w\.])(SafeFileSystem|ModFileInstaller|ServersRootRelocator|PropertiesDocumentCodec)\.")]
+    private static partial Regex A29Regex();
+
+    [GeneratedRegex(@"\bAppWindow\.Resize\(")]
+    private static partial Regex A30Regex();
 
     #endregion
 }

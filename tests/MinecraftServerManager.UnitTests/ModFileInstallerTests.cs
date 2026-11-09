@@ -39,7 +39,7 @@ public sealed partial class ModFileInstallerTests : IDisposable
     [Fact]
     public async Task SetModStateAsyncEnableAndDisableShouldRenameFiles()
     {
-        var installer = new ModFileInstaller(new FakeHttpPort());
+        var installer = new ModFileInstaller(CreateHttpPort());
         string activeJar = Path.Combine(_modsDir, "testmod.jar");
         File.WriteAllText(activeJar, "dummy content");
 
@@ -59,7 +59,7 @@ public sealed partial class ModFileInstallerTests : IDisposable
     [Fact]
     public async Task SetModStateAsyncWithConflictDifferentContentShouldCreateBackup()
     {
-        var installer = new ModFileInstaller(new FakeHttpPort());
+        var installer = new ModFileInstaller(CreateHttpPort());
         string activeJar = Path.Combine(_modsDir, "conflictmod.jar");
         string disabledJar = Path.Combine(_modsDir, "conflictmod.jar.disabled");
         File.WriteAllText(activeJar, "version 1");
@@ -76,7 +76,7 @@ public sealed partial class ModFileInstallerTests : IDisposable
     [Fact]
     public async Task DeleteModsAsyncShouldRemoveSpecifiedFiles()
     {
-        var installer = new ModFileInstaller(new FakeHttpPort());
+        var installer = new ModFileInstaller(CreateHttpPort());
         string mod1 = Path.Combine(_modsDir, "mod1.jar");
         string mod2 = Path.Combine(_modsDir, "mod2.jar.disabled");
         File.WriteAllText(mod1, "content1");
@@ -85,7 +85,7 @@ public sealed partial class ModFileInstallerTests : IDisposable
         var result = await installer.DeleteModsAsync(_modsDir, ["mod1", "mod2", "mod3"]);
         Assert.True(result.Partial);
         Assert.Equal(2, result.AffectedCount);
-        Assert.Contains("mod3", result.MissingIds);
+        Assert.Contains("1 個未找到", result.Message);
         Assert.False(File.Exists(mod1));
         Assert.False(File.Exists(mod2));
     }
@@ -93,7 +93,7 @@ public sealed partial class ModFileInstallerTests : IDisposable
     [Fact]
     public async Task ImportLocalModAsyncShouldRejectNonJarFiles()
     {
-        var installer = new ModFileInstaller(new FakeHttpPort());
+        var installer = new ModFileInstaller(CreateHttpPort());
         string textFile = Path.Combine(_testDir, "test.txt");
         File.WriteAllText(textFile, "not a jar");
 
@@ -104,7 +104,7 @@ public sealed partial class ModFileInstallerTests : IDisposable
     [Fact]
     public async Task ImportLocalModAsyncShouldCopyJarFile()
     {
-        var installer = new ModFileInstaller(new FakeHttpPort());
+        var installer = new ModFileInstaller(CreateHttpPort());
         string jarFile = Path.Combine(_testDir, "imported.jar");
         File.WriteAllText(jarFile, "jar content");
 
@@ -116,7 +116,7 @@ public sealed partial class ModFileInstallerTests : IDisposable
     [Fact]
     public async Task InstallRemoteModAsyncWhenDownloadFailsShouldRollback()
     {
-        var fakeHttp = new FakeHttpPort { ShouldFailDownload = true };
+        var fakeHttp = CreateHttpPort(shouldFail: true);
         var installer = new ModFileInstaller(fakeHttp);
 
         var result = await installer.InstallRemoteModAsync(
@@ -131,7 +131,7 @@ public sealed partial class ModFileInstallerTests : IDisposable
     [Fact]
     public async Task InstallRemoteModAsyncConcurrentDownloadsUseIsolatedStagingDirectories()
     {
-        var installer = new ModFileInstaller(new FakeHttpPort { DelayMilliseconds = 25 });
+        var installer = new ModFileInstaller(CreateHttpPort(delayMilliseconds: 25));
 
         ModFileOperationResult[] results = await Task.WhenAll(
             installer.InstallRemoteModAsync(_modsDir, "https://example.invalid/first.jar", "first.jar"),
@@ -159,43 +159,24 @@ public sealed partial class ModFileInstallerTests : IDisposable
         Assert.Equal(expected, actual);
     }
 
-    private sealed class FakeHttpPort : IHttpPort
-    {
-        public bool ShouldFailDownload { get; set; }
-        public int DelayMilliseconds { get; set; }
-
-        public async Task<HttpResult> DownloadAsync(
-            Uri uri,
-            string targetPath,
-            IProgress<HttpProgress>? progress = null,
-            string? expectedHash = null,
-            string expectedHashAlgorithm = "sha256",
-            CancellationToken cancellationToken = default)
+    /// <summary>建立模擬下載的 HTTP 替身：可設定失敗與延遲，成功時寫入固定內容</summary>
+    private static StubHttpPort CreateHttpPort(bool shouldFail = false, int delayMilliseconds = 0) =>
+        new()
         {
-            if (DelayMilliseconds > 0)
+            DownloadHandler = async request =>
             {
-                await Task.Delay(DelayMilliseconds, cancellationToken);
-            }
+                if (delayMilliseconds > 0)
+                {
+                    await Task.Delay(delayMilliseconds, request.CancellationToken);
+                }
 
-            if (ShouldFailDownload)
-            {
-                return new HttpResult(false, "網路連線失敗");
-            }
+                if (shouldFail)
+                {
+                    return new HttpResult(false, "網路連線失敗");
+                }
 
-            File.WriteAllText(targetPath, "downloaded content");
-            return new HttpResult(true, null, 18);
-        }
-
-        public Task<HttpJsonResponse<T>> GetJsonAsync<T>(Uri uri, CancellationToken cancellationToken = default) =>
-            throw new NotImplementedException();
-
-        public Task<HttpJsonResponse<System.Text.Json.JsonDocument>> GetJsonDocumentAsync(Uri uri, CancellationToken cancellationToken = default) =>
-            TestHttpJson.FromTextAsync(this, uri, cancellationToken);
-
-        public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default) =>
-            throw new NotImplementedException();
-
-        public Task<string?> PostJsonAsync(Uri uri, string jsonPayload, CancellationToken cancellationToken = default) =>
-            Task.FromResult<string?>(null);
-    }
+                File.WriteAllText(request.TargetPath, "downloaded content");
+                return new HttpResult(true, null, 18);
+            },
+        };
 }

@@ -63,16 +63,33 @@ public static class AccentColorService
     }
 
     /// <summary>
-    /// 套用強調色彩（若 customHex 為空則使用系統色彩）
+    /// 取得 Windows 系統強調色及其原生明暗色階（AccentLight1 / AccentDark1），失敗時回退計算值
+    /// </summary>
+    private static (Color Accent, Color Hover, Color Pressed) GetSystemAccentShades()
+    {
+        Color accent = GetSystemAccentColor();
+        try
+        {
+            return (accent, UiSettings.GetColorValue(UIColorType.AccentLight1), UiSettings.GetColorValue(UIColorType.AccentDark1));
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning("取得 Windows 系統強調色階失敗，改用計算值: {Message}", ex.Message);
+            return (accent, CalculateHoverColor(accent), CalculatePressedColor(accent));
+        }
+    }
+
+    /// <summary>
+    /// 套用強調色彩（若 customHex 為空則使用系統色彩與系統原生色階）
     /// </summary>
     public static void ApplyAccentColor(string? customHex)
     {
         try
         {
             s_currentCustomHex = customHex;
-            Color color = ParseColor(customHex) ?? GetSystemAccentColor();
-            Color hoverColor = CalculateHoverColor(color);
-            Color pressedColor = CalculatePressedColor(color);
+            (Color color, Color hoverColor, Color pressedColor) = ParseColor(customHex) is { } custom
+                ? (custom, CalculateHoverColor(custom), CalculatePressedColor(custom))
+                : GetSystemAccentShades();
             Color disabledColor = CalculateDisabledColor(color);
 
             if (Application.Current?.Resources is ResourceDictionary appResources)
@@ -114,7 +131,6 @@ public static class AccentColorService
     {
         dict["SystemAccentColor"] = color;
         UpdateBrush(dict, "AccentBrush", color);
-        UpdateBrush(dict, "AccentHoverBrush", hoverColor);
         UpdateBrush(dict, "AccentFillColorDefaultBrush", color);
         UpdateBrush(dict, "AccentFillColorSecondaryBrush", hoverColor);
         UpdateBrush(dict, "AccentFillColorTertiaryBrush", pressedColor);

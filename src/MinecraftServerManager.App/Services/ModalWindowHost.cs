@@ -63,19 +63,20 @@ public static partial class ModalWindowHost
         Window? parentWindow,
         ElementTheme theme,
         Func<TWindow, TResult> resultSelector,
-        Action<Window>? onWindowPushed = null,
-        Action<Window>? onWindowPopped = null)
+        Action<Window> onWindowPushed,
+        Action<Window> onWindowPopped)
         where TWindow : Window
     {
         ArgumentNullException.ThrowIfNull(childWindow);
         ArgumentNullException.ThrowIfNull(resultSelector);
+        ArgumentNullException.ThrowIfNull(onWindowPushed);
+        ArgumentNullException.ThrowIfNull(onWindowPopped);
 
         var tcs = new TaskCompletionSource<TResult>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // 套用視窗圖示與標題列主題
         WindowIconHelper.SetIcon(childWindow.AppWindow);
         TitleBarThemeHelper.ApplyTitleBarTheme(childWindow.AppWindow, theme);
-        childWindow.SystemBackdrop ??= new Microsoft.UI.Xaml.Media.MicaBackdrop();
 
         // 套用主題
         if (childWindow.Content is FrameworkElement fe)
@@ -102,7 +103,7 @@ public static partial class ModalWindowHost
         CenterOnParent(childWindow, parentWindow);
 
         // 推入作用中視窗堆疊
-        onWindowPushed?.Invoke(childWindow);
+        onWindowPushed(childWindow);
 
         // 停用父視窗以杜絕背景點擊
         if (parentHwnd != IntPtr.Zero)
@@ -122,7 +123,7 @@ public static partial class ModalWindowHost
                         SetForegroundWindow(parentHwnd);
                     }
 
-                    onWindowPopped?.Invoke(childWindow);
+                    onWindowPopped(childWindow);
                     tcs.TrySetResult(resultSelector(childWindow));
                 }
                 catch (Exception ex)
@@ -141,7 +142,7 @@ public static partial class ModalWindowHost
                 SetForegroundWindow(parentHwnd);
             }
 
-            onWindowPopped?.Invoke(childWindow);
+            onWindowPopped(childWindow);
             throw;
         }
 

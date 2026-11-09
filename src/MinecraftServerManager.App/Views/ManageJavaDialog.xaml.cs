@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using MinecraftServerManager.App.Controls;
 using MinecraftServerManager.App.ViewModels;
+using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
@@ -18,7 +19,7 @@ public sealed partial class ManageJavaDialog : Window
         InitializeComponent();
         Title = "管理 Java 環境";
 
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(820, 620));
+        WindowLayoutHelper.ResizeToDip(this, 820, 620);
 
         ViewModel.RequestClose += () =>
         {
@@ -41,38 +42,7 @@ public sealed partial class ManageJavaDialog : Window
         }
     }
 
-    private void OnHeaderSortRequested(object? sender, SortRequestedEventArgs e)
-    {
-        if (ViewModel.InstalledJavas.Count <= 1)
-        {
-            return;
-        }
+    private void OnHeaderSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.InstalledJavas.SortBy(TableSortKeys.Javas, e);
 
-        ViewModel.InstalledJavas.SortBy(e);
-    }
-
-    private void OnHeaderAutoFitRequested(object? sender, string propertyName)
-    {
-        if (ViewModel.InstalledJavas.Count == 0)
-        {
-            return;
-        }
-
-        var cols = JavaListColumns.Current;
-        switch (propertyName)
-        {
-            case "MajorVersion":
-                cols.VersionWidth = new(SortableTableHeader.CalculateAutoFitWidth(JavaListColumns.DefaultVersionWidth, ViewModel.InstalledJavas.Select(j => j.DisplayName), "主要版本"));
-                break;
-            case "Vendor":
-                cols.VendorWidth = new(SortableTableHeader.CalculateAutoFitWidth(JavaListColumns.DefaultVendorWidth, ViewModel.InstalledJavas.Select(j => j.Vendor), "發行廠商"));
-                break;
-            case "StatusText":
-                cols.StatusWidth = new(SortableTableHeader.CalculateAutoFitWidth(JavaListColumns.DefaultStatusWidth, ViewModel.InstalledJavas.Select(j => j.StatusText), "相容狀態"));
-                break;
-            case "ExecutablePath":
-                cols.PathWidth = new(SortableTableHeader.CalculateAutoFitWidth(JavaListColumns.DefaultPathWidth, ViewModel.InstalledJavas.Select(j => j.ExecutablePath), "執行檔路徑"));
-                break;
-        }
-    }
+    private void OnHeaderAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.InstalledJavas, TableSortKeys.Javas);
 }

@@ -13,8 +13,7 @@
             Style="{ThemeResource CaptionTextBlockStyle}" />
 
         <StackPanel Spacing="10">
-            <RadioButton x:Name="TxtRadio"
-                Content="純文字格式 (*.txt) — 適合快速檢閱與純文字備份"
+            <RadioButton Content="純文字格式 (*.txt) — 適合快速檢閱與純文字備份"
                 IsChecked="True" />
             <RadioButton x:Name="JsonRadio"
                 Content="JSON 格式 (*.json) — 包含完整中繼資料與雜湊值" />

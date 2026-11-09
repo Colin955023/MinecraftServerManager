@@ -1,5 +1,4 @@
 using MinecraftServerManager.Infrastructure.Logging;
-using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Utilities;
 
@@ -8,7 +7,7 @@ namespace MinecraftServerManager.Infrastructure.Mods;
 /// <summary>
 /// 模組快取索引持久化管理員
 /// </summary>
-public sealed class ModIndexPersistence : IModIndexPersistence
+public sealed class ModIndexPersistence
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModIndexPersistence));
     private readonly string _indexFilePath;
@@ -36,26 +35,19 @@ public sealed class ModIndexPersistence : IModIndexPersistence
         LoadIndex();
     }
 
-    internal ModCacheEntry? GetEntry(string fileName)
+    public IReadOnlyDictionary<string, string>? GetCachedMetadata(string fileName, long fileSizeBytes, long lastWriteTimeUtcTicks)
     {
         lock (_lock)
         {
-            return _index.TryGetValue(fileName, out var entry) ? entry : null;
+            return _index.TryGetValue(fileName, out var entry)
+                && entry.FileSizeBytes == fileSizeBytes
+                && entry.LastWriteTimeUtcTicks == lastWriteTimeUtcTicks
+                    ? entry.Metadata
+                    : null;
         }
     }
 
-    public IReadOnlyDictionary<string, string>? GetCachedMetadata(string fileName)
-    {
-        lock (_lock)
-        {
-            return _index.TryGetValue(fileName, out var entry) ? entry.Metadata : null;
-        }
-    }
-
-    public void CacheMetadata(string fileName, IReadOnlyDictionary<string, string> metadata) =>
-        CacheMetadata(fileName, metadata, 0, 0);
-
-    internal void CacheMetadata(string fileName, IReadOnlyDictionary<string, string> metadata, long fileSizeBytes, long lastWriteTimeUtcTicks)
+    public void CacheMetadata(string fileName, IReadOnlyDictionary<string, string> metadata, long fileSizeBytes, long lastWriteTimeUtcTicks)
     {
         lock (_lock)
         {
@@ -109,30 +101,6 @@ public sealed class ModIndexPersistence : IModIndexPersistence
             entry.Hashes ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             entry.Hashes[algorithm] = hash;
             _dirty = true;
-        }
-    }
-
-    public void MarkIssue(string fileName, string reason)
-    {
-        lock (_lock)
-        {
-            if (!_index.TryGetValue(fileName, out var entry))
-            {
-                entry = new ModCacheEntry();
-                _index[fileName] = entry;
-            }
-            entry.Issue = reason;
-            _dirty = true;
-        }
-    }
-
-    public void ClearIndex()
-    {
-        lock (_lock)
-        {
-            _index.Clear();
-            _dirty = true;
-            Flush();
         }
     }
 
@@ -212,7 +180,6 @@ internal sealed class ModCacheEntry
 {
     public Dictionary<string, string>? Metadata { get; set; }
     public Dictionary<string, string>? Hashes { get; set; }
-    public string? Issue { get; set; }
     public long FileSizeBytes { get; set; }
     public long LastWriteTimeUtcTicks { get; set; }
 }

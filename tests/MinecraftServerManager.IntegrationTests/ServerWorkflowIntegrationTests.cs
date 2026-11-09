@@ -6,6 +6,7 @@ using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Mods;
 using MinecraftServerManager.Infrastructure.Servers;
+using MinecraftServerManager.TestSupport;
 using Xunit;
 
 namespace MinecraftServerManager.IntegrationTests;
@@ -42,9 +43,9 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
     [Fact]
     public async Task ServerLifecycleWorkflowSucceeds()
     {
-        var inspector = new ServerInspector(new ServerDirectorySizeService());
+        var inspector = new ServerInspector();
         var planner = new ServerLaunchPlanner();
-        var manager = new ServerManager(_serversRoot, inspector);
+        var manager = TestServerManagers.Create(_serversRoot, inspector);
 
         // 1. 建立伺服器
         var plan = ServerCreationPlan.Create(
@@ -73,8 +74,11 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         Assert.Equal("vanilla", inspection.LoaderType, ignoreCase: true);
 
         // 3. 啟動規劃
-        var launchPlan = planner.CreatePlan(createResult.Config, inspection, "C:\\Java\\java.exe");
-        Assert.Equal("C:\\Java\\java.exe", launchPlan.JavaExecutable);
+        string javaExe = Path.Combine(serverDir, "jre", "bin", "java.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(javaExe)!);
+        File.WriteAllText(javaExe, "stub");
+        var launchPlan = planner.CreatePlan(createResult.Config, inspection.LaunchTarget.Value, javaExe);
+        Assert.Equal(javaExe, launchPlan.JavaExecutable);
         Assert.False(launchPlan.IsScript);
         Assert.Contains("-Xms2048M", launchPlan.Arguments);
         Assert.Contains("-Xmx4096M", launchPlan.Arguments);
@@ -132,8 +136,8 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
     [Fact]
     public async Task ServerImportDirectoryAndZipWorkflowSucceeds()
     {
-        var inspector = new ServerInspector(new ServerDirectorySizeService());
-        var manager = new ServerManager(_serversRoot, inspector);
+        var inspector = new ServerInspector();
+        var manager = TestServerManagers.Create(_serversRoot, inspector);
 
         // 1. 測試資料夾匯入
         string externalDir = Path.Combine(_testRoot, "ExternalServerDir");
@@ -185,10 +189,15 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
             using var writer = new StreamWriter(entry.Open());
             writer.Write("{\"id\":\"testmod\",\"name\":\"Test Mod\",\"version\":\"1.0.0\"}");
         }
-
-        var persistence = new ModIndexPersistence(_serversRoot);
-        var scanner = new LocalModScanner(persistence);
-        var installer = new ModFileInstaller(new DummyHttpPort());
+        var scanner = new LocalModScanner();
+        var installer = new ModFileInstaller(new StubHttpPort
+        {
+            DownloadHandler = request =>
+            {
+                File.WriteAllText(request.TargetPath, "dummy download");
+                return Task.FromResult(new HttpResult(true, null, 14));
+            },
+        });
         var modManager = new ModManager(scanner, installer);
 
         // 1. 匯入模組
@@ -270,8 +279,8 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
     [Fact]
     public async Task ImportServer_MaliciousZipSlipArchive_IsSafelyRejected()
     {
-        var inspector = new ServerInspector(new ServerDirectorySizeService());
-        var manager = new ServerManager(_serversRoot, inspector);
+        var inspector = new ServerInspector();
+        var manager = TestServerManagers.Create(_serversRoot, inspector);
 
         // 建立含惡意 Zip Slip 目錄穿越條目的 ZIP 壓縮檔
         string maliciousZip = Path.Combine(_testRoot, "malicious_zipslip.zip");
@@ -296,29 +305,5 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         Assert.False(result.Completed);
         Assert.False(File.Exists(Path.Combine(_testRoot, "evil_escape.txt")));
         Assert.False(Directory.Exists(Path.Combine(_serversRoot, "MaliciousServer")));
-    }
-
-    private sealed class DummyHttpPort : IHttpPort
-    {
-        public Task<HttpResult> DownloadAsync(
-            Uri uri,
-            string targetPath,
-            IProgress<HttpProgress>? progress = null,
-            string? expectedHash = null,
-            string expectedHashAlgorithm = "sha256",
-            CancellationToken cancellationToken = default)
-        {
-            File.WriteAllText(targetPath, "dummy download");
-            return Task.FromResult(new HttpResult(true, null, 14));
-        }
-
-        public Task<HttpJsonResponse<T>> GetJsonAsync<T>(Uri uri, CancellationToken cancellationToken = default) => Task.FromResult(new HttpJsonResponse<T>(404, default, "Not Found"));
-
-        public Task<HttpJsonResponse<System.Text.Json.JsonDocument>> GetJsonDocumentAsync(Uri uri, CancellationToken cancellationToken = default) =>
-            TestHttpJson.FromTextAsync(this, uri, cancellationToken);
-
-        public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
-
-        public Task<string?> PostJsonAsync(Uri uri, string jsonPayload, CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
     }
 }

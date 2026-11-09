@@ -29,6 +29,7 @@ public static class CrashDiagnostics
     private const int MaxFirstChanceRecords = 300;
     private const int MaxStackLines = 12;
     private const int LogTailLineCount = 20;
+    private const int LogTailReadBytes = 64 * 1024;
 
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(CrashDiagnostics));
     private static int s_installed;
@@ -91,8 +92,14 @@ public static class CrashDiagnostics
         IReadOnlyList<string> tail = [];
         if (logFile is not null && SafeFileSystem.FileExists(logFile))
         {
-            string logText = SafeFileSystem.ReadAllText(logFile, Encoding.UTF8);
+            // 只需最後數行：讀取檔尾即可，避免啟動時載入整份記錄檔
+            string logText = SafeFileSystem.ReadTailText(logFile, LogTailReadBytes, out bool truncated);
             string[] lines = logText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (truncated && lines.Length > 1)
+            {
+                lines = lines[1..];
+            }
+
             tail = lines.Length > LogTailLineCount ? lines[^LogTailLineCount..] : lines;
         }
 
@@ -118,10 +125,7 @@ public static class CrashDiagnostics
     public static void ClearSessionMarker(string logDir)
     {
         string markerPath = Path.Combine(logDir, SessionMarkerFileName);
-        if (SafeFileSystem.FileExists(markerPath))
-        {
-            SafeFileSystem.DeleteFile(markerPath);
-        }
+        SafeFileSystem.DeleteFile(markerPath);
     }
 
     /// <summary>
@@ -138,10 +142,10 @@ public static class CrashDiagnostics
         }
 
         int written = 0;
-        foreach (string rawLine in stackTrace.Split('\n'))
+        foreach (var rawLine in stackTrace.AsSpan().EnumerateLines())
         {
-            string line = rawLine.Trim();
-            if (line.Length == 0 || line.Contains(nameof(CrashDiagnostics), StringComparison.Ordinal))
+            var line = rawLine.Trim();
+            if (line.IsEmpty || line.Contains(nameof(CrashDiagnostics), StringComparison.Ordinal))
             {
                 continue;
             }

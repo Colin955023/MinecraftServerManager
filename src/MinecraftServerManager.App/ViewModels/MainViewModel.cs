@@ -3,7 +3,6 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Logging;
-using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Settings;
 
 namespace MinecraftServerManager.App.ViewModels;
@@ -16,32 +15,20 @@ public sealed partial class MainViewModel : ViewModelBase
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(MainViewModel));
     private readonly IUiService _ui;
     private readonly SettingsManager _settingsManager;
-    private readonly IServerManager? _serverManager;
+    private readonly IServerManager _serverManager;
+    private readonly ILocalFileSystem _fileSystem;
     private readonly Dictionary<string, PageViewModel> _pages = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Func<PageViewModel>> _pageFactories = new(StringComparer.OrdinalIgnoreCase);
 
     [ObservableProperty]
     public partial PageViewModel CurrentPage { get; set; }
 
-    [ObservableProperty]
-    public partial string NotificationMessage { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial bool IsNotificationVisible { get; set; }
-
-    [ObservableProperty]
-    public partial bool IsNotificationError { get; set; }
-
-    private readonly IExternalLauncher? _launcher;
-    private readonly IUpdateCheckerService? _updateChecker;
+    private readonly IExternalLauncher _launcher;
+    private readonly IUpdateCheckerService _updateChecker;
 
     [ObservableProperty]
     public partial string ThemeMode { get; set; } = "system";
 
-    [ObservableProperty]
-    public partial bool IsLightTheme { get; set; }
-
-    public event Action<string, string, NotificationLevel>? NotificationRequested;
     public event Action? ResetWindowSizeRequested;
 
     /// <summary>
@@ -58,17 +45,20 @@ public sealed partial class MainViewModel : ViewModelBase
     {
         ArgumentNullException.ThrowIfNull(dependencies);
 
-        _ui = dependencies.UiService ?? NoOpUiService.Instance;
+        _ui = dependencies.UiService;
         _settingsManager = dependencies.SettingsManager;
         _serverManager = dependencies.ServerManager;
         _launcher = dependencies.Launcher;
+        _fileSystem = dependencies.FileSystem;
         _updateChecker = dependencies.UpdateChecker;
 
         var createVm = new CreateServerViewModel(
+            dependencies.FileSystem,
+            _ui,
             dependencies.JavaDetector,
             dependencies.ServerManager,
             dependencies.LoaderCatalog,
-            ShowNotification,
+            systemMemoryMb: Core.Utilities.MemoryUtils.GetTotalSystemMemoryMb(),
             launcher: dependencies.Launcher,
             navigateCallback: (pageKey, serverName) =>
             {
@@ -76,69 +66,41 @@ public sealed partial class MainViewModel : ViewModelBase
                 if (!string.IsNullOrWhiteSpace(serverName)
                     && GetOrCreatePage("manage") is ManageServerViewModel manageVm)
                 {
-                    _ = RunSafeAsync(() => manageVm.RefreshAndSelectServerAsync(serverName), "重新整理並選取伺服器", Logger);
+                    _ = RunSafeAsync(() => manageVm.List.RefreshAndSelectServerAsync(serverName), "重新整理並選取伺服器", Logger);
                 }
             },
             javaRequirementService: dependencies.JavaRequirementService,
             javaInstaller: dependencies.JavaInstaller,
             serverRuntime: dependencies.ServerRuntime,
-            uiService: _ui);
+            launchPlanner: dependencies.LaunchPlanner);
 
         _pages["create"] = createVm;
-        _pageFactories["manage"] = () => new ManageServerViewModel(
-            dependencies.SettingsManager,
-            dependencies.ServerManager,
-            dependencies.BackupService,
-            dependencies.ServerRuntime,
-            dependencies.ServerInspector,
-            dependencies.LaunchPlanner,
-            dependencies.PropertiesStore,
-            dependencies.PlayerConfigStore,
-            dependencies.DirectorySizeService,
-            dependencies.IntegrityService,
-            Navigate,
-            ShowNotification,
-            dependencies.Launcher,
-            dependencies.JavaDetector,
-            dependencies.JavaRequirementService,
-            uiService: _ui);
+        _pageFactories["manage"] = () => new ManageServerViewModel(dependencies, _ui, Navigate);
 
         _pageFactories["mods"] = () => new ModsViewModel(
+            dependencies.DependencyPlanner,
+            dependencies.ModListExporter,
+            dependencies.ModFileService,
+            _ui,
             dependencies.ServerManager,
             dependencies.ModManager,
             dependencies.ModrinthClient,
-            ShowNotification,
-            dependencies.Launcher,
-            dependencyPlanner: dependencies.DependencyPlanner,
-            modListExporter: dependencies.ModListExporter,
-            uiService: _ui);
+            dependencies.Launcher);
 
         _pageFactories["about_preferences"] = () => new AboutPreferencesViewModel(
+            _ui,
             dependencies.SettingsManager,
             dependencies.UpdateChecker,
             SetThemeMode,
             () => ResetWindowSizeRequested?.Invoke(),
-            ShowNotification,
             dependencies.Launcher,
-            uiService: _ui,
-            appUpdateService: dependencies.AppUpdateService);
+            dependencies.AppUpdateService);
 
         CurrentPage = createVm;
         ApplyInitialTheme();
     }
 
-    public string PageTitle => CurrentPage.Title;
-
-    public string PageSubtitle => CurrentPage.Subtitle;
-
     public SettingsManager Settings => _settingsManager;
-
-    public IUpdateCheckerService? UpdateChecker => _updateChecker;
-
-    public IExternalLauncher? Launcher => _launcher;
-
-
-    public AboutPreferencesViewModel? AboutPreferences => GetOrCreatePage("about_preferences") as AboutPreferencesViewModel;
 
     private PageViewModel? GetOrCreatePage(string pageKey)
     {
@@ -165,10 +127,9 @@ public sealed partial class MainViewModel : ViewModelBase
     /// <summary>
     /// 啟動時依設定檢查更新，有新版本時觸發 <see cref="UpdateAvailable"/>
     /// </summary>
-    [RelayCommand]
     public async Task CheckForUpdateOnStartupAsync(CancellationToken cancellationToken = default)
     {
-        if (_updateChecker is null || !_settingsManager.IsAutoUpdateEnabled())
+        if (!_settingsManager.IsAutoUpdateEnabled())
         {
             return;
         }
@@ -179,19 +140,9 @@ public sealed partial class MainViewModel : ViewModelBase
             if (result.HasUpdate)
             {
                 UpdateAvailable?.Invoke(result);
-                if (AboutPreferences is not null)
+                if (GetOrCreatePage("about_preferences") is AboutPreferencesViewModel aboutPreferences)
                 {
-                    await AboutPreferences.HandleUpdateResultAsync(result, cancellationToken).ConfigureAwait(true);
-                }
-                else
-                {
-                    string cleanedNotes = AboutPreferencesViewModel.CleanReleaseNotes(result.ReleaseNotes);
-                    if (await _ui.ConfirmAsync(
-                        $"發現新版本 {result.LatestVersion} (目前版本：{result.CurrentVersion})！\n\n更新內容：\n{cleanedNotes}\n\n是否立即更新主程式？",
-                        "發現新版本").ConfigureAwait(true))
-                    {
-                        OpenReleasePage(result.ReleasePageUrl);
-                    }
+                    await aboutPreferences.HandleUpdateResultAsync(result, cancellationToken).ConfigureAwait(true);
                 }
             }
         }
@@ -205,12 +156,6 @@ public sealed partial class MainViewModel : ViewModelBase
         }
     }
 
-    /// <summary>
-    /// 透過外部啟動器開啟發行頁面
-    /// </summary>
-    public void OpenReleasePage(string url) => _launcher?.OpenUrl(url, isTrusted: true);
-
-    [RelayCommand]
     public void Navigate(string pageKey)
     {
         if (string.IsNullOrWhiteSpace(pageKey))
@@ -224,13 +169,11 @@ public sealed partial class MainViewModel : ViewModelBase
         if (targetPage is not null)
         {
             CurrentPage = targetPage;
-            OnPropertyChanged(nameof(PageTitle));
-            OnPropertyChanged(nameof(PageSubtitle));
 
             switch (targetPage)
             {
                 case ManageServerViewModel manageVm:
-                    _ = RunSafeAsync(manageVm.RefreshServers, "重新整理伺服器清單", Logger);
+                    _ = RunSafeAsync(manageVm.List.RefreshServers, "重新整理伺服器清單", Logger);
                     break;
                 case ModsViewModel modsVm:
                     _ = RunSafeAsync(modsVm.RefreshServersAsync, "重新整理模組頁面伺服器清單", Logger);
@@ -239,41 +182,35 @@ public sealed partial class MainViewModel : ViewModelBase
         }
         else
         {
-            ShowNotification($"找不到頁面：{pageKey}", isError: true);
+            ShowNotification($"找不到頁面：{pageKey}", NotificationType.Error);
         }
     }
 
     [RelayCommand]
     public async Task ImportServerAsync()
     {
-        if (_serverManager is not null)
+        var vm = new ImportServerViewModel(_serverManager, uiService: _ui);
+        if (await _ui.ShowImportServerAsync(vm).ConfigureAwait(true) == true)
         {
-            var vm = new ImportServerViewModel(_serverManager, uiService: _ui);
-            if (await _ui.ShowImportServerAsync(vm).ConfigureAwait(true) == true)
+            bool success = true;
+            if (!string.IsNullOrWhiteSpace(vm.SourcePath) && !string.IsNullOrWhiteSpace(vm.ServerName))
             {
-                bool success = true;
-                if (!string.IsNullOrWhiteSpace(vm.SourcePath) && !string.IsNullOrWhiteSpace(vm.ServerName))
-                {
-                    success = await vm.ExecuteImportAsync().ConfigureAwait(true);
-                }
+                success = await vm.ExecuteImportAsync().ConfigureAwait(true);
+            }
 
-                if (success)
+            if (success)
+            {
+                ShowNotification("伺服器匯入成功！已更新至伺服器管理清單", NotificationType.Success);
+                Navigate("manage");
+                if (_pages.TryGetValue("manage", out var page) && page is ManageServerViewModel manageVm)
                 {
-                    ShowNotification("伺服器匯入成功！已更新至伺服器管理清單", false);
-                    Navigate("manage");
-                    if (_pages.TryGetValue("manage", out var page) && page is ManageServerViewModel manageVm)
+                    if (!string.IsNullOrWhiteSpace(vm.ImportedServerName))
                     {
-                        if (!string.IsNullOrWhiteSpace(vm.ImportedServerName))
-                        {
-                            _ = RunSafeAsync(() => manageVm.RefreshAndSelectServerAsync(vm.ImportedServerName), "重新整理並選取匯入伺服器", Logger);
-                        }
+                        _ = RunSafeAsync(() => manageVm.List.RefreshAndSelectServerAsync(vm.ImportedServerName), "重新整理並選取匯入伺服器", Logger);
                     }
                 }
             }
-            return;
         }
-
-        ShowNotification("開啟伺服器匯入對話方塊 (支援資料夾與 ZIP 壓縮檔)", false);
     }
 
     [RelayCommand]
@@ -282,58 +219,34 @@ public sealed partial class MainViewModel : ViewModelBase
         string path = _settingsManager.GetServersRoot();
         if (string.IsNullOrWhiteSpace(path))
         {
-            ShowNotification("尚未設定伺服器資料夾", true);
+            ShowNotification("尚未設定伺服器資料夾", NotificationType.Warning);
             return Task.CompletedTask;
         }
 
-        SafeFileSystem.CreateDirectory(path);
-
-        if (_launcher is not null && !_launcher.OpenFolder(path, isTrusted: true))
+        try
         {
-            ShowNotification($"無法開啟資料夾：{path}", true);
+            _fileSystem.CreateDirectory(path);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Error("建立伺服器資料夾失敗: {Message}", ex.Message);
+            ShowNotification($"無法建立伺服器資料夾：{ex.Message}", NotificationType.Error);
+            return Task.CompletedTask;
+        }
+
+        if (!_launcher.OpenFolder(path))
+        {
+            ShowNotification($"無法開啟資料夾：{path}", NotificationType.Warning);
         }
 
         return Task.CompletedTask;
     }
 
-    [RelayCommand]
-    public void DismissNotification()
-    {
-        IsNotificationVisible = false;
-        NotificationMessage = string.Empty;
-    }
-
-    [RelayCommand]
-    public void ToggleTheme()
-    {
-        string newMode = ThemeMode == "light" ? "dark" : "light";
-        SetThemeMode(newMode);
-        NotificationMessage = $"已切換為{(newMode == "light" ? "淺色" : "深色")}主題";
-        IsNotificationVisible = true;
-    }
-
-    public void ShowNotification(string message, bool isError = false)
-    {
-        _ui.RunOnUi(() =>
-        {
-            NotificationMessage = message;
-            IsNotificationError = isError;
-            IsNotificationVisible = true;
-            if (isError)
-            {
-                NotificationRequested?.Invoke("錯誤", message, NotificationLevel.Error);
-            }
-            else
-            {
-                _ui.ShowToast(message, "提示", ToastType.Info);
-            }
-        });
-    }
+    public void ShowNotification(string message, NotificationType type = NotificationType.Info) => _ui.Notify(message, type);
 
     public void SetThemeMode(string mode)
     {
         ThemeMode = mode;
-        IsLightTheme = mode == "light";
         _settingsManager.SetThemeMode(mode);
         ThemeModeChanged?.Invoke(mode);
     }
@@ -343,8 +256,6 @@ public sealed partial class MainViewModel : ViewModelBase
         string themeMode = _settingsManager.GetThemeMode();
         SetThemeMode(themeMode);
     }
-
-    public void UnregisterEvents() => DisposePages();
 
     public void DisposePages()
     {

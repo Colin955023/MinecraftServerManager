@@ -1,7 +1,7 @@
 using System.Net;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
-using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Http;
 using MinecraftServerManager.Infrastructure.Java;
 using MinecraftServerManager.Infrastructure.Loaders;
@@ -30,19 +30,16 @@ public sealed class AppCompositionRoot : IAsyncDisposable
     private readonly JavaRuntimeDetector _javaDetector;
     private readonly LoaderCatalogService _loaderCatalog;
     private readonly MainViewModel _mainViewModel;
-    private readonly IUiService _uiService;
 
     public MainViewModel MainViewModel => _mainViewModel;
-    public IUiService UiService => _uiService;
-    public SettingsManager Settings => _settingsManager;
-    public IProcessRunner ProcessRunner => _sharedProcessRunner;
     public bool IsServerRunning => _sharedServerRuntime.IsRunning;
-    public MainViewModelDependencies Dependencies { get; }
 
-    public AppCompositionRoot(string serversRoot, IUiService uiService, SettingsManager? settingsManager = null)
+    public AppCompositionRoot(string serversRoot, IUiService uiService, SettingsManager settingsManager, ProcessRunner processRunner)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serversRoot);
-        _uiService = uiService ?? throw new ArgumentNullException(nameof(uiService));
+        ArgumentNullException.ThrowIfNull(uiService);
+        ArgumentNullException.ThrowIfNull(settingsManager);
+        ArgumentNullException.ThrowIfNull(processRunner);
 
         _httpHandler = new SocketsHttpHandler
         {
@@ -52,9 +49,9 @@ public sealed class AppCompositionRoot : IAsyncDisposable
             ConnectCallback = HttpUrlPolicy.ConnectAsync,
         };
         _sharedHttpClient = new HttpClient(_httpHandler, disposeHandler: false);
-        _sharedProcessRunner = new ProcessRunner();
+        _sharedProcessRunner = processRunner;
         _sharedServerRuntime = new ServerRuntime(_sharedProcessRunner);
-        _settingsManager = settingsManager ?? new SettingsManager();
+        _settingsManager = settingsManager;
 
         _javaDetector = new JavaRuntimeDetector(_sharedProcessRunner);
         var javaInstaller = new JavaWingetInstaller(_sharedProcessRunner);
@@ -62,8 +59,8 @@ public sealed class AppCompositionRoot : IAsyncDisposable
         var javaRequirements = new MinecraftJavaRequirementService(httpPort, RuntimePaths.GetVersionCacheDir());
         _loaderCatalog = new LoaderCatalogService(httpPort, RuntimePaths.GetVersionCacheDir());
         var loaderInstaller = new LoaderInstallerService(httpPort, _sharedProcessRunner, RuntimePaths.GetInstallerCacheDir());
-        var directorySizeService = new ServerDirectorySizeService();
-        var serverInspector = new ServerInspector(directorySizeService);
+        var directorySizeService = new ServerDirectorySizeService(TimeSpan.FromSeconds(60));
+        var serverInspector = new ServerInspector();
         var serverManager = new ServerManager(
             serversRoot,
             inspector: serverInspector,
@@ -83,7 +80,7 @@ public sealed class AppCompositionRoot : IAsyncDisposable
         var dependencyPlanner = new ModDependencyPlanner();
         var modListExporter = new ModListExporter();
         var updateCheckerService = new UpdateCheckerService(httpPort);
-        var appUpdateService = new AppUpdateService(httpPort, processRunner: _sharedProcessRunner);
+        var appUpdateService = new AppUpdateService(httpPort, Path.Combine(RuntimePaths.GetUserDataDir(), "updates"), _sharedProcessRunner);
 
         var dependencies = new MainViewModelDependencies(
             SettingsManager: _settingsManager,
@@ -98,10 +95,14 @@ public sealed class AppCompositionRoot : IAsyncDisposable
             Launcher: _sharedProcessRunner,
             JavaRequirementService: javaRequirements,
             JavaInstaller: javaInstaller,
-            UiService: _uiService,
+            UiService: uiService,
             AppUpdateService: appUpdateService,
             DependencyPlanner: dependencyPlanner,
             ModListExporter: modListExporter,
+            FileSystem: new LocalFileSystem(),
+            LogReader: new ServerLogReader(),
+            ModFileService: new ModFileService(),
+            ServersRootService: new ServersRootService(),
             DirectorySizeService: directorySizeService,
             IntegrityService: integrityService,
             ServerInspector: serverInspector,
@@ -111,7 +112,6 @@ public sealed class AppCompositionRoot : IAsyncDisposable
 
         AccentColorService.ApplyAccentColor(_settingsManager.GetCustomAccentColor());
         _mainViewModel = new MainViewModel(dependencies);
-        Dependencies = dependencies;
     }
 
     /// <summary>

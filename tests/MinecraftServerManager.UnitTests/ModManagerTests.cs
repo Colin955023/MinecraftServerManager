@@ -147,9 +147,6 @@ public sealed partial class ModManagerTests : IDisposable
     {
         public Task<IReadOnlyList<LocalModInfo>> ScanModsAsync(string modsDirectory, CancellationToken cancellationToken = default) =>
             Task.FromResult(mods);
-
-        public Task<LocalModInfo?> ScanSingleModAsync(string filePath, CancellationToken cancellationToken = default) =>
-            Task.FromResult(mods.Count > 0 ? mods[0] : null);
     }
 
     private sealed class FakeInstaller : IModFileInstaller

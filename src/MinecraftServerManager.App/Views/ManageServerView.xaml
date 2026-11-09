@@ -42,10 +42,10 @@
                     Foreground="{ThemeResource TextBrush}"
                     Margin="0,0,2,0" />
                 <TextBox Grid.Column="1"
-                    Text="{x:Bind ViewModel.DetectPath, Mode=OneWay}"
+                    Text="{x:Bind ViewModel.List.DetectPath, Mode=OneWay}"
                     IsReadOnly="True" />
                 <Button Grid.Column="2"
-                    Command="{x:Bind ViewModel.ChangeServersRootCommand}"
+                    Command="{x:Bind ViewModel.ServersRoot.ChangeServersRootCommand}"
                     Height="32"
                     ToolTipService.ToolTip="修改伺服器存放主資料夾路徑">
                     <StackPanel Orientation="Horizontal"
@@ -64,7 +64,7 @@
 
             <StackPanel Orientation="Horizontal"
                 Spacing="8">
-                <Button Command="{x:Bind ViewModel.DetectServersCommand}"
+                <Button Command="{x:Bind ViewModel.List.DetectServersCommand}"
                     Height="32">
                     <StackPanel Orientation="Horizontal"
                         Spacing="6"
@@ -78,7 +78,7 @@
                             Foreground="{ThemeResource TextBrush}" />
                     </StackPanel>
                 </Button>
-                <Button Command="{x:Bind ViewModel.AddServerCommand}"
+                <Button Command="{x:Bind ViewModel.List.AddServerCommand}"
                     Height="32">
                     <StackPanel Orientation="Horizontal"
                         Spacing="6"
@@ -92,7 +92,7 @@
                             Foreground="{ThemeResource TextBrush}" />
                     </StackPanel>
                 </Button>
-                <Button Command="{x:Bind ViewModel.RefreshServersCommand}"
+                <Button Command="{x:Bind ViewModel.List.RefreshServersCommand}"
                     Height="32">
                     <StackPanel Orientation="Horizontal"
                         Spacing="6"
@@ -115,8 +115,8 @@
                         Width="80"
                         Height="4"
                         VerticalAlignment="Center"
-                        Visibility="{x:Bind controls:UiBindHelpers.BoolToVis(ViewModel.IsBusy), Mode=OneWay}" />
-                    <TextBlock Text="{x:Bind ViewModel.BusyStatusText, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.List.IsBusy, Mode=OneWay}" />
+                    <TextBlock Text="{x:Bind ViewModel.List.BusyStatusText, Mode=OneWay}"
                         FontSize="12"
                         Foreground="{ThemeResource AccentBrush}"
                         VerticalAlignment="Center" />
@@ -226,9 +226,8 @@
                 <Border Grid.Row="2"
                     BorderBrush="{ThemeResource DataGridGridLineBrush}"
                     BorderThickness="1,0,1,1">
-                    <ListView x:Name="ServersListView"
-                        ItemsSource="{x:Bind ViewModel.Servers, Mode=OneWay}"
-                        SelectedItem="{x:Bind ViewModel.SelectedServer, Mode=TwoWay}"
+                    <ListView ItemsSource="{x:Bind ViewModel.List.Servers, Mode=OneWay}"
+                        SelectedItem="{x:Bind ViewModel.List.SelectedServer, Mode=TwoWay}"
                         SelectionMode="Single"
                         MinHeight="180"
                         ItemContainerStyle="{StaticResource TableListViewItemStyle}"
@@ -241,9 +240,9 @@
                                     Command="{x:Bind ViewModel.RecheckServerCommand}" />
                                 <MenuFlyoutSeparator />
                                 <MenuFlyoutItem Text="📂 開啟備份資料夾"
-                                    Command="{x:Bind ViewModel.OpenBackupFolderCommand}" />
+                                    Command="{x:Bind ViewModel.Backup.OpenBackupFolderCommand}" />
                                 <MenuFlyoutItem Text="📁 修改備份路徑"
-                                    Command="{x:Bind ViewModel.EditBackupPathCommand}" />
+                                    Command="{x:Bind ViewModel.Backup.EditBackupPathCommand}" />
                             </MenuFlyout>
                         </ListView.ContextFlyout>
 
@@ -301,7 +300,7 @@
                                         BorderThickness="0,0,1,0"
                                         Padding="8,6">
                                         <TextBlock Text="{x:Bind Status, Mode=OneWay}"
-                                            Foreground="{x:Bind controls:UiBindHelpers.ErrorBrush(HasMissingFiles), Mode=OneWay}"
+                                            controls:ThemeBrush.ForegroundKey="{x:Bind controls:UiBindHelpers.ErrorBrushKey(HasMissingFiles), Mode=OneWay}"
                                             TextTrimming="CharacterEllipsis"
                                             ToolTipService.ToolTip="{x:Bind Status, Mode=OneWay}"
                                             VerticalAlignment="Center" />
@@ -362,11 +361,11 @@
             <TextBlock Text="請於上方列表中選取伺服器以檢視詳細資訊與執行操作"
                 Foreground="{ThemeResource MutedTextBrush}"
                 Margin="0,0,0,10"
-                Visibility="{x:Bind controls:UiBindHelpers.InverseBoolToVis(ViewModel.HasSelectedServer), Mode=OneWay}" />
+                Visibility="{x:Bind controls:UiBindHelpers.InverseBoolToVis(ViewModel.List.HasSelectedServer), Mode=OneWay}" />
 
             <!-- 選取伺服器時之橫向平均分配詳細資訊區 -->
             <Grid Margin="0,0,0,10"
-                Visibility="{x:Bind controls:UiBindHelpers.BoolToVis(ViewModel.HasSelectedServer), Mode=OneWay}">
+                Visibility="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
@@ -386,7 +385,7 @@
                     TextTrimming="CharacterEllipsis">
                     <Run Text="伺服器名稱："
                         Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.SelectedServer.Name, Mode=OneWay}"
+                    <Run Text="{x:Bind ViewModel.List.SelectedServer.Name, Mode=OneWay}"
                         Foreground="{ThemeResource TextBrush}"
                         FontWeight="SemiBold" />
                 </TextBlock>
@@ -397,7 +396,7 @@
                     TextTrimming="CharacterEllipsis">
                     <Run Text="Minecraft 版本："
                         Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.SelectedServer.Version, Mode=OneWay}"
+                    <Run Text="{x:Bind ViewModel.List.SelectedServer.Version, Mode=OneWay}"
                         Foreground="{ThemeResource TextBrush}"
                         FontWeight="SemiBold" />
                 </TextBlock>
@@ -408,7 +407,7 @@
                     TextTrimming="CharacterEllipsis">
                     <Run Text="載入器類型："
                         Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.SelectedServer.Loader, Mode=OneWay}"
+                    <Run Text="{x:Bind ViewModel.List.SelectedServer.Loader, Mode=OneWay}"
                         Foreground="{ThemeResource TextBrush}"
                         FontWeight="SemiBold" />
                 </TextBlock>
@@ -419,7 +418,7 @@
                     TextTrimming="CharacterEllipsis">
                     <Run Text="目前狀態："
                         Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.SelectedServer.Status, Mode=OneWay}"
+                    <Run Text="{x:Bind ViewModel.List.SelectedServer.Status, Mode=OneWay}"
                         Foreground="{ThemeResource TextBrush}"
                         FontWeight="SemiBold" />
                 </TextBlock>
@@ -431,7 +430,7 @@
                     TextTrimming="CharacterEllipsis">
                     <Run Text="目錄大小："
                         Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.SelectedServer.Size, Mode=OneWay}"
+                    <Run Text="{x:Bind ViewModel.List.SelectedServer.Size, Mode=OneWay}"
                         Foreground="{ThemeResource TextBrush}" />
                 </TextBlock>
 
@@ -441,7 +440,7 @@
                     TextTrimming="CharacterEllipsis">
                     <Run Text="記憶體配置："
                         Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.SelectedServerMemory, Mode=OneWay}"
+                    <Run Text="{x:Bind ViewModel.List.SelectedServerMemory, Mode=OneWay}"
                         Foreground="{ThemeResource TextBrush}" />
                 </TextBlock>
 
@@ -451,7 +450,7 @@
                     TextTrimming="CharacterEllipsis">
                     <Run Text="備份狀況："
                         Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.SelectedServer.BackupStatus, Mode=OneWay}"
+                    <Run Text="{x:Bind ViewModel.List.SelectedServer.BackupStatus, Mode=OneWay}"
                         Foreground="{ThemeResource TextBrush}" />
                 </TextBlock>
 
@@ -459,10 +458,10 @@
                     Grid.Column="3"
                     Margin="0,0,0,4"
                     TextTrimming="CharacterEllipsis"
-                    ToolTipService.ToolTip="{x:Bind ViewModel.SelectedServerBackupPath, Mode=OneWay}">
+                    ToolTipService.ToolTip="{x:Bind ViewModel.List.SelectedServerBackupPath, Mode=OneWay}">
                     <Run Text="外部備份路徑："
                         Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.SelectedServerBackupPath, Mode=OneWay}"
+                    <Run Text="{x:Bind ViewModel.List.SelectedServerBackupPath, Mode=OneWay}"
                         Foreground="{ThemeResource TextBrush}" />
                 </TextBlock>
 
@@ -472,10 +471,10 @@
                     Grid.ColumnSpan="4"
                     Margin="0,0,0,4"
                     TextTrimming="CharacterEllipsis"
-                    ToolTipService.ToolTip="{x:Bind ViewModel.SelectedServer.Path, Mode=OneWay}">
+                    ToolTipService.ToolTip="{x:Bind ViewModel.List.SelectedServer.Path, Mode=OneWay}">
                     <Run Text="實體路徑："
                         Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.SelectedServer.Path, Mode=OneWay}"
+                    <Run Text="{x:Bind ViewModel.List.SelectedServer.Path, Mode=OneWay}"
                         Foreground="{ThemeResource TextBrush}" />
                 </TextBlock>
             </Grid>
@@ -484,9 +483,9 @@
             <controls:WrapPanel ItemSpacing="8"
                 LineSpacing="8">
                 <!-- 啟動按鈕 (未執行時顯示) -->
-                <Button Command="{x:Bind ViewModel.StartServerCommand}"
-                    IsEnabled="{x:Bind ViewModel.CanStartOrMonitorServer, Mode=OneWay}"
-                    Visibility="{x:Bind controls:UiBindHelpers.InverseBoolToVis(ViewModel.IsSelectedServerRunning), Mode=OneWay}"
+                <Button Command="{x:Bind ViewModel.Lifecycle.StartServerCommand}"
+                    IsEnabled="{x:Bind ViewModel.List.CanStartOrMonitorServer, Mode=OneWay}"
+                    Visibility="{x:Bind controls:UiBindHelpers.InverseBoolToVis(ViewModel.List.IsSelectedServerActive), Mode=OneWay}"
                     Style="{StaticResource PrimaryButtonStyle}"
                     Width="120"
                     Height="32">
@@ -503,9 +502,9 @@
                 </Button>
 
                 <!-- 停止按鈕 (執行中時顯示) -->
-                <Button Command="{x:Bind ViewModel.StopServerCommand}"
-                    IsEnabled="{x:Bind ViewModel.HasSelectedServer, Mode=OneWay}"
-                    Visibility="{x:Bind controls:UiBindHelpers.BoolToVis(ViewModel.IsSelectedServerRunning), Mode=OneWay}"
+                <Button Command="{x:Bind ViewModel.Lifecycle.StopServerCommand}"
+                    IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
+                    Visibility="{x:Bind ViewModel.List.IsSelectedServerActive, Mode=OneWay}"
                     Style="{StaticResource DangerButtonStyle}"
                     Width="120"
                     Height="32">
@@ -523,8 +522,8 @@
                 </Button>
 
                 <!-- 監控 -->
-                <Button Command="{x:Bind ViewModel.MonitorServerCommand}"
-                    IsEnabled="{x:Bind ViewModel.CanStartOrMonitorServer, Mode=OneWay}"
+                <Button Command="{x:Bind ViewModel.Lifecycle.MonitorServerCommand}"
+                    IsEnabled="{x:Bind ViewModel.List.CanStartOrMonitorServer, Mode=OneWay}"
                     Width="120"
                     Height="32">
                     <StackPanel Orientation="Horizontal"
@@ -541,7 +540,7 @@
 
                 <!-- 設定 -->
                 <Button Command="{x:Bind ViewModel.ConfigureServerCommand}"
-                    IsEnabled="{x:Bind ViewModel.HasSelectedServer, Mode=OneWay}"
+                    IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Width="120"
                     Height="32">
                     <StackPanel Orientation="Horizontal"
@@ -558,7 +557,7 @@
 
                 <!-- 名單管理 -->
                 <Button Command="{x:Bind ViewModel.ManagePlayersCommand}"
-                    IsEnabled="{x:Bind ViewModel.CanManagePlayers, Mode=OneWay}"
+                    IsEnabled="{x:Bind ViewModel.List.CanManagePlayers, Mode=OneWay}"
                     ToolTipService.ToolTip="管理伺服器管理員 (ops)、白名單 (whitelist) 與封鎖名單 (bans)"
                     Width="120"
                     Height="32">
@@ -576,7 +575,7 @@
 
                 <!-- 開啟資料夾 -->
                 <Button Command="{x:Bind ViewModel.OpenServerFolderCommand}"
-                    IsEnabled="{x:Bind ViewModel.HasSelectedServer, Mode=OneWay}"
+                    IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Width="120"
                     Height="32">
                     <StackPanel Orientation="Horizontal"
@@ -592,8 +591,8 @@
                 </Button>
 
                 <!-- 備份伺服器 -->
-                <Button Command="{x:Bind ViewModel.BackupServerCommand}"
-                    IsEnabled="{x:Bind ViewModel.HasSelectedServer, Mode=OneWay}"
+                <Button Command="{x:Bind ViewModel.Backup.BackupServerCommand}"
+                    IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Width="120"
                     Height="32">
                     <StackPanel Orientation="Horizontal"
@@ -609,8 +608,8 @@
                 </Button>
 
                 <!-- 還原備份 -->
-                <Button Command="{x:Bind ViewModel.RestoreBackupCommand}"
-                    IsEnabled="{x:Bind ViewModel.HasSelectedServer, Mode=OneWay}"
+                <Button Command="{x:Bind ViewModel.Backup.RestoreBackupCommand}"
+                    IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Width="120"
                     Height="32">
                     <StackPanel Orientation="Horizontal"
@@ -627,7 +626,7 @@
 
                 <!-- 刪除 -->
                 <Button Command="{x:Bind ViewModel.DeleteServerCommand}"
-                    IsEnabled="{x:Bind ViewModel.HasSelectedServer, Mode=OneWay}"
+                    IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Style="{StaticResource DangerButtonStyle}"
                     Width="120"
                     Height="32">

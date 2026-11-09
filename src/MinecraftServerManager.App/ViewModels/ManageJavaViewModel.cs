@@ -5,7 +5,6 @@ using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
-using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.App.ViewModels;
 
@@ -46,9 +45,10 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
     private readonly IUiService _ui;
 
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ManageJavaViewModel));
-    private readonly IJavaRuntimeDetector? _javaDetector;
-    private readonly IMinecraftJavaRequirementService? _javaRequirementService;
-    private readonly IJavaInstaller? _javaInstaller;
+    private readonly IJavaRuntimeDetector _javaDetector;
+    private readonly IMinecraftJavaRequirementService _javaRequirementService;
+    private readonly IJavaInstaller _javaInstaller;
+    private readonly ILocalFileSystem _fileSystem;
 
     [ObservableProperty]
     public partial string MinecraftVersionText { get; set; } = string.Empty;
@@ -83,28 +83,35 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
     public event Action? RequestClose;
 
     public ManageJavaViewModel(
-        IJavaRuntimeDetector? javaDetector,
-        IMinecraftJavaRequirementService? javaRequirementService,
-        IJavaInstaller? javaInstaller,
+        IJavaRuntimeDetector javaDetector,
+        IMinecraftJavaRequirementService javaRequirementService,
+        IJavaInstaller javaInstaller,
         string currentJavaPath,
         string minecraftVersion,
         string loaderName,
-        IUiService? uiService = null)
+        ILocalFileSystem fileSystem,
+        IUiService uiService)
     {
-        _ui = uiService ?? NoOpUiService.Instance;
+        ArgumentNullException.ThrowIfNull(javaDetector);
+        ArgumentNullException.ThrowIfNull(javaRequirementService);
+        ArgumentNullException.ThrowIfNull(javaInstaller);
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(uiService);
+        _ui = uiService;
+        _fileSystem = fileSystem;
         _javaDetector = javaDetector;
         _javaRequirementService = javaRequirementService;
         _javaInstaller = javaInstaller;
 
         MinecraftVersionText = minecraftVersion;
         var lk = LoaderKinds.ParseOrDefault(loaderName);
-        RequiredMajor = _javaRequirementService?.GetCachedJavaMajor(minecraftVersion, lk);
+        RequiredMajor = _javaRequirementService.GetCachedJavaMajor(minecraftVersion, lk);
 
         RequiredMajorText = RequiredMajor.HasValue
             ? $"Java {RequiredMajor.Value}"
             : "未限定 (依需求選擇)";
 
-        var majors = _javaRequirementService?.GetCachedAvailableJavaMajors() ?? [];
+        var majors = _javaRequirementService.GetCachedAvailableJavaMajors();
         AvailableInstallMajors.ReplaceAll(majors);
 
         SelectedInstallMajor = RequiredMajor.HasValue && AvailableInstallMajors.Contains(RequiredMajor.Value)
@@ -118,7 +125,7 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
         ResultJavaPath = currentJavaPath;
         _ = RunSafeAsync(() => LoadInstalledJavasAsync(currentJavaPath), "載入已安裝 Java 清單", Logger);
 
-        if (!RequiredMajor.HasValue && !string.IsNullOrWhiteSpace(minecraftVersion) && _javaRequirementService is not null)
+        if (!RequiredMajor.HasValue && !string.IsNullOrWhiteSpace(minecraftVersion))
         {
             _ = RunSafeAsync(async () =>
             {
@@ -157,11 +164,6 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
     [RelayCommand]
     public async Task AutoDetectAsync()
     {
-        if (_javaDetector is null)
-        {
-            return;
-        }
-
         IsBusy = true;
         StatusMessage = "正在自動尋找最符合的 Java...";
         try
@@ -195,7 +197,7 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "自動偵測 Java 失敗: {Message}", ex.Message);
+            Logger.Warning(ex, "自動偵測 Java 失敗: {Message}", ex.Message);
             StatusMessage = $"自動偵測失敗：{ex.Message}";
         }
         finally
@@ -207,12 +209,6 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
     [RelayCommand]
     public async Task InstallWithWingetAsync()
     {
-        if (_javaInstaller is null)
-        {
-            StatusMessage = "未提供自動安裝器";
-            return;
-        }
-
         int targetMajor = SelectedInstallMajor;
         IsBusy = true;
         StatusMessage = "正在檢查本機 Java 候選版本...";
@@ -226,16 +222,16 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
             var existing = await Task.Run(() => javaSnapshot.FirstOrDefault(j =>
                 j.MajorVersion == targetMajor &&
                 !string.IsNullOrWhiteSpace(j.ExecutablePath) &&
-                SafeFileSystem.FileExists(j.ExecutablePath))).ConfigureAwait(true);
+                _fileSystem.FileExists(j.ExecutablePath))).ConfigureAwait(true);
 
             if (existing is not null)
             {
                 SelectedJava = existing;
                 StatusMessage = $"本機已有可使用的 Java {targetMajor}，已自動選取：{existing.ExecutablePath}";
-                _ui.ShowToast(
+                _ui.ShowNotification(
                     $"本機已偵測到可使用的 Java {targetMajor}！\n\n路徑：{existing.ExecutablePath}\n廠商：{existing.Vendor}\n\n系統已為您自動選取該版本，無需重複安裝。",
                     "本機已有可用版本",
-                    ToastType.Info);
+                    NotificationType.Info);
                 return;
             }
 
@@ -271,7 +267,7 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
     [RelayCommand]
     public async Task BrowseFileAsync()
     {
-        if (await _ui.PickFilesAsync("選取 Java 執行檔", "Java 執行檔 (javaw.exe;java.exe)|javaw.exe;java.exe|所有檔案 (*.*)|*.*") is { Count: > 0 } picked)
+        if (await _ui.PickFilesAsync("選取 Java 執行檔", FileTypeChoice.JavaExecutable) is { Count: > 0 } picked)
         {
             string path = picked[0];
             var existing = InstalledJavas.FirstOrDefault(j => string.Equals(j.ExecutablePath, path, StringComparison.OrdinalIgnoreCase));
@@ -312,11 +308,6 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
 
     private async Task LoadInstalledJavasAsync(string? preferredPath, bool forceRefresh = false)
     {
-        if (_javaDetector is null)
-        {
-            return;
-        }
-
         IsBusy = true;
         try
         {
@@ -370,7 +361,7 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "載入已安裝 Java 清單失敗: {Message}", ex.Message);
+            Logger.Warning(ex, "載入已安裝 Java 清單失敗: {Message}", ex.Message);
             StatusMessage = $"載入 Java 清單失敗：{ex.Message}";
         }
         finally

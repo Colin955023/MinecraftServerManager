@@ -10,24 +10,10 @@ public sealed class DialogStackCoordinator
     /// <summary>
     /// 等待前一個對話框隱藏的逾時上限；對話框拒絕隱藏時避免永久卡住
     /// </summary>
-    public static readonly TimeSpan PreviousHideTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan PreviousHideTimeout = TimeSpan.FromSeconds(3);
 
     private readonly Stack<DialogEntry> _stack = new();
     private readonly Lock _lock = new();
-
-    /// <summary>
-    /// 當前堆疊中的對話框層數
-    /// </summary>
-    public int Depth
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _stack.Count;
-            }
-        }
-    }
 
     /// <summary>
     /// 以非同步方式排隊並顯示對話框；若已有顯示中之對話框，自動中斷並暫存其狀態，待本對話框關閉後自動喚醒恢復。

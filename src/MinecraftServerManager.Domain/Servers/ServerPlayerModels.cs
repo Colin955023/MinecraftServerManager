@@ -67,9 +67,6 @@ public sealed record ServerBannedPlayerEntry(
 {
     [JsonIgnore]
     public string FormattedCreated => ServerPlayerTimeFormatter.FormatToGmt8(Created);
-
-    [JsonIgnore]
-    public string FormattedExpires => ServerPlayerTimeFormatter.FormatToGmt8(Expires);
 }
 
 /// <summary>
@@ -84,9 +81,6 @@ public sealed record ServerBannedIpEntry(
 {
     [JsonIgnore]
     public string FormattedCreated => ServerPlayerTimeFormatter.FormatToGmt8(Created);
-
-    [JsonIgnore]
-    public string FormattedExpires => ServerPlayerTimeFormatter.FormatToGmt8(Expires);
 }
 
 /// <summary>

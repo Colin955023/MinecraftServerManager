@@ -22,6 +22,18 @@
     },
     {
       "customType": "regex",
+      "description": "Directory.Build.props 的 Windows SDK 投影套件版本（WindowsSdkPackageVersion）",
+      "managerFilePatterns": [
+        "/^Directory\\.Build\\.props$/"
+      ],
+      "matchStrings": [
+        "<WindowsSdkPackageVersion>(?<currentValue>[^<]+)</WindowsSdkPackageVersion>"
+      ],
+      "depNameTemplate": "Microsoft.Windows.SDK.NET.Ref",
+      "datasourceTemplate": "nuget"
+    },
+    {
+      "customType": "regex",
       "description": "validate-renovate.yml 以 npx 執行的 Renovate 版本",
       "managerFilePatterns": [
         "/^\\.github/workflows/validate-renovate\\.yml$/"
@@ -36,9 +48,10 @@
   "packageRules": [
     {
       "matchPackageNames": [
-        "Microsoft.Windows.SDK.BuildTools"
+        "Microsoft.Windows.SDK.BuildTools",
+        "Microsoft.Windows.SDK.NET.Ref"
       ],
-      "allowedVersions": "/^10\\.0\\.28000\\./"
+      "allowedVersions": "/^10\\.0\\.26100\\./"
     },
     {
       "description": ".NET major 固定為 10；升級 major 屬擁有者決策",
@@ -52,7 +65,7 @@
     {
       "description": "Windows App SDK major 固定為 2",
       "matchPackageNames": [
-        "Microsoft.WindowsAppSDK"
+        "Microsoft.WindowsAppSDK.*"
       ],
       "allowedVersions": "<3"
     },
@@ -96,6 +109,9 @@
       "matchManagers": [
         "custom.regex"
       ],
+      "matchPackageNames": [
+        "!Microsoft.Windows.SDK.NET.Ref"
+      ],
       "schedule": [
         "before 6am on monday"
       ]
@@ -115,10 +131,8 @@
       "security"
     ],
     "prConcurrentLimit": 3,
-    "minimumReleaseAge": null,
-    "vulnerabilityFixStrategy": "lowest"
+    "minimumReleaseAge": null
   },
-  "dependencyDashboard": true,
   "prCreation": "not-pending",
   "timezone": "Asia/Taipei"
 }

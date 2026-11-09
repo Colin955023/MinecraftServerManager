@@ -11,10 +11,10 @@ namespace MinecraftServerManager.App.ViewModels;
 /// 匯入伺服器對話方塊 ViewModel
 /// </summary>
 public sealed partial class ImportServerViewModel(IServerManager serverManager,
-    IUiService? uiService = null) : ObservableObject
+    IUiService uiService) : ObservableObject
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ImportServerViewModel));
-    private readonly IUiService _ui = uiService ?? NoOpUiService.Instance;
+    private readonly IUiService _ui = uiService;
     private readonly IServerManager _serverManager = serverManager;
 
     [ObservableProperty]
@@ -30,10 +30,7 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
     public partial string StatusMessage { get; set; } = string.Empty;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsNotBusy))]
     public partial bool IsBusy { get; set; }
-
-    public bool IsNotBusy => !IsBusy;
 
     public bool IsCopyMode
     {
@@ -61,8 +58,6 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
 
     public string? ImportedServerName { get; private set; }
 
-    public event Action<bool>? RequestClose;
-
     partial void OnTransferModeChanged(ImportTransferMode value)
     {
         OnPropertyChanged(nameof(IsCopyMode));
@@ -72,7 +67,7 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
     [RelayCommand]
     public async Task BrowseZipAsync()
     {
-        if (await _ui.PickFilesAsync("選取 Minecraft 伺服器 ZIP 壓縮檔", "ZIP 壓縮檔 (*.zip)|*.zip|所有檔案 (*.*)|*.*").ConfigureAwait(true) is { Count: > 0 } picked)
+        if (await _ui.PickFilesAsync("選取 Minecraft 伺服器 ZIP 壓縮檔", FileTypeChoice.Zip).ConfigureAwait(true) is { Count: > 0 } picked)
         {
             SourcePath = picked[0];
             ServerName = Path.GetFileNameWithoutExtension(picked[0]);
@@ -138,18 +133,17 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
         IsBusy = true;
         StatusMessage = string.Empty;
 
-        var progressDialog = _ui.ShowServerImportProgress(targetName);
-        var progress = progressDialog.Progress;
-
         try
         {
-            var result = await _serverManager.ImportServerAsync(
-                source,
-                targetName,
-                TransferMode,
-                progress).ConfigureAwait(true);
-
-            progressDialog.Complete();
+            ServerImportResult result;
+            using (var progressDialog = _ui.ShowServerImportProgress(targetName))
+            {
+                result = await _serverManager.ImportServerAsync(
+                    source,
+                    targetName,
+                    TransferMode,
+                    progressDialog.Progress).ConfigureAwait(true);
+            }
 
             if (result.Completed)
             {
@@ -159,19 +153,17 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
             else
             {
                 StatusMessage = $"匯入失敗：{result.Message}";
-                await _ui.ShowWarningAsync($"匯入伺服器被拒絕或失敗：\n{result.Message}", "匯入伺服器失敗").ConfigureAwait(true);
+                await _ui.ShowErrorAsync($"匯入伺服器被拒絕或失敗：\n{result.Message}", "匯入伺服器失敗").ConfigureAwait(true);
                 return false;
             }
         }
         catch (OperationCanceledException)
         {
-            progressDialog.Complete();
             StatusMessage = "匯入已取消";
             return false;
         }
         catch (Exception ex)
         {
-            progressDialog.Complete();
             Logger.Error(ex, "匯入伺服器異常: {Message}", ex.Message);
             StatusMessage = $"匯入異常：{ex.Message}";
             await _ui.ShowErrorAsync($"匯入伺服器時發生錯誤：\n{ex.Message}", "匯入伺服器異常").ConfigureAwait(true);
@@ -182,16 +174,4 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
             IsBusy = false;
         }
     }
-
-    [RelayCommand]
-    public async Task ImportAsync()
-    {
-        if (await ExecuteImportAsync().ConfigureAwait(true))
-        {
-            RequestClose?.Invoke(true);
-        }
-    }
-
-    [RelayCommand]
-    public void Cancel() => RequestClose?.Invoke(false);
 }

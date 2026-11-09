@@ -13,9 +13,9 @@ public sealed class HashCalculatorTests
     [InlineData("hello world")]
     [InlineData("1234567890!@#$%^&*()_+")]
     [InlineData("繁體中文與台灣用詞測試內容一二三四五六七八九十")]
-    public void ComputeSha256_ProducesExactMatchWithStandardCrypto(string input)
+    public void DigestBytes_ProducesExactMatchWithStandardCrypto(string input)
     {
-        string actual = HashCalculator.ComputeSha256(input);
+        string actual = HashCalculator.DigestBytes(Encoding.UTF8.GetBytes(input));
         byte[] expectedBytes = SHA256.HashData(Encoding.UTF8.GetBytes(input ?? string.Empty));
         string expected = Convert.ToHexStringLower(expectedBytes);
 
@@ -23,10 +23,10 @@ public sealed class HashCalculatorTests
     }
 
     [Fact]
-    public void ComputeSha256_LargeString_ProducesExactMatch()
+    public void DigestBytes_LargeString_ProducesExactMatch()
     {
         string input = new('A', 5000);
-        string actual = HashCalculator.ComputeSha256(input);
+        string actual = HashCalculator.DigestBytes(Encoding.UTF8.GetBytes(input));
         byte[] expectedBytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));
         string expected = Convert.ToHexStringLower(expectedBytes);
 

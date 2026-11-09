@@ -66,7 +66,7 @@ public sealed class ServerPropertiesViewModelTests
         Assert.Equal("25577", item.Value);
         item.ResetToDefault();
         Assert.Equal("25565", item.Value);
-        Assert.False(item.HasError);
+        Assert.True(string.IsNullOrEmpty(item.ErrorMessage));
     }
 
     private sealed class FakeServerPropertiesStore(ServerPropertiesSnapshot snapshot) : IServerPropertiesStore
@@ -90,13 +90,5 @@ public sealed class ServerPropertiesViewModelTests
             CurrentSnapshot = new ServerPropertiesSnapshot(serverName, ServerPropertiesReadStatus.Ok, "rev-next", updated);
             return Task.FromResult(new ServerPropertiesUpdateResult(true, CurrentSnapshot));
         }
-
-        public Task<ServerPropertiesMigrationPlan> MigrateAsync(
-            string serverName,
-            string? minecraftVersion = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ServerPropertiesMigrationPlan(false, [], CurrentSnapshot.Properties));
-
-        public string GetPropertiesFilePath(string serverName) => $@"C:\Servers\{serverName}\server.properties";
     }
 }

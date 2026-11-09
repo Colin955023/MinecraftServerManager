@@ -1,21 +1,24 @@
 using System.Collections.Frozen;
 using MinecraftServerManager.Core.Errors;
 using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Settings;
 
 public sealed class SettingsManager
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(SettingsManager));
+
     private static readonly FrozenSet<string> ValidThemeModes = FrozenSet.ToFrozenSet(["system", "light", "dark"], StringComparer.Ordinal);
     private readonly Lock _syncRoot = new();
     private readonly string _settingsPath;
     private UserSettings _settings;
 
-    public SettingsManager(string? userDataDirectory = null)
+    public SettingsManager(string userDataDirectory)
     {
-        string resolvedUserDataDirectory = ResolveUserDataDirectory(userDataDirectory);
-        _settingsPath = Path.Combine(resolvedUserDataDirectory, "user_settings.json");
+        ArgumentException.ThrowIfNullOrWhiteSpace(userDataDirectory);
+        _settingsPath = Path.Combine(Path.GetFullPath(userDataDirectory), "user_settings.json");
         _settings = LoadSettings();
     }
 
@@ -143,16 +146,6 @@ public sealed class SettingsManager
 
     public void SetAutoUpdateEnabled(bool enabled) => Update(settings => settings with { AutoUpdateEnabled = enabled });
 
-    public bool IsFirstRunCompleted()
-    {
-        lock (_syncRoot)
-        {
-            return _settings.FirstRunCompleted;
-        }
-    }
-
-    public void MarkFirstRunCompleted() => Update(static settings => settings with { FirstRunCompleted = true });
-
     public WindowPreferences GetWindowPreferences()
     {
         lock (_syncRoot)
@@ -193,21 +186,63 @@ public sealed class SettingsManager
 
     private UserSettings LoadSettings()
     {
-        using var result = JsonCodec.ReadJsonWithBytes(_settingsPath);
-        if (result is null)
+        byte[]? bytes = null;
+        try
         {
+            bytes = SafeFileSystem.ReadRegularFile(_settingsPath, JsonCodec.DefaultMaxBytes);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.Warning(ex, "讀取設定檔失敗：{Path}", _settingsPath);
+        }
+
+        UserSettings? loaded = bytes is null ? null : JsonCodec.Deserialize<UserSettings>(bytes);
+        if (loaded is null)
+        {
+            // 檔案存在卻讀不到（損毀、過大或被鎖定）：先保留原檔，避免預設值覆蓋使用者設定
+            PreserveUnreadableSettings();
             var defaults = new UserSettings();
-            Save(defaults);
+            TrySaveDefaults(defaults);
             return defaults;
         }
 
-        UserSettings? loaded = JsonCodec.Deserialize<UserSettings>(result.RawBytes);
-        var normalized = NormalizeSettings(loaded ?? new UserSettings());
+        var normalized = NormalizeSettings(loaded);
         if (loaded != normalized)
         {
             Save(normalized);
         }
         return normalized;
+    }
+
+    private void PreserveUnreadableSettings()
+    {
+        if (!SafeFileSystem.FileExists(_settingsPath))
+        {
+            return;
+        }
+
+        try
+        {
+            SafeFileSystem.CopyFile(_settingsPath, _settingsPath + ".bad", overwrite: true);
+            Logger.Warning("設定檔無法讀取，已備份為 {Path}.bad 並改用預設值", _settingsPath);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Warning(ex, "無法備份損毀的設定檔：{Path}", _settingsPath);
+        }
+    }
+
+    private void TrySaveDefaults(UserSettings defaults)
+    {
+        try
+        {
+            Save(defaults);
+        }
+        catch (IOException ex)
+        {
+            // 寫入失敗不應使啟動失敗；使用記憶體中的預設值繼續
+            Logger.Warning(ex, "無法寫入預設設定檔：{Path}", _settingsPath);
+        }
     }
 
     private void Update(Func<UserSettings, UserSettings> update)
@@ -245,13 +280,4 @@ public sealed class SettingsManager
         return ValidThemeModes.Contains(normalized) ? normalized : "system";
     }
 
-    private static string ResolveUserDataDirectory(string? userDataDirectory)
-    {
-        if (!string.IsNullOrWhiteSpace(userDataDirectory))
-        {
-            return Path.GetFullPath(userDataDirectory);
-        }
-
-        return RuntimePaths.GetUserDataDir();
-    }
 }

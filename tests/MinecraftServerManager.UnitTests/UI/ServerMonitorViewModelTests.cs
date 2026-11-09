@@ -2,6 +2,7 @@ using System.Text;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Infrastructure.Servers;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
@@ -12,13 +13,18 @@ namespace MinecraftServerManager.UnitTests.UI;
 public sealed partial class ServerMonitorViewModelTests : IDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerMonitorViewModelTests));
+    private readonly string _tempRoot;
     private readonly string _tempServerDir;
     private readonly MockServerRuntime _runtime;
+    private readonly ServerLogReader _logReader = new();
+    private readonly ServerPropertiesStore _propertiesStore;
 
     public ServerMonitorViewModelTests()
     {
-        _tempServerDir = Path.Combine(Path.GetTempPath(), "msm-monitor-test-" + Guid.NewGuid().ToString("N"));
+        _tempRoot = Path.Combine(Path.GetTempPath(), "msm-monitor-test-" + Guid.NewGuid().ToString("N"));
+        _tempServerDir = Path.Combine(_tempRoot, "TestServer");
         Directory.CreateDirectory(_tempServerDir);
+        _propertiesStore = new ServerPropertiesStore(_tempRoot);
         _runtime = new MockServerRuntime();
     }
 
@@ -26,9 +32,9 @@ public sealed partial class ServerMonitorViewModelTests : IDisposable
     {
         try
         {
-            if (Directory.Exists(_tempServerDir))
+            if (Directory.Exists(_tempRoot))
             {
-                Directory.Delete(_tempServerDir, recursive: true);
+                Directory.Delete(_tempRoot, recursive: true);
             }
         }
         catch (Exception ex)
@@ -40,7 +46,7 @@ public sealed partial class ServerMonitorViewModelTests : IDisposable
     [Fact]
     public void ParsesPlayerList_DifferentCoreFormats_UpdatesCountAndPlayerList()
     {
-        using var vm = new ServerMonitorViewModel(_runtime, "TestServer", _tempServerDir);
+        using var vm = new ServerMonitorViewModel(_runtime, _logReader, _propertiesStore, "TestServer", NoOpUiService.Instance, _tempServerDir, string.Empty, static () => Task.CompletedTask);
 
         // 格式 1: Vanilla / Paper 繁複格式: There are 2 of a max of 20 players online: Steve, Alex
         _runtime.RaiseOutputLine("[12:00:00 INFO]: There are 2 of a max of 20 players online: Steve, Alex");
@@ -69,7 +75,7 @@ public sealed partial class ServerMonitorViewModelTests : IDisposable
     [Fact]
     public void HandlesPlayerJoinAndLeave_UpdatesOnlinePlayersCorrectly()
     {
-        using var vm = new ServerMonitorViewModel(_runtime, "TestServer", _tempServerDir);
+        using var vm = new ServerMonitorViewModel(_runtime, _logReader, _propertiesStore, "TestServer", NoOpUiService.Instance, _tempServerDir, string.Empty, static () => Task.CompletedTask);
 
         _runtime.RaiseOutputLine("[12:00:00 INFO]: : PlayerOne joined the game");
         Assert.Single(vm.OnlinePlayers);
@@ -86,29 +92,27 @@ public sealed partial class ServerMonitorViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task ReloadLogs_ClearsExistingAndLoadsFromDiskWithinLimits()
+    public async Task InitialLoad_ReadsLatestLogHistoryFromDisk()
     {
         string logsDir = Path.Combine(_tempServerDir, "logs");
         Directory.CreateDirectory(logsDir);
         string logFile = Path.Combine(logsDir, "latest.log");
 
         var utf8NoBom = new UTF8Encoding(false);
-        // 寫入初始 5 行
         File.WriteAllLines(logFile, ["Line 1", "Line 2", "Line 3", "Line 4", "Line 5"], utf8NoBom);
 
-        using var vm = new ServerMonitorViewModel(_runtime, "TestServer", _tempServerDir);
-        await vm.HistoryLoadTask;
+        using var vm = new ServerMonitorViewModel(_runtime, _logReader, _propertiesStore, "TestServer", NoOpUiService.Instance, _tempServerDir, string.Empty, static () => Task.CompletedTask);
+
+        // 歷史紀錄於背景載入，輪詢直到 Logs 出現內容
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (vm.Logs.Count < 5 && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(20);
+        }
+
         Assert.Equal(5, vm.Logs.Count);
-
-        // 修改記錄檔內容為 3 行新內容，並執行手動重新載入
-        File.WriteAllLines(logFile, ["New A", "New B", "New C"], utf8NoBom);
-        vm.ReloadLogs();
-        await vm.HistoryLoadTask;
-
-        // 驗證已先清空舊紀錄並重新載入最新 3 行
-        Assert.Equal(3, vm.Logs.Count);
-        Assert.Equal("New A", vm.Logs[0]);
-        Assert.Equal("New C", vm.Logs[2]);
+        Assert.Equal("Line 1", vm.Logs[0]);
+        Assert.Equal("Line 5", vm.Logs[4]);
     }
 
     [Fact]
@@ -125,21 +129,25 @@ public sealed partial class ServerMonitorViewModelTests : IDisposable
         _runtime.IsReady = false;
         using var vm = new ServerMonitorViewModel(
             _runtime,
+            _logReader,
+            _propertiesStore,
             "TestServer",
+            mockUi,
             _tempServerDir,
-            uiService: mockUi);
+            string.Empty,
+            static () => Task.CompletedTask);
 
         // 觸發伺服器就緒事件
         _runtime.RaiseReady();
 
-        for (int i = 0; i < 50 && mockUi.LastToastMessage is null; i++)
+        for (int i = 0; i < 50 && mockUi.LastNotificationMessage is null; i++)
         {
             await Task.Delay(20);
         }
 
-        Assert.NotNull(mockUi.LastToastMessage);
-        Assert.Contains("25577", mockUi.LastToastMessage);
-        Assert.Contains("127.0.0.1", mockUi.LastToastMessage);
+        Assert.NotNull(mockUi.LastNotificationMessage);
+        Assert.Contains("25577", mockUi.LastNotificationMessage);
+        Assert.Contains("127.0.0.1", mockUi.LastNotificationMessage);
     }
 
     [Fact]
@@ -148,9 +156,13 @@ public sealed partial class ServerMonitorViewModelTests : IDisposable
         var mockUi = new MockMonitorUiService();
         using var vm = new ServerMonitorViewModel(
             _runtime,
+            _logReader,
+            _propertiesStore,
             "TestServer",
+            mockUi,
             _tempServerDir,
-            uiService: mockUi);
+            string.Empty,
+            static () => Task.CompletedTask);
 
         for (int i = 0; i < 6000; i++)
         {
@@ -168,9 +180,9 @@ public sealed partial class ServerMonitorViewModelTests : IDisposable
     {
         private readonly List<ManualUiTimer> _timers = [];
 
-        public string? LastToastMessage { get; private set; }
-        public string? LastToastTitle { get; private set; }
-        public ToastType? LastToastType { get; private set; }
+        public string? LastNotificationMessage { get; private set; }
+        public string? LastNotificationTitle { get; private set; }
+        public NotificationType? LastNotificationType { get; private set; }
 
         public override IUiTimer CreateUiTimer(TimeSpan interval, Action tick)
         {
@@ -188,11 +200,11 @@ public sealed partial class ServerMonitorViewModelTests : IDisposable
             }
         }
 
-        public override void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3)
+        public override void ShowNotification(string message, string? title = null, NotificationType type = NotificationType.Info)
         {
-            LastToastMessage = message;
-            LastToastTitle = title;
-            LastToastType = type;
+            LastNotificationMessage = message;
+            LastNotificationTitle = title;
+            LastNotificationType = type;
         }
 
         private sealed class ManualUiTimer(Action tick) : IUiTimer
@@ -216,35 +228,15 @@ public sealed partial class ServerMonitorViewModelTests : IDisposable
         public event Action<string>? OutputLineReceived;
         public event Action<int>? ServerExited;
         public event Action? ServerReady;
-        public event Action? ServerStarted;
+        public event Action? ServerStarted { add { } remove { } }
 
         public void RaiseOutputLine(string line) => OutputLineReceived?.Invoke(line);
         public void RaiseExited(int exitCode) => ServerExited?.Invoke(exitCode);
         public void RaiseReady() => ServerReady?.Invoke();
-        public void RaiseStarted() => ServerStarted?.Invoke();
 
         public Task StartAsync(Core.Servers.ServerLaunchPlan plan, CancellationToken cancellationToken = default)
         {
             _ = plan;
-            _ = cancellationToken;
-            return Task.CompletedTask;
-        }
-
-        public Task StartAsync(
-            string javaExecutablePath,
-            string serverDirectory,
-            string executableName,
-            int memoryMaxMb,
-            int? memoryMinMb = null,
-            IReadOnlyList<string>? customJvmArgs = null,
-            CancellationToken cancellationToken = default)
-        {
-            _ = javaExecutablePath;
-            _ = serverDirectory;
-            _ = executableName;
-            _ = memoryMaxMb;
-            _ = memoryMinMb;
-            _ = customJvmArgs;
             _ = cancellationToken;
             return Task.CompletedTask;
         }

@@ -33,43 +33,6 @@ public sealed class ServerTombstoneManagerTests
     }
 
     [Fact]
-    public void CopyWithinRejectsBoundaryViolationAndCopiesDirectoryTree()
-    {
-        var tempDir = Directory.CreateTempSubdirectory("msm-copy-within-");
-        try
-        {
-            string srcDir = Path.Combine(tempDir.FullName, "src");
-            string dstDir = Path.Combine(tempDir.FullName, "dst");
-            Directory.CreateDirectory(Path.Combine(srcDir, "mods"));
-            File.WriteAllText(Path.Combine(srcDir, "mods", "test.jar"), "dummy jar");
-
-            // 成功複製目錄樹
-            bool result = SafeFileSystem.CopyWithin(tempDir.FullName, srcDir, dstDir);
-            Assert.True(result);
-            Assert.True(File.Exists(Path.Combine(dstDir, "mods", "test.jar")));
-
-            // 超出邊界時拒絕
-            string outside = Path.Combine(Path.GetTempPath(), "outside-copy.bin");
-            File.WriteAllText(outside, "outside");
-            try
-            {
-                Assert.False(SafeFileSystem.CopyWithin(tempDir.FullName, outside, Path.Combine(tempDir.FullName, "in.bin")));
-            }
-            finally
-            {
-                if (File.Exists(outside))
-                {
-                    File.Delete(outside);
-                }
-            }
-        }
-        finally
-        {
-            tempDir.Delete(true);
-        }
-    }
-
-    [Fact]
     public void PrepareDeleteTombstoneCreatesMarkerAndJournal()
     {
         var tempDir = Directory.CreateTempSubdirectory("msm-tombstone-prep-");
@@ -106,14 +69,11 @@ public sealed class ServerTombstoneManagerTests
             var (tombstonePath, journalPath) = ServerTombstoneManager.PrepareDeleteTombstone(
                 tempDir.FullName, "UncommittedServer", originalPath);
 
-            bool recovered = false;
             // registeredServerLookup 回傳原路徑，代表伺服器尚未提交刪除
             ServerTombstoneManager.RecoverDeleteTombstones(
                 tempDir.FullName,
-                name => name == "UncommittedServer" ? originalPath : null,
-                onRecovered: name => recovered = true);
+                name => name == "UncommittedServer" ? originalPath : null);
 
-            Assert.True(recovered);
             Assert.True(Directory.Exists(originalPath));
             Assert.False(Directory.Exists(tombstonePath));
             Assert.False(File.Exists(journalPath));
@@ -137,14 +97,11 @@ public sealed class ServerTombstoneManagerTests
             var (tombstonePath, journalPath) = ServerTombstoneManager.PrepareDeleteTombstone(
                 tempDir.FullName, "CommittedServer", originalPath);
 
-            bool cleaned = false;
             // registeredServerLookup 回傳 null，代表伺服器已在設定中刪除
             ServerTombstoneManager.RecoverDeleteTombstones(
                 tempDir.FullName,
-                name => null,
-                onCleaned: name => cleaned = true);
+                name => null);
 
-            Assert.True(cleaned);
             Assert.False(Directory.Exists(tombstonePath));
             Assert.False(File.Exists(journalPath));
         }

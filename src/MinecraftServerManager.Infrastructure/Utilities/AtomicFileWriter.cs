@@ -3,6 +3,9 @@ using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.Infrastructure.Utilities;
 
+/// <summary>
+/// 關鍵檔案原子寫入：先寫入同目錄暫存檔並落盤，再以 Replace／Move 一次替換目標
+/// </summary>
 public static class AtomicFileWriter
 {
     /// <summary>
@@ -27,72 +30,37 @@ public static class AtomicFileWriter
 
     public static bool WriteBytes(string filePath, ReadOnlySpan<byte> content, bool skipIfUnchanged = false)
     {
-        string target;
-        try
-        {
-            target = SafeFileSystem.ResolveStablePath(filePath, createParent: true);
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
+        if (TryResolveTarget(filePath) is not { } target)
         {
             return false;
         }
 
         lock (GetLockForPath(target))
         {
-            if (skipIfUnchanged && SafeFileSystem.FileExists(target))
+            if (skipIfUnchanged && IsUnchanged(target, content))
             {
-                byte[]? existing = SafeFileSystem.ReadRegularFile(target);
-                if (existing is not null && existing.SequenceEqual(content))
-                {
-                    return true;
-                }
+                return true;
             }
 
             string temporary = CreateTempSiblingPath(target);
             try
             {
-                SafeFileSystem.ResolveStablePath(target, createParent: true);
-                using (SafeFileHandle handle = File.OpenHandle(
-                    temporary,
-                    FileMode.CreateNew,
-                    FileAccess.Write,
-                    FileShare.None,
-                    FileOptions.WriteThrough,
-                    preallocationSize: content.Length))
+                using (SafeFileHandle handle = File.OpenHandle(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, FileOptions.None, content.Length))
                 {
                     RandomAccess.Write(handle, content, fileOffset: 0);
                     RandomAccess.FlushToDisk(handle);
                 }
 
-                if (File.Exists(target))
-                {
-                    File.Replace(temporary, target, null);
-                }
-                else
-                {
-                    File.Move(temporary, target);
-                }
-
+                CommitReplace(temporary, target);
                 return true;
             }
-            catch (IOException)
-            {
-                return false;
-            }
-            catch (UnauthorizedAccessException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 return false;
             }
             finally
             {
-                if (File.Exists(temporary))
-                {
-                    File.Delete(temporary);
-                }
+                SafeFileSystem.TryDeleteFile(temporary);
             }
         }
     }
@@ -104,41 +72,20 @@ public static class AtomicFileWriter
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-
-        string target;
-        try
-        {
-            target = SafeFileSystem.ResolveStablePath(filePath, createParent: true);
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
+        if (TryResolveTarget(filePath) is not { } target)
         {
             return false;
         }
 
-        if (skipIfUnchanged && SafeFileSystem.FileExists(target))
+        if (skipIfUnchanged && IsUnchanged(target, content.Span))
         {
-            byte[]? existing = SafeFileSystem.ReadRegularFile(target);
-            if (existing is not null && existing.AsSpan().SequenceEqual(content.Span))
-            {
-                return true;
-            }
+            return true;
         }
 
         string temporary = CreateTempSiblingPath(target);
         try
         {
-            SafeFileSystem.ResolveStablePath(target, createParent: true);
-            using (SafeFileHandle handle = File.OpenHandle(
-                temporary,
-                FileMode.CreateNew,
-                FileAccess.Write,
-                FileShare.None,
-                FileOptions.Asynchronous | FileOptions.WriteThrough,
-                preallocationSize: content.Length))
+            using (SafeFileHandle handle = File.OpenHandle(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, FileOptions.Asynchronous, content.Length))
             {
                 await RandomAccess.WriteAsync(handle, content, fileOffset: 0, cancellationToken).ConfigureAwait(false);
                 RandomAccess.FlushToDisk(handle);
@@ -146,32 +93,18 @@ public static class AtomicFileWriter
 
             lock (GetLockForPath(target))
             {
-                if (File.Exists(target))
-                {
-                    File.Replace(temporary, target, null);
-                }
-                else
-                {
-                    File.Move(temporary, target);
-                }
+                CommitReplace(temporary, target);
             }
 
             return true;
         }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return false;
         }
         finally
         {
-            if (File.Exists(temporary))
-            {
-                File.Delete(temporary);
-            }
+            SafeFileSystem.TryDeleteFile(temporary);
         }
     }
 
@@ -185,46 +118,48 @@ public static class AtomicFileWriter
 
     public static bool ReplaceFile(string sourcePath, string targetPath)
     {
-        string source;
-        string target;
         try
         {
-            source = SafeFileSystem.ResolveStablePath(sourcePath);
-            target = SafeFileSystem.ResolveStablePath(targetPath, createParent: true);
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-
-        if (!File.Exists(source))
-        {
-            return false;
-        }
-
-        try
-        {
-            if (File.Exists(target))
+            string source = SafeFileSystem.ResolveStablePath(sourcePath);
+            string target = SafeFileSystem.ResolveStablePath(targetPath, createParent: true);
+            if (!File.Exists(source))
             {
-                File.Replace(source, target, null);
+                return false;
             }
-            else
-            {
-                File.Move(source, target);
-            }
+
+            CommitReplace(source, target);
             return true;
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return false;
         }
-        catch (UnauthorizedAccessException)
+    }
+
+    private static string? TryResolveTarget(string filePath)
+    {
+        try
         {
-            return false;
+            return SafeFileSystem.ResolveStablePath(filePath, createParent: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsUnchanged(string target, ReadOnlySpan<byte> content) =>
+        SafeFileSystem.FileExists(target) && SafeFileSystem.ReadRegularFile(target) is { } existing && existing.AsSpan().SequenceEqual(content);
+
+    private static void CommitReplace(string source, string target)
+    {
+        if (File.Exists(target))
+        {
+            File.Replace(source, target, null);
+        }
+        else
+        {
+            File.Move(source, target);
         }
     }
 }

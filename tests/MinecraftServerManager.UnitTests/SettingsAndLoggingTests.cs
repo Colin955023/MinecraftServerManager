@@ -19,7 +19,6 @@ public sealed partial class SettingsAndLoggingTests
             var settings = new SettingsManager(userData);
             settings.SetServersRoot(Path.Combine(userData, "servers"));
             settings.SetAutoUpdateEnabled(false);
-            settings.MarkFirstRunCompleted();
             settings.SetThemeMode("dark");
             settings.SetMainWindowSettings(1600, 900, 10, 20, maximized: true);
 
@@ -29,7 +28,6 @@ public sealed partial class SettingsAndLoggingTests
             Assert.Equal(expectedRoot, reloaded.GetServersRoot());
             Assert.Equal(expectedRoot, reloaded.GetValidatedServersRootPath(create: true));
             Assert.False(reloaded.IsAutoUpdateEnabled());
-            Assert.True(reloaded.IsFirstRunCompleted());
             Assert.Equal("dark", reloaded.GetThemeMode());
             Assert.Equal(new MainWindowSettings(1600, 900, 10, 20, true), reloaded.GetMainWindowSettings());
         }
@@ -82,52 +80,16 @@ public sealed partial class SettingsAndLoggingTests
     }
 
     [Fact]
-    public void ComponentLoggerBindsStructuredContext()
+    public void ComponentLoggerForwardsMessageTemplateAndArguments()
     {
         var logger = new CapturingLogger();
-        var Logger = new ComponentLogger(logger).Bind("component", nameof(SettingsManager));
+        var Logger = new ComponentLogger(logger);
 
         Logger.Information("已載入 {Count} 筆設定", 3);
 
         Assert.Equal(LogLevel.Information, logger.Level);
         Assert.Equal("已載入 3 筆設定", logger.Message);
-        Assert.Equal(nameof(SettingsManager), Assert.IsType<string>(logger.Scope!["component"]));
         Assert.Equal(3, logger.Arguments![0]);
-    }
-
-    [Fact]
-    public void IsDevelopmentEnvironmentAccuratelyDetectsSingleFileOrDev()
-    {
-        string? originalEnv = Environment.GetEnvironmentVariable("MSM_DEBUG_LOG");
-        object? originalAppContext = AppContext.GetData("APP_CONTEXT_PUBLISH_SINGLE_FILE");
-
-        try
-        {
-            // 1. 一般測試執行階段（非 single file bundle），無環境變數覆寫
-            Environment.SetEnvironmentVariable("MSM_DEBUG_LOG", null);
-            AppContext.SetData("APP_CONTEXT_PUBLISH_SINGLE_FILE", null);
-
-            // 單元測試時 EntryAssembly 非空，無 single-file 旗標，應為開發環境
-            bool isDev = RuntimePaths.IsDevelopmentEnvironment();
-            Assert.True(isDev);
-
-            // 2. 當環境變數設定 MSM_DEBUG_LOG=1 時，一律為 true
-            Environment.SetEnvironmentVariable("MSM_DEBUG_LOG", "1");
-            Assert.True(RuntimePaths.IsDevelopmentEnvironment());
-
-            // 3. 模擬發布之 Single-File EXE（微軟 Host 注入旗標，測試布林值與字串型態）
-            Environment.SetEnvironmentVariable("MSM_DEBUG_LOG", null);
-            AppContext.SetData("APP_CONTEXT_PUBLISH_SINGLE_FILE", true);
-            Assert.False(RuntimePaths.IsDevelopmentEnvironment());
-
-            AppContext.SetData("APP_CONTEXT_PUBLISH_SINGLE_FILE", "true");
-            Assert.False(RuntimePaths.IsDevelopmentEnvironment());
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("MSM_DEBUG_LOG", originalEnv);
-            AppContext.SetData("APP_CONTEXT_PUBLISH_SINGLE_FILE", originalAppContext);
-        }
     }
 
     private static string CreateTemporaryDirectory()
@@ -145,14 +107,8 @@ public sealed partial class SettingsAndLoggingTests
 
         public object?[]? Arguments { get; private set; }
 
-        public IReadOnlyDictionary<string, object?>? Scope { get; private set; }
-
-        public IDisposable BeginScope<TState>(TState state)
-            where TState : notnull
-        {
-            Scope = state as IReadOnlyDictionary<string, object?>;
-            return NoopDisposable.Instance;
-        }
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
 
         public bool IsEnabled(LogLevel logLevel) => true;
 
@@ -171,15 +127,6 @@ public sealed partial class SettingsAndLoggingTests
                     .Select(static pair => pair.Value)
                     .ToArray()
                 : null;
-        }
-    }
-
-    private sealed partial class NoopDisposable : IDisposable
-    {
-        public static NoopDisposable Instance { get; } = new();
-
-        public void Dispose()
-        {
         }
     }
 }

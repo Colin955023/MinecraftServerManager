@@ -25,35 +25,16 @@ public static partial class AudioFeedback
     {
         switch (level)
         {
-            case UiMessageLevel.Question:
-                PlayQuestion();
-                break;
             case UiMessageLevel.Warning:
                 PlayWarning();
                 break;
             case UiMessageLevel.Error:
                 PlayError();
                 break;
+            case UiMessageLevel.Question:
             case UiMessageLevel.Information:
             default:
                 PlayInfo();
-                break;
-        }
-    }
-
-    /// <summary>
-    /// 依提示層級播放對應之系統音效
-    /// </summary>
-    public static void Play(NotificationLevel level)
-    {
-        switch (level)
-        {
-            case NotificationLevel.Error:
-                PlayError();
-                break;
-            case NotificationLevel.Warning:
-            default:
-                PlayWarning();
                 break;
         }
     }
@@ -69,12 +50,7 @@ public static partial class AudioFeedback
     public static void PlayError() => PlayCore(MB_ICONHAND, "播放錯誤提示音效失敗");
 
     /// <summary>
-    /// 播放確認詢問音效
-    /// </summary>
-    public static void PlayQuestion() => PlayCore(MB_ICONASTERISK, "播放詢問提示音效失敗");
-
-    /// <summary>
-    /// 播放提示資訊音效
+    /// 播放提示資訊與確認詢問音效（兩者共用系統「星號」音效）
     /// </summary>
     public static void PlayInfo() => PlayCore(MB_ICONASTERISK, "播放資訊提示音效失敗");
 

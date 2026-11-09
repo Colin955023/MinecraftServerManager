@@ -4,6 +4,7 @@ using Microsoft.Windows.AppLifecycle;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core;
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Infrastructure.Process;
 using MinecraftServerManager.Infrastructure.Settings;
 using MinecraftServerManager.Infrastructure.Utilities;
 
@@ -16,7 +17,6 @@ public partial class App : Application
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(App));
     private static readonly bool s_isSmokeTest = Environment.GetCommandLineArgs().Any(a => string.Equals(a, "--smoke-test", StringComparison.OrdinalIgnoreCase));
-    private static Mutex? s_singleInstanceMutex;
 
     private static int s_unhandledExceptionCount;
     private static long s_lastUnhandledExceptionTicks;
@@ -26,13 +26,11 @@ public partial class App : Application
     private const uint MB_OK = 0x00000000;
     private const uint MB_ICONERROR = 0x00000010;
     private const uint MB_ICONWARNING = 0x00000030;
-    private const uint MB_ICONINFORMATION = 0x00000040;
 
     [LibraryImport("user32.dll", EntryPoint = "MessageBoxW", StringMarshalling = StringMarshalling.Utf16)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static partial int MessageBox(IntPtr hWnd, string lpText, string lpCaption, uint uType);
 
-    public static MainWindow? MainWindowInstance { get; private set; }
     public static AppCompositionRoot? CompositionRoot { get; private set; }
 
     public App()
@@ -50,20 +48,6 @@ public partial class App : Application
         {
             Logger.Warning("解除 AppInstance 單一實體註冊異常: {0}", ex.Message);
         }
-
-        if (s_singleInstanceMutex is not null)
-        {
-            try
-            {
-                s_singleInstanceMutex.ReleaseMutex();
-            }
-            catch (ApplicationException ex)
-            {
-                Logger.Warning("釋放單一實體 Mutex 異常: {0}", ex.Message);
-            }
-            s_singleInstanceMutex.Dispose();
-            s_singleInstanceMutex = null;
-        }
     }
 
     private static void ShowNativeMessageBox(string text, string caption, uint type)
@@ -74,6 +58,7 @@ public partial class App : Application
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope", Justification = "主視窗生命週期等同應用程式，由視窗關閉流程釋放")]
     protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
         base.OnLaunched(args);
@@ -83,7 +68,7 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
         TaskScheduler.UnobservedTaskException += TaskScheduler_UnobservedTaskException;
 
-        // 2. 單一實體防護（順序固定：先 AppInstance 喚醒既有實例，後 Mutex 互斥防範 2.1.x）
+        // 2. 單一實體防護：AppInstance 喚醒既有實例
         try
         {
             var mainInstance = AppInstance.FindOrRegisterForKey("MinecraftServerManager");
@@ -91,19 +76,6 @@ public partial class App : Application
             {
                 var activatedArgs = AppInstance.GetCurrent().GetActivatedEventArgs();
                 await mainInstance.RedirectActivationToAsync(activatedArgs);
-                Environment.Exit(0);
-                return;
-            }
-
-            s_singleInstanceMutex = new Mutex(true, "MinecraftServerManagerMutex", out bool createdNew);
-            if (!createdNew)
-            {
-                s_singleInstanceMutex.Dispose();
-                s_singleInstanceMutex = null;
-                ShowNativeMessageBox(
-                    $"{AppInfo.AppEnglishName} 已由舊版 (v2.1.x) 執行中，請勿重複啟動。",
-                    "提示",
-                    MB_OK | MB_ICONINFORMATION);
                 Environment.Exit(0);
                 return;
             }
@@ -127,13 +99,13 @@ public partial class App : Application
 
         try
         {
-            var settingsManager = new SettingsManager();
+            var settingsManager = new SettingsManager(RuntimePaths.GetUserDataDir());
 
             // 4. 建立主視窗與 WinUiService
             var mainWindow = new MainWindow();
-            MainWindowInstance = mainWindow;
 
-            var uiService = new WinUiService(mainWindow.DispatcherQueue);
+            var processRunner = new ProcessRunner();
+            var uiService = new WinUiService(mainWindow.DispatcherQueue, processRunner);
             uiService.RegisterMainWindow(mainWindow);
 
             // 5. 伺服器存放目錄檢查與引導
@@ -147,11 +119,11 @@ public partial class App : Application
             }
 
             // 6. 建構組合根並載入主畫面
-            CompositionRoot = new AppCompositionRoot(serversRoot, uiService, settingsManager);
+            CompositionRoot = new AppCompositionRoot(serversRoot, uiService, settingsManager, processRunner);
 
             uiService.PostToUi(() =>
             {
-                mainWindow.InitializeViewModel(CompositionRoot);
+                mainWindow.InitializeViewModel(CompositionRoot, uiService);
                 mainWindow.Activate();
                 CompositionRoot.StartBackgroundWarmup();
 

@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using MinecraftServerManager.Core.Loaders;
+using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
@@ -126,8 +127,15 @@ public sealed partial class LoaderInstallerService(
             throw new InvalidOperationException($"找不到 PaperMC {minecraftVersion} 的伺服器下載連結");
         }
 
-        string targetJarName = !string.IsNullOrWhiteSpace(fileName) ? fileName : "paper.jar";
-        string targetJarPath = Path.Combine(serverDirectory, targetJarName);
+        // API 回傳檔名不可信任：僅取檔名部分且須為 .jar，並確認位於伺服器目錄內
+        string? apiJarName = string.IsNullOrWhiteSpace(fileName) ? null : Path.GetFileName(fileName);
+        string targetJarName = apiJarName is not null && ModHelpers.IsJarFileName(apiJarName) ? apiJarName : "paper.jar";
+        string stableServerDir = SafeFileSystem.ResolveStableDirectory(serverDirectory, create: true);
+        string targetJarPath = Path.Combine(stableServerDir, targetJarName);
+        if (!SafeFileSystem.IsPathWithin(stableServerDir, targetJarPath, strict: false))
+        {
+            throw new InvalidOperationException($"PaperMC 檔名超出伺服器目錄邊界：{fileName}");
+        }
 
         progress?.Report(new LoaderInstallProgress("downloading", $"正在下載 {targetJarName}...", 20));
 
@@ -155,22 +163,7 @@ public sealed partial class LoaderInstallerService(
     private static (string? DownloadUrl, string? FileName, string? Sha256) ExtractPaperDownloadInfo(string json)
     {
         using var doc = JsonCodec.ParseDocument(json);
-        if (!doc.RootElement.TryGetProperty("downloads", out var downloadsProp) || downloadsProp.ValueKind != JsonValueKind.Object)
-        {
-            return (null, null, null);
-        }
-
-        JsonElement item;
-        if (downloadsProp.TryGetProperty("server:application", out var appProp))
-        {
-            item = appProp;
-        }
-        else
-        {
-            item = downloadsProp.EnumerateObject().FirstOrDefault().Value;
-        }
-
-        if (item.ValueKind != JsonValueKind.Object)
+        if (!MojangVersionCatalog.TryGetPaperDownload(doc.RootElement, out var item))
         {
             return (null, null, null);
         }
@@ -268,8 +261,10 @@ public sealed partial class LoaderInstallerService(
         var uri = new Uri(installerUrl);
         string fileName = Path.GetFileName(uri.AbsolutePath);
         string destination = Path.Combine(_cacheDir, fileName);
+        string hashSidecar = destination + ".sha256";
 
-        if (!SafeFileSystem.FileExists(destination))
+        // 快取安裝器執行前須與下載當下記錄之 SHA-256 相符，否則重新下載
+        if (!await IsCachedInstallerIntactAsync(destination, hashSidecar, cancellationToken).ConfigureAwait(false))
         {
             string? expectedHash = null;
             string expectedAlgorithm = "sha256";
@@ -309,9 +304,29 @@ public sealed partial class LoaderInstallerService(
             {
                 throw new InvalidOperationException($"下載 {loader} 安裝器失敗：{result.Error}");
             }
+
+            await SafeFileSystem.WriteAllTextAsync(hashSidecar, await HashCalculator.Shared.ComputeFileHashAsync(destination, useCache: false, cancellationToken: cancellationToken).ConfigureAwait(false), cancellationToken: cancellationToken).ConfigureAwait(false);
         }
 
         return destination;
+    }
+
+    private static async Task<bool> IsCachedInstallerIntactAsync(string jarPath, string hashSidecar, CancellationToken cancellationToken)
+    {
+        if (!SafeFileSystem.FileExists(jarPath) || !SafeFileSystem.FileExists(hashSidecar))
+        {
+            return false;
+        }
+
+        string recorded = (await SafeFileSystem.ReadAllTextAsync(hashSidecar, cancellationToken: cancellationToken).ConfigureAwait(false)).Trim();
+        string actual = await HashCalculator.Shared.ComputeFileHashAsync(jarPath, useCache: false, cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (actual.Length > 0 && string.Equals(recorded, actual, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        Logger.Warning("快取安裝器雜湊不符，將重新下載: {Path}", jarPath);
+        return false;
     }
 
     private static string? ExtractValidHexHash(string? text, int expectedLength)
@@ -386,12 +401,6 @@ public sealed partial class LoaderInstallerService(
             WorkingDirectory: serverDirectory);
     }
 
-    internal static (string? Url, string? Sha1) ExtractServerDownloadInfo(string metaJson)
-    {
-        using var doc = JsonCodec.ParseDocument(metaJson);
-        return ExtractServerDownloadInfo(doc);
-    }
-
     private static (string? Url, string? Sha1) ExtractServerDownloadInfo(JsonDocument doc)
     {
         if (doc.RootElement.TryGetProperty("downloads", out var dl) &&
@@ -428,20 +437,19 @@ public sealed partial class LoaderInstallerService(
                 return _current;
             }
 
-            string lower = line.ToLowerInvariant();
-            if (lower.Contains("successfully installed") || lower.Contains("installation complete") || lower.Contains("all done"))
+            if (line.Contains("successfully installed", StringComparison.OrdinalIgnoreCase) || line.Contains("installation complete", StringComparison.OrdinalIgnoreCase) || line.Contains("all done", StringComparison.OrdinalIgnoreCase))
             {
                 _current = 98;
             }
-            else if (lower.Contains("patching") || lower.Contains("remapping") || lower.Contains("injecting"))
+            else if (line.Contains("patching", StringComparison.OrdinalIgnoreCase) || line.Contains("remapping", StringComparison.OrdinalIgnoreCase) || line.Contains("injecting", StringComparison.OrdinalIgnoreCase))
             {
                 _current = Math.Max(_current, 85);
             }
-            else if (lower.Contains("processor") || lower.Contains("processing") || lower.Contains("applying"))
+            else if (line.Contains("processor", StringComparison.OrdinalIgnoreCase) || line.Contains("processing", StringComparison.OrdinalIgnoreCase) || line.Contains("applying", StringComparison.OrdinalIgnoreCase))
             {
                 _current = Math.Max(_current, Math.Min(80, _current + 2));
             }
-            else if (lower.Contains("downloading") || lower.Contains("extracting") || lower.Contains("task"))
+            else if (line.Contains("downloading", StringComparison.OrdinalIgnoreCase) || line.Contains("extracting", StringComparison.OrdinalIgnoreCase) || line.Contains("task", StringComparison.OrdinalIgnoreCase))
             {
                 _current = Math.Max(_current, Math.Min(65, _current + 1));
             }

@@ -1,3 +1,4 @@
+using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.Servers;
@@ -14,7 +15,7 @@ public sealed partial class ServerManagerTests : IDisposable
     {
         _testRoot = Path.Combine(Path.GetTempPath(), "msm-servermgr-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testRoot);
-        _manager = new ServerManager(_testRoot, new ServerInspector(new ServerDirectorySizeService()));
+        _manager = TestServerManagers.Create(_testRoot);
     }
 
     public void Dispose()
@@ -128,7 +129,7 @@ public sealed partial class ServerManagerTests : IDisposable
             memoryMinMb: 8192,
             path: dir);
 
-        ServerManager.UpdateStartScriptMemory(dir, config);
+        StartScriptWriter.UpdateMemory(dir, config);
 
         string updated = File.ReadAllText(batPath);
         Assert.Contains("-Xms8192M", updated);
@@ -152,7 +153,7 @@ public sealed partial class ServerManagerTests : IDisposable
             memoryMinMb: 4096,
             path: dir);
 
-        ServerManager.UpdateStartScriptMemory(dir, config);
+        StartScriptWriter.UpdateMemory(dir, config);
 
         string updated = File.ReadAllText(batPath);
         Assert.Contains("-Xms4096M -Xmx8192M", updated);

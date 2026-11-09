@@ -41,6 +41,35 @@ internal static class MojangVersionCatalog
         return new($"{PaperProjectUrl}/versions/{Uri.EscapeDataString(minecraftVersion.Trim())}/builds/{segment}");
     }
 
+    /// <summary>
+    /// 取得 Paper build 的下載描述：優先 <c>server:application</c>，否則取第一個含 <c>url</c> 的項目
+    /// </summary>
+    public static bool TryGetPaperDownload(JsonElement build, out JsonElement download)
+    {
+        download = default;
+        if (!build.TryGetProperty("downloads", out var downloads) || downloads.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (downloads.TryGetProperty("server:application", out var application) && application.ValueKind == JsonValueKind.Object)
+        {
+            download = application;
+            return true;
+        }
+
+        foreach (var property in downloads.EnumerateObject())
+        {
+            if (property.Value.ValueKind == JsonValueKind.Object && property.Value.TryGetProperty("url", out _))
+            {
+                download = property.Value;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static string GetVersionsCachePath(string cacheDirectory) =>
         Path.Combine(cacheDirectory, VersionsCacheFileName);
 
@@ -145,12 +174,6 @@ internal static class MojangVersionCatalog
         return null;
     }
 
-    internal static List<LoaderVersion> ParseManifest(string json)
-    {
-        using var doc = JsonCodec.ParseDocument(json);
-        return ParseManifest(doc);
-    }
-
     /// <summary>
     /// 解析官方 Manifest：正式版僅保留具官方 server.jar 者並標記 Stable，其餘標記為非穩定版
     /// </summary>
@@ -188,7 +211,7 @@ internal static class MojangVersionCatalog
             }
         }
 
-        return [.. list.OrderByDescending(static v => VersionValue.TryParse(v.Version, out var val) ? val : VersionValue.Zero)];
+        return [.. list.OrderByDescending(static v => VersionValue.ParseOrZero(v.Version))];
     }
 
     /// <summary>

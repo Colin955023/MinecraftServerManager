@@ -47,7 +47,7 @@ public sealed partial class SortableTableHeader : UserControl
             nameof(ColumnWidth),
             typeof(GridLength),
             typeof(SortableTableHeader),
-            new PropertyMetadata(new GridLength(1, GridUnitType.Star)));
+            new PropertyMetadata(new GridLength(1, GridUnitType.Star), OnColumnWidthChanged));
 
     public static readonly DependencyProperty ShowSplitterProperty =
         DependencyProperty.Register(
@@ -56,17 +56,11 @@ public sealed partial class SortableTableHeader : UserControl
             typeof(SortableTableHeader),
             new PropertyMetadata(true, OnSortStateChanged));
 
-    public static readonly DependencyProperty MinColumnWidthProperty =
-        DependencyProperty.Register(
-            nameof(MinColumnWidth),
-            typeof(double),
-            typeof(SortableTableHeader),
-            new PropertyMetadata(DefaultMinColumnWidth));
-
     private bool _isDraggingSplitter;
     private double _dragStartX;
     private double _dragStartWidth;
     private long _lastDoubleTapTick;
+    private double? _initialPixelWidth;
 
     public event EventHandler<SortRequestedEventArgs>? SortRequested;
     public event EventHandler<string>? AutoFitRequested;
@@ -110,12 +104,6 @@ public sealed partial class SortableTableHeader : UserControl
     {
         get => (bool)GetValue(ShowSplitterProperty);
         set => SetValue(ShowSplitterProperty, value);
-    }
-
-    public double MinColumnWidth
-    {
-        get => (double)GetValue(MinColumnWidthProperty);
-        set => SetValue(MinColumnWidthProperty, value);
     }
 
     public string SortGlyph =>
@@ -166,6 +154,20 @@ public sealed partial class SortableTableHeader : UserControl
         }
 
         return Math.Min(maxEstimatedWidth, DefaultMaxColumnWidth);
+    }
+
+    /// <summary>
+    /// 依資料列顯示文字自動對齊欄寬（不小於欄位初始寬度），經 ColumnWidth 雙向繫結回寫欄寬設定
+    /// </summary>
+    public void FitToContent(IEnumerable<string?> values) =>
+        ColumnWidth = new GridLength(CalculateAutoFitWidth(_initialPixelWidth ?? DefaultMinColumnWidth, values, Text));
+
+    private static void OnColumnWidthChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is SortableTableHeader { _initialPixelWidth: null } header && e.NewValue is GridLength { IsAbsolute: true } width)
+        {
+            header._initialPixelWidth = width.Value;
+        }
     }
 
     private static double EstimateTextPixelWidth(string text)
@@ -244,7 +246,7 @@ public sealed partial class SortableTableHeader : UserControl
         _dragStartX = point.Position.X;
         _dragStartWidth = ColumnWidth.IsAbsolute && ColumnWidth.Value > 0
             ? ColumnWidth.Value
-            : (ActualWidth > 0 ? ActualWidth : Math.Max(DefaultMinColumnWidth, MinColumnWidth));
+            : (ActualWidth > 0 ? ActualWidth : DefaultMinColumnWidth);
         SplitterGrip.CapturePointer(e.Pointer);
     }
 
@@ -258,8 +260,7 @@ public sealed partial class SortableTableHeader : UserControl
         e.Handled = true;
         double currentX = e.GetCurrentPoint(XamlRoot?.Content).Position.X;
         double deltaX = currentX - _dragStartX;
-        double minW = Math.Max(DefaultMinColumnWidth, MinColumnWidth);
-        double newWidth = Math.Clamp(_dragStartWidth + deltaX, minW, DefaultMaxColumnWidth);
+        double newWidth = Math.Clamp(_dragStartWidth + deltaX, DefaultMinColumnWidth, DefaultMaxColumnWidth);
         ColumnWidth = new GridLength(newWidth, GridUnitType.Pixel);
     }
 

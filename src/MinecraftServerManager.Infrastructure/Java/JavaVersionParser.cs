@@ -34,8 +34,7 @@ public static partial class JavaVersionParser
                       (output.Contains("64-Bit", StringComparison.OrdinalIgnoreCase) ||
                        output.Contains("x86_64", StringComparison.OrdinalIgnoreCase) ||
                        output.Contains("amd64", StringComparison.OrdinalIgnoreCase) ||
-                       output.Contains("aarch64", StringComparison.OrdinalIgnoreCase) ||
-                       Environment.Is64BitOperatingSystem);
+                       output.Contains("aarch64", StringComparison.OrdinalIgnoreCase));
 
         string? vendor = DetectVendor(output);
 

@@ -14,19 +14,20 @@ public sealed partial class OperationProgressDialog : ContentDialog, INotifyProp
     private readonly IUiService _ui;
     private bool _completed;
     private bool _allowNestedHide;
+    private int _lastReportedPercent = -1;
+    private string? _lastReportedMessage;
 
     public string DialogHeading { get; }
     public string PhaseMessage { get; private set; }
     public double ProgressValue { get; private set; }
     public string PercentDisplay { get; private set; } = "0%";
 
-    public OperationProgressDialog(IUiService ui, string windowTitle, string heading, string initialMessage)
+    public OperationProgressDialog(IUiService ui, string heading, string initialMessage)
     {
         ArgumentNullException.ThrowIfNull(ui);
         InitializeComponent();
 
         _ui = ui;
-        _ = windowTitle;
         DialogHeading = heading;
         PhaseMessage = initialMessage;
 
@@ -75,6 +76,15 @@ public sealed partial class OperationProgressDialog : ContentDialog, INotifyProp
     public void UpdateProgress(int percent, string message)
     {
         int pct = Math.Clamp(percent, 0, 100);
+
+        // 高頻回報時略過與上次相同的內容，避免無謂的 UI 執行緒排程與整體屬性通知
+        if (pct == _lastReportedPercent && string.Equals(message, _lastReportedMessage, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _lastReportedPercent = pct;
+        _lastReportedMessage = message;
         _ui.RunOnUi(() =>
         {
             ProgressValue = pct;
@@ -83,26 +93,9 @@ public sealed partial class OperationProgressDialog : ContentDialog, INotifyProp
             {
                 PhaseMessage = message;
             }
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ProgressValue)));
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PercentDisplay)));
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PhaseMessage)));
-        });
-    }
 
-    public void UpdateProgress(int current, int total, string message)
-    {
-        int pct = total > 0 ? (int)Math.Clamp(current * 100.0 / total, 0, 100) : 0;
-        _ui.RunOnUi(() =>
-        {
-            ProgressValue = pct;
-            PercentDisplay = $"{pct}% ({current}/{total})";
-            if (!string.IsNullOrWhiteSpace(message))
-            {
-                PhaseMessage = message;
-            }
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ProgressValue)));
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PercentDisplay)));
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PhaseMessage)));
+            // 一次通知所有繫結屬性
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(string.Empty));
         });
     }
 }

@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
-using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.App.Services;
 
@@ -18,15 +17,6 @@ public enum UiMessageLevel
 }
 
 /// <summary>
-/// 系統提示嚴重程度
-/// </summary>
-public enum NotificationLevel
-{
-    Warning,
-    Error,
-}
-
-/// <summary>
 /// 刪除伺服器確認結果列舉
 /// </summary>
 public enum ServerDeleteDecision
@@ -37,26 +27,19 @@ public enum ServerDeleteDecision
 }
 
 /// <summary>
-/// 進度視窗工作階段：提供進度回報器，並於工作結束時關閉視窗
+/// 進度視窗工作階段：提供進度回報器；<see cref="IDisposable.Dispose"/> 時關閉視窗（可重複呼叫）
 /// </summary>
-public interface IProgressSession<TReport>
+public interface IProgressSession<TReport> : IDisposable
 {
     public IProgress<TReport> Progress { get; }
-
-    /// <summary>
-    /// 標示工作已完成並關閉視窗
-    /// </summary>
-    public void Complete();
 }
 
 /// <summary>
-/// 通用作業進度視窗控制點
+/// 通用作業進度視窗控制點；<see cref="IDisposable.Dispose"/> 時關閉視窗（可重複呼叫）
 /// </summary>
-public interface IOperationProgress
+public interface IOperationProgress : IDisposable
 {
     public void UpdateProgress(int current, int total, string message);
-
-    public void Close();
 }
 
 /// <summary>
@@ -91,11 +74,9 @@ public interface IUiService
         UiMessageLevel level = UiMessageLevel.Question);
 
     /// <summary>
-    /// 於螢幕右下角顯示非阻塞式浮動提示（Toast），自動淡出
+    /// 通知提示唯一入口：資訊、成功與警告以右上角 InfoBar 顯示並自動關閉；錯誤以對話方塊顯示
     /// </summary>
-    public void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3);
-
-    public Task ShowWarningAsync(string message, string title);
+    public void ShowNotification(string message, string? title = null, NotificationType type = NotificationType.Info);
 
     public Task ShowErrorAsync(string message, string title);
 
@@ -134,9 +115,9 @@ public interface IUiService
     /// <summary>
     /// 選取檔案；取消時回傳 null
     /// </summary>
-    public Task<IReadOnlyList<string>?> PickFilesAsync(string title, string filter, bool multiselect = false);
+    public Task<IReadOnlyList<string>?> PickFilesAsync(string title, FileTypeChoice fileType, bool multiselect = false);
 
-    public Task<string?> PickSaveFileAsync(string title, string fileName, string filter);
+    public Task<string?> PickSaveFileAsync(string title, string fileName, FileTypeChoice fileType);
 
     public Task<string?> PickFolderAsync(string title, string? initialDirectory = null);
 
@@ -165,12 +146,12 @@ public interface IUiService
 
     public Task<ServerDeleteDecision> ShowServerDeleteConfirmationAsync(string serverName, int backupCount);
 
-    public Task ShowExportModListAsync(string serverName, IReadOnlyList<ModListExportRow> rows, IModListExporter exporter, IExternalLauncher? launcher);
+    public Task ShowExportModListAsync(string serverName, IReadOnlyList<ModListExportRow> rows, IModListExporter exporter, IExternalLauncher launcher);
 
     /// <summary>
     /// 顯示初次啟動初始化對話方塊，回傳是否成功完成初始化
     /// </summary>
-    public Task<bool> ShowServerInitializationAsync(ServerConfig config, string javaPath, IServerRuntime runtime);
+    public Task<bool> ShowServerInitializationAsync(ServerInitializationViewModel viewModel);
 
     public IMonitorWindow OpenServerMonitor(ServerMonitorViewModel viewModel);
 

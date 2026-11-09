@@ -32,23 +32,22 @@ public sealed partial class AboutPreferencesViewModelTests : IDisposable
         }
     }
 
+    private AboutPreferencesViewModel Create(IUiService uiService, SettingsManager? settings = null, IUpdateCheckerService? updateChecker = null, IAppUpdateService? appUpdateService = null, Action? onResetWindowSizeRequested = null) =>
+        new(uiService, settings ?? new SettingsManager(_testDir), updateChecker ?? NoOp.Create<IUpdateCheckerService>(), static _ => { }, onResetWindowSizeRequested ?? (static () => { }), NoOp.Create<IExternalLauncher>(), appUpdateService ?? NoOp.Create<IAppUpdateService>());
+
     [Fact]
     public void ShouldAlignWithAppInfo()
     {
         Assert.Equal(AppInfo.Version, AboutPreferencesViewModel.AppVersion);
         Assert.Equal(AppInfo.AppName, AboutPreferencesViewModel.AppDescription);
         Assert.Equal(AppInfo.Author, AboutPreferencesViewModel.AppAuthor);
-        Assert.Equal(AppInfo.RepositoryUrl, AboutPreferencesViewModel.GithubUrl);
-        Assert.Equal("GNU General Public License v3.0 (GPL-3.0)", AppInfo.License);
     }
 
     [Fact]
     public void ManualCheckVisibilityShouldBeInvertedFromAutoUpdate()
     {
-        var vm = new AboutPreferencesViewModel
-        {
-            IsAutoUpdateEnabled = true
-        };
+        var vm = Create(NoOpUiService.Instance);
+        vm.IsAutoUpdateEnabled = true;
         Assert.False(vm.IsManualCheckVisible);
 
         vm.IsAutoUpdateEnabled = false;
@@ -60,29 +59,27 @@ public sealed partial class AboutPreferencesViewModelTests : IDisposable
     {
         var settings = new SettingsManager(_testDir);
         bool windowSizeResetCalled = false;
-        string notificationMsg = string.Empty;
-        var vm = new AboutPreferencesViewModel(
-            settingsManager: settings,
-            notificationSink: (msg, _) => notificationMsg = msg,
-            onResetWindowSizeRequested: () => windowSizeResetCalled = true)
-        {
-            IsAutoUpdateEnabled = false,
-            SelectedThemeModeIndex = 1 // 淺色
-        };
+        var ui = new ManualUiService();
+        var vm = Create(
+            ui,
+            settings,
+            onResetWindowSizeRequested: () => windowSizeResetCalled = true);
+        vm.IsAutoUpdateEnabled = false;
+        vm.SelectedThemeModeIndex = 1; // 淺色
 
         vm.ResetAllSettingsCommand.Execute(null);
 
         Assert.True(vm.IsAutoUpdateEnabled);
         Assert.Equal(0, vm.SelectedThemeModeIndex);
         Assert.True(windowSizeResetCalled);
-        Assert.Empty(notificationMsg);
+        Assert.Empty(ui.Notifications);
     }
 
     [Fact]
     public void SelectAccentColorShouldUpdateSettingsAndViewModel()
     {
         var settings = new SettingsManager(_testDir);
-        var vm = new AboutPreferencesViewModel(settingsManager: settings);
+        var vm = Create(NoOpUiService.Instance, settings);
 
         var customColor = Windows.UI.Color.FromArgb(255, 18, 52, 86);
         vm.SelectAccentColor(customColor);
@@ -114,25 +111,9 @@ public sealed partial class AboutPreferencesViewModelTests : IDisposable
     }
 
     [Fact]
-    public void ServerListColumns_ResetAll_ShouldRestoreDefaultWidths()
-    {
-        var cols = new App.Views.ServerListColumns
-        {
-            NameWidth = new Microsoft.UI.Xaml.GridLength(320),
-            VersionWidth = new Microsoft.UI.Xaml.GridLength(150),
-        };
-
-        cols.ResetAll();
-
-        Assert.Equal(App.Views.ServerListColumns.DefaultNameWidth, cols.NameWidth.Value);
-        Assert.Equal(App.Views.ServerListColumns.DefaultVersionWidth, cols.VersionWidth.Value);
-        Assert.True(cols.PathWidth.IsStar);
-    }
-
-    [Fact]
     public async Task CheckForUpdatesShouldNotifyWhenAlreadyLatestVersion()
     {
-        string notification = string.Empty;
+        var ui = new ManualUiService();
         var mockChecker = new MockUpdateChecker(new UpdateCheckResult(
             HasUpdate: false,
             CurrentVersion: "2.1.0",
@@ -143,13 +124,13 @@ public sealed partial class AboutPreferencesViewModelTests : IDisposable
             Sha256ChecksumUrl: null,
             ReleasePageUrl: "https://example.com"));
 
-        var vm = new AboutPreferencesViewModel(
-            updateChecker: mockChecker,
-            notificationSink: (msg, _) => notification = msg);
+        var vm = Create(
+            ui,
+            updateChecker: mockChecker);
 
         await vm.CheckForUpdatesCommand.ExecuteAsync(null);
 
-        Assert.Contains("目前已是最新版本", notification);
+        Assert.Contains(ui.Notifications, static n => n.Message.Contains("目前已是最新版本", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -167,10 +148,10 @@ public sealed partial class AboutPreferencesViewModelTests : IDisposable
         var mockUpdateService = new MockAppUpdateService();
         var fakeUi = new ConfirmingUiService(confirmResult: false);
 
-        var vm = new AboutPreferencesViewModel(
+        var vm = Create(
+            fakeUi,
             updateChecker: mockChecker,
-            appUpdateService: mockUpdateService,
-            uiService: fakeUi);
+            appUpdateService: mockUpdateService);
 
         await vm.CheckForUpdatesCommand.ExecuteAsync(null);
 
@@ -193,10 +174,10 @@ public sealed partial class AboutPreferencesViewModelTests : IDisposable
         var mockUpdateService = new MockAppUpdateService();
         var fakeUi = new ConfirmingUiService(confirmResult: true);
 
-        var vm = new AboutPreferencesViewModel(
+        var vm = Create(
+            fakeUi,
             updateChecker: mockChecker,
-            appUpdateService: mockUpdateService,
-            uiService: fakeUi);
+            appUpdateService: mockUpdateService);
 
         await vm.CheckForUpdatesCommand.ExecuteAsync(null);
 
@@ -230,7 +211,7 @@ public sealed partial class AboutPreferencesViewModelTests : IDisposable
     {
         var settings = new SettingsManager(_testDir);
         settings.SetCustomAccentColor("#112233");
-        var vm = new AboutPreferencesViewModel(settingsManager: settings);
+        var vm = Create(NoOpUiService.Instance, settings);
 
         vm.ResetAccentColor();
 

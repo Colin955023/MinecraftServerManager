@@ -66,21 +66,8 @@ public static partial class MinecraftVersionSemantics
             return false;
         }
 
-        // 明確為舊版 1.0～1.13.x 則不支援
-        if (VersionValue.TryParse(minecraftVersion, out var parsed))
-        {
-            if (parsed.Major == 1 && parsed.Minor < 14)
-            {
-                return false;
-            }
-            if (parsed.Major >= 1)
-            {
-                return true;
-            }
-        }
-
-        // 快照版本或非標準版本格式（如 24w..., 26.3...），預設相容
-        return true;
+        // 明確為舊版 1.0～1.13.x 則不支援；快照版本或非標準版本格式（如 24w..., 26.3...）預設相容
+        return !(VersionValue.TryParse(minecraftVersion, out var parsed) && parsed.Major == 1 && parsed.Minor < 14);
     }
 
     /// <summary>
@@ -152,7 +139,7 @@ public static partial class MinecraftVersionSemantics
 
         if (major >= 26)
         {
-            return minor == 0 ? $"{major}.0" : $"{major}.{minor}";
+            return $"{major}.{minor}";
         }
 
         if (major >= 20)

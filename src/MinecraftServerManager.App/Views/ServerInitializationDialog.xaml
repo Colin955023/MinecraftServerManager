@@ -1,6 +1,7 @@
 ﻿<Window x:Class="MinecraftServerManager.App.Views.ServerInitializationDialog"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:MinecraftServerManager.App.Controls">
 
     <Grid Background="{ThemeResource WindowBrush}">
         <Grid Margin="20"
@@ -14,27 +15,25 @@
             <!-- 頂部標題與狀態 -->
             <StackPanel Grid.Row="0"
                 Spacing="4">
-                <TextBlock x:Name="TitleText"
-                    Text="伺服器初次啟動初始化"
+                <TextBlock Text="{x:Bind ViewModel.TitleText, Mode=OneWay}"
                     Style="{ThemeResource TitleTextBlockStyle}" />
                 <StackPanel Orientation="Horizontal"
                     Spacing="8">
-                    <ProgressBar x:Name="InitProgressBar"
-                        IsIndeterminate="True"
+                    <ProgressBar IsIndeterminate="True"
                         Width="80"
                         Height="4"
-                        VerticalAlignment="Center" />
-                    <TextBlock x:Name="StatusText"
-                        Text="狀態：正在準備啟動伺服器執行初次世界生成與設定..."
+                        VerticalAlignment="Center"
+                        Visibility="{x:Bind ViewModel.IsProgressVisible, Mode=OneWay}" />
+                    <TextBlock Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Style="{ThemeResource CaptionTextBlockStyle}"
                         VerticalAlignment="Center" />
                 </StackPanel>
             </StackPanel>
 
-            <!-- 中間：主控台記錄輸出 (黑底綠字) -->
+            <!-- 中間：主控台記錄輸出 -->
             <Border Grid.Row="1"
-                Background="#0C0C0C"
+                Background="{ThemeResource ConsoleBackgroundBrush}"
                 BorderBrush="{ThemeResource BorderBrush}"
                 BorderThickness="1"
                 CornerRadius="8"
@@ -43,8 +42,10 @@
                     VerticalScrollBarVisibility="Auto"
                     HorizontalScrollBarVisibility="Disabled">
                     <TextBox x:Name="ConsoleBox"
-                        Background="#0C0C0C"
-                        Foreground="#00FF66"
+                        Text="{x:Bind ViewModel.ConsoleText, Mode=OneWay}"
+                        TextChanged="ConsoleBox_TextChanged"
+                        Background="{ThemeResource ConsoleBackgroundBrush}"
+                        Foreground="{ThemeResource ConsoleForegroundBrush}"
                         FontFamily="Consolas, Cascadia Code, Courier New"
                         FontSize="12"
                         BorderThickness="0"
@@ -64,16 +65,14 @@
 
                 <!-- 左側：取消按鈕 -->
                 <Button Grid.Column="0"
-                    x:Name="CancelButton"
                     Content="取消初始化"
                     Style="{ThemeResource DefaultButtonStyle}"
                     Click="CancelButton_Click" />
 
                 <!-- 中間：倒數計時提示 -->
                 <TextBlock Grid.Column="1"
-                    x:Name="CountdownText"
-                    Text=""
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="{x:Bind ViewModel.CountdownText, Mode=OneWay}"
+                    controls:ThemeBrush.ForegroundKey="{x:Bind CountdownBrushKey(ViewModel.CountdownState), Mode=OneWay}"
                     Style="{ThemeResource CaptionTextBlockStyle}"
                     VerticalAlignment="Center"
                     HorizontalAlignment="Center"
@@ -81,10 +80,9 @@
 
                 <!-- 右側：完成按鈕 -->
                 <Button Grid.Column="2"
-                    x:Name="CompleteButton"
-                    Content="完成初始化"
+                    Content="{x:Bind ViewModel.CompleteButtonText, Mode=OneWay}"
                     Style="{ThemeResource AccentButtonStyle}"
-                    IsEnabled="False"
+                    IsEnabled="{x:Bind ViewModel.IsCompleteEnabled, Mode=OneWay}"
                     Click="CompleteButton_Click" />
             </Grid>
         </Grid>

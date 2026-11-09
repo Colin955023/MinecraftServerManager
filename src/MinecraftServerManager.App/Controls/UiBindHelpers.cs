@@ -1,7 +1,4 @@
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Media;
-using MinecraftServerManager.Core.Utilities;
-using Windows.UI;
 
 namespace MinecraftServerManager.App.Controls;
 
@@ -10,19 +7,25 @@ namespace MinecraftServerManager.App.Controls;
 /// </summary>
 public static class UiBindHelpers
 {
-    private static readonly Color GreenColor = Color.FromArgb(255, 46, 204, 113);
-    private static readonly Color GrayColor = Color.FromArgb(255, 149, 165, 166);
-    private static readonly Color RedColor = Color.FromArgb(255, 231, 76, 60);
-
-    private static readonly SolidColorBrush GreenBrush = new(GreenColor);
-    private static readonly SolidColorBrush GrayBrush = new(GrayColor);
-    private static readonly SolidColorBrush RedBrush = new(RedColor);
+    /// <summary>
+    /// 成功狀態文字主題資源鍵
+    /// </summary>
+    public const string SuccessTextBrushKey = "SuccessTextBrush";
 
     /// <summary>
-    /// 布林值轉為可見性（true 為 Visible，false 為 Collapsed）
+    /// 錯誤狀態文字主題資源鍵
     /// </summary>
-    public static Visibility BoolToVis(bool value) =>
-        value ? Visibility.Visible : Visibility.Collapsed;
+    public const string DangerTextBrushKey = "DangerTextBrush";
+
+    /// <summary>
+    /// 警告狀態文字主題資源鍵
+    /// </summary>
+    public const string WarningTextBrushKey = "WarningBrush";
+
+    /// <summary>
+    /// 次要文字主題資源鍵
+    /// </summary>
+    public const string MutedTextBrushKey = "MutedTextBrush";
 
     /// <summary>
     /// 反轉布林值轉為可見性（true 為 Collapsed，false 為 Visible）
@@ -37,15 +40,10 @@ public static class UiBindHelpers
         string.IsNullOrWhiteSpace(value) ? Visibility.Collapsed : Visibility.Visible;
 
     /// <summary>
-    /// 錯誤狀態筆刷
+    /// 錯誤狀態前景主題資源鍵（搭配 <see cref="ThemeBrush"/> 使用）
     /// </summary>
-    public static SolidColorBrush ErrorBrush(bool hasError) =>
-        hasError ? RedBrush : GrayBrush;
-
-    /// <summary>
-    /// 格式化檔案大小為使用者友善單位（B / KiB / MiB / GiB / TiB）
-    /// </summary>
-    public static string FormatBytes(long bytes) => UnitFormatter.FormatBytes(bytes);
+    public static string ErrorBrushKey(bool hasError) =>
+        hasError ? DangerTextBrushKey : MutedTextBrushKey;
 
     /// <summary>
     /// 相容狀態字型粗細
@@ -54,8 +52,8 @@ public static class UiBindHelpers
         isRecommended ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
 
     /// <summary>
-    /// 相容狀態前景色
+    /// 相容狀態前景主題資源鍵（搭配 <see cref="ThemeBrush"/> 使用）
     /// </summary>
-    public static SolidColorBrush FormatStatusBrush(bool isRecommended) =>
-        isRecommended ? GreenBrush : GrayBrush;
+    public static string FormatStatusBrushKey(bool isRecommended) =>
+        isRecommended ? SuccessTextBrushKey : MutedTextBrushKey;
 }

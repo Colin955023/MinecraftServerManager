@@ -164,7 +164,7 @@
 
       <!-- 終端機紀錄檢視區 (黑底綠字) -->
       <Border Grid.Column="0"
-        Background="#0C0C0C"
+        Background="{ThemeResource ConsoleBackgroundBrush}"
         BorderBrush="{ThemeResource BorderBrush}"
         BorderThickness="1"
         CornerRadius="8"
@@ -182,7 +182,7 @@
             <TextBlock Text="📜 伺服器終端輸出"
               FontSize="13"
               FontWeight="SemiBold"
-              Foreground="#888888"
+              Foreground="{ThemeResource ConsoleMutedTextBrush}"
               VerticalAlignment="Center" />
             <Button HorizontalAlignment="Right"
               Content="📋 複製全部紀錄"
@@ -212,7 +212,7 @@
                 <TextBlock Text="{x:Bind}"
                   FontFamily="Consolas, Cascadia Code, Courier New"
                   FontSize="12"
-                  Foreground="#00FF66"
+                  Foreground="{ThemeResource ConsoleForegroundBrush}"
                   TextWrapping="NoWrap"
                   IsTextSelectionEnabled="True"
                   Padding="2,1" />
@@ -247,7 +247,7 @@
             Foreground="{ThemeResource MutedTextBrush}"
             HorizontalAlignment="Center"
             VerticalAlignment="Center"
-            Visibility="{x:Bind controls:UiBindHelpers.BoolToVis(ViewModel.HasNoOnlinePlayers), Mode=OneWay}" />
+            Visibility="{x:Bind ViewModel.HasNoOnlinePlayers, Mode=OneWay}" />
           <ListView Grid.Row="1"
             ItemsSource="{x:Bind ViewModel.OnlinePlayers, Mode=OneWay}"
             Background="Transparent"
@@ -284,8 +284,7 @@
         <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
 
-      <TextBox x:Name="CommandInputBox"
-        Grid.Column="0"
+      <TextBox Grid.Column="0"
         Text="{x:Bind ViewModel.CommandText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
         IsEnabled="{x:Bind ViewModel.IsServerRunning, Mode=OneWay}"
         KeyDown="CommandInputBox_KeyDown"

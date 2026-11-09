@@ -8,8 +8,8 @@ namespace MinecraftServerManager.Infrastructure.Logging;
 /// </summary>
 public sealed class RotatingFileLoggerOptions
 {
-    public const long DefaultMaxFileBytes = 10 * 1024 * 1024; // 10 MiB
-    public const int DefaultMaxArchiveFiles = 10;
+    private const long DefaultMaxFileBytes = 10 * 1024 * 1024; // 10 MiB
+    private const int DefaultMaxArchiveFiles = 10;
 
     public string LogDirectory { get; set; } = RuntimePaths.GetLogDir();
 
@@ -20,7 +20,5 @@ public sealed class RotatingFileLoggerOptions
     public LogLevel MinimumLevel { get; set; } = LogLevel.Information;
 
     public int ProcessId { get; set; } = Environment.ProcessId;
-
-    public bool OutputToConsole { get; set; } = RuntimePaths.IsDevelopmentEnvironment();
 
 }

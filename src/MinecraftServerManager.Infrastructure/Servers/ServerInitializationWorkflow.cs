@@ -1,5 +1,7 @@
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Domain.Servers;
+using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
@@ -14,13 +16,16 @@ public sealed class ServerInitializationWorkflow : IDisposable
     private static readonly TimeSpan ReadyStopTimeout = TimeSpan.FromSeconds(30);
 
     private readonly IServerRuntime _runtime;
+    private readonly IServerLaunchPlanner _launchPlanner;
     private volatile bool _readyDetected;
     private bool _disposed;
 
-    public ServerInitializationWorkflow(IServerRuntime runtime)
+    public ServerInitializationWorkflow(IServerRuntime runtime, IServerLaunchPlanner launchPlanner)
     {
         ArgumentNullException.ThrowIfNull(runtime);
+        ArgumentNullException.ThrowIfNull(launchPlanner);
         _runtime = runtime;
+        _launchPlanner = launchPlanner;
         _runtime.ServerReady += OnServerReady;
     }
 
@@ -30,18 +35,21 @@ public sealed class ServerInitializationWorkflow : IDisposable
     public bool ReadyDetected => _readyDetected;
 
     /// <summary>
-    /// 以指定的啟動檔案啟動伺服器行程
+    /// 解析初次啟動所用的啟動檔：存在啟動腳本時優先使用，否則使用 server.jar
     /// </summary>
-    public Task StartAsync(string javaExecutablePath, ServerConfig config, string executableName)
+    public static string ResolveExecutableName(string serverPath) =>
+        !string.IsNullOrWhiteSpace(serverPath) && SafeFileSystem.FileExists(Path.Combine(serverPath, ServerDefaults.StartServerBatFileName))
+            ? ServerDefaults.StartServerBatFileName
+            : "server.jar";
+
+    /// <summary>
+    /// 以指定的啟動檔案啟動伺服器行程（經啟動規劃器套用安全檢驗、GC 與 nogui 參數）
+    /// </summary>
+    public async Task StartAsync(string javaExecutablePath, ServerConfig config, string executableName)
     {
         ArgumentNullException.ThrowIfNull(config);
-        return _runtime.StartAsync(
-            javaExecutablePath: javaExecutablePath,
-            serverDirectory: config.Path,
-            executableName: executableName,
-            memoryMaxMb: config.MemoryMaxMb,
-            memoryMinMb: config.MemoryMinMb,
-            customJvmArgs: config.JvmArgs);
+        var plan = await Task.Run(() => _launchPlanner.CreatePlan(config, executableName, javaExecutablePath)).ConfigureAwait(false);
+        await _runtime.StartAsync(plan).ConfigureAwait(false);
     }
 
     /// <summary>

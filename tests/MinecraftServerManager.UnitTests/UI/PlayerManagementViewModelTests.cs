@@ -22,76 +22,10 @@ public sealed class PlayerManagementViewModelTests
         await vm.InitializeAsync();
 
         Assert.Single(vm.FilteredUserCache);
-        Assert.Single(vm.Operators);
+        var row = Assert.Single(vm.OperatorRows);
+        Assert.True(row.IsOp);
         Assert.Empty(vm.Whitelist);
         Assert.False(vm.HasUnsavedChanges);
-        Assert.Equal("Steve", vm.SelectedOpCandidate?.Name);
-    }
-
-    [Fact]
-    public async Task AddOperator_WhenValidCandidate_AddsAndSetsHasUnsavedChanges()
-    {
-        var fakeStore = new FakePlayerConfigStore(new ServerPlayerConfigBundle(
-            UserCache: [new ServerUserCacheEntry("Alex", "aaaa-bbbb", "2026-01-01")],
-            Operators: [],
-            Whitelist: [],
-            BannedPlayers: [],
-            BannedIps: []));
-
-        var vm = new PlayerManagementViewModel("TestServer", "C:\\fake\\server", fakeStore, NoOpUiService.Instance);
-        await vm.InitializeAsync();
-
-        vm.SelectedOpCandidate = vm.AvailableCandidates[0];
-        vm.SelectedOpLevel = PlayerManagementViewModel.OpLevelOptions[1]; // Level 3
-        vm.OpBypassesPlayerLimit = true;
-
-        vm.AddOperatorCommand.Execute(null);
-
-        var item = Assert.Single(vm.Operators);
-        Assert.Equal("Alex", item.Name);
-        Assert.Equal(3, vm.Operators[0].Level);
-        Assert.True(vm.Operators[0].BypassesPlayerLimit);
-        Assert.True(vm.HasUnsavedChanges);
-    }
-
-    [Fact]
-    public async Task AddOperator_WhenAlreadyExists_DoesNotDuplicate()
-    {
-        var fakeStore = new FakePlayerConfigStore(new ServerPlayerConfigBundle(
-            UserCache: [new ServerUserCacheEntry("Alex", "aaaa-bbbb", "2026-01-01")],
-            Operators: [new ServerOperatorEntry("aaaa-bbbb", "Alex", 4, false)],
-            Whitelist: [],
-            BannedPlayers: [],
-            BannedIps: []));
-
-        var vm = new PlayerManagementViewModel("TestServer", "C:\\fake\\server", fakeStore, NoOpUiService.Instance);
-        await vm.InitializeAsync();
-
-        vm.SelectedOpCandidate = vm.AvailableCandidates[0];
-        vm.AddOperatorCommand.Execute(null);
-
-        Assert.Single(vm.Operators);
-        Assert.Contains("已在管理員名單中", vm.StatusMessage);
-    }
-
-    [Fact]
-    public async Task RemoveOperator_RemovesEntryAndSetsHasUnsavedChanges()
-    {
-        var op = new ServerOperatorEntry("aaaa-bbbb", "Alex", 4, false);
-        var fakeStore = new FakePlayerConfigStore(new ServerPlayerConfigBundle(
-            UserCache: [],
-            Operators: [op],
-            Whitelist: [],
-            BannedPlayers: [],
-            BannedIps: []));
-
-        var vm = new PlayerManagementViewModel("TestServer", "C:\\fake\\server", fakeStore, NoOpUiService.Instance);
-        await vm.InitializeAsync();
-
-        vm.RemoveOperatorCommand.Execute(vm.Operators[0]);
-
-        Assert.Empty(vm.Operators);
-        Assert.True(vm.HasUnsavedChanges);
     }
 
     [Fact]

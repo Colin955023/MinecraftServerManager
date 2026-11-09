@@ -5,7 +5,6 @@ using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Servers;
-using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
@@ -14,15 +13,13 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 
 public sealed partial class ServerInspector : IServerInspector
 {
+    private static readonly (string Name, string Display, string[] Segments)[] SimpleLoaderLibraries =
+    [
+        ("fabric", "Fabric", ["net", "fabricmc", "fabric-loader"]),
+        ("quilt", "Quilt", ["org", "quiltmc", "quilt-loader"]),
+    ];
+
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerInspector));
-    private readonly IServerDirectorySizeService _directorySizeService;
-
-    public ServerInspector(IServerDirectorySizeService directorySizeService)
-    {
-        ArgumentNullException.ThrowIfNull(directorySizeService);
-        _directorySizeService = directorySizeService;
-    }
-
     private static readonly string[] ServerJarCandidates =
     [
         "run.bat",
@@ -45,56 +42,32 @@ public sealed partial class ServerInspector : IServerInspector
 
     private static readonly string[] VersionJsonCandidateProperties = ["id", "name", "release_target"];
 
-    public async Task<ServerInspection> InspectAsync(
+    /// <summary>
+    /// 於背景執行緒讀取伺服器根目錄少量檔案完成偵測（不走訪世界資料）
+    /// </summary>
+    public Task<ServerInspection> InspectAsync(
         string serverDirectory,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
+        CancellationToken cancellationToken = default) =>
+        Task.Run(() => Inspect(serverDirectory), cancellationToken);
 
+    private static ServerInspection Inspect(string serverDirectory)
+    {
         try
         {
             string stableDir = SafeFileSystem.ResolveStableDirectory(serverDirectory);
             if (!SafeFileSystem.DirectoryExists(stableDir))
             {
-                return new ServerInspection(
-                    path: serverDirectory,
-                    revision: string.Empty,
-                    isCandidate: false,
-                    error: "找不到伺服器目錄");
+                Logger.Warning("伺服器偵測失敗，找不到目錄: {Path}", serverDirectory);
+                return new ServerInspection { Path = serverDirectory };
             }
 
             var entries = SafeFileSystem.ListBoundedDirectory(stableDir, maxEntries: 512, maxTotalBytes: SafeFileSystem.DefaultMaxTotalBytes, rejectReparse: false);
             var files = entries.Where(static e => !e.IsDirectory).Select(static e => Path.GetFileName(e.FullPath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            var eulaState = InspectEula(stableDir, files);
             var launchTarget = InspectLaunchTarget(stableDir, files);
             var (loaderType, loaderVersion, mcVersion, loaderTypeSource, loaderVersionSource, mcVersionSource) =
                 InspectLoaderAndVersion(stableDir, files, launchTarget);
             var (maxMb, minMb) = InspectMemory(stableDir);
-            long totalSizeBytes = await _directorySizeService.CalculateServerSizeAsync(stableDir, cancellationToken).ConfigureAwait(false);
-
-            bool isCandidate = launchTarget.Kind != LaunchTargetKind.None || files.Contains(ServerDefaults.ServerPropertiesFileName);
-            bool launchable = launchTarget.Kind != LaunchTargetKind.None && eulaState == EulaState.Accepted;
-            bool statusReady = launchable && MinecraftVersion.TryParse(mcVersion, out _);
-
-            var revisionBuilder = new StringBuilder();
-            foreach (string? file in files.OrderBy(static f => f, StringComparer.OrdinalIgnoreCase))
-            {
-                revisionBuilder.Append(file).Append(';');
-            }
-            string revision = HashCalculator.ComputeSha256(revisionBuilder.ToString());
-
-            var evidence = new Dictionary<string, string>
-            {
-                ["EulaState"] = eulaState.ToString(),
-                ["LaunchTarget"] = launchTarget.Value,
-                ["Loader"] = loaderType,
-                ["MinecraftVersion"] = mcVersion,
-                ["LoaderVersion"] = loaderVersion,
-                ["LoaderTypeSource"] = loaderTypeSource,
-                ["LoaderVersionSource"] = loaderVersionSource,
-                ["MinecraftVersionSource"] = mcVersionSource,
-            };
 
             Logger.Information(
                 "伺服器「{Path}」偵測結果: Minecraft版本={McVersion} (來源: {McSource}), 載入器={LoaderType} (來源: {LoaderSource}), 載入器版本={LoaderVersion} (來源: {LoaderVerSource})",
@@ -106,66 +79,22 @@ public sealed partial class ServerInspector : IServerInspector
                 loaderVersion,
                 loaderVersionSource);
 
-            return new ServerInspection(
-                path: stableDir,
-                revision: revision,
-                isCandidate: isCandidate,
-                error: string.Empty,
-                loaderType: loaderType,
-                minecraftVersion: mcVersion,
-                loaderVersion: loaderVersion,
-                evidence: evidence,
-                launchTarget: launchTarget,
-                memoryMaxMb: maxMb,
-                memoryMinMb: minMb,
-                eulaState: eulaState,
-                statusReady: statusReady,
-                launchable: launchable,
-                totalSizeBytes: totalSizeBytes);
+            return new ServerInspection
+            {
+                Path = stableDir,
+                IsCandidate = launchTarget.Kind != LaunchTargetKind.None || files.Contains(ServerDefaults.ServerPropertiesFileName),
+                LoaderType = loaderType,
+                MinecraftVersion = mcVersion,
+                LoaderVersion = loaderVersion,
+                LaunchTarget = launchTarget,
+                MemoryMaxMb = maxMb,
+                MemoryMinMb = minMb,
+            };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.Error(ex, "伺服器偵測發生例外: {Path}, 原因: {Message}", serverDirectory, ex.Message);
-            return new ServerInspection(
-                path: serverDirectory,
-                revision: string.Empty,
-                isCandidate: false,
-                error: ex.Message);
-        }
-    }
-
-    private static EulaState InspectEula(string directory, HashSet<string> files)
-    {
-        if (!files.Contains(ServerDefaults.EulaFileName))
-        {
-            return EulaState.Missing;
-        }
-
-        try
-        {
-            string path = Path.Combine(directory, ServerDefaults.EulaFileName);
-            if (SafeFileSystem.GetFileLength(path) > MaxMetadataBytes)
-            {
-                return EulaState.Missing;
-            }
-
-            string content = SafeFileSystem.ReadAllText(path, Encoding.UTF8);
-            if (content.Contains("eula=true", StringComparison.OrdinalIgnoreCase))
-            {
-                return EulaState.Accepted;
-            }
-
-            if (content.Contains("eula=false", StringComparison.OrdinalIgnoreCase))
-            {
-                return EulaState.Rejected;
-            }
-
-            return EulaState.Missing;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Logger.Warning("讀取 eula.txt 失敗: {Message}", ex.Message);
-            return EulaState.Missing;
+            return new ServerInspection { Path = serverDirectory };
         }
     }
 
@@ -350,51 +279,32 @@ public sealed partial class ServerInspector : IServerInspector
                 }
             }
 
-            // Fabric
-            string fabricLib = Path.Combine(librariesDir, "net", "fabricmc", "fabric-loader");
-            if (SafeFileSystem.DirectoryExists(fabricLib))
+            // Fabric / Quilt：libraries 下的版本資料夾名稱即為載入器版本
+            foreach (var (name, display, segments) in SimpleLoaderLibraries)
             {
-                loaderType = "fabric";
-                loaderTypeSource = "libraries/net/fabricmc/fabric-loader";
-                try
+                string libDir = Path.Combine([librariesDir, .. segments]);
+                if (!SafeFileSystem.DirectoryExists(libDir))
                 {
-                    var subDirs = SafeFileSystem.ListBoundedDirectory(fabricLib, maxEntries: 16, maxTotalBytes: SafeFileSystem.DefaultMaxTotalBytes, rejectReparse: false)
-                        .Where(static e => e.IsDirectory)
-                        .ToList();
-                    if (subDirs.Count > 0)
-                    {
-                        string verName = Path.GetFileName(subDirs[0].FullPath);
-                        loaderVersion = verName;
-                        loaderVersionSource = $"libraries/net/fabricmc/fabric-loader/{verName}";
-                    }
+                    continue;
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    Logger.Warning("探測 Fabric 函式庫目錄失敗: {Message}", ex.Message);
-                }
-            }
 
-            // Quilt
-            string quiltLib = Path.Combine(librariesDir, "org", "quiltmc", "quilt-loader");
-            if (SafeFileSystem.DirectoryExists(quiltLib))
-            {
-                loaderType = "quilt";
-                loaderTypeSource = "libraries/org/quiltmc/quilt-loader";
+                string relative = "libraries/" + string.Join('/', segments);
+                loaderType = name;
+                loaderTypeSource = relative;
                 try
                 {
-                    var subDirs = SafeFileSystem.ListBoundedDirectory(quiltLib, maxEntries: 16, maxTotalBytes: SafeFileSystem.DefaultMaxTotalBytes, rejectReparse: false)
-                        .Where(static e => e.IsDirectory)
-                        .ToList();
-                    if (subDirs.Count > 0)
+                    var firstVersionDir = SafeFileSystem.ListBoundedDirectory(libDir, maxEntries: 16, maxTotalBytes: SafeFileSystem.DefaultMaxTotalBytes, rejectReparse: false)
+                        .FirstOrDefault(static e => e.IsDirectory);
+                    if (firstVersionDir is not null)
                     {
-                        string verName = Path.GetFileName(subDirs[0].FullPath);
+                        string verName = Path.GetFileName(firstVersionDir.FullPath);
                         loaderVersion = verName;
-                        loaderVersionSource = $"libraries/org/quiltmc/quilt-loader/{verName}";
+                        loaderVersionSource = $"{relative}/{verName}";
                     }
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    Logger.Warning("探測 Quilt 函式庫目錄失敗: {Message}", ex.Message);
+                    Logger.Warning("探測 {Loader} 函式庫目錄失敗: {Message}", display, ex.Message);
                 }
             }
         }

@@ -6,10 +6,8 @@
     <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" />
     <PackageReference Include="xunit.v3" />
-    <PackageReference Include="xunit.runner.visualstudio" />
     <ProjectReference
       Include="..\..\src\MinecraftServerManager.Domain\MinecraftServerManager.Domain.csproj" />
     <ProjectReference
@@ -18,5 +16,8 @@
       Include="..\..\src\MinecraftServerManager.Infrastructure\MinecraftServerManager.Infrastructure.csproj" />
     <ProjectReference
       Include="..\..\src\MinecraftServerManager.App\MinecraftServerManager.App.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Shared\*.cs" Link="Shared\%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

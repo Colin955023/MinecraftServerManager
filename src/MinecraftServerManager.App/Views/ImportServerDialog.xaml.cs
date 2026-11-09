@@ -16,13 +16,6 @@ public sealed partial class ImportServerDialog : ContentDialog
         InitializeComponent();
 
         ViewModel = viewModel;
-        viewModel.RequestClose += success =>
-        {
-            if (success)
-            {
-                Hide();
-            }
-        };
     }
 
     private void Dialog_PrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)

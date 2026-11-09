@@ -1,34 +1,19 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
-using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Serialization;
 
 namespace MinecraftServerManager.Infrastructure.Utilities;
 
-public sealed record JsonReadResult(JsonDocument Document, byte[] RawBytes) : IDisposable
-{
-    public void Dispose() => Document.Dispose();
-}
-
+/// <summary>
+/// JSON 共用入口：一律經 <see cref="AppJsonSerializerContext"/> 來源產生器序列化，失敗時回傳預設值而不擲出
+/// </summary>
 public static class JsonCodec
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(JsonCodec));
+
     public const long DefaultMaxBytes = 2L * 1024 * 1024;
-
-    public static JsonDocument ParseDocument(string json, JsonDocumentOptions options = default) =>
-        JsonDocument.Parse(json, options);
-
-    public static JsonDocument ParseDocument(ReadOnlyMemory<byte> utf8Json, JsonDocumentOptions options = default) =>
-        JsonDocument.Parse(utf8Json, options);
-
-    public static JsonDocument ParseDocument(Stream utf8Json, JsonDocumentOptions options = default) =>
-        JsonDocument.Parse(utf8Json, options);
-
-    public static Task<JsonDocument> ParseDocumentAsync(
-        Stream utf8Json,
-        JsonDocumentOptions options = default,
-        CancellationToken cancellationToken = default) =>
-        JsonDocument.ParseAsync(utf8Json, options, cancellationToken);
 
     private static readonly JsonSerializerOptions CompactOptions = new()
     {
@@ -50,198 +35,29 @@ public static class JsonCodec
     private static readonly AppJsonSerializerContext IndentedContext = new(IndentedOptions);
     private static readonly AppJsonSerializerContext RelaxedContext = new(RelaxedIndentedOptions);
 
-    private static JsonTypeInfo<T> GetTypeInfo<T>(AppJsonSerializerContext context)
-    {
-        if (context.GetTypeInfo(typeof(T)) is not JsonTypeInfo<T> typeInfo)
-        {
-            throw new JsonException($"型別 '{typeof(T).FullName}' 尚未在 AppJsonSerializerContext 中註冊。");
-        }
+    public static JsonDocument ParseDocument(string json, JsonDocumentOptions options = default) =>
+        JsonDocument.Parse(json, options);
 
-        return typeInfo;
-    }
+    public static JsonDocument ParseDocument(ReadOnlyMemory<byte> utf8Json, JsonDocumentOptions options = default) =>
+        JsonDocument.Parse(utf8Json, options);
 
-    public static JsonReadResult? ReadJsonWithBytes(string filePath, long maxBytes = DefaultMaxBytes)
-    {
-        if (string.IsNullOrWhiteSpace(filePath) || maxBytes < 0)
-        {
-            return null;
-        }
+    public static Task<JsonDocument> ParseDocumentAsync(
+        Stream utf8Json,
+        JsonDocumentOptions options = default,
+        CancellationToken cancellationToken = default) =>
+        JsonDocument.ParseAsync(utf8Json, options, cancellationToken);
 
-        try
-        {
-            byte[]? bytes = SafeFileSystem.ReadRegularFile(filePath, maxBytes);
-            return bytes is null
-                ? null
-                : new JsonReadResult(ParseDocument(bytes), bytes);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-        catch (IOException)
-        {
-            return null;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
+    public static string Serialize<T>(T? value, bool indented = false) =>
+        value is null ? "null" : TrySerialize((value, indented), static s => JsonSerializer.Serialize(s.value, GetTypeInfo<T>(s.indented ? IndentedContext : DefaultContext))) ?? string.Empty;
 
-    public static JsonDocument? ReadJson(string filePath, long maxBytes = DefaultMaxBytes)
-    {
-        if (string.IsNullOrWhiteSpace(filePath) || maxBytes < 0)
-        {
-            return null;
-        }
+    /// <summary>
+    /// 以寬鬆跳脫（保留中文等非 ASCII 字元）縮排序列化，供匯出檔案使用
+    /// </summary>
+    public static string SerializeRelaxed<T>(T? value) =>
+        value is null ? "null" : TrySerialize(value, static v => JsonSerializer.Serialize(v, GetTypeInfo<T>(RelaxedContext))) ?? string.Empty;
 
-        try
-        {
-            byte[]? bytes = SafeFileSystem.ReadRegularFile(filePath, maxBytes);
-            return bytes is null ? null : ParseDocument(bytes);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-        catch (IOException)
-        {
-            return null;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
-
-    public static string Serialize<T>(T? value, bool indented = false)
-    {
-        if (value is null)
-        {
-            return "null";
-        }
-
-        try
-        {
-            return JsonSerializer.Serialize(value, GetTypeInfo<T>(indented ? IndentedContext : DefaultContext));
-        }
-        catch (JsonException)
-        {
-            return string.Empty;
-        }
-        catch (NotSupportedException)
-        {
-            return string.Empty;
-        }
-    }
-
-    public static string Serialize<T>(T? value, JsonTypeInfo<T> jsonTypeInfo)
-    {
-        if (value is null)
-        {
-            return "null";
-        }
-
-        ArgumentNullException.ThrowIfNull(jsonTypeInfo);
-        try
-        {
-            return JsonSerializer.Serialize(value, jsonTypeInfo);
-        }
-        catch (JsonException)
-        {
-            return string.Empty;
-        }
-        catch (NotSupportedException)
-        {
-            return string.Empty;
-        }
-    }
-
-    public static string SerializeRelaxed<T>(T? value)
-    {
-        if (value is null)
-        {
-            return "null";
-        }
-
-        try
-        {
-            return JsonSerializer.Serialize(value, GetTypeInfo<T>(RelaxedContext));
-        }
-        catch (JsonException)
-        {
-            return string.Empty;
-        }
-        catch (NotSupportedException)
-        {
-            return string.Empty;
-        }
-    }
-
-    public static string SerializeRelaxed<T>(T? value, JsonTypeInfo<T> jsonTypeInfo)
-    {
-        if (value is null)
-        {
-            return "null";
-        }
-
-        ArgumentNullException.ThrowIfNull(jsonTypeInfo);
-        try
-        {
-            return JsonSerializer.Serialize(value, jsonTypeInfo);
-        }
-        catch (JsonException)
-        {
-            return string.Empty;
-        }
-        catch (NotSupportedException)
-        {
-            return string.Empty;
-        }
-    }
-
-    public static byte[]? SerializeToUtf8Bytes<T>(T? value, bool indented = false)
-    {
-        if (value is null)
-        {
-            return "null"u8.ToArray();
-        }
-
-        try
-        {
-            return JsonSerializer.SerializeToUtf8Bytes(value, GetTypeInfo<T>(indented ? IndentedContext : DefaultContext));
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-        catch (NotSupportedException)
-        {
-            return null;
-        }
-    }
-
-    public static byte[]? SerializeToUtf8Bytes<T>(T? value, JsonTypeInfo<T> jsonTypeInfo)
-    {
-        if (value is null)
-        {
-            return "null"u8.ToArray();
-        }
-
-        ArgumentNullException.ThrowIfNull(jsonTypeInfo);
-        try
-        {
-            return JsonSerializer.SerializeToUtf8Bytes(value, jsonTypeInfo);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-        catch (NotSupportedException)
-        {
-            return null;
-        }
-    }
+    public static byte[]? SerializeToUtf8Bytes<T>(T? value, bool indented = false) =>
+        value is null ? "null"u8.ToArray() : TrySerialize((value, indented), static s => JsonSerializer.SerializeToUtf8Bytes(s.value, GetTypeInfo<T>(s.indented ? IndentedContext : DefaultContext)));
 
     public static T? Deserialize<T>(ReadOnlySpan<byte> utf8Json)
     {
@@ -249,85 +65,31 @@ public static class JsonCodec
         {
             return JsonSerializer.Deserialize(utf8Json, GetTypeInfo<T>(DefaultContext));
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
-            return default;
-        }
-        catch (NotSupportedException)
-        {
+            Logger.Warning(ex, "JSON 反序列化失敗，型別：{Type}", typeof(T).Name);
             return default;
         }
     }
 
-    public static T? Deserialize<T>(ReadOnlySpan<byte> utf8Json, JsonTypeInfo<T> jsonTypeInfo)
+    public static T? Deserialize<T>(string? json) =>
+        string.IsNullOrWhiteSpace(json) ? default : TrySerialize(json, static j => JsonSerializer.Deserialize(j, GetTypeInfo<T>(DefaultContext)));
+
+    private static TResult? TrySerialize<TState, TResult>(TState state, Func<TState, TResult?> operation)
     {
-        ArgumentNullException.ThrowIfNull(jsonTypeInfo);
         try
         {
-            return JsonSerializer.Deserialize(utf8Json, jsonTypeInfo);
+            return operation(state);
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
-            return default;
-        }
-        catch (NotSupportedException)
-        {
-            return default;
-        }
-    }
-
-    public static T? Deserialize<T>(byte[] utf8Json)
-    {
-        ArgumentNullException.ThrowIfNull(utf8Json);
-        return Deserialize<T>(utf8Json.AsSpan());
-    }
-
-    public static T? Deserialize<T>(byte[] utf8Json, JsonTypeInfo<T> jsonTypeInfo)
-    {
-        ArgumentNullException.ThrowIfNull(utf8Json);
-        return Deserialize(utf8Json.AsSpan(), jsonTypeInfo);
-    }
-
-    public static T? Deserialize<T>(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return default;
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize(json, GetTypeInfo<T>(DefaultContext));
-        }
-        catch (JsonException)
-        {
-            return default;
-        }
-        catch (NotSupportedException)
-        {
+            // 含型別未登錄於 AppJsonSerializerContext 的情形，不得無聲失敗
+            Logger.Warning(ex, "JSON 序列化／反序列化失敗：{Message}", ex.Message);
             return default;
         }
     }
 
-    public static T? Deserialize<T>(string? json, JsonTypeInfo<T> jsonTypeInfo)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return default;
-        }
-
-        ArgumentNullException.ThrowIfNull(jsonTypeInfo);
-        try
-        {
-            return JsonSerializer.Deserialize(json, jsonTypeInfo);
-        }
-        catch (JsonException)
-        {
-            return default;
-        }
-        catch (NotSupportedException)
-        {
-            return default;
-        }
-    }
+    private static JsonTypeInfo<T> GetTypeInfo<T>(AppJsonSerializerContext context) =>
+        context.GetTypeInfo(typeof(T)) as JsonTypeInfo<T>
+            ?? throw new JsonException($"型別 '{typeof(T).FullName}' 尚未在 AppJsonSerializerContext 中註冊。");
 }

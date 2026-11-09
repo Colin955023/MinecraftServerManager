@@ -55,9 +55,7 @@ public sealed partial class LocalModScannerTests : IDisposable
             }
         }
         """);
-
-        var persistence = new ModIndexPersistence(_testDir);
-        var scanner = new LocalModScanner(persistence);
+        var scanner = new LocalModScanner();
         var mods = await scanner.ScanModsAsync(_modsDir);
 
         var mod = Assert.Single(mods);
@@ -84,9 +82,7 @@ public sealed partial class LocalModScannerTests : IDisposable
         authors="ForgeDev"
         description="A test mod for Forge"
         """);
-
-        var persistence = new ModIndexPersistence(_testDir);
-        var scanner = new LocalModScanner(persistence);
+        var scanner = new LocalModScanner();
         var mods = await scanner.ScanModsAsync(_modsDir);
 
         var mod = Assert.Single(mods);
@@ -104,9 +100,7 @@ public sealed partial class LocalModScannerTests : IDisposable
     {
         string jarPath = Path.Combine(_modsDir, "jei-1.20.1-forge-15.2.0.27.jar");
         CreateZipWithEntry(jarPath, "META-INF/MANIFEST.MF", "Manifest-Version: 1.0\r\n");
-
-        var persistence = new ModIndexPersistence(_testDir);
-        var scanner = new LocalModScanner(persistence);
+        var scanner = new LocalModScanner();
         var mods = await scanner.ScanModsAsync(_modsDir);
 
         var mod = Assert.Single(mods);
@@ -141,9 +135,7 @@ public sealed partial class LocalModScannerTests : IDisposable
         ordering="NONE"
         side="BOTH"
         """);
-
-        var persistence = new ModIndexPersistence(_testDir);
-        var scanner = new LocalModScanner(persistence);
+        var scanner = new LocalModScanner();
         var mods = await scanner.ScanModsAsync(_modsDir);
 
         var mod = Assert.Single(mods);
@@ -184,9 +176,7 @@ public sealed partial class LocalModScannerTests : IDisposable
                 }
                 """);
         }
-
-        var persistence = new ModIndexPersistence(_testDir);
-        var scanner = new LocalModScanner(persistence);
+        var scanner = new LocalModScanner();
         var mods = await scanner.ScanModsAsync(_modsDir);
 
         var mod = Assert.Single(mods);
@@ -210,7 +200,7 @@ public sealed partial class LocalModScannerTests : IDisposable
         """);
 
         FileInfo fileInfo = new(jarPath);
-        ModIndexPersistence persistence = new(_testDir);
+        ModIndexPersistence persistence = new(_modsDir);
         Dictionary<string, string> legacyMeta = new(StringComparer.OrdinalIgnoreCase)
         {
             ["id"] = "legacy-mod",
@@ -222,7 +212,7 @@ public sealed partial class LocalModScannerTests : IDisposable
         persistence.CacheMetadata(Path.GetFileName(jarPath), legacyMeta, fileInfo.Length, fileInfo.LastWriteTimeUtc.Ticks);
         persistence.Flush();
 
-        LocalModScanner scanner = new(persistence);
+        LocalModScanner scanner = new();
         IReadOnlyList<LocalModInfo> mods = await scanner.ScanModsAsync(_modsDir);
 
         LocalModInfo mod = Assert.Single(mods);

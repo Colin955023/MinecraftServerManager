@@ -36,11 +36,6 @@ public interface IJavaRuntimeDetector
 public interface IJavaInstaller
 {
     /// <summary>
-    /// 檢查系統環境是否支援 winget
-    /// </summary>
-    public Task<bool> IsWingetAvailableAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// 透過 winget 安裝指定主要版本的 Java
     /// </summary>
     public Task<ProcessExitResult> InstallWithWingetAsync(

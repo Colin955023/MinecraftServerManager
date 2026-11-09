@@ -90,15 +90,6 @@ public static partial class ModHelpers
         (value ?? string.Empty).Trim().ToLowerInvariant();
 
     /// <summary>
-    /// 正規化雜湊演算法名稱字串（供外部輸入或驗證比對使用）
-    /// </summary>
-    public static string NormalizeHashAlgorithm(string? algorithm)
-    {
-        string norm = NormalizeIdentifier(algorithm);
-        return norm is "sha512" or "sha256" or "sha1" ? norm : PreferredHashAlgorithm;
-    }
-
-    /// <summary>
     /// 清除字串中的 ANSI 跳脫序列（CSI、OSC、2-char ESC）以及 Minecraft 格式化代碼（§、\u00a7、Hex 格式）
     /// </summary>
     public static string StripColorAndFormattingCodes(string? text)
@@ -145,51 +136,6 @@ public static partial class ModHelpers
         }
 
         return sb.Length > 0 ? sb.ToString() : ModFilenameStem(rawQuery);
-    }
-
-    /// <summary>
-    /// 判定版本類型是否為允許範圍
-    /// </summary>
-    public static bool IsAllowedVersionType(string? versionType)
-    {
-        string norm = NormalizeIdentifier(versionType);
-        return norm is "" or "release" or "stable" || norm.Contains("beta", StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// 從線上模組版本集合中挑選優先級最高之最佳相容版本（供無相依環境之純獨立選版使用）
-    /// </summary>
-    public static OnlineModVersion? SelectBestModVersion(IEnumerable<OnlineModVersion> versions)
-    {
-        return versions
-            .Select(static v => (Version: v, ParsedVersion: new FlexVersion(v.VersionNumber)))
-            .OrderByDescending(static x => x.Version.PrimaryFile is not null ? 1 : 0)
-            .ThenByDescending(static x => GetVersionTypePriority(x.Version.VersionType))
-            .ThenByDescending(static x => x.Version.DatePublished)
-            .ThenByDescending(static x => x.ParsedVersion)
-            .Select(static x => x.Version)
-            .FirstOrDefault();
-    }
-
-    private static int GetVersionTypePriority(string versionType)
-    {
-        string norm = NormalizeIdentifier(versionType);
-        if (norm == "release")
-        {
-            return 3;
-        }
-
-        if (norm is "beta" or "snapshot")
-        {
-            return 2;
-        }
-
-        if (norm == "alpha")
-        {
-            return 1;
-        }
-
-        return 0;
     }
 
     [GeneratedRegex(@"(?<=[a-z0-9])([A-Z])")]

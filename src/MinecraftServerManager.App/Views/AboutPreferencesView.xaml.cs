@@ -6,16 +6,13 @@ namespace MinecraftServerManager.App.Views;
 
 public sealed partial class AboutPreferencesView : UserControl
 {
-    public AboutPreferencesViewModel? ViewModel
-    {
-        get => DataContext as AboutPreferencesViewModel;
-        set => DataContext = value;
-    }
+    public AboutPreferencesViewModel ViewModel { get; }
 
-    public AboutPreferencesView()
+    public AboutPreferencesView(AboutPreferencesViewModel viewModel)
     {
+        ArgumentNullException.ThrowIfNull(viewModel);
+        ViewModel = viewModel;
         InitializeComponent();
-        DataContextChanged += (_, _) => Bindings.Update();
     }
 
     public static string FormatVersion(string version) => $"版本 {version}";
@@ -26,7 +23,7 @@ public sealed partial class AboutPreferencesView : UserControl
 
     private void OnApplyAccentColorClicked(object sender, RoutedEventArgs e)
     {
-        ViewModel?.SelectAccentColor(AccentPicker.Color);
+        ViewModel.SelectAccentColor(AccentPicker.Color);
         AccentColorFlyout.Hide();
     }
 

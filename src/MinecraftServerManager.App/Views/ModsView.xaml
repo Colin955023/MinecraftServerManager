@@ -95,22 +95,15 @@
         <RowDefinition Height="*" />
       </Grid.RowDefinitions>
 
-      <!-- 分頁切換按鈕列 -->
-      <StackPanel Grid.Row="0"
-        Orientation="Horizontal"
-        Spacing="8"
-        Margin="0,0,0,12">
-        <Button Content="本地模組"
-          Click="OnTabLocalClicked"
-          Style="{x:Bind GetTabButtonStyle(ViewModel.SelectedTabIndex, 0), Mode=OneWay}"
-          Height="32"
-          Padding="16,4" />
-        <Button Content="線上瀏覽"
-          Click="OnTabOnlineClicked"
-          Style="{x:Bind GetTabButtonStyle(ViewModel.SelectedTabIndex, 1), Mode=OneWay}"
-          Height="32"
-          Padding="16,4" />
-      </StackPanel>
+      <!-- 分頁切換列 -->
+      <SelectorBar Grid.Row="0"
+        HorizontalAlignment="Left"
+        Margin="0,0,0,12"
+        SelectionChanged="OnTabSelectionChanged">
+        <SelectorBarItem Text="本地模組"
+          IsSelected="True" />
+        <SelectorBarItem Text="線上瀏覽" />
+      </SelectorBar>
 
       <!-- 本地模組分頁 -->
       <Grid Grid.Row="1"
@@ -132,7 +125,7 @@
           <controls:WrapPanel Grid.Column="0"
             ItemSpacing="8"
             LineSpacing="8">
-            <Button Command="{x:Bind ViewModel.ImportModsCommand}"
+            <Button Command="{x:Bind ViewModel.Local.ImportModsCommand}"
               Height="32">
               <StackPanel Orientation="Horizontal"
                 Spacing="6">
@@ -145,7 +138,7 @@
                   Foreground="{ThemeResource TextBrush}" />
               </StackPanel>
             </Button>
-            <Button Command="{x:Bind ViewModel.RefreshLocalModsCommand}"
+            <Button Command="{x:Bind ViewModel.Local.RefreshLocalModsCommand}"
               Height="32">
               <StackPanel Orientation="Horizontal"
                 Spacing="6">
@@ -159,7 +152,7 @@
               </StackPanel>
             </Button>
             <Button Command="{x:Bind ViewModel.CheckModUpdatesCommand}"
-              IsEnabled="{x:Bind ViewModel.CanCheckUpdates, Mode=OneWay}"
+              IsEnabled="{x:Bind ViewModel.Local.CanCheckUpdates, Mode=OneWay}"
               Height="32">
               <StackPanel Orientation="Horizontal"
                 Spacing="6">
@@ -172,20 +165,20 @@
                   Foreground="{ThemeResource TextBrush}" />
               </StackPanel>
             </Button>
-            <Button Command="{x:Bind ViewModel.ToggleSelectAllCommand}"
+            <Button Command="{x:Bind ViewModel.Local.ToggleSelectAllCommand}"
               Height="32">
               <TextBlock Text="全選"
                 VerticalAlignment="Center"
                 Foreground="{ThemeResource TextBrush}" />
             </Button>
-            <Button Command="{x:Bind ViewModel.BatchToggleCommand}"
-              IsEnabled="{x:Bind ViewModel.CanBatchToggle, Mode=OneWay}"
+            <Button Command="{x:Bind ViewModel.Local.BatchToggleCommand}"
+              IsEnabled="{x:Bind ViewModel.Local.CanBatchToggle, Mode=OneWay}"
               Height="32">
               <TextBlock Text="批次切換"
                 VerticalAlignment="Center"
                 Foreground="{ThemeResource TextBrush}" />
             </Button>
-            <Button Command="{x:Bind ViewModel.OpenModsFolderCommand}"
+            <Button Command="{x:Bind ViewModel.Local.OpenModsFolderCommand}"
               Height="32">
               <StackPanel Orientation="Horizontal"
                 Spacing="6">
@@ -198,8 +191,8 @@
                   Foreground="{ThemeResource TextBrush}" />
               </StackPanel>
             </Button>
-            <Button Command="{x:Bind ViewModel.DeleteSelectedModCommand}"
-              IsEnabled="{x:Bind ViewModel.CanDeleteMod, Mode=OneWay}"
+            <Button Command="{x:Bind ViewModel.Local.DeleteSelectedModCommand}"
+              IsEnabled="{x:Bind ViewModel.Local.CanDeleteMod, Mode=OneWay}"
               Style="{StaticResource DangerButtonStyle}"
               Height="32">
               <StackPanel Orientation="Horizontal"
@@ -223,15 +216,15 @@
             <StackPanel Orientation="Horizontal"
               Spacing="8">
               <TextBox Width="150"
-                Text="{x:Bind ViewModel.LocalSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                Text="{x:Bind ViewModel.Local.LocalSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                 Height="32"
                 PlaceholderText="搜尋本地模組..." />
-              <ComboBox ItemsSource="{x:Bind vm:ModsViewModel.LocalFilterOptions}"
-                SelectedItem="{x:Bind ViewModel.SelectedLocalFilter, Mode=TwoWay}"
+              <ComboBox ItemsSource="{x:Bind vm:LocalModsViewModel.LocalFilterOptions}"
+                SelectedItem="{x:Bind ViewModel.Local.SelectedLocalFilter, Mode=TwoWay}"
                 Width="100"
                 Height="32" />
             </StackPanel>
-            <Button Command="{x:Bind ViewModel.ExportModListCommand}"
+            <Button Command="{x:Bind ViewModel.Local.ExportModListCommand}"
               HorizontalAlignment="Right"
               Height="32"
               Padding="12,0">
@@ -350,8 +343,8 @@
             <Border Grid.Row="1"
               BorderBrush="{ThemeResource DataGridGridLineBrush}"
               BorderThickness="1,0,1,1">
-              <ListView ItemsSource="{x:Bind ViewModel.LocalMods, Mode=OneWay}"
-                SelectedItem="{x:Bind ViewModel.SelectedLocalMod, Mode=TwoWay}"
+              <ListView ItemsSource="{x:Bind ViewModel.Local.LocalMods, Mode=OneWay}"
+                SelectedItem="{x:Bind ViewModel.Local.SelectedLocalMod, Mode=TwoWay}"
                 SelectionMode="Single"
                 ItemContainerStyle="{StaticResource TableListViewItemStyle}">
                 <ListView.ContextFlyout>
@@ -362,7 +355,7 @@
                       Click="OnShowInFolderClicked" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="刪除模組"
-                      Command="{x:Bind ViewModel.DeleteSelectedModCommand}" />
+                      Command="{x:Bind ViewModel.Local.DeleteSelectedModCommand}" />
                   </MenuFlyout>
                 </ListView.ContextFlyout>
 
@@ -505,7 +498,7 @@
               Width="15"
               Height="15"
               VerticalAlignment="Center" />
-            <TextBlock Text="{x:Bind ViewModel.OnlineFilterHint, Mode=OneWay}"
+            <TextBlock Text="{x:Bind ViewModel.Online.OnlineFilterHint, Mode=OneWay}"
               Foreground="{ThemeResource TextBrush}"
               FontSize="12"
               VerticalAlignment="Center" />
@@ -525,7 +518,7 @@
             <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
           <TextBox Grid.Column="0"
-            Text="{x:Bind ViewModel.OnlineSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+            Text="{x:Bind ViewModel.Online.OnlineSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
             KeyDown="OnlineSearchBox_KeyDown"
             Height="32"
             PlaceholderText="輸入模組名稱搜尋..."
@@ -536,8 +529,8 @@
             Margin="0,0,6,0"
             Foreground="{ThemeResource TextBrush}" />
           <ComboBox Grid.Column="2"
-            ItemsSource="{x:Bind vm:ModsViewModel.PlatformOptions}"
-            SelectedItem="{x:Bind ViewModel.SelectedPlatform, Mode=TwoWay}"
+            ItemsSource="{x:Bind vm:OnlineModSearchViewModel.PlatformOptions}"
+            SelectedItem="{x:Bind ViewModel.Online.SelectedPlatform, Mode=TwoWay}"
             Width="120"
             Height="32"
             Margin="0,0,10,0" />
@@ -547,13 +540,13 @@
             Margin="0,0,6,0"
             Foreground="{ThemeResource TextBrush}" />
           <ComboBox Grid.Column="4"
-            ItemsSource="{x:Bind vm:ModsViewModel.OnlineSortOptions}"
-            SelectedItem="{x:Bind ViewModel.SelectedOnlineSort, Mode=TwoWay}"
+            ItemsSource="{x:Bind vm:OnlineModSearchViewModel.OnlineSortOptions}"
+            SelectedItem="{x:Bind ViewModel.Online.SelectedOnlineSort, Mode=TwoWay}"
             Width="110"
             Height="32"
             Margin="0,0,10,0" />
           <Button Grid.Column="5"
-            Command="{x:Bind ViewModel.SearchOnlineModsCommand}"
+            Command="{x:Bind ViewModel.Online.SearchOnlineModsCommand}"
             Style="{StaticResource PrimaryButtonStyle}"
             Height="32"
             Padding="16,0">
@@ -578,12 +571,12 @@
               Width="80"
               Height="4"
               VerticalAlignment="Center"
-              Visibility="{x:Bind controls:UiBindHelpers.BoolToVis(ViewModel.IsSearchingOnline), Mode=OneWay}" />
+              Visibility="{x:Bind ViewModel.Online.IsSearchingOnline, Mode=OneWay}" />
             <TextBlock Text="搜尋中..."
               FontSize="12"
               Foreground="{ThemeResource AccentBrush}"
               VerticalAlignment="Center"
-              Visibility="{x:Bind controls:UiBindHelpers.BoolToVis(ViewModel.IsSearchingOnline), Mode=OneWay}" />
+              Visibility="{x:Bind ViewModel.Online.IsSearchingOnline, Mode=OneWay}" />
           </StackPanel>
         </Grid>
 
@@ -656,8 +649,8 @@
             <Border Grid.Row="1"
               BorderBrush="{ThemeResource DataGridGridLineBrush}"
               BorderThickness="1,0,1,1">
-              <ListView ItemsSource="{x:Bind ViewModel.OnlineMods, Mode=OneWay}"
-                SelectedItem="{x:Bind ViewModel.SelectedOnlineMod, Mode=TwoWay}"
+              <ListView ItemsSource="{x:Bind ViewModel.Online.OnlineMods, Mode=OneWay}"
+                SelectedItem="{x:Bind ViewModel.Online.SelectedOnlineMod, Mode=TwoWay}"
                 SelectionMode="Single"
                 ItemContainerStyle="{StaticResource TableListViewItemStyle}"
                 DoubleTapped="OnOnlineModsDoubleTapped">
@@ -736,11 +729,11 @@
           <StackPanel Orientation="Horizontal"
             HorizontalAlignment="Left"
             Spacing="16">
-            <TextBlock Text="{x:Bind ViewModel.OnlineResultHint, Mode=OneWay}"
+            <TextBlock Text="{x:Bind ViewModel.Online.OnlineResultHint, Mode=OneWay}"
               VerticalAlignment="Center"
               Foreground="{ThemeResource MutedTextBrush}"
               FontSize="12" />
-            <TextBlock Text="{x:Bind ViewModel.InstallQueueHint, Mode=OneWay}"
+            <TextBlock Text="{x:Bind ViewModel.Queue.InstallQueueHint, Mode=OneWay}"
               VerticalAlignment="Center"
               Foreground="{ThemeResource MutedTextBrush}"
               FontSize="12" />
@@ -748,17 +741,17 @@
           <StackPanel Orientation="Horizontal"
             HorizontalAlignment="Right"
             Spacing="10">
-            <Button Content="{x:Bind ViewModel.OpenPlatformPageButtonText, Mode=OneWay}"
-              Command="{x:Bind ViewModel.OpenModPlatformPageCommand}"
+            <Button Content="{x:Bind ViewModel.Online.OpenPlatformPageButtonText, Mode=OneWay}"
+              Command="{x:Bind ViewModel.Online.OpenModPlatformPageCommand}"
               Padding="14,6" />
             <Button Content="檢視安裝清單"
-              Command="{x:Bind ViewModel.ViewInstallQueueCommand}"
+              Command="{x:Bind ViewModel.Queue.ViewInstallQueueCommand}"
               Padding="14,6" />
             <Button Content="清空清單"
-              Command="{x:Bind ViewModel.ClearInstallQueueCommand}"
+              Command="{x:Bind ViewModel.Queue.ClearInstallQueueCommand}"
               Padding="14,6" />
             <Button Content="開始安裝"
-              Command="{x:Bind ViewModel.InstallQueuedModsCommand}"
+              Command="{x:Bind ViewModel.Queue.InstallQueuedModsCommand}"
               Style="{StaticResource PrimaryButtonStyle}"
               Padding="18,6" />
           </StackPanel>

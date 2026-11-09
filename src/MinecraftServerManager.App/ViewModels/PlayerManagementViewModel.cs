@@ -36,24 +36,12 @@ public sealed partial class PlayerManagementViewModel(
     public partial ServerUserCacheEntry? SelectedUserCacheEntry { get; set; }
 
     [ObservableProperty]
-    public partial bool IsLoading { get; set; } = true;
-
-    [ObservableProperty]
     public partial string StatusMessage { get; set; } = string.Empty;
 
     [ObservableProperty]
     public partial bool HasUnsavedChanges { get; set; }
 
     // --- 各標籤頁新增表單屬性 ---
-    [ObservableProperty]
-    public partial ServerUserCacheEntry? SelectedOpCandidate { get; set; }
-
-    [ObservableProperty]
-    public partial OpLevelOption SelectedOpLevel { get; set; } = OpLevelOptions[0];
-
-    [ObservableProperty]
-    public partial bool OpBypassesPlayerLimit { get; set; }
-
     [ObservableProperty]
     public partial ServerUserCacheEntry? SelectedWhitelistCandidate { get; set; }
 
@@ -73,26 +61,14 @@ public sealed partial class PlayerManagementViewModel(
     public BulkObservableCollection<ServerUserCacheEntry> FilteredUserCache { get; } = [];
     public BulkObservableCollection<ServerUserCacheEntry> AvailableCandidates { get; } = [];
     public BulkObservableCollection<OperatorRowItem> OperatorRows { get; } = [];
-    public BulkObservableCollection<ServerOperatorEntry> Operators { get; } = [];
     public BulkObservableCollection<ServerWhitelistEntry> Whitelist { get; } = [];
     public BulkObservableCollection<ServerBannedPlayerEntry> BannedPlayers { get; } = [];
     public BulkObservableCollection<ServerBannedIpEntry> BannedIps { get; } = [];
-
-    private static readonly OpLevelOption[] OpLevelOptionsCache =
-    [
-        new(4, "等級 4 - 伺服器完全控制權限 (stop, save-all 等維護指令)"),
-        new(3, "等級 3 - 玩家名單與權限管理 (op, deop, kick, ban 等)"),
-        new(2, "等級 2 - 允許使用作弊指令與指令方塊 (gamemode, tp, give 等)"),
-        new(1, "等級 1 - 僅略過出生點方塊保護 (無作弊與管理指令)"),
-    ];
-
-    public static IReadOnlyList<OpLevelOption> OpLevelOptions => OpLevelOptionsCache;
 
     public event Action<bool>? RequestClose;
 
     public async Task InitializeAsync()
     {
-        IsLoading = true;
         StatusMessage = "正在讀取伺服器名單設定檔案...";
 
         try
@@ -101,8 +77,6 @@ public sealed partial class PlayerManagementViewModel(
 
             _allUserCache.Clear();
             _allUserCache.AddRange(bundle.UserCache);
-
-            Operators.ReplaceAll(bundle.Operators);
 
             var playersMap = new Dictionary<string, (string Name, string Uuid, bool IsOp, int Level, bool Bypass)>(StringComparer.OrdinalIgnoreCase);
 
@@ -154,10 +128,6 @@ public sealed partial class PlayerManagementViewModel(
             Logger.Error(ex, "讀取伺服器名單設定失敗: {Message}", ex.Message);
             StatusMessage = $"讀取失敗：{ex.Message}";
         }
-        finally
-        {
-            IsLoading = false;
-        }
     }
 
     private void ApplyUserCacheFilter()
@@ -172,68 +142,8 @@ public sealed partial class PlayerManagementViewModel(
     private void UpdateAvailableCandidates()
     {
         AvailableCandidates.ReplaceAll(_allUserCache);
-        SelectedOpCandidate = AvailableCandidates.FirstOrDefault();
         SelectedWhitelistCandidate = AvailableCandidates.FirstOrDefault();
         SelectedBanCandidate = AvailableCandidates.FirstOrDefault();
-    }
-
-    [RelayCommand]
-    public void AddOperator()
-    {
-        if (SelectedOpCandidate is null)
-        {
-            StatusMessage = "請先從下拉選單選取要設為管理員的玩家";
-            return;
-        }
-
-        if (Operators.Any(o => string.Equals(o.Uuid, SelectedOpCandidate.Uuid, StringComparison.OrdinalIgnoreCase)))
-        {
-            StatusMessage = $"玩家「{SelectedOpCandidate.Name}」已在管理員名單中";
-            return;
-        }
-
-        var entry = new ServerOperatorEntry(
-            Uuid: SelectedOpCandidate.Uuid,
-            Name: SelectedOpCandidate.Name,
-            Level: SelectedOpLevel.Level,
-            BypassesPlayerLimit: OpBypassesPlayerLimit);
-
-        Operators.Add(entry);
-
-        var existing = OperatorRows.FirstOrDefault(r => string.Equals(r.Uuid, SelectedOpCandidate.Uuid, StringComparison.OrdinalIgnoreCase));
-        if (existing is not null)
-        {
-            existing.IsOp = true;
-            existing.Level = SelectedOpLevel.Level;
-            existing.BypassesPlayerLimit = OpBypassesPlayerLimit;
-        }
-        else
-        {
-            OperatorRows.Insert(0, new OperatorRowItem(
-                SelectedOpCandidate.Name,
-                SelectedOpCandidate.Uuid,
-                isOp: true,
-                level: SelectedOpLevel.Level,
-                bypassesPlayerLimit: OpBypassesPlayerLimit,
-                () => HasUnsavedChanges = true));
-        }
-
-        HasUnsavedChanges = true;
-        StatusMessage = $"已將「{SelectedOpCandidate.Name}」設為管理員 (Level {SelectedOpLevel.Level})";
-    }
-
-    [RelayCommand]
-    public void RemoveOperator(ServerOperatorEntry? entry)
-    {
-        if (entry is not null)
-        {
-            Operators.Remove(entry);
-            var existing = OperatorRows.FirstOrDefault(r => string.Equals(r.Uuid, entry.Uuid, StringComparison.OrdinalIgnoreCase));
-            existing?.IsOp = false;
-
-            HasUnsavedChanges = true;
-            StatusMessage = $"已從管理員名單移除「{entry.Name}」";
-        }
     }
 
     [RelayCommand]
@@ -260,7 +170,6 @@ public sealed partial class PlayerManagementViewModel(
         StatusMessage = $"已將「{SelectedWhitelistCandidate.Name}」加入白名單暫存";
     }
 
-    [RelayCommand]
     public void RemoveWhitelist(ServerWhitelistEntry? entry)
     {
         if (entry is not null && Whitelist.Remove(entry))
@@ -299,7 +208,6 @@ public sealed partial class PlayerManagementViewModel(
         StatusMessage = $"已將「{SelectedBanCandidate.Name}」加入玩家封鎖暫存名單";
     }
 
-    [RelayCommand]
     public void RemoveBannedPlayer(ServerBannedPlayerEntry? entry)
     {
         if (entry is not null && BannedPlayers.Remove(entry))
@@ -364,7 +272,6 @@ public sealed partial class PlayerManagementViewModel(
         StatusMessage = $"已將 IP「{normalizedIp}」加入封鎖暫存名單";
     }
 
-    [RelayCommand]
     public void RemoveBannedIp(ServerBannedIpEntry? entry)
     {
         if (entry is not null && BannedIps.Remove(entry))
@@ -377,7 +284,6 @@ public sealed partial class PlayerManagementViewModel(
     [RelayCommand]
     public async Task SaveAsync()
     {
-        IsLoading = true;
         StatusMessage = "正在儲存伺服器名單設定...";
 
         try
@@ -407,10 +313,6 @@ public sealed partial class PlayerManagementViewModel(
             Logger.Error(ex, "儲存伺服器名單設定失敗: {Message}", ex.Message);
             StatusMessage = $"儲存失敗：{ex.Message}";
         }
-        finally
-        {
-            IsLoading = false;
-        }
     }
 
     [RelayCommand]
@@ -432,14 +334,12 @@ public sealed partial class PlayerManagementViewModel(
         dto.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " " + dto.ToString("zzz", CultureInfo.InvariantCulture).Replace(":", "", StringComparison.Ordinal);
 }
 
-public sealed record OpLevelOption(int Level, string Display);
-
 /// <summary>
 /// 管理員名單資料列項目模型
 /// </summary>
-public sealed partial class OperatorRowItem(string name, string uuid, bool isOp, int level, bool bypassesPlayerLimit, Action? onChanged = null) : ObservableObject
+public sealed partial class OperatorRowItem(string name, string uuid, bool isOp, int level, bool bypassesPlayerLimit, Action onChanged) : ObservableObject
 {
-    private readonly Action? _onChanged = onChanged;
+    private readonly Action _onChanged = onChanged;
 
     public string Name { get; init; } = name;
     public string Uuid { get; init; } = uuid;
@@ -453,9 +353,9 @@ public sealed partial class OperatorRowItem(string name, string uuid, bool isOp,
     [ObservableProperty]
     public partial bool BypassesPlayerLimit { get; set; } = bypassesPlayerLimit;
 
-    partial void OnIsOpChanged(bool value) => _onChanged?.Invoke();
-    partial void OnLevelChanged(int value) => _onChanged?.Invoke();
-    partial void OnBypassesPlayerLimitChanged(bool value) => _onChanged?.Invoke();
+    partial void OnIsOpChanged(bool value) => _onChanged();
+    partial void OnLevelChanged(int value) => _onChanged();
+    partial void OnBypassesPlayerLimitChanged(bool value) => _onChanged();
 
     private static readonly int[] LevelsCache = [1, 2, 3, 4];
     [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "WinUI 3 x:Bind requires instance member for DataTemplate bindings")]

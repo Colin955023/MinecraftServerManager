@@ -50,9 +50,9 @@ public interface IProcessRunner
 
 public interface IExternalLauncher
 {
-    public bool OpenFolder(string folderPath, bool isTrusted = false);
+    public bool OpenFolder(string folderPath);
 
-    public bool ShowInFolder(string filePath, bool isTrusted = false);
+    public bool ShowInFolder(string filePath);
 
     public bool OpenFile(string filePath, bool isTrusted = false);
 

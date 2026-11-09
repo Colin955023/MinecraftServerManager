@@ -203,28 +203,34 @@ public static class SafeScriptValidator
         }
     }
 
+    /// <summary>
+    /// 判斷行是否以指定批次命令字起始（後面須為行尾或空白，避免 echoevil 誤判為 echo）
+    /// </summary>
+    private static bool IsCommandWord(string line, string word) =>
+        line.StartsWith(word, StringComparison.OrdinalIgnoreCase) && (line.Length == word.Length || char.IsWhiteSpace(line[word.Length]));
+
     private static bool IsAllowedScriptCommand(string line)
     {
         // 註解行
         if (line.StartsWith("::", StringComparison.Ordinal) ||
-            (line.StartsWith("rem", StringComparison.OrdinalIgnoreCase) && (line.Length == 3 || char.IsWhiteSpace(line[3]))))
+            IsCommandWord(line, "rem"))
         {
             return true;
         }
 
         // 回顯設定與訊息
-        if (line.StartsWith("@echo", StringComparison.OrdinalIgnoreCase) && (line.Length == 5 || char.IsWhiteSpace(line[5])))
+        if (IsCommandWord(line, "@echo"))
         {
             return true;
         }
 
-        if (line.StartsWith("echo", StringComparison.OrdinalIgnoreCase) && (line.Length == 4 || char.IsWhiteSpace(line[4])))
+        if (IsCommandWord(line, "echo"))
         {
             return true;
         }
 
         // 標題與暫停
-        if (line.StartsWith("title", StringComparison.OrdinalIgnoreCase) && (line.Length == 5 || char.IsWhiteSpace(line[5])))
+        if (IsCommandWord(line, "title"))
         {
             return true;
         }
@@ -235,13 +241,13 @@ public static class SafeScriptValidator
         }
 
         // 字碼頁切換 (例如 chcp 65001)
-        if (line.StartsWith("chcp", StringComparison.OrdinalIgnoreCase) && (line.Length == 4 || char.IsWhiteSpace(line[4])))
+        if (IsCommandWord(line, "chcp"))
         {
             return true;
         }
 
         // 工作目錄切換 (僅允許切換至目前目錄或腳本所在目錄 %~dp0)
-        if (line.StartsWith("cd", StringComparison.OrdinalIgnoreCase) && (line.Length == 2 || char.IsWhiteSpace(line[2])))
+        if (IsCommandWord(line, "cd"))
         {
             string cdArg = line[2..].Trim();
             if (cdArg.StartsWith("/d", StringComparison.OrdinalIgnoreCase))

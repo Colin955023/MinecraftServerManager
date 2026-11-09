@@ -6,7 +6,7 @@ using MinecraftServerManager.App.Services;
 namespace MinecraftServerManager.App.Views;
 
 /// <summary>
-/// 具備自主倒數、滑鼠暫停功能的 WinUI 3 原生 NotificationDialog
+/// 具備自主倒數、滑鼠暫停功能的 WinUI 3 原生錯誤對話方塊
 /// </summary>
 public sealed partial class NotificationDialog : ContentDialog, INotifyPropertyChanged
 {
@@ -23,25 +23,27 @@ public sealed partial class NotificationDialog : ContentDialog, INotifyPropertyC
     public string IconGlyph { get; }
     public string ButtonText { get; private set; }
 
-    public NotificationDialog(IUiService ui, string title, string message, NotificationLevel level = NotificationLevel.Warning)
+    public NotificationDialog(IUiService ui, string title, string message)
     {
         ArgumentNullException.ThrowIfNull(ui);
         InitializeComponent();
 
         DialogTitle = title;
         Message = message;
-        IconGlyph = level == NotificationLevel.Error ? "❌" : "⚠️";
-        _totalSeconds = level == NotificationLevel.Error ? 10.0 : 6.0;
+        IconGlyph = "❌";
+        _totalSeconds = 10.0;
         ButtonText = $"確定 ({(int)_totalSeconds}s)";
 
         _autoCloseTimer = ui.CreateUiTimer(TimeSpan.FromMilliseconds(100), AutoCloseTimer_Tick);
-        // 任何關閉途徑（含 Esc）皆停止倒數，避免關閉後計時器持續觸發 Hide()
-        Closed += (_, _) =>
+        // 倒數僅於實際顯示期間進行：排隊等待或被巢狀對話框暫時隱藏時不計時，重新顯示後續算
+        Opened += (_, _) =>
         {
-            _isClosing = true;
-            _autoCloseTimer.StopTimer();
+            if (!_isClosing)
+            {
+                _autoCloseTimer.StartTimer();
+            }
         };
-        _autoCloseTimer.StartTimer();
+        Closed += (_, _) => _autoCloseTimer.StopTimer();
     }
 
     private void Dialog_PointerEntered(object sender, PointerRoutedEventArgs e)

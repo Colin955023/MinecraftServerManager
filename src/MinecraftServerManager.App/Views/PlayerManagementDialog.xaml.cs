@@ -3,6 +3,7 @@ using MinecraftServerManager.App.Controls;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
@@ -22,7 +23,7 @@ public sealed partial class PlayerManagementDialog : Window
         InitializeComponent();
         Title = "伺服器名單管理";
 
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(1060, 740));
+        WindowLayoutHelper.ResizeToDip(this, 1060, 740);
 
         if (Content is FrameworkElement fe)
         {
@@ -62,7 +63,7 @@ public sealed partial class PlayerManagementDialog : Window
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "名單管理視窗關閉確認異常: {Message}", ex.Message);
+                Logger.Warning(ex, "名單管理視窗關閉確認異常: {Message}", ex.Message);
             }
         };
     }
@@ -91,137 +92,19 @@ public sealed partial class PlayerManagementDialog : Window
         }
     }
 
-    private void OnOperatorSortRequested(object? sender, SortRequestedEventArgs e)
-    {
-        if (ViewModel.OperatorRows.Count <= 1)
-        {
-            return;
-        }
+    private void OnOperatorSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.OperatorRows.SortBy(TableSortKeys.Operators, e);
 
-        ViewModel.OperatorRows.SortBy(e);
-    }
+    private void OnOperatorAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.OperatorRows, TableSortKeys.Operators);
 
-    private void OnOperatorAutoFitRequested(object? sender, string propertyName)
-    {
-        if (ViewModel.OperatorRows.Count == 0)
-        {
-            return;
-        }
+    private void OnWhitelistSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.Whitelist.SortBy(TableSortKeys.Whitelist, e);
 
-        var cols = OperatorListColumns.Current;
-        switch (propertyName)
-        {
-            case "IsOp":
-                cols.IsOpWidth = new(SortableTableHeader.CalculateAutoFitWidth(OperatorListColumns.DefaultIsOpWidth, [], "管理員"));
-                break;
-            case "Name":
-                cols.NameWidth = new(SortableTableHeader.CalculateAutoFitWidth(OperatorListColumns.DefaultNameWidth, ViewModel.OperatorRows.Select(r => r.Name), "玩家名稱"));
-                break;
-            case "Level":
-                cols.LevelWidth = new(SortableTableHeader.CalculateAutoFitWidth(OperatorListColumns.DefaultLevelWidth, [], "權限等級"));
-                break;
-            case "BypassesPlayerLimit":
-                cols.BypassWidth = new(SortableTableHeader.CalculateAutoFitWidth(OperatorListColumns.DefaultBypassWidth, [], "略過人數限制"));
-                break;
-            case "Uuid":
-                cols.UuidWidth = new(SortableTableHeader.CalculateAutoFitWidth(OperatorListColumns.DefaultUuidWidth, ViewModel.OperatorRows.Select(r => r.Uuid), "UUID"));
-                break;
-        }
-    }
+    private void OnWhitelistAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.Whitelist, TableSortKeys.Whitelist);
 
-    private void OnWhitelistSortRequested(object? sender, SortRequestedEventArgs e)
-    {
-        if (ViewModel.Whitelist.Count <= 1)
-        {
-            return;
-        }
+    private void OnBannedPlayerSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.BannedPlayers.SortBy(TableSortKeys.BannedPlayers, e);
 
-        ViewModel.Whitelist.SortBy(e);
-    }
+    private void OnBannedPlayerAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.BannedPlayers, TableSortKeys.BannedPlayers);
 
-    private void OnWhitelistAutoFitRequested(object? sender, string propertyName)
-    {
-        if (ViewModel.Whitelist.Count == 0)
-        {
-            return;
-        }
+    private void OnBannedIpSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.BannedIps.SortBy(TableSortKeys.BannedIps, e);
 
-        var cols = WhitelistListColumns.Current;
-        switch (propertyName)
-        {
-            case "Name":
-                cols.NameWidth = new(SortableTableHeader.CalculateAutoFitWidth(WhitelistListColumns.DefaultNameWidth, ViewModel.Whitelist.Select(w => w.Name), "玩家名稱"));
-                break;
-            case "Uuid":
-                cols.UuidWidth = new(SortableTableHeader.CalculateAutoFitWidth(WhitelistListColumns.DefaultUuidWidth, ViewModel.Whitelist.Select(w => w.Uuid), "UUID"));
-                break;
-        }
-    }
-
-    private void OnBannedPlayerSortRequested(object? sender, SortRequestedEventArgs e)
-    {
-        if (ViewModel.BannedPlayers.Count <= 1)
-        {
-            return;
-        }
-
-        ViewModel.BannedPlayers.SortBy(e);
-    }
-
-    private void OnBannedPlayerAutoFitRequested(object? sender, string propertyName)
-    {
-        if (ViewModel.BannedPlayers.Count == 0)
-        {
-            return;
-        }
-
-        var cols = BannedPlayerListColumns.Current;
-        switch (propertyName)
-        {
-            case "Name":
-                cols.NameWidth = new(SortableTableHeader.CalculateAutoFitWidth(BannedPlayerListColumns.DefaultNameWidth, ViewModel.BannedPlayers.Select(b => b.Name), "玩家名稱"));
-                break;
-            case "Reason":
-                cols.ReasonWidth = new(SortableTableHeader.CalculateAutoFitWidth(BannedPlayerListColumns.DefaultReasonWidth, ViewModel.BannedPlayers.Select(b => b.Reason), "封鎖原因"));
-                break;
-            case "FormattedCreated":
-                cols.CreatedWidth = new(SortableTableHeader.CalculateAutoFitWidth(BannedPlayerListColumns.DefaultCreatedWidth, ViewModel.BannedPlayers.Select(b => b.FormattedCreated), "封鎖時間"));
-                break;
-            case "Uuid":
-                cols.UuidWidth = new(SortableTableHeader.CalculateAutoFitWidth(BannedPlayerListColumns.DefaultUuidWidth, ViewModel.BannedPlayers.Select(b => b.Uuid), "UUID"));
-                break;
-        }
-    }
-
-    private void OnBannedIpSortRequested(object? sender, SortRequestedEventArgs e)
-    {
-        if (ViewModel.BannedIps.Count <= 1)
-        {
-            return;
-        }
-
-        ViewModel.BannedIps.SortBy(e);
-    }
-
-    private void OnBannedIpAutoFitRequested(object? sender, string propertyName)
-    {
-        if (ViewModel.BannedIps.Count == 0)
-        {
-            return;
-        }
-
-        var cols = BannedIpListColumns.Current;
-        switch (propertyName)
-        {
-            case "Ip":
-                cols.IpWidth = new(SortableTableHeader.CalculateAutoFitWidth(BannedIpListColumns.DefaultIpWidth, ViewModel.BannedIps.Select(b => b.Ip), "IP 位址"));
-                break;
-            case "Reason":
-                cols.ReasonWidth = new(SortableTableHeader.CalculateAutoFitWidth(BannedIpListColumns.DefaultReasonWidth, ViewModel.BannedIps.Select(b => b.Reason), "封鎖原因"));
-                break;
-            case "FormattedCreated":
-                cols.CreatedWidth = new(SortableTableHeader.CalculateAutoFitWidth(BannedIpListColumns.DefaultCreatedWidth, ViewModel.BannedIps.Select(b => b.FormattedCreated), "封鎖時間"));
-                break;
-        }
-    }
+    private void OnBannedIpAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.BannedIps, TableSortKeys.BannedIps);
 }

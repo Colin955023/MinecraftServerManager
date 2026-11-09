@@ -33,34 +33,7 @@ public sealed partial class MainViewModelTests : IDisposable
     {
         var settings = new Infrastructure.Settings.SettingsManager(_testDir);
         settings.SetThemeMode(themeMode);
-        var dirSize = new Infrastructure.Servers.ServerDirectorySizeService();
-        var inspector = new Infrastructure.Servers.ServerInspector(dirSize);
-        var manager = new Infrastructure.Servers.ServerManager(_testDir, inspector);
-        var backup = new Infrastructure.Servers.ServerBackupService(_testDir);
-        var runner = new Infrastructure.Process.ProcessRunner();
-        var runtime = new Infrastructure.Servers.ServerRuntime(runner);
-        var launchPlanner = new Infrastructure.Servers.ServerLaunchPlanner();
-        var propsStore = new Infrastructure.Servers.ServerPropertiesStore(_testDir);
-        var playerConfig = new Infrastructure.Servers.ServerPlayerConfigStore();
-        var integrity = new Infrastructure.Servers.ServerIntegrityService();
-        var depPlanner = new Infrastructure.Mods.ModDependencyPlanner();
-        var exporter = new Infrastructure.Mods.ModListExporter();
-
-        var deps = new MainViewModelDependencies(
-            SettingsManager: settings,
-            ServerManager: manager,
-            BackupService: backup,
-            ServerRuntime: runtime,
-            ServerInspector: inspector,
-            LaunchPlanner: launchPlanner,
-            PropertiesStore: propsStore,
-            PlayerConfigStore: playerConfig,
-            DirectorySizeService: dirSize,
-            IntegrityService: integrity,
-            DependencyPlanner: depPlanner,
-            ModListExporter: exporter,
-            UiService: uiService);
-
+        var deps = TestDependencies.Create(_testDir, uiService, settings: settings);
         return new MainViewModel(deps);
     }
 
@@ -71,11 +44,8 @@ public sealed partial class MainViewModelTests : IDisposable
 
         // 預設呈現建立新伺服器頁面
         Assert.NotNull(vm.CurrentPage);
-        Assert.Equal("create", vm.CurrentPage.Key);
-        Assert.Equal("建立新伺服器", vm.PageTitle);
-        Assert.False(string.IsNullOrWhiteSpace(vm.PageSubtitle));
-        Assert.False(vm.IsNotificationVisible);
-        Assert.False(vm.IsLightTheme);
+        Assert.IsType<CreateServerViewModel>(vm.CurrentPage);
+        Assert.Equal("建立新伺服器", vm.CurrentPage.Title);
     }
 
     [Theory]
@@ -87,82 +57,50 @@ public sealed partial class MainViewModelTests : IDisposable
     {
         var vm = CreateIsolatedViewModel();
 
-        vm.NavigateCommand.Execute(key);
+        vm.Navigate(key);
 
         Assert.IsType(expectedType, vm.CurrentPage);
-        Assert.Equal(key, vm.CurrentPage.Key);
-        Assert.Equal(expectedTitle, vm.PageTitle);
+        Assert.Equal(expectedTitle, vm.CurrentPage.Title);
     }
 
     [Fact]
     public void NavigateShouldShowErrorNotificationWhenKeyIsInvalid()
     {
-        var vm = CreateIsolatedViewModel();
+        var ui = new RecordingUiService();
+        var vm = CreateIsolatedViewModel(uiService: ui);
         var initialPage = vm.CurrentPage;
 
-        vm.NavigateCommand.Execute("nonexistent_page");
+        vm.Navigate("nonexistent_page");
 
         Assert.Same(initialPage, vm.CurrentPage);
-        Assert.True(vm.IsNotificationVisible);
-        Assert.True(vm.IsNotificationError);
-        Assert.Contains("找不到頁面", vm.NotificationMessage);
+        Assert.Equal(NotificationType.Error, ui.LastType);
+        Assert.Contains("找不到頁面", ui.LastMessage);
     }
 
     [Fact]
     public void ActionCommandsShouldTriggerNotifications()
     {
-        var vm = CreateIsolatedViewModel(uiService: new ConfirmingImportUiService());
+        var ui = new ConfirmingImportUiService();
+        var vm = CreateIsolatedViewModel(uiService: ui);
 
         vm.ImportServerCommand.Execute(null);
-        Assert.True(vm.IsNotificationVisible);
-        Assert.Contains("匯入", vm.NotificationMessage);
-
-        vm.OpenServersFolderCommand.Execute(null);
-        Assert.True(vm.IsNotificationVisible);
+        Assert.Contains("匯入", ui.LastMessage);
     }
 
-    [Fact]
-    public void DismissNotificationShouldHideNotificationBanner()
+    private class RecordingUiService : NoOpUiService
     {
-        var vm = CreateIsolatedViewModel();
-        vm.ShowNotification("測試通知", isError: false);
-        Assert.True(vm.IsNotificationVisible);
+        public string? LastMessage { get; private set; }
 
-        vm.DismissNotificationCommand.Execute(null);
+        public NotificationType? LastType { get; private set; }
 
-        Assert.False(vm.IsNotificationVisible);
-        Assert.Empty(vm.NotificationMessage);
+        public override void ShowNotification(string message, string? title = null, NotificationType type = NotificationType.Info)
+        {
+            LastMessage = message;
+            LastType = type;
+        }
     }
 
-    [Fact]
-    public void ToggleThemeShouldInvertThemeState()
-    {
-        var vm = CreateIsolatedViewModel();
-        Assert.False(vm.IsLightTheme);
-
-        vm.ToggleThemeCommand.Execute(null);
-        Assert.True(vm.IsLightTheme);
-        Assert.True(vm.IsNotificationVisible);
-
-        vm.ToggleThemeCommand.Execute(null);
-        Assert.False(vm.IsLightTheme);
-    }
-
-    [Fact]
-    public void ToggleThemeShouldInvertThemeStateFromLight()
-    {
-        var vm = CreateIsolatedViewModel(themeMode: "light");
-        Assert.True(vm.IsLightTheme);
-
-        vm.ToggleThemeCommand.Execute(null);
-        Assert.False(vm.IsLightTheme);
-        Assert.True(vm.IsNotificationVisible);
-
-        vm.ToggleThemeCommand.Execute(null);
-        Assert.True(vm.IsLightTheme);
-    }
-
-    private sealed class ConfirmingImportUiService : NoOpUiService
+    private sealed class ConfirmingImportUiService : RecordingUiService
     {
         public override Task<bool?> ShowImportServerAsync(ImportServerViewModel viewModel) => Task.FromResult<bool?>(true);
     }

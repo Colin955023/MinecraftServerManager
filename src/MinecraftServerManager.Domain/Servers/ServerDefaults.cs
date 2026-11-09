@@ -6,6 +6,11 @@ namespace MinecraftServerManager.Domain.Servers;
 public static class ServerDefaults
 {
     /// <summary>
+    /// 伺服器目錄下存放模組的子資料夾名稱
+    /// </summary>
+    public const string ModsDirectoryName = "mods";
+
+    /// <summary>
     /// 伺服器預設最大記憶體配置 (MB)
     /// </summary>
     public const int DefaultMemoryMaxMb = 2048;
@@ -18,7 +23,17 @@ public static class ServerDefaults
     /// <summary>
     /// Minecraft 伺服器標準預設通訊埠
     /// </summary>
-    public const int DefaultPort = 25565;
+    public const string DefaultPort = "25565";
+
+    /// <summary>
+    /// 伺服器登錄檔名（位於伺服器根目錄）
+    /// </summary>
+    public const string RegistryFileName = "servers.json";
+
+    /// <summary>
+    /// 管理工具內部項目（墓碑、暫存）之名稱前綴，不可作為伺服器名稱
+    /// </summary>
+    public const string InternalPrefix = ".msm-";
 
     /// <summary>
     /// 標準伺服器屬性檔名

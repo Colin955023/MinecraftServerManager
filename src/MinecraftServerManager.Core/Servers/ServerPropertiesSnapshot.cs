@@ -29,29 +29,6 @@ public sealed record ServerPropertiesSnapshot(
     string Message = "")
 {
     public bool Readable => Status is ServerPropertiesReadStatus.Ok or ServerPropertiesReadStatus.Empty or ServerPropertiesReadStatus.Missing;
-
-    public string GetProperty(string key, string fallback = "") =>
-        Properties.TryGetValue(key, out string? value) ? value : fallback;
-
-    public bool GetBoolean(string key, bool fallback = false)
-    {
-        if (Properties.TryGetValue(key, out string? value))
-        {
-            return bool.TryParse(value, out bool parsed) ? parsed : fallback;
-        }
-
-        return fallback;
-    }
-
-    public int GetInt32(string key, int fallback = 0)
-    {
-        if (Properties.TryGetValue(key, out string? value))
-        {
-            return int.TryParse(value, out int parsed) ? parsed : fallback;
-        }
-
-        return fallback;
-    }
 }
 
 public sealed record ServerPropertiesUpdateResult(

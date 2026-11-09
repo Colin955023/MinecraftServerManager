@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using MinecraftServerManager.App.Controls;
 using MinecraftServerManager.App.ViewModels;
+using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
@@ -18,7 +19,7 @@ public sealed partial class RestoreBackupDialog : Window
         InitializeComponent();
         Title = "備份還原與管理";
 
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(720, 520));
+        WindowLayoutHelper.ResizeToDip(this, 720, 520);
 
         ViewModel.RequestClose += success =>
         {
@@ -27,35 +28,7 @@ public sealed partial class RestoreBackupDialog : Window
         };
     }
 
-    private void OnHeaderSortRequested(object? sender, SortRequestedEventArgs e)
-    {
-        if (ViewModel.Backups.Count <= 1)
-        {
-            return;
-        }
+    private void OnHeaderSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.Backups.SortBy(TableSortKeys.Backups, e);
 
-        ViewModel.Backups.SortBy(e);
-    }
-
-    private void OnHeaderAutoFitRequested(object? sender, string propertyName)
-    {
-        if (ViewModel.Backups.Count == 0)
-        {
-            return;
-        }
-
-        var cols = BackupListColumns.Current;
-        switch (propertyName)
-        {
-            case "FileName":
-                cols.FileNameWidth = new(SortableTableHeader.CalculateAutoFitWidth(BackupListColumns.DefaultFileNameWidth, ViewModel.Backups.Select(b => b.FileName), "備份檔案名稱"));
-                break;
-            case "SizeFormatted":
-                cols.SizeWidth = new(SortableTableHeader.CalculateAutoFitWidth(BackupListColumns.DefaultSizeWidth, ViewModel.Backups.Select(b => b.SizeFormatted), "檔案大小"));
-                break;
-            case "CreatedAtFormatted":
-                cols.CreatedWidth = new(SortableTableHeader.CalculateAutoFitWidth(BackupListColumns.DefaultCreatedWidth, ViewModel.Backups.Select(b => b.CreatedAtFormatted), "建立時間"));
-                break;
-        }
-    }
+    private void OnHeaderAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.Backups, TableSortKeys.Backups);
 }

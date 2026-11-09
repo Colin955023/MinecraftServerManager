@@ -18,30 +18,8 @@ public sealed class ManageServerViewModelTests
         Directory.CreateDirectory(root);
         var settings = new Infrastructure.Settings.SettingsManager(root);
         settings.SetExactServersRoot(root);
-        var dirSize = new Infrastructure.Servers.ServerDirectorySizeService();
-        var inspector = new Infrastructure.Servers.ServerInspector(dirSize);
-        var manager = new Infrastructure.Servers.ServerManager(root, inspector);
-        var backupService = new Infrastructure.Servers.ServerBackupService(root);
-        var processRunner = new Infrastructure.Process.ProcessRunner();
-        var runtime = new Infrastructure.Servers.ServerRuntime(processRunner);
-        var launchPlanner = new Infrastructure.Servers.ServerLaunchPlanner();
-        var propertiesStore = new Infrastructure.Servers.ServerPropertiesStore(root);
-        var playerConfigStore = new Infrastructure.Servers.ServerPlayerConfigStore();
-        var integrityService = new Infrastructure.Servers.ServerIntegrityService();
-
-        return new ManageServerViewModel(
-            settingsManager: settings,
-            serverManager: manager,
-            backupService: backupService,
-            serverRuntime: runtime,
-            serverInspector: inspector,
-            launchPlanner: launchPlanner,
-            propertiesStore: propertiesStore,
-            playerConfigStore: playerConfigStore,
-            directorySizeService: dirSize,
-            integrityService: integrityService,
-            launcher: launcher,
-            uiService: uiService);
+        var deps = TestDependencies.Create(root, uiService, launcher, settings);
+        return new ManageServerViewModel(deps, deps.UiService, static _ => { });
     }
 
     [Fact]
@@ -53,28 +31,9 @@ public sealed class ManageServerViewModelTests
         {
             var settings = new Infrastructure.Settings.SettingsManager(root);
             settings.SetExactServersRoot(root);
-            var dirSize = new Infrastructure.Servers.ServerDirectorySizeService();
-            var inspector = new Infrastructure.Servers.ServerInspector(dirSize);
-            var manager = new Infrastructure.Servers.ServerManager(root, inspector);
-            var backupService = new Infrastructure.Servers.ServerBackupService(root);
-            var processRunner = new Infrastructure.Process.ProcessRunner();
-            var runtime = new Infrastructure.Servers.ServerRuntime(processRunner);
-            var launchPlanner = new Infrastructure.Servers.ServerLaunchPlanner();
-            var propertiesStore = new Infrastructure.Servers.ServerPropertiesStore(root);
-            var playerConfigStore = new Infrastructure.Servers.ServerPlayerConfigStore();
-            var integrityService = new Infrastructure.Servers.ServerIntegrityService();
-
-            var vm = new ManageServerViewModel(
-                settingsManager: settings,
-                serverManager: manager,
-                backupService: backupService,
-                serverRuntime: runtime,
-                serverInspector: inspector,
-                launchPlanner: launchPlanner,
-                propertiesStore: propertiesStore,
-                playerConfigStore: playerConfigStore,
-                directorySizeService: dirSize,
-                integrityService: integrityService);
+            var deps = TestDependencies.Create(root, settings: settings);
+            var manager = deps.ServerManager;
+            var vm = new ManageServerViewModel(deps, deps.UiService, static _ => { });
 
             var plan = Domain.Servers.ServerCreationPlan.Create(
                 name: Domain.ValueObjects.ServerName.Parse("MemoryServer"),
@@ -86,12 +45,12 @@ public sealed class ManageServerViewModelTests
             var created = await manager.CreateServerAsync(plan);
             Assert.True(created.Completed);
 
-            await vm.RefreshServers();
-            var server = vm.Servers.FirstOrDefault(s => s.Name == "MemoryServer");
+            await vm.List.RefreshServers();
+            var server = vm.List.Servers.FirstOrDefault(s => s.Name == "MemoryServer");
             Assert.NotNull(server);
-            vm.SelectedServer = server;
+            vm.List.SelectedServer = server;
 
-            Assert.Equal("1024 MB ~ 2048 MB", vm.SelectedServerMemory);
+            Assert.Equal("1024 MB ~ 2048 MB", vm.List.SelectedServerMemory);
 
             var updatedConfig = new Domain.Servers.ServerConfig(
                 name: Domain.ValueObjects.ServerName.Parse(server.Name),
@@ -103,11 +62,9 @@ public sealed class ManageServerViewModelTests
                 path: server.Path);
             await manager.UpdateServerAsync(updatedConfig);
 
-            await vm.RefreshAndSelectServerAsync("MemoryServer");
+            await vm.List.RefreshAndSelectServerAsync("MemoryServer");
 
-            Assert.Equal("10240 MB ~ 20480 MB", vm.SelectedServerMemory);
-            Assert.Contains("10240 MB ~ 20480 MB", vm.SelectedServerInfo);
-            Assert.Contains("目錄大小：", vm.SelectedServerInfo);
+            Assert.Equal("10240 MB ~ 20480 MB", vm.List.SelectedServerMemory);
         }
         finally
         {
@@ -130,11 +87,11 @@ public sealed class ManageServerViewModelTests
             var ui = new FakeRelocateUiService { FolderToPick = subDir };
             var vm = CreateTestViewModel(uiService: ui, customRoot: root);
 
-            await vm.ChangeServersRootCommand.ExecuteAsync(null);
+            await vm.ServersRoot.ChangeServersRootCommand.ExecuteAsync(null);
 
             Assert.Null(ui.LastErrorMessage);
             Assert.True(ui.RestartCalled);
-            Assert.Equal(Path.Combine(subDir, "servers"), vm.DetectPath);
+            Assert.Equal(Path.Combine(subDir, "servers"), vm.List.DetectPath);
         }
         finally
         {
@@ -165,10 +122,10 @@ public sealed class ManageServerViewModelTests
             };
             var vm = CreateTestViewModel(uiService: ui, customRoot: oldRoot);
 
-            await vm.ChangeServersRootCommand.ExecuteAsync(null);
+            await vm.ServersRoot.ChangeServersRootCommand.ExecuteAsync(null);
 
             Assert.True(ui.RestartCalled);
-            Assert.Equal(Path.Combine(newRoot, "servers"), vm.DetectPath);
+            Assert.Equal(Path.Combine(newRoot, "servers"), vm.List.DetectPath);
             Assert.True(File.Exists(Path.Combine(newRoot, "servers", "MyServer", "server.jar")));
         }
         finally
@@ -196,14 +153,14 @@ public sealed class ManageServerViewModelTests
     public void SelectionShouldUpdateActionState()
     {
         var vm = CreateTestViewModel();
-        Assert.False(vm.HasSelectedServer);
-        Assert.False(vm.StartServerCommand.CanExecute(null));
-        Assert.False(vm.StopServerCommand.CanExecute(null));
-        Assert.False(vm.MonitorServerCommand.CanExecute(null));
+        Assert.False(vm.List.HasSelectedServer);
+        Assert.False(vm.Lifecycle.StartServerCommand.CanExecute(null));
+        Assert.False(vm.Lifecycle.StopServerCommand.CanExecute(null));
+        Assert.False(vm.Lifecycle.MonitorServerCommand.CanExecute(null));
         Assert.False(vm.ConfigureServerCommand.CanExecute(null));
         Assert.False(vm.OpenServerFolderCommand.CanExecute(null));
-        Assert.False(vm.BackupServerCommand.CanExecute(null));
-        Assert.False(vm.RestoreBackupCommand.CanExecute(null));
+        Assert.False(vm.Backup.BackupServerCommand.CanExecute(null));
+        Assert.False(vm.Backup.RestoreBackupCommand.CanExecute(null));
         Assert.False(vm.DeleteServerCommand.CanExecute(null));
 
         var server = new ServerRowItem
@@ -214,22 +171,22 @@ public sealed class ManageServerViewModelTests
             Status = "已停止",
             Path = @"C:\servers\Survival"
         };
-        vm.SelectedServer = server;
+        vm.List.SelectedServer = server;
 
-        Assert.True(vm.HasSelectedServer);
-        Assert.Contains("Survival", vm.SelectedServerInfo);
-        Assert.True(vm.StartServerCommand.CanExecute(null));
-        Assert.True(vm.StopServerCommand.CanExecute(null));
-        Assert.True(vm.MonitorServerCommand.CanExecute(null));
+        Assert.True(vm.List.HasSelectedServer);
+        Assert.Equal("Survival", vm.List.SelectedServer?.Name);
+        Assert.True(vm.Lifecycle.StartServerCommand.CanExecute(null));
+        Assert.True(vm.Lifecycle.StopServerCommand.CanExecute(null));
+        Assert.True(vm.Lifecycle.MonitorServerCommand.CanExecute(null));
         Assert.True(vm.ConfigureServerCommand.CanExecute(null));
         Assert.True(vm.OpenServerFolderCommand.CanExecute(null));
-        Assert.True(vm.BackupServerCommand.CanExecute(null));
-        Assert.True(vm.RestoreBackupCommand.CanExecute(null));
+        Assert.True(vm.Backup.BackupServerCommand.CanExecute(null));
+        Assert.True(vm.Backup.RestoreBackupCommand.CanExecute(null));
         Assert.True(vm.DeleteServerCommand.CanExecute(null));
 
-        vm.SelectedServer = null;
-        Assert.False(vm.HasSelectedServer);
-        Assert.False(vm.StartServerCommand.CanExecute(null));
+        vm.List.SelectedServer = null;
+        Assert.False(vm.List.HasSelectedServer);
+        Assert.False(vm.Lifecycle.StartServerCommand.CanExecute(null));
         Assert.False(vm.DeleteServerCommand.CanExecute(null));
     }
 
@@ -242,7 +199,7 @@ public sealed class ManageServerViewModelTests
         {
             var fakeLauncher = new FakeExternalLauncher();
             var vm = CreateTestViewModel(launcher: fakeLauncher);
-            vm.SelectedServer = new ServerRowItem
+            vm.List.SelectedServer = new ServerRowItem
             {
                 Name = "TestServer",
                 Version = "1.21.4",
@@ -252,7 +209,7 @@ public sealed class ManageServerViewModelTests
                 BackupPath = string.Empty
             };
 
-            await vm.OpenBackupFolderCommand.ExecuteAsync(null);
+            await vm.Backup.OpenBackupFolderCommand.ExecuteAsync(null);
 
             string internalBackupDir = Path.Combine(tempDir, "backups");
             Assert.False(Directory.Exists(internalBackupDir));
@@ -281,11 +238,11 @@ public sealed class ManageServerViewModelTests
             HasMissingFiles = true,
             Path = @"C:\servers\BrokenServer"
         };
-        vm.SelectedServer = server;
+        vm.List.SelectedServer = server;
 
-        Assert.True(vm.HasSelectedServer);
-        Assert.False(vm.StartServerCommand.CanExecute(null));
-        Assert.False(vm.MonitorServerCommand.CanExecute(null));
+        Assert.True(vm.List.HasSelectedServer);
+        Assert.False(vm.Lifecycle.StartServerCommand.CanExecute(null));
+        Assert.False(vm.Lifecycle.MonitorServerCommand.CanExecute(null));
         Assert.Contains("win_args.txt", server.Status);
     }
 
@@ -299,10 +256,9 @@ public sealed class ManageServerViewModelTests
             MemoryMaxMb = 4096,
             MemoryMinMb = null,
         };
-        vm.SelectedServer = server;
+        vm.List.SelectedServer = server;
 
-        Assert.Equal("4096 MB", vm.SelectedServerMemory);
-        Assert.Contains("記憶體配置：4096 MB", vm.SelectedServerInfo);
+        Assert.Equal("4096 MB", vm.List.SelectedServerMemory);
     }
 
     [Fact]
@@ -315,10 +271,9 @@ public sealed class ManageServerViewModelTests
             MemoryMaxMb = 4096,
             MemoryMinMb = 2048,
         };
-        vm.SelectedServer = server;
+        vm.List.SelectedServer = server;
 
-        Assert.Equal("2048 MB ~ 4096 MB", vm.SelectedServerMemory);
-        Assert.Contains("記憶體配置：2048 MB ~ 4096 MB", vm.SelectedServerInfo);
+        Assert.Equal("2048 MB ~ 4096 MB", vm.List.SelectedServerMemory);
     }
 
     private sealed class FakeRelocateUiService : NoOpUiService
@@ -326,7 +281,6 @@ public sealed class ManageServerViewModelTests
         public string? FolderToPick { get; set; }
         public bool? YesNoCancelDecision { get; set; } = true;
         public string? LastErrorMessage { get; private set; }
-        public string? LastWarningMessage { get; private set; }
         public bool RestartCalled { get; private set; }
 
         public override Task<string?> PickFolderAsync(string title, string? initialDirectory = null) =>
@@ -347,24 +301,18 @@ public sealed class ManageServerViewModelTests
             return Task.CompletedTask;
         }
 
-        public override Task ShowWarningAsync(string message, string title)
-        {
-            LastWarningMessage = message;
-            return Task.CompletedTask;
-        }
-
         public override void RestartApplication() => RestartCalled = true;
     }
 
     private sealed class FakeExternalLauncher : Core.Ports.IExternalLauncher
     {
         public List<string> OpenedFolders { get; } = [];
-        public bool OpenFolder(string folderPath, bool isTrusted = false)
+        public bool OpenFolder(string folderPath)
         {
             OpenedFolders.Add(folderPath);
             return true;
         }
-        public bool ShowInFolder(string filePath, bool isTrusted = false) => !string.IsNullOrEmpty(filePath);
+        public bool ShowInFolder(string filePath) => !string.IsNullOrEmpty(filePath);
         public bool OpenFile(string filePath, bool isTrusted = false) => !string.IsNullOrEmpty(filePath);
         public bool OpenUrl(string url, bool isTrusted = false) => !string.IsNullOrEmpty(url);
     }

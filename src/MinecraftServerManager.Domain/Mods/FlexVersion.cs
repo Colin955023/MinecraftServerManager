@@ -5,7 +5,7 @@ namespace MinecraftServerManager.Domain.Mods;
 /// 規格參照 Prism Launcher 之版本解析標準，以原生 C# / .NET 10 落實乾淨室獨立實作（Clean-room implementation）。
 /// 能精準解析 Minecraft 自由格式之模組版本字串，支援多區段比對、前導零正規化、忽略 '+' 建置中繼資料與預發布版降級，提供與人類直覺完全相符之版本排序與比較。
 /// </summary>
-public sealed class FlexVersion : IComparable<FlexVersion>, IEquatable<FlexVersion>, IComparable
+public sealed class FlexVersion
 {
     public enum SectionType : byte
     {
@@ -15,7 +15,7 @@ public sealed class FlexVersion : IComparable<FlexVersion>, IEquatable<FlexVersi
         PreRelease = 3,
     }
 
-    public readonly record struct Section(SectionType Type, string Value) : IComparable<Section>
+    public readonly record struct Section(SectionType Type, string Value)
     {
         public static readonly Section Null = new(SectionType.Null, string.Empty);
 
@@ -51,28 +51,13 @@ public sealed class FlexVersion : IComparable<FlexVersion>, IEquatable<FlexVersi
             // 文字或不同類型比較 (區段代碼 Unicode 順序)
             return string.CompareOrdinal(Value, other.Value);
         }
-
-        public static bool operator <(Section left, Section right) => left.CompareTo(right) < 0;
-
-        public static bool operator <=(Section left, Section right) => left.CompareTo(right) <= 0;
-
-        public static bool operator >(Section left, Section right) => left.CompareTo(right) > 0;
-
-        public static bool operator >=(Section left, Section right) => left.CompareTo(right) >= 0;
-
     }
 
     private readonly List<Section> _sections;
 
-    /// <summary>
-    /// 取得原始版本字串。
-    /// </summary>
-    public string OriginalString { get; }
-
     public FlexVersion(string? raw)
     {
-        OriginalString = raw ?? string.Empty;
-        _sections = ParseSections(OriginalString);
+        _sections = ParseSections(raw ?? string.Empty);
     }
 
     /// <summary>
@@ -223,44 +208,4 @@ public sealed class FlexVersion : IComparable<FlexVersion>, IEquatable<FlexVersi
 
         return 0;
     }
-
-    public int CompareTo(object? obj) => obj is FlexVersion fv ? CompareTo(fv) : 1;
-
-    public bool Equals(FlexVersion? other) => CompareTo(other) == 0;
-
-    public override bool Equals(object? obj) => obj is FlexVersion fv && Equals(fv);
-
-    public override int GetHashCode()
-    {
-        var hash = new HashCode();
-        foreach (var section in _sections)
-        {
-            if (section.Type != SectionType.Null)
-            {
-                hash.Add(section.Type);
-                hash.Add(section.Value, StringComparer.Ordinal);
-            }
-        }
-
-        return hash.ToHashCode();
-    }
-
-    public override string ToString() => OriginalString;
-
-    public static bool operator ==(FlexVersion? left, FlexVersion? right) =>
-        ReferenceEquals(left, right) || (left is not null && right is not null && left.CompareTo(right) == 0);
-
-    public static bool operator !=(FlexVersion? left, FlexVersion? right) => !(left == right);
-
-    public static bool operator <(FlexVersion? left, FlexVersion? right) =>
-        left is null ? right is not null : left.CompareTo(right) < 0;
-
-    public static bool operator <=(FlexVersion? left, FlexVersion? right) =>
-        left is null || left.CompareTo(right) <= 0;
-
-    public static bool operator >(FlexVersion? left, FlexVersion? right) =>
-        left is not null && (right is null || left.CompareTo(right) > 0);
-
-    public static bool operator >=(FlexVersion? left, FlexVersion? right) =>
-        right is null || (left is not null && left.CompareTo(right) >= 0);
 }

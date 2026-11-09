@@ -9,12 +9,11 @@ public static class AppLogging
 {
     private static readonly Lock SyncRoot = new();
     private static RotatingFileLoggerProvider? _fileLoggerProvider;
-    private static LoggerExternalScopeProvider? _scopeProvider;
 
     /// <summary>
     /// 初始化應用程式記錄管線
     /// </summary>
-    public static void Initialize(RotatingFileLoggerOptions? options = null)
+    public static void Initialize()
     {
         lock (SyncRoot)
         {
@@ -23,11 +22,7 @@ public static class AppLogging
                 return;
             }
 
-            options ??= new RotatingFileLoggerOptions();
-
-            _scopeProvider = new LoggerExternalScopeProvider();
-            _fileLoggerProvider = new RotatingFileLoggerProvider(options);
-            _fileLoggerProvider.SetScopeProvider(_scopeProvider);
+            _fileLoggerProvider = new RotatingFileLoggerProvider(new RotatingFileLoggerOptions());
         }
     }
 
@@ -64,25 +59,6 @@ public static class AppLogging
             {
                 string? path = _fileLoggerProvider?.CurrentFilePath;
                 return string.IsNullOrEmpty(path) ? null : path;
-            }
-        }
-    }
-
-    /// <summary>
-    /// 關閉並清除記錄管線，確保檔案串流完成寫入與釋放
-    /// </summary>
-    public static void Shutdown()
-    {
-        lock (SyncRoot)
-        {
-            try
-            {
-                _fileLoggerProvider?.Dispose();
-            }
-            finally
-            {
-                _fileLoggerProvider = null;
-                _scopeProvider = null;
             }
         }
     }

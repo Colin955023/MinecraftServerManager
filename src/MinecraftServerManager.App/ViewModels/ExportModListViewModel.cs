@@ -12,7 +12,7 @@ public sealed class ExportModListViewModel(
     string serverName,
     IReadOnlyList<ModListExportRow> rows,
     IModListExporter exporter,
-    IExternalLauncher? launcher,
+    IExternalLauncher launcher,
     IUiService ui)
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ExportModListViewModel));
@@ -22,8 +22,8 @@ public sealed class ExportModListViewModel(
     /// </summary>
     public async Task<bool> ExportAsync(ModListExportFormat format)
     {
-        (string extension, string filter) = Describe(format);
-        string? path = await ui.PickSaveFileAsync("儲存模組列表", $"{serverName}_模組列表{extension}", filter).ConfigureAwait(true);
+        FileTypeChoice fileType = Describe(format);
+        string? path = await ui.PickSaveFileAsync("儲存模組列表", $"{serverName}_模組列表{fileType.Extension}", fileType).ConfigureAwait(true);
         if (string.IsNullOrWhiteSpace(path))
         {
             return false;
@@ -50,27 +50,26 @@ public sealed class ExportModListViewModel(
         try
         {
             if (await ui.ConfirmAsync($"已儲存：\n{path}\n\n是否要立即開啟匯出的檔案？", "匯出成功", UiMessageLevel.Information).ConfigureAwait(true) &&
-                launcher is not null &&
                 !launcher.OpenFile(path, isTrusted: true))
             {
                 // 匯出檔案為程式內建產出內容，不需判斷是否拒絕開啟
-                ui.ShowToast($"無法開啟檔案：{path}", "開啟失敗", ToastType.Warning);
+                ui.ShowNotification($"無法開啟檔案：{path}", "開啟失敗", NotificationType.Warning);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.Warning(ex, "開啟匯出檔案流程失敗：{Message}", ex.Message);
-            ui.ShowToast($"檔案已匯出，但開啟時發生錯誤：{ex.Message}", "開啟失敗", ToastType.Warning);
+            ui.ShowNotification($"檔案已匯出，但開啟時發生錯誤：{ex.Message}", "開啟失敗", NotificationType.Warning);
         }
 
         return true;
     }
 
-    private static (string Extension, string Filter) Describe(ModListExportFormat format) => format switch
+    private static FileTypeChoice Describe(ModListExportFormat format) => format switch
     {
-        ModListExportFormat.Json => (".json", "JSON 檔案 (*.json)|*.json"),
-        ModListExportFormat.Html => (".html", "HTML 網頁 (*.html)|*.html"),
-        ModListExportFormat.Xlsx => (".xlsx", "Excel 工作表 (*.xlsx)|*.xlsx"),
-        _ => (".txt", "純文字檔案 (*.txt)|*.txt"),
+        ModListExportFormat.Json => FileTypeChoice.Json,
+        ModListExportFormat.Html => FileTypeChoice.Html,
+        ModListExportFormat.Xlsx => FileTypeChoice.Xlsx,
+        _ => FileTypeChoice.Text,
     };
 }

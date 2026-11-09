@@ -22,7 +22,6 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       DOTNET_CLI_FORCE_UTF8_ENCODING: "1"
     permissions:
       security-events: write
@@ -53,8 +52,6 @@ jobs:
       - name: Build Solution for CodeQL
         env:
           MSBUILDDISABLENODEREUSE: "1"
-          DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER: "1"
-        # App.csproj 已固定 RuntimeIdentifier=win-x64；不可加 -r，否則相依專案的 packages.lock.json 會因 RID 不符而在 locked mode 還原失敗
         run: dotnet build src/MinecraftServerManager.App/MinecraftServerManager.App.csproj -p:UseSharedCompilation=false
 
       - name: Perform CodeQL Analysis

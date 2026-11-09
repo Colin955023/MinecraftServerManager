@@ -10,35 +10,22 @@ public sealed partial class ServerListColumns : ObservableObject
 {
     public static ServerListColumns Current { get; } = new();
 
-    public static readonly double DefaultNameWidth = 180;
-    public static readonly double DefaultVersionWidth = 90;
-    public static readonly double DefaultLoaderWidth = 100;
-    public static readonly double DefaultStatusWidth = 110;
-    public static readonly double DefaultSizeWidth = 100;
-    public static readonly double DefaultModifiedWidth = 140;
-    public static readonly double DefaultBackupWidth = 100;
-    public static readonly double DefaultPathWidth = 180;
+    private const double DefaultNameWidth = 180;
+    private const double DefaultVersionWidth = 90;
+    private const double DefaultLoaderWidth = 100;
+    private const double DefaultStatusWidth = 110;
+    private const double DefaultSizeWidth = 100;
+    private const double DefaultModifiedWidth = 140;
+    private const double DefaultBackupWidth = 100;
 
-    [ObservableProperty] public partial GridLength NameWidth { get; set; } = new(180);
-    [ObservableProperty] public partial GridLength VersionWidth { get; set; } = new(90);
-    [ObservableProperty] public partial GridLength LoaderWidth { get; set; } = new(100);
-    [ObservableProperty] public partial GridLength StatusWidth { get; set; } = new(110);
-    [ObservableProperty] public partial GridLength SizeWidth { get; set; } = new(100);
-    [ObservableProperty] public partial GridLength ModifiedWidth { get; set; } = new(140);
-    [ObservableProperty] public partial GridLength BackupWidth { get; set; } = new(100);
+    [ObservableProperty] public partial GridLength NameWidth { get; set; } = new(DefaultNameWidth);
+    [ObservableProperty] public partial GridLength VersionWidth { get; set; } = new(DefaultVersionWidth);
+    [ObservableProperty] public partial GridLength LoaderWidth { get; set; } = new(DefaultLoaderWidth);
+    [ObservableProperty] public partial GridLength StatusWidth { get; set; } = new(DefaultStatusWidth);
+    [ObservableProperty] public partial GridLength SizeWidth { get; set; } = new(DefaultSizeWidth);
+    [ObservableProperty] public partial GridLength ModifiedWidth { get; set; } = new(DefaultModifiedWidth);
+    [ObservableProperty] public partial GridLength BackupWidth { get; set; } = new(DefaultBackupWidth);
     [ObservableProperty] public partial GridLength PathWidth { get; set; } = new(1, GridUnitType.Star);
-
-    public void ResetAll()
-    {
-        NameWidth = new(DefaultNameWidth);
-        VersionWidth = new(DefaultVersionWidth);
-        LoaderWidth = new(DefaultLoaderWidth);
-        StatusWidth = new(DefaultStatusWidth);
-        SizeWidth = new(DefaultSizeWidth);
-        ModifiedWidth = new(DefaultModifiedWidth);
-        BackupWidth = new(DefaultBackupWidth);
-        PathWidth = new(1, GridUnitType.Star);
-    }
 }
 
 /// <summary>
@@ -48,15 +35,14 @@ public sealed partial class LocalModListColumns : ObservableObject
 {
     public static LocalModListColumns Current { get; } = new();
 
-    public const double DefaultEnabledWidth = 60;
-    public const double DefaultNameWidth = 200;
-    public const double DefaultVersionWidth = 110;
-    public const double DefaultAuthorWidth = 120;
-    public const double DefaultLoaderWidth = 90;
-    public const double DefaultPlatformWidth = 95;
-    public const double DefaultSizeWidth = 100;
-    public const double DefaultModifiedWidth = 140;
-    public const double DefaultDescriptionWidth = 200;
+    private const double DefaultEnabledWidth = 60;
+    private const double DefaultNameWidth = 200;
+    private const double DefaultVersionWidth = 110;
+    private const double DefaultAuthorWidth = 120;
+    private const double DefaultLoaderWidth = 90;
+    private const double DefaultPlatformWidth = 95;
+    private const double DefaultSizeWidth = 100;
+    private const double DefaultModifiedWidth = 140;
 
     [ObservableProperty] public partial GridLength EnabledWidth { get; set; } = new(DefaultEnabledWidth);
     [ObservableProperty] public partial GridLength NameWidth { get; set; } = new(DefaultNameWidth);
@@ -76,11 +62,10 @@ public sealed partial class OnlineModListColumns : ObservableObject
 {
     public static OnlineModListColumns Current { get; } = new();
 
-    public const double DefaultTitleWidth = 220;
-    public const double DefaultAuthorWidth = 120;
-    public const double DefaultDownloadsWidth = 100;
-    public const double DefaultVersionWidth = 120;
-    public const double DefaultDescriptionWidth = 220;
+    private const double DefaultTitleWidth = 220;
+    private const double DefaultAuthorWidth = 120;
+    private const double DefaultDownloadsWidth = 100;
+    private const double DefaultVersionWidth = 120;
 
     [ObservableProperty] public partial GridLength TitleWidth { get; set; } = new(DefaultTitleWidth);
     [ObservableProperty] public partial GridLength AuthorWidth { get; set; } = new(DefaultAuthorWidth);
@@ -96,10 +81,9 @@ public sealed partial class JavaListColumns : ObservableObject
 {
     public static JavaListColumns Current { get; } = new();
 
-    public const double DefaultVersionWidth = 110;
-    public const double DefaultVendorWidth = 140;
-    public const double DefaultStatusWidth = 160;
-    public const double DefaultPathWidth = 240;
+    private const double DefaultVersionWidth = 110;
+    private const double DefaultVendorWidth = 140;
+    private const double DefaultStatusWidth = 160;
 
     [ObservableProperty] public partial GridLength VersionWidth { get; set; } = new(DefaultVersionWidth);
     [ObservableProperty] public partial GridLength VendorWidth { get; set; } = new(DefaultVendorWidth);
@@ -114,9 +98,8 @@ public sealed partial class BackupListColumns : ObservableObject
 {
     public static BackupListColumns Current { get; } = new();
 
-    public const double DefaultFileNameWidth = 300;
-    public const double DefaultSizeWidth = 120;
-    public const double DefaultCreatedWidth = 170;
+    private const double DefaultFileNameWidth = 300;
+    private const double DefaultSizeWidth = 120;
 
     [ObservableProperty] public partial GridLength FileNameWidth { get; set; } = new(DefaultFileNameWidth);
     [ObservableProperty] public partial GridLength SizeWidth { get; set; } = new(DefaultSizeWidth);
@@ -130,11 +113,10 @@ public sealed partial class ModVersionListColumns : ObservableObject
 {
     public static ModVersionListColumns Current { get; } = new();
 
-    public const double DefaultVersionWidth = 150;
-    public const double DefaultGameVersionWidth = 140;
-    public const double DefaultLoaderWidth = 120;
-    public const double DefaultDateWidth = 120;
-    public const double DefaultFileNameWidth = 180;
+    private const double DefaultVersionWidth = 150;
+    private const double DefaultGameVersionWidth = 140;
+    private const double DefaultLoaderWidth = 120;
+    private const double DefaultDateWidth = 120;
 
     [ObservableProperty] public partial GridLength VersionWidth { get; set; } = new(DefaultVersionWidth);
     [ObservableProperty] public partial GridLength GameVersionWidth { get; set; } = new(DefaultGameVersionWidth);
@@ -150,11 +132,10 @@ public sealed partial class ModQueueListColumns : ObservableObject
 {
     public static ModQueueListColumns Current { get; } = new();
 
-    public const double DefaultActionWidth = 75;
-    public const double DefaultTitleWidth = 180;
-    public const double DefaultVersionWidth = 130;
-    public const double DefaultFileNameWidth = 170;
-    public const double DefaultReasonWidth = 160;
+    private const double DefaultActionWidth = 75;
+    private const double DefaultTitleWidth = 180;
+    private const double DefaultVersionWidth = 130;
+    private const double DefaultFileNameWidth = 170;
 
     [ObservableProperty] public partial GridLength ActionWidth { get; set; } = new(DefaultActionWidth);
     [ObservableProperty] public partial GridLength TitleWidth { get; set; } = new(DefaultTitleWidth);
@@ -170,12 +151,11 @@ public sealed partial class ModUpdatesListColumns : ObservableObject
 {
     public static ModUpdatesListColumns Current { get; } = new();
 
-    public const double DefaultUpdateWidth = 60;
-    public const double DefaultNameWidth = 170;
-    public const double DefaultCurrentVersionWidth = 110;
-    public const double DefaultNewVersionWidth = 110;
-    public const double DefaultPlatformWidth = 95;
-    public const double DefaultFileNameWidth = 160;
+    private const double DefaultUpdateWidth = 60;
+    private const double DefaultNameWidth = 170;
+    private const double DefaultCurrentVersionWidth = 110;
+    private const double DefaultNewVersionWidth = 110;
+    private const double DefaultPlatformWidth = 95;
 
     [ObservableProperty] public partial GridLength UpdateWidth { get; set; } = new(DefaultUpdateWidth);
     [ObservableProperty] public partial GridLength NameWidth { get; set; } = new(DefaultNameWidth);
@@ -192,11 +172,10 @@ public sealed partial class OperatorListColumns : ObservableObject
 {
     public static OperatorListColumns Current { get; } = new();
 
-    public const double DefaultIsOpWidth = 75;
-    public const double DefaultNameWidth = 140;
-    public const double DefaultLevelWidth = 110;
-    public const double DefaultBypassWidth = 120;
-    public const double DefaultUuidWidth = 220;
+    private const double DefaultIsOpWidth = 75;
+    private const double DefaultNameWidth = 140;
+    private const double DefaultLevelWidth = 110;
+    private const double DefaultBypassWidth = 120;
 
     [ObservableProperty] public partial GridLength IsOpWidth { get; set; } = new(DefaultIsOpWidth);
     [ObservableProperty] public partial GridLength NameWidth { get; set; } = new(DefaultNameWidth);
@@ -212,9 +191,8 @@ public sealed partial class WhitelistListColumns : ObservableObject
 {
     public static WhitelistListColumns Current { get; } = new();
 
-    public const double DefaultNameWidth = 180;
-    public const double DefaultUuidWidth = 240;
-    public const double DefaultActionWidth = 90;
+    private const double DefaultNameWidth = 180;
+    private const double DefaultActionWidth = 90;
 
     [ObservableProperty] public partial GridLength NameWidth { get; set; } = new(DefaultNameWidth);
     [ObservableProperty] public partial GridLength UuidWidth { get; set; } = new(1, GridUnitType.Star);
@@ -228,11 +206,10 @@ public sealed partial class BannedPlayerListColumns : ObservableObject
 {
     public static BannedPlayerListColumns Current { get; } = new();
 
-    public const double DefaultNameWidth = 140;
-    public const double DefaultReasonWidth = 180;
-    public const double DefaultCreatedWidth = 155;
-    public const double DefaultUuidWidth = 200;
-    public const double DefaultActionWidth = 95;
+    private const double DefaultNameWidth = 140;
+    private const double DefaultReasonWidth = 180;
+    private const double DefaultCreatedWidth = 155;
+    private const double DefaultActionWidth = 95;
 
     [ObservableProperty] public partial GridLength NameWidth { get; set; } = new(DefaultNameWidth);
     [ObservableProperty] public partial GridLength ReasonWidth { get; set; } = new(DefaultReasonWidth);
@@ -248,10 +225,9 @@ public sealed partial class BannedIpListColumns : ObservableObject
 {
     public static BannedIpListColumns Current { get; } = new();
 
-    public const double DefaultIpWidth = 180;
-    public const double DefaultReasonWidth = 200;
-    public const double DefaultCreatedWidth = 170;
-    public const double DefaultActionWidth = 95;
+    private const double DefaultIpWidth = 180;
+    private const double DefaultReasonWidth = 200;
+    private const double DefaultActionWidth = 95;
 
     [ObservableProperty] public partial GridLength IpWidth { get; set; } = new(DefaultIpWidth);
     [ObservableProperty] public partial GridLength ReasonWidth { get; set; } = new(DefaultReasonWidth);

@@ -52,12 +52,8 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         ArgumentNullException.ThrowIfNull(targetVersion);
 
         var hardErrors = new List<string>();
-        var warnings = new List<string>();
-        var notes = new List<string>();
         var missingRequired = new List<string>();
-        var optional = new List<string>();
         var incompatible = new List<string>();
-        var embedded = new List<string>();
 
         string normalizedServerLoader = ModHelpers.NormalizeIdentifier(serverLoader);
         string normalizedServerMcVer = MinecraftVersion.TryParse(serverMinecraftVersion, out var parsedServerMc)
@@ -117,17 +113,6 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
                         }
                         break;
 
-                    case ModDependencyType.Optional:
-                        if (!isInstalled)
-                        {
-                            optional.Add(depName);
-                        }
-                        break;
-
-                    case ModDependencyType.Embedded:
-                        // 內嵌相依模組已封裝於模組檔案內，不需另行安裝，僅供顯示參考
-                        embedded.Add(depName);
-                        break;
                 }
             }
         }
@@ -137,14 +122,7 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
             hardErrors.Add($"缺少必要相依模組：{string.Join(", ", missingRequired)}");
         }
 
-        return new OnlineModCompatibilityReport(
-            hardErrors,
-            warnings,
-            notes,
-            missingRequired,
-            optional,
-            incompatible,
-            embeddedDependencies: embedded);
+        return new OnlineModCompatibilityReport(hardErrors, missingRequired, incompatible);
     }
 
     public async Task<IReadOnlyList<ModDependencyPlanItem>> ResolveDependenciesRecursivelyAsync(
@@ -224,14 +202,16 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
 
                 if (versions.Count == 0)
                 {
-                    Logger.Warning("相依項目「{TargetKey}」在 MC {MC} / {Loader} 下無相容版本", targetKey, serverMinecraftVersion, normalizedLoader);
+                    string name = await ResolveProjectNameAsync(modrinthClient, targetKey, cancellationToken).ConfigureAwait(false);
+                    Logger.Warning("相依模組「{Name}」在 MC {MC} / {Loader} 下無相容版本", name, serverMinecraftVersion, normalizedLoader);
                     continue;
                 }
 
                 var matchedVersion = SelectBestCompatibleVersion(versions, serverMinecraftVersion, normalizedLoader);
                 if (matchedVersion is null)
                 {
-                    Logger.Warning("相依項目「{TargetKey}」找不到具備有效 JAR 檔案的相容版本", targetKey);
+                    string name = await ResolveProjectNameAsync(modrinthClient, targetKey, cancellationToken).ConfigureAwait(false);
+                    Logger.Warning("相依模組「{Name}」找不到具備有效 JAR 檔案的相容版本", name);
                     continue;
                 }
 
@@ -285,13 +265,23 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
                     }
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.Warning("查詢相依專案「{TargetKey}」失敗: {Message}", targetKey, ex.Message);
+                string name = await ResolveProjectNameAsync(modrinthClient, targetKey, cancellationToken).ConfigureAwait(false);
+                Logger.Warning("查詢相依模組「{Name}」失敗: {Message}", name, ex.Message);
             }
         }
 
         return resolvedPlans;
+    }
+
+    /// <summary>
+    /// 取得專案名稱供日誌與提示使用；查詢失敗時退回專案代碼
+    /// </summary>
+    private static async Task<string> ResolveProjectNameAsync(IModrinthClient modrinthClient, string projectKey, CancellationToken cancellationToken)
+    {
+        var titles = await modrinthClient.GetProjectTitlesAsync([projectKey], cancellationToken).ConfigureAwait(false);
+        return titles.TryGetValue(projectKey, out string? title) && !string.IsNullOrWhiteSpace(title) ? title : projectKey;
     }
 
     private static HashSet<string> BuildInstalledIdentifiers(IReadOnlyList<LocalModInfo>? installedMods)
@@ -362,6 +352,12 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         return false;
     }
 
+    /// <summary>
+    /// 比對識別碼（不分大小寫、忽略前後空白）；<paramref name="normalized"/> 為已正規化的目標識別碼
+    /// </summary>
+    private static bool IdMatches(string? candidate, string normalized) =>
+        !string.IsNullOrWhiteSpace(candidate) && candidate.AsSpan().Trim().Equals(normalized, StringComparison.OrdinalIgnoreCase);
+
     private static LocalModInfo? FindMatchingInstalledMod(string? idToMatch, string? fileName, IReadOnlyList<LocalModInfo> installedMods)
     {
         if (installedMods is null || installedMods.Count == 0)
@@ -382,17 +378,13 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         {
             if (normId is not null)
             {
-                if ((!string.IsNullOrWhiteSpace(mod.Id) && (string.Equals(mod.Id, normId, StringComparison.OrdinalIgnoreCase) || string.Equals(ModHelpers.NormalizeIdentifier(mod.Id), normId, StringComparison.OrdinalIgnoreCase))) ||
-                    (!string.IsNullOrWhiteSpace(mod.Name) && (string.Equals(mod.Name, normId, StringComparison.OrdinalIgnoreCase) || string.Equals(ModHelpers.NormalizeIdentifier(mod.Name), normId, StringComparison.OrdinalIgnoreCase))) ||
-                    (!string.IsNullOrWhiteSpace(mod.PlatformId) && (string.Equals(mod.PlatformId, normId, StringComparison.OrdinalIgnoreCase) || string.Equals(ModHelpers.NormalizeIdentifier(mod.PlatformId), normId, StringComparison.OrdinalIgnoreCase))) ||
-                    (!string.IsNullOrWhiteSpace(mod.PlatformSlug) && (string.Equals(mod.PlatformSlug, normId, StringComparison.OrdinalIgnoreCase) || string.Equals(ModHelpers.NormalizeIdentifier(mod.PlatformSlug), normId, StringComparison.OrdinalIgnoreCase))))
+                if (IdMatches(mod.Id, normId) || IdMatches(mod.Name, normId) ||
+                    IdMatches(mod.PlatformId, normId) || IdMatches(mod.PlatformSlug, normId))
                 {
                     return mod;
                 }
 
-                if (aliasNorm is not null &&
-                    ((!string.IsNullOrWhiteSpace(mod.Id) && (string.Equals(mod.Id, aliasNorm, StringComparison.OrdinalIgnoreCase) || string.Equals(ModHelpers.NormalizeIdentifier(mod.Id), aliasNorm, StringComparison.OrdinalIgnoreCase))) ||
-                     (!string.IsNullOrWhiteSpace(mod.Name) && (string.Equals(mod.Name, aliasNorm, StringComparison.OrdinalIgnoreCase) || string.Equals(ModHelpers.NormalizeIdentifier(mod.Name), aliasNorm, StringComparison.OrdinalIgnoreCase)))))
+                if (aliasNorm is not null && (IdMatches(mod.Id, aliasNorm) || IdMatches(mod.Name, aliasNorm)))
                 {
                     return mod;
                 }
@@ -400,9 +392,7 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
 
             if (fileStem is not null && !string.IsNullOrWhiteSpace(mod.Filename))
             {
-                string rawStem = ModHelpers.ModFilenameStem(mod.Filename);
-                if (string.Equals(rawStem, fileStem, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(ModHelpers.NormalizeIdentifier(rawStem), fileStem, StringComparison.OrdinalIgnoreCase))
+                if (IdMatches(ModHelpers.ModFilenameStem(mod.Filename), fileStem))
                 {
                     return mod;
                 }

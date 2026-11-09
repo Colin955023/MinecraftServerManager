@@ -3,6 +3,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using MinecraftServerManager.App.Controls;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.App.Views;
@@ -24,6 +25,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
     private MainViewModel? _viewModel;
     private bool _shutdownInProgress;
     private bool _shutdownCompleted;
+    private WinUiService? _uiService;
 
     private readonly Dictionary<string, UIElement> _viewCache = new(StringComparer.OrdinalIgnoreCase);
 
@@ -34,7 +36,6 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         InitializeComponent();
         Title = "Minecraft 伺服器管理器";
 
-        SystemBackdrop = new MicaBackdrop();
         ExtendsContentIntoTitleBar = true;
 
         WindowIconHelper.SetIcon(AppWindow);
@@ -46,13 +47,13 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
     /// <summary>
     /// 初始化主視窗之組合根與 ViewModel 繫結
     /// </summary>
-    public void InitializeViewModel(AppCompositionRoot compositionRoot)
+    public void InitializeViewModel(AppCompositionRoot compositionRoot, WinUiService uiService)
     {
+        _uiService = uiService ?? throw new ArgumentNullException(nameof(uiService));
         _compositionRoot = compositionRoot ?? throw new ArgumentNullException(nameof(compositionRoot));
         _viewModel = compositionRoot.MainViewModel;
 
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
-        _viewModel.NotificationRequested += ViewModel_NotificationRequested;
         _viewModel.ResetWindowSizeRequested += OnResetWindowSizeRequested;
         _viewModel.UpdateAvailable += ViewModel_UpdateAvailable;
         _viewModel.ThemeModeChanged += ApplyThemeMode;
@@ -77,7 +78,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         };
 
         RootGrid.RequestedTheme = targetTheme;
-        WinUiService.Instance.CurrentTheme = targetTheme;
+        _uiService!.CurrentTheme = targetTheme;
         TitleBarThemeHelper.ApplyTitleBarTheme(AppWindow, targetTheme);
         Logger.Information("主視窗套用主題模式: {0} ({1})", mode, targetTheme);
     }
@@ -91,10 +92,10 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
 
         UIElement view = page switch
         {
-            CreateServerViewModel vm => GetOrCreateView("create", () => new CreateServerView { ViewModel = vm }),
-            ManageServerViewModel vm => GetOrCreateView("manage", () => new ManageServerView { ViewModel = vm }),
-            ModsViewModel vm => GetOrCreateView("mods", () => new ModsView { ViewModel = vm }),
-            AboutPreferencesViewModel vm => GetOrCreateView("about_preferences", () => new AboutPreferencesView { ViewModel = vm }),
+            CreateServerViewModel vm => GetOrCreateView("create", () => new CreateServerView(vm)),
+            ManageServerViewModel vm => GetOrCreateView("manage", () => new ManageServerView(vm)),
+            ModsViewModel vm => GetOrCreateView("mods", () => new ModsView(vm)),
+            AboutPreferencesViewModel vm => GetOrCreateView("about_preferences", () => new AboutPreferencesView(vm)),
             _ => new TextBlock { Text = page.Title, Margin = new Thickness(20) }
         };
 
@@ -123,40 +124,28 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
     {
         DispatcherQueue.TryEnqueue(() =>
         {
-            ShowToast("發現新版本", $"已偵測到新版本 v{result.LatestVersion}，請至「關於與設定」查看詳細更新資訊。", NotificationLevel.Warning, 5);
+            ShowNotification($"已偵測到新版本 v{result.LatestVersion}，請至「關於與設定」查看詳細更新資訊。", "發現新版本", NotificationType.Info, durationSeconds: 5);
         });
     }
 
-    private void ViewModel_NotificationRequested(string title, string message, NotificationLevel level) => ShowToast(title, message, level);
 
-    public void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3)
-    {
-        var level = type switch
-        {
-            ToastType.Error => NotificationLevel.Error,
-            _ => NotificationLevel.Warning
-        };
-        ShowToast(title ?? "通知", message, level, durationSeconds);
-    }
+    /// <summary>
+    /// 以 InfoBar 顯示資訊、成功與警告通知（錯誤由 WinUiService 以對話方塊顯示）
+    /// </summary>
+    public void ShowNotification(string message, string? title = null, NotificationType type = NotificationType.Info, int? durationSeconds = null) =>
+        ShowInfoBar(
+            title ?? NotificationPresentation.GetDefaultTitle(type),
+            message,
+            type,
+            durationSeconds ?? NotificationPresentation.GetDisplaySeconds(type));
 
     private Brush GetSafeThemeBrush(string key, Color fallbackColor)
     {
         try
         {
-            string themeKey = RootGrid.ActualTheme == ElementTheme.Light ? "Light" : "Default";
-            if (Application.Current?.Resources?.ThemeDictionaries is { } themeDicts &&
-                themeDicts.TryGetValue(themeKey, out object? dictObj) &&
-                dictObj is ResourceDictionary themeDict &&
-                themeDict.TryGetValue(key, out object? brushObj) &&
-                brushObj is Brush themeBrush)
+            if (ThemeBrush.ResolveBrush(key, RootGrid.ActualTheme) is { } brush)
             {
-                return themeBrush;
-            }
-
-            if (Application.Current?.Resources?.TryGetValue(key, out object? rootObj) == true &&
-                rootObj is Brush rootBrush)
-            {
-                return rootBrush;
+                return brush;
             }
         }
         catch (Exception ex)
@@ -167,67 +156,65 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         return new SolidColorBrush(fallbackColor);
     }
 
-    public void ShowToast(string title, string message, NotificationLevel level, int durationSeconds = 5)
+    /// <summary>
+    /// 於右上角以 WinUI 原生 InfoBar 顯示浮動通知：滑鼠停留時暫停自動關閉，最多同時顯示 4 則
+    /// </summary>
+    private void ShowInfoBar(string title, string message, NotificationType type, int durationSeconds)
     {
         bool isLight = RootGrid.ActualTheme == ElementTheme.Light;
-        Brush cardBrush = GetSafeThemeBrush("CardBrush", isLight ? Color.FromArgb(255, 255, 255, 255) : Color.FromArgb(255, 31, 34, 41));
-        Brush borderBrush = level == NotificationLevel.Error
-            ? GetSafeThemeBrush("DangerBrush", Color.FromArgb(255, 220, 38, 38))
-            : GetSafeThemeBrush("AccentBrush", Color.FromArgb(255, 79, 111, 216));
-        Brush textBrush = GetSafeThemeBrush("TextBrush", isLight ? Color.FromArgb(255, 26, 29, 36) : Color.FromArgb(255, 243, 244, 246));
-        Brush mutedTextBrush = GetSafeThemeBrush("MutedTextBrush", isLight ? Color.FromArgb(255, 94, 102, 117) : Color.FromArgb(255, 165, 172, 185));
-
-        var toastBorder = new Border
+        var infoBar = new InfoBar
         {
-            Background = cardBrush,
-            BorderBrush = borderBrush,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(14, 10, 14, 10),
-            MinWidth = 280,
-            MaxWidth = 420
+            Title = title,
+            Message = message,
+            Severity = NotificationPresentation.ToSeverity(type),
+            IsClosable = true,
+            IsOpen = true,
         };
 
-        var stack = new StackPanel { Spacing = 4 };
-        stack.Children.Add(new TextBlock
+        // InfoBar 預設背景為半透明，外層以卡片色承載確保浮於頁面內容上仍清晰可讀
+        var host = new Border
         {
-            Text = title,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            FontSize = 14,
-            Foreground = textBrush
-        });
-        stack.Children.Add(new TextBlock
-        {
-            Text = message,
-            FontSize = 12,
-            TextWrapping = TextWrapping.Wrap,
-            Foreground = mutedTextBrush
-        });
-
-        toastBorder.Child = stack;
+            Background = GetSafeThemeBrush("CardBrush", isLight ? Color.FromArgb(255, 255, 255, 255) : Color.FromArgb(255, 31, 34, 41)),
+            CornerRadius = new CornerRadius(8),
+            MinWidth = 280,
+            MaxWidth = 420,
+            Child = infoBar,
+        };
 
         var timer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromSeconds(durationSeconds > 0 ? durationSeconds : 3);
         timer.Tick += (s, e) =>
         {
             timer.Stop();
-            ToastContainer.Children.Remove(toastBorder);
+            infoBar.IsOpen = false;
         };
 
-        toastBorder.PointerEntered += (s, e) => timer.Stop();
-        toastBorder.PointerExited += (s, e) => timer.Start();
-
-        while (ToastContainer.Children.Count >= 4)
+        infoBar.Closed += (s, e) =>
         {
-            ToastContainer.Children.RemoveAt(0);
+            timer.Stop();
+            NotificationContainer.Children.Remove(host);
+        };
+        host.PointerEntered += (s, e) => timer.Stop();
+        host.PointerExited += (s, e) => timer.Start();
+
+        while (NotificationContainer.Children.Count >= 4)
+        {
+            // 經 IsOpen=false 走 Closed 流程，確保被擠出之通知一併停止計時器
+            var oldest = NotificationContainer.Children[0];
+            if (oldest is Border { Child: InfoBar oldBar })
+            {
+                oldBar.IsOpen = false;
+            }
+
+            NotificationContainer.Children.Remove(oldest);
         }
 
-        ToastContainer.Children.Add(toastBorder);
+        NotificationContainer.Children.Add(host);
         timer.Start();
 
-        if (level == NotificationLevel.Error)
+        if (type == NotificationType.Warning)
         {
-            AudioFeedback.PlayError();
+            AudioFeedback.PlayWarning();
         }
         else
         {
@@ -357,11 +344,10 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         if (_viewModel is not null)
         {
             _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
-            _viewModel.NotificationRequested -= ViewModel_NotificationRequested;
             _viewModel.ResetWindowSizeRequested -= OnResetWindowSizeRequested;
             _viewModel.UpdateAvailable -= ViewModel_UpdateAvailable;
             _viewModel.ThemeModeChanged -= ApplyThemeMode;
-            _viewModel.UnregisterEvents();
+            _viewModel.DisposePages();
         }
     }
 
@@ -378,7 +364,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         finally
         {
             _shutdownCompleted = true;
-            WinUiService.Instance.PostToUi(Close);
+            DispatcherQueue.TryEnqueue(Close);
         }
     }
 

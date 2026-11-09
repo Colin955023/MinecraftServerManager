@@ -90,6 +90,28 @@ public sealed class ProcessRunnerTests
         }
     }
 
+    [Theory]
+    [InlineData("A & calc", "run.bat", "nogui")]
+    [InlineData("safe", "run.bat", "%PATH%")]
+    [InlineData("safe", "run.bat", "a|b")]
+    public async Task RejectsBatchScriptWithCmdMetaCharacters(string folderName, string scriptName, string argument)
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "msm-meta-" + Guid.NewGuid().ToString("N"), folderName);
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string batPath = Path.Combine(tempDir, scriptName);
+            File.WriteAllText(batPath, "@echo off\r\n");
+
+            await Assert.ThrowsAsync<ArgumentException>(() => new ProcessRunner().StartAsync(
+                new ProcessStartSpec(batPath, [argument], WorkingDirectory: tempDir)));
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(tempDir)!, recursive: true);
+        }
+    }
+
     [Fact]
     public void OpenFile_RejectsDangerousExtensionsBeforeShellExecution()
     {

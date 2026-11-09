@@ -88,7 +88,7 @@ public sealed partial class DownloadBaselineTests(ITestOutputHelper output)
     {
         using var handler = new DownloadResponseHandler(fileBytes, TimeSpan.FromMilliseconds(latencyMilliseconds));
         using var client = new HttpClient(handler);
-        var downloader = new HttpDownloadClient(client, ResolvePublicTestHostAsync);
+        var downloader = new HttpDownloadClient(client);
         using var process = Process.GetCurrentProcess();
         process.Refresh();
         TimeSpan cpuBefore = process.TotalProcessorTime;
@@ -125,7 +125,7 @@ public sealed partial class DownloadBaselineTests(ITestOutputHelper output)
     {
         using var handler = new DownloadResponseHandler(fileBytes, TimeSpan.FromMilliseconds(latencyMilliseconds));
         using var client = new HttpClient(handler);
-        var downloader = new HttpDownloadClient(client, ResolvePublicTestHostAsync);
+        var downloader = new HttpDownloadClient(client);
 
         using var process = Process.GetCurrentProcess();
         process.Refresh();
@@ -176,12 +176,6 @@ public sealed partial class DownloadBaselineTests(ITestOutputHelper output)
             measurement.CpuTime.TotalMilliseconds,
             measurement.WorkingSetDelta,
             measurement.ManagedMemoryDelta);
-    }
-
-    private static Task<IPAddress[]> ResolvePublicTestHostAsync(string _, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(new[] { IPAddress.Parse("93.184.216.34") });
     }
 
     private sealed partial class DownloadResponseHandler(long contentLength, TimeSpan latency, bool enableRanges = false) : HttpMessageHandler

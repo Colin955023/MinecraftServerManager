@@ -1,15 +1,15 @@
 using System.Collections.ObjectModel;
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
-using MinecraftServerManager.Domain.Servers;
 
-namespace MinecraftServerManager.App.Services;
+namespace MinecraftServerManager.UnitTests.UI;
 
 /// <summary>
-/// 無介面的預設實作，供未注入 UI 服務時使用（例如單元測試）。行為與原本「沒有 Application 實例」時相同：不顯示任何視窗。
+/// 測試用 UI 服務替身：不顯示任何視窗，確認類對話方塊一律回傳同意。僅供單元測試使用，正式程式碼不得相依。
 /// </summary>
-public class NoOpUiService : IUiService
+internal class NoOpUiService : IUiService
 {
     public static readonly NoOpUiService Instance = new();
 
@@ -25,10 +25,7 @@ public class NoOpUiService : IUiService
         UiMessageLevel level = UiMessageLevel.Question) =>
         Task.FromResult<bool?>(true);
 
-    public virtual void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3) { }
-
-    public virtual Task ShowWarningAsync(string message, string title) =>
-        Task.CompletedTask;
+    public virtual void ShowNotification(string message, string? title = null, NotificationType type = NotificationType.Info) { }
 
     public virtual Task ShowErrorAsync(string message, string title) =>
         Task.CompletedTask;
@@ -47,10 +44,10 @@ public class NoOpUiService : IUiService
 
     public virtual IUiTimer CreateUiTimer(TimeSpan interval, Action tick) => new NoOpUiTimer();
 
-    public virtual Task<IReadOnlyList<string>?> PickFilesAsync(string title, string filter, bool multiselect = false) =>
+    public virtual Task<IReadOnlyList<string>?> PickFilesAsync(string title, FileTypeChoice fileType, bool multiselect = false) =>
         Task.FromResult<IReadOnlyList<string>?>(null);
 
-    public virtual Task<string?> PickSaveFileAsync(string title, string fileName, string filter) =>
+    public virtual Task<string?> PickSaveFileAsync(string title, string fileName, FileTypeChoice fileType) =>
         Task.FromResult<string?>(null);
 
     public virtual Task<string?> PickFolderAsync(string title, string? initialDirectory = null) =>
@@ -92,10 +89,10 @@ public class NoOpUiService : IUiService
     public virtual Task<ServerDeleteDecision> ShowServerDeleteConfirmationAsync(string serverName, int backupCount) =>
         Task.FromResult(ServerDeleteDecision.DeleteServerOnly);
 
-    public virtual Task ShowExportModListAsync(string serverName, IReadOnlyList<ModListExportRow> rows, IModListExporter exporter, IExternalLauncher? launcher) =>
+    public virtual Task ShowExportModListAsync(string serverName, IReadOnlyList<ModListExportRow> rows, IModListExporter exporter, IExternalLauncher launcher) =>
         Task.CompletedTask;
 
-    public virtual Task<bool> ShowServerInitializationAsync(ServerConfig config, string javaPath, IServerRuntime runtime) =>
+    public virtual Task<bool> ShowServerInitializationAsync(ServerInitializationViewModel viewModel) =>
         Task.FromResult(true);
 
     public virtual IMonitorWindow OpenServerMonitor(ServerMonitorViewModel viewModel) => new NoOpMonitorWindow();
@@ -116,14 +113,14 @@ public class NoOpUiService : IUiService
     {
         public IProgress<TReport> Progress { get; } = new Progress<TReport>();
 
-        public void Complete() { }
+        public void Dispose() { }
     }
 
     private sealed class NoOpModOperationProgress : IOperationProgress
     {
         public void UpdateProgress(int current, int total, string message) { }
 
-        public void Close() { }
+        public void Dispose() { }
     }
 
     private sealed class NoOpUiTimer : IUiTimer

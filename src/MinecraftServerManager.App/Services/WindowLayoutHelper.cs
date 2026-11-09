@@ -27,6 +27,15 @@ public static partial class WindowLayoutHelper
     }
 
     /// <summary>
+    /// 依視窗所在螢幕的 DPI 縮放比例，將視窗調整為指定的邏輯尺寸（AppWindow.Resize 的單位為實體像素）
+    /// </summary>
+    public static void ResizeToDip(Window window, int widthDip, int heightDip)
+    {
+        double scale = GetScale(window);
+        window.AppWindow.Resize(new SizeInt32((int)(widthDip * scale), (int)(heightDip * scale)));
+    }
+
+    /// <summary>
     /// 計算將指定尺寸置中於參考矩形之座標，並夾限於螢幕工作區內
     /// </summary>
     public static PointInt32 CenterWithin(RectInt32 reference, RectInt32 workArea, int width, int height)

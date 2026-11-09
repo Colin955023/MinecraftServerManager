@@ -19,14 +19,12 @@
       VerticalAlignment="Stretch">
       <StackPanel Orientation="Horizontal"
         Spacing="4">
-        <TextBlock x:Name="HeaderText"
-          Text="{x:Bind Text, Mode=OneWay}"
+        <TextBlock Text="{x:Bind Text, Mode=OneWay}"
           FontWeight="SemiBold"
           FontSize="12"
           TextTrimming="CharacterEllipsis"
           VerticalAlignment="Center" />
-        <FontIcon x:Name="SortIndicator"
-          Glyph="{x:Bind SortGlyph}"
+        <FontIcon Glyph="{x:Bind SortGlyph}"
           FontSize="10"
           Opacity="0.7"
           VerticalAlignment="Center"

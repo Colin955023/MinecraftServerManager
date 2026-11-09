@@ -1,4 +1,5 @@
 using System.Buffers;
+using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Domain.ValueObjects;
 
@@ -75,9 +76,9 @@ public readonly record struct ServerName
         }
 
         if (span.Equals(".issues", StringComparison.OrdinalIgnoreCase)
-            || span.Equals("servers.json", StringComparison.OrdinalIgnoreCase)
+            || span.Equals(ServerDefaults.RegistryFileName, StringComparison.OrdinalIgnoreCase)
             || span.Equals("servers_config.json", StringComparison.OrdinalIgnoreCase)
-            || span.StartsWith(".msm-", StringComparison.OrdinalIgnoreCase))
+            || span.StartsWith(ServerDefaults.InternalPrefix, StringComparison.OrdinalIgnoreCase))
         {
             error = "伺服器名稱與程式內部保留路徑衝突";
             return false;

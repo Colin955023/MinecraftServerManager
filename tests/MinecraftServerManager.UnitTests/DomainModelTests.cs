@@ -77,42 +77,28 @@ public sealed class DomainModelTests
     [Fact]
     public void ServerCreationPlanValidatesInvariantsAndBuildsConfig()
     {
-        var plan = new ServerCreationPlan(
-            transactionId: "tx-12345",
+        var plan = ServerCreationPlan.Create(
             name: ServerName.Parse("測試計畫伺服器"),
             minecraftVersion: MinecraftVersion.Parse("1.20.4"),
             loaderType: LoaderKind.Fabric,
             loaderVersion: "0.15.7",
             memoryMaxMb: 4096,
             memoryMinMb: 2048,
-            jvmArgs: ["-XX:+UseG1GC"],
-            properties: [new KeyValuePair<string, string>("difficulty", "hard")],
-            finalPath: @"C:\Servers\Test",
-            stagingPath: @"C:\Temp\Test",
-            warnings: [new ServerCreationWarning("建議升級記憶體")]
-        );
+            jvmArgs: ["-XX:+UseG1GC"]);
 
-        Assert.Single(plan.Warnings);
-        var config = plan.BuildConfig(@"C:\Servers\Test");
+        var config = plan.Config.WithPath(@"C:\Servers\Test");
         Assert.Equal("測試計畫伺服器", config.Name.Value);
         Assert.Equal(4096, config.MemoryMaxMb);
         Assert.Equal(2048, config.MemoryMinMb);
         Assert.Equal(@"C:\Servers\Test", config.Path);
 
         // 驗證不變條件：min > max 應擲出 ArgumentException
-        Assert.Throws<ArgumentException>(static () => new ServerCreationPlan(
-            "tx-fail",
+        Assert.Throws<ArgumentException>(static () => ServerCreationPlan.Create(
             ServerName.Parse("無效"),
             MinecraftVersion.Parse("1.20.1"),
             LoaderKind.Vanilla,
-            "",
             memoryMaxMb: 1024,
-            memoryMinMb: 2048,
-            jvmArgs: [],
-            properties: [],
-            finalPath: "",
-            stagingPath: ""
-        ));
+            memoryMinMb: 2048));
     }
 
     [Theory]
@@ -121,19 +107,12 @@ public sealed class DomainModelTests
     [InlineData(1024, 2048, false)]
     public void ServerCreationPlanValidatesMemoryInvariants(int maxMb, int minMb, bool shouldSucceed)
     {
-        void act() => _ = new ServerCreationPlan(
-            "tx-test",
+        void act() => _ = ServerCreationPlan.Create(
             ServerName.Parse("MemTest"),
             MinecraftVersion.Parse("1.20.1"),
             LoaderKind.Vanilla,
-            "",
             memoryMaxMb: maxMb,
-            memoryMinMb: minMb,
-            jvmArgs: [],
-            properties: [],
-            finalPath: "",
-            stagingPath: ""
-        );
+            memoryMinMb: minMb);
 
         if (shouldSucceed)
         {
@@ -149,33 +128,21 @@ public sealed class DomainModelTests
     public void ServerImportResultFactoryMethodsProduceExpectedStates()
     {
         var success = ServerImportResult.Success("server1", new ServerConfig(ServerName.Parse("server1"), MinecraftVersion.Parse("1.20.1"), LoaderKind.Vanilla, "", 2048));
-        var skipped = ServerImportResult.Skipped("server2", "已存在相同伺服器");
-        var failed = ServerImportResult.Failed("server3", "檔案損毀", diagnosticId: "diag-001");
+        var failed = ServerImportResult.Failed("server3", "檔案損毀");
 
         Assert.True(success.Completed);
-        Assert.Equal(ImportStatus.Skipped, skipped.Status);
         Assert.False(failed.Completed);
-        Assert.Equal("diag-001", failed.DiagnosticId);
+        Assert.Equal("檔案損毀", failed.Message);
     }
 
     [Fact]
     public void OnlineModCompatibilityReportDeterminesCompatibility()
     {
-        var compatibleReport = new OnlineModCompatibilityReport(
-            hardErrors: [],
-            incompatibleInstalled: [],
-            missingRequiredDependencies: [],
-            warnings: ["此為 Beta 測試版"]
-        );
+        var compatibleReport = new OnlineModCompatibilityReport([], [], []);
         Assert.True(compatibleReport.IsCompatible);
-        Assert.False(compatibleReport.HasHardErrors);
 
-        var incompatibleReport = new OnlineModCompatibilityReport(
-            hardErrors: ["遊戲版本不相容"],
-            missingRequiredDependencies: ["fabric-api"]
-        );
+        var incompatibleReport = new OnlineModCompatibilityReport(["遊戲版本不相容"], ["fabric-api"], []);
         Assert.False(incompatibleReport.IsCompatible);
-        Assert.True(incompatibleReport.HasHardErrors);
     }
 }
 

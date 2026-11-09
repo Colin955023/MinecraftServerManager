@@ -3,7 +3,6 @@ using System.Globalization;
 using System.IO.Compression;
 using System.Security;
 using System.Text;
-using System.Xml;
 using MinecraftServerManager.Core.Mods;
 
 namespace MinecraftServerManager.Infrastructure.Utilities;
@@ -16,12 +15,6 @@ public static class OpenXmlSpreadsheetBuilder
 {
     private static readonly SearchValues<char> InvalidSheetNameChars = SearchValues.Create("[]:*?/\\");
     private static readonly string[] CachedColumnNames = [.. Enumerable.Range(1, 100).Select(ComputeExcelColumnName)];
-    private static readonly XmlWriterSettings SheetXmlWriterSettings = new()
-    {
-        Encoding = new UTF8Encoding(false),
-        OmitXmlDeclaration = false,
-        CheckCharacters = false,
-    };
 
     /// <summary>
     /// 將字串表格建立為標準 OpenXML SpreadsheetML (.xlsx) 二進位位元組陣列。
@@ -76,46 +69,29 @@ public static class OpenXmlSpreadsheetBuilder
             WriteEntry(archive, "xl/workbook.xml", workbookXml);
             WriteEntry(archive, "xl/_rels/workbook.xml.rels", workbookRelsXml);
 
-            // 以 XmlWriter 直寫 xl/worksheets/sheet1.xml 串流，避免巨量字串與位元組陣列配置
+            // 直寫 xl/worksheets/sheet1.xml 串流，避免巨量字串配置；文字經過濾與跳脫後輸出
             var sheetEntry = archive.CreateEntry("xl/worksheets/sheet1.xml", CompressionLevel.Optimal);
-            using var sheetStream = sheetEntry.Open();
-            using var writer = XmlWriter.Create(sheetStream, SheetXmlWriterSettings);
-
-            writer.WriteStartDocument(standalone: true);
-            writer.WriteStartElement("worksheet", "http://schemas.openxmlformats.org/spreadsheetml/2006/main");
-            writer.WriteStartElement("sheetData");
+            using var writer = new StreamWriter(sheetEntry.Open(), new UTF8Encoding(false));
+            writer.Write(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
 
             for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
             {
                 var row = rows[rowIndex];
-                int excelRowNum = rowIndex + 1;
-                writer.WriteStartElement("row");
-                writer.WriteAttributeString("r", excelRowNum.ToString(CultureInfo.InvariantCulture));
-
+                string excelRowNum = (rowIndex + 1).ToString(CultureInfo.InvariantCulture);
+                writer.Write($"<row r=\"{excelRowNum}\">");
                 for (int colIndex = 0; colIndex < row.Count; colIndex++)
                 {
-                    string colName = GetExcelColumnName(colIndex + 1);
-                    string cellRef = $"{colName}{excelRowNum}";
-                    string cellValue = SanitizeXmlText(row[colIndex]);
-
-                    writer.WriteStartElement("c");
-                    writer.WriteAttributeString("r", cellRef);
-                    writer.WriteAttributeString("t", "inlineStr");
-                    writer.WriteStartElement("is");
-                    writer.WriteStartElement("t");
-                    writer.WriteAttributeString("xml", "space", null, "preserve");
-                    writer.WriteString(cellValue);
-                    writer.WriteEndElement(); // </t>
-                    writer.WriteEndElement(); // </is>
-                    writer.WriteEndElement(); // </c>
+                    writer.Write($"<c r=\"{GetExcelColumnName(colIndex + 1)}{excelRowNum}\" t=\"inlineStr\"><is><t xml:space=\"preserve\">");
+                    writer.Write(SecurityElement.Escape(SanitizeXmlText(row[colIndex])));
+                    writer.Write("</t></is></c>");
                 }
 
-                writer.WriteEndElement(); // </row>
+                writer.Write("</row>");
             }
 
-            writer.WriteEndElement(); // </sheetData>
-            writer.WriteEndElement(); // </worksheet>
-            writer.WriteEndDocument();
+            writer.Write("</sheetData></worksheet>");
         }
 
         return memoryStream.ToArray();
@@ -254,5 +230,5 @@ public static class OpenXmlSpreadsheetBuilder
     }
 
     private static bool IsValidXmlRune(Rune rune) =>
-        !rune.IsBmp || XmlConvert.IsXmlChar((char)rune.Value);
+        rune.Value is 0x9 or 0xA or 0xD or (>= 0x20 and <= 0xD7FF) or (>= 0xE000 and <= 0xFFFD) or >= 0x10000;
 }

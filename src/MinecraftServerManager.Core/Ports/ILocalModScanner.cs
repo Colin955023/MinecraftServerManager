@@ -11,9 +11,4 @@ public interface ILocalModScanner
     /// 掃描指定目錄下之所有 .jar 與 .jar.disabled 檔案
     /// </summary>
     public Task<IReadOnlyList<LocalModInfo>> ScanModsAsync(string modsDirectory, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// 掃描並解析單一模組 JAR 檔案
-    /// </summary>
-    public Task<LocalModInfo?> ScanSingleModAsync(string filePath, CancellationToken cancellationToken = default);
 }

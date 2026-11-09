@@ -17,8 +17,6 @@ public readonly partial record struct VersionValue(
 
     public static VersionValue Zero => new(0, 0, 0);
 
-    public static VersionValue? ParseOrDefault(string? value, VersionValue? fallback = null) => TryParse(value, out var result) ? result : fallback;
-
     public static bool TryParse(string? value, out VersionValue result)
     {
         string candidate = value?.Trim() ?? string.Empty;
@@ -34,65 +32,26 @@ public readonly partial record struct VersionValue(
             return false;
         }
 
-
+        // 正規表示式已保證各段皆為數字，僅需處理溢位；第四段以後忽略
         ReadOnlySpan<char> versionSpan = match.Groups["version"].ValueSpan;
-        int firstDot = versionSpan.IndexOf('.');
-        if (firstDot < 0)
+        Span<Range> parts = stackalloc Range[4];
+        int count = versionSpan.Split(parts, '.');
+        Span<int> numbers = stackalloc int[3];
+        for (int i = 0; i < Math.Min(count, 3); i++)
         {
-            if (!int.TryParse(versionSpan, CultureInfo.InvariantCulture, out int singleMajor))
-            {
-                result = default;
-                return false;
-            }
-
-            result = new VersionValue(singleMajor, 0, 0, match.Groups["pre"].Value, match.Groups["build"].Value);
-            return true;
-        }
-
-        if (!int.TryParse(versionSpan[..firstDot], CultureInfo.InvariantCulture, out int major))
-        {
-            result = default;
-            return false;
-        }
-
-        ReadOnlySpan<char> rest = versionSpan[(firstDot + 1)..];
-        int secondDot = rest.IndexOf('.');
-        int patch = 0;
-
-        int minor;
-        if (secondDot < 0)
-        {
-            if (!int.TryParse(rest, CultureInfo.InvariantCulture, out minor))
-            {
-                result = default;
-                return false;
-            }
-        }
-        else
-        {
-            ReadOnlySpan<char> patchSpan = rest[(secondDot + 1)..];
-            int thirdDot = patchSpan.IndexOf('.');
-            if (thirdDot >= 0)
-            {
-                patchSpan = patchSpan[..thirdDot];
-            }
-
-            if (!int.TryParse(rest[..secondDot], CultureInfo.InvariantCulture, out minor)
-                || !int.TryParse(patchSpan, CultureInfo.InvariantCulture, out patch))
+            if (!int.TryParse(versionSpan[parts[i]], CultureInfo.InvariantCulture, out numbers[i]))
             {
                 result = default;
                 return false;
             }
         }
 
-        result = new VersionValue(
-            major,
-            minor,
-            patch,
-            match.Groups["pre"].Value,
-            match.Groups["build"].Value);
+        result = new VersionValue(numbers[0], numbers[1], numbers[2], match.Groups["pre"].Value, match.Groups["build"].Value);
         return true;
     }
+
+    /// <summary>解析版本字串，失敗時回傳 <see cref="Zero"/>。</summary>
+    public static VersionValue ParseOrZero(string? value) => TryParse(value, out var result) ? result : Zero;
 
     public int CompareTo(VersionValue other)
     {

@@ -48,7 +48,6 @@ function Test-SecretsAndPrivacy
 
     Write-Host "偵測到 Gitleaks："
     & gitleaks version
-    # 設定檔 .gitleaks.toml 由目標目錄自動載入（已排除 output、bin、obj 與二進位檔）
     & gitleaks dir $solutionDir --redact --verbose
     if ($LASTEXITCODE -ne 0)
     {

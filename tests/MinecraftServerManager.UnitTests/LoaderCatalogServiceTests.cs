@@ -43,7 +43,7 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         }
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(manifestJson);
+        var fakeHttp = new StubHttpPort(manifestJson);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var releasesOnly = await service.GetMinecraftVersionsAsync(includeSnapshots: false);
@@ -65,7 +65,7 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         ]
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(fabricJson);
+        var fakeHttp = new StubHttpPort(fabricJson);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.Fabric, "1.20.4");
@@ -87,13 +87,36 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         </metadata>
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(forgeXml);
+        var fakeHttp = new StubHttpPort(forgeXml);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.Forge, "1.20.4");
         var item = Assert.Single(versions);
         Assert.Equal("49.0.1", item.Version);
         Assert.Equal("1.20.4", item.MinecraftVersion);
+    }
+
+    [Fact]
+    public async Task GetLoaderVersionsAsyncForForgeSortsBySemanticVersion()
+    {
+        string forgeXml = """
+        <metadata>
+            <versioning>
+                <versions>
+                    <version>1.20.1-47.9.0</version>
+                    <version>1.20.1-47.10.0</version>
+                    <version>1.20.1-47.2.0</version>
+                    <version>1.20.1-47.11.1</version>
+                    <version>1.20.1-47.1.0</version>
+                </versions>
+            </versioning>
+        </metadata>
+        """;
+
+        var service = new LoaderCatalogService(new StubHttpPort(forgeXml), _cacheDir);
+
+        var versions = await service.GetLoaderVersionsAsync(LoaderKind.Forge, "1.20.1");
+        Assert.Equal(["47.11.1", "47.10.0", "47.9.0", "47.2.0"], versions.Select(static v => v.Version));
     }
 
     [Fact]
@@ -110,7 +133,7 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         </metadata>
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(neoForgeXml);
+        var fakeHttp = new StubHttpPort(neoForgeXml);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.NeoForge, "1.20.4");
@@ -134,7 +157,7 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         </metadata>
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(neoForgeXml);
+        var fakeHttp = new StubHttpPort(neoForgeXml);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         // 使用者查詢 26.3，統一規則解析為 26.3，應能成功比對
@@ -156,7 +179,7 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         ]
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(fabricJson);
+        var fakeHttp = new StubHttpPort(fabricJson);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.Fabric, "1.20.4");
@@ -182,7 +205,7 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         </metadata>
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(forgeXml);
+        var fakeHttp = new StubHttpPort(forgeXml);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.Forge, "1.20.4");
@@ -211,7 +234,7 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         </metadata>
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(neoForgeXml);
+        var fakeHttp = new StubHttpPort(neoForgeXml);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.NeoForge, "1.20.4");
@@ -236,7 +259,7 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         """;
 
         int requestCount = 0;
-        var fakeHttp = new FakeCatalogHttpPort(uri =>
+        var fakeHttp = new StubHttpPort(uri =>
         {
             requestCount++;
             string url = uri.AbsoluteUri;
@@ -311,7 +334,7 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         ]
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(buildsJson);
+        var fakeHttp = new StubHttpPort(buildsJson);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var builds = await service.GetLoaderVersionsAsync(LoaderKind.Paper, "1.21.4");
@@ -320,9 +343,6 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         Assert.Equal("165", item.Version);
         Assert.True(item.Stable);
         Assert.Equal("https://fill-data.papermc.io/paper-1.21.4-165.jar", item.Url);
-
-        // 驗證不應在磁碟中寫入零碎的 build 快取檔案
-        Assert.False(File.Exists(Path.Combine(_cacheDir, "paper_1.21.4_builds_cache.json")));
     }
 
     [Fact]
@@ -355,7 +375,7 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         }
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(uri =>
+        var fakeHttp = new StubHttpPort(uri =>
         {
             if (uri.ToString().Contains("version_manifest.json"))
             {
@@ -377,9 +397,7 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         Assert.Equal(21, v.JavaMajor);
 
         string mcCache = Path.Combine(_cacheDir, "mc_versions_cache.json");
-        string reqCache = Path.Combine(_cacheDir, "mc_java_requirements_cache.json");
         Assert.True(File.Exists(mcCache));
-        Assert.False(File.Exists(reqCache));
         string mcContent = await File.ReadAllTextAsync(mcCache);
         Assert.Contains("\"JavaMajor\": 21", mcContent);
     }
@@ -398,7 +416,7 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         }
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(manifestJson);
+        var fakeHttp = new StubHttpPort(manifestJson);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var fabricVersions = await service.GetMinecraftVersionsForLoaderAsync(LoaderKind.Fabric);
@@ -453,7 +471,7 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         }
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(uri =>
+        var fakeHttp = new StubHttpPort(uri =>
         {
             string s = uri.ToString();
             if (s.EndsWith("/projects/paper", StringComparison.OrdinalIgnoreCase))
@@ -497,7 +515,7 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         """;
         await File.WriteAllTextAsync(cacheFile, dirtyCacheJson);
 
-        var fakeHttp = new FakeCatalogHttpPort("");
+        var fakeHttp = new StubHttpPort("");
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetMinecraftVersionsAsync(includeSnapshots: false);
@@ -508,44 +526,5 @@ public sealed partial class LoaderCatalogServiceTests : IDisposable
         // 驗證快取檔案已自動清洗並剔除 Stable: false
         string cleanedJson = await File.ReadAllTextAsync(cacheFile);
         Assert.DoesNotContain("24w05a", cleanedJson);
-    }
-
-    private sealed class FakeCatalogHttpPort : IHttpPort
-    {
-        private readonly Func<Uri, string?> _handler;
-
-        public FakeCatalogHttpPort(string responseText)
-        {
-            _handler = _ => responseText;
-        }
-
-        public FakeCatalogHttpPort(Func<Uri, string?> handler)
-        {
-            _handler = handler;
-        }
-
-        public Task<HttpJsonResponse<System.Text.Json.JsonDocument>> GetJsonDocumentAsync(Uri uri, CancellationToken cancellationToken = default) =>
-            TestHttpJson.FromTextAsync(this, uri, cancellationToken);
-
-        public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default) =>
-            Task.FromResult(_handler(uri));
-
-        public Task<HttpJsonResponse<T>> GetJsonAsync<T>(Uri uri, CancellationToken cancellationToken = default) =>
-            throw new NotImplementedException();
-
-        public Task<HttpResult> DownloadAsync(
-            Uri uri,
-            string targetPath,
-            IProgress<HttpProgress>? progress = null,
-            string? expectedHash = null,
-            string expectedHashAlgorithm = "sha256",
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new HttpResult(true));
-
-        public Task<string?> PostJsonAsync(
-            Uri uri,
-            string jsonPayload,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult<string?>(null);
     }
 }

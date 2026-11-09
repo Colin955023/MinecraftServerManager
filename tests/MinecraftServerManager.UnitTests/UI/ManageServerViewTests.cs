@@ -1,91 +1,36 @@
 using MinecraftServerManager.App.Controls;
-using MinecraftServerManager.App.Views;
+using MinecraftServerManager.App.ViewModels;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
+/// <summary>
+/// 表頭自動欄寬估算與欄位顯示文字對照測試
+/// </summary>
 public sealed class ManageServerViewTests
 {
-    [Fact]
-    public void ToggleColumnWidth_AlwaysAutoFitsToWidestItem()
-    {
-        double current = 250.0;
-        double defaultWidth = 100.0;
-        double assignedWidth = 0;
-
-        ManageServerView.ToggleColumnWidth(
-            () => current,
-            w => assignedWidth = w,
-            defaultWidth,
-            ["01234567890123456789"]);
-
-        // 20 個 ASCII 字元: 20 * 8.5 + 32 = 202.0（不再切回預設寬度）
-        Assert.Equal(202.0, assignedWidth);
-    }
+    [Theory]
+    [InlineData("01234567890123456789", 202.0)]
+    [InlineData("0123456789", 117.0)]
+    [InlineData("測試伺服器名稱說明文字", 197.0)]
+    public void CalculateAutoFitWidth_EstimatesWidestItem(string value, double expected) =>
+        Assert.Equal(expected, SortableTableHeader.CalculateAutoFitWidth(100.0, [value]));
 
     [Fact]
-    public void ToggleColumnWidth_WithEmptyOrNullValues_KeepsDefaultWidth()
-    {
-        double current = 100.0;
-        double defaultWidth = 100.0;
-        double assignedWidth = 0;
-
-        ManageServerView.ToggleColumnWidth(
-            () => current,
-            w => assignedWidth = w,
-            defaultWidth,
-            [null, string.Empty, "   "]);
-
-        Assert.Equal(defaultWidth, assignedWidth);
-    }
+    public void CalculateAutoFitWidth_WithEmptyOrNullValues_KeepsDefaultWidth() =>
+        Assert.Equal(100.0, SortableTableHeader.CalculateAutoFitWidth(100.0, [null, string.Empty, "   "]));
 
     [Fact]
-    public void ToggleColumnWidth_WithAsciiValues_CalculatesEstimatedWidth()
-    {
-        double current = 100.0;
-        double defaultWidth = 100.0;
-        double assignedWidth = 0;
-
-        ManageServerView.ToggleColumnWidth(
-            () => current,
-            w => assignedWidth = w,
-            defaultWidth,
-            ["0123456789"]);
-
-        Assert.Equal(117.0, assignedWidth);
-    }
+    public void CalculateAutoFitWidth_WhenWidthExceedsMaxCap_ClampsToMaxColumnWidth() =>
+        Assert.Equal(SortableTableHeader.DefaultMaxColumnWidth, SortableTableHeader.CalculateAutoFitWidth(100.0, [new string('伺', 100)]));
 
     [Fact]
-    public void ToggleColumnWidth_WithCjkValues_AppliesCjkWeight()
+    public void GetDisplayTexts_PrefersDisplayOverrideThenStringSortKey()
     {
-        double current = 100.0;
-        double defaultWidth = 100.0;
-        double assignedWidth = 0;
+        ServerRowItem[] rows = [new() { Name = "Alpha", Size = "1.5 GB", RawSizeBytes = 1_500_000_000 }];
 
-        ManageServerView.ToggleColumnWidth(
-            () => current,
-            w => assignedWidth = w,
-            defaultWidth,
-            ["測試伺服器名稱說明文字"]);
-
-        Assert.Equal(197.0, assignedWidth);
-    }
-
-    [Fact]
-    public void ToggleColumnWidth_WhenWidthExceedsMaxCap_ClampsToMaxColumnWidth()
-    {
-        double current = 100.0;
-        double defaultWidth = 100.0;
-        double assignedWidth = 0;
-
-        string veryLongCjk = new('伺', 100);
-
-        ManageServerView.ToggleColumnWidth(
-            () => current,
-            w => assignedWidth = w,
-            defaultWidth,
-            [veryLongCjk]);
-
-        Assert.Equal(SortableTableHeader.DefaultMaxColumnWidth, assignedWidth);
+        Assert.Equal(["1.5 GB"], TableSortKeys.Servers.GetDisplayTexts(rows, "Size"));
+        Assert.Equal(["Alpha"], TableSortKeys.Servers.GetDisplayTexts(rows, "Name"));
+        Assert.Empty(TableSortKeys.Servers.GetDisplayTexts(rows, "Unknown"));
     }
 }

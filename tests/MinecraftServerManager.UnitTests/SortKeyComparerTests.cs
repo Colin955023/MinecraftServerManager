@@ -1,11 +1,10 @@
-using System.ComponentModel;
 using MinecraftServerManager.App.Controls;
 using MinecraftServerManager.App.ViewModels;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class WindowsNaturalSortComparerTests
+public sealed class SortKeyComparerTests
 {
     private sealed class NamedItem
     {
@@ -23,8 +22,7 @@ public sealed class WindowsNaturalSortComparerTests
             new() { Name = "file20.txt" }
         };
 
-        var comparer = new WindowsNaturalSortComparer("Name", ListSortDirection.Ascending);
-        items.Sort(comparer.Compare);
+        items = [.. items.OrderBy(static i => (object?)i.Name, SortKeyComparer.Instance)];
 
         Assert.Equal("file1.txt", items[0].Name);
         Assert.Equal("file2.txt", items[1].Name);
@@ -42,41 +40,12 @@ public sealed class WindowsNaturalSortComparerTests
             new() { FileName = "c.jar", FileSize = "10 MB", RawFileSize = 10_000_000 }
         };
 
-        var comparer = new WindowsNaturalSortComparer("FileSize", ListSortDirection.Ascending);
-        items.Sort(comparer.Compare);
+        Assert.True(TableSortKeys.LocalMods.TryGetSelector("FileSize", out var selector));
+        items = [.. items.OrderBy(selector, SortKeyComparer.Instance)];
 
         Assert.Equal("a.jar", items[0].FileName);
         Assert.Equal("b.jar", items[1].FileName);
         Assert.Equal("c.jar", items[2].FileName);
-    }
-
-    [Fact]
-    public void NaturalSortOrdersDataSizeStringsAcrossUnits()
-    {
-        var items = new List<ServerRowItem>
-        {
-            new() { Name = "S3", Size = "1.2 GB" },
-            new() { Name = "S1", Size = "-" },
-            new() { Name = "S2", Size = "900 MB" },
-            new() { Name = "S0", Size = "512 KB" },
-        };
-
-        var comparer = new WindowsNaturalSortComparer<ServerRowItem>("Size", ListSortDirection.Ascending);
-        items.Sort(comparer);
-
-        Assert.Equal("S1", items[0].Name);
-        Assert.Equal("S0", items[1].Name);
-        Assert.Equal("S2", items[2].Name);
-        Assert.Equal("S3", items[3].Name);
-    }
-
-    [Fact]
-    public void NaturalSortOrdersQuantitiesAcrossSuffixes()
-    {
-        Assert.True(NaturalSortHelper.CompareNatural("900", "1.5K") < 0);
-        Assert.True(NaturalSortHelper.CompareNatural("1.5K", "2.3M") < 0);
-        Assert.True(NaturalSortHelper.CompareNatural("8,500", "1.2 萬") < 0);
-        Assert.True(NaturalSortHelper.CompareNatural("900萬", "1.1億") < 0);
     }
 
     [Fact]
@@ -89,8 +58,8 @@ public sealed class WindowsNaturalSortComparerTests
             new() { Title = "Mod C", Downloads = "15,000", DownloadCountRaw = 15000 }
         };
 
-        var comparer = new WindowsNaturalSortComparer("Downloads", ListSortDirection.Ascending);
-        items.Sort(comparer.Compare);
+        Assert.True(TableSortKeys.OnlineMods.TryGetSelector("Downloads", out var selector));
+        items = [.. items.OrderBy(selector, SortKeyComparer.Instance)];
 
         Assert.Equal("Mod A", items[0].Title);
         Assert.Equal("Mod B", items[1].Title);

@@ -46,11 +46,13 @@ public sealed partial class ManageJavaViewModelTests : IDisposable
 
         var vm = new ManageJavaViewModel(
             javaDetector: detector,
-            javaRequirementService: null,
+            javaRequirementService: NoOp.Create<IMinecraftJavaRequirementService>(),
             javaInstaller: installer,
             currentJavaPath: string.Empty,
             minecraftVersion: "1.20.1",
-            loaderName: "Paper")
+            loaderName: "Paper",
+            fileSystem: new Infrastructure.FileSystem.LocalFileSystem(),
+            uiService: NoOpUiService.Instance)
         {
             SelectedInstallMajor = 17
         };
@@ -83,11 +85,13 @@ public sealed partial class ManageJavaViewModelTests : IDisposable
 
         var vm = new ManageJavaViewModel(
             javaDetector: detector,
-            javaRequirementService: null,
+            javaRequirementService: NoOp.Create<IMinecraftJavaRequirementService>(),
             javaInstaller: installer,
             currentJavaPath: string.Empty,
             minecraftVersion: "1.20.5",
-            loaderName: "Paper")
+            loaderName: "Paper",
+            fileSystem: new Infrastructure.FileSystem.LocalFileSystem(),
+            uiService: NoOpUiService.Instance)
         {
             SelectedInstallMajor = 21
         };
@@ -123,8 +127,6 @@ public sealed partial class ManageJavaViewModelTests : IDisposable
         public bool InstallInvoked { get; private set; }
         public int LastInstalledMajor { get; private set; }
         public Action<int>? OnInstall { get; init; }
-
-        public Task<bool> IsWingetAvailableAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
 
         public Task<ProcessExitResult> InstallWithWingetAsync(int majorVersion, CancellationToken cancellationToken = default)
         {

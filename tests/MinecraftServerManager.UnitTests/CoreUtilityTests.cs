@@ -22,11 +22,7 @@ public sealed class CoreUtilityTests
     }
 
     [Fact]
-    public void VersionParserUsesFallbackForInvalidInput()
-    {
-        Assert.Equal(VersionValue.Zero, VersionValue.ParseOrDefault("version-x.y.z", VersionValue.Zero));
-        Assert.Null(VersionValue.ParseOrDefault("version-x.y.z"));
-    }
+    public void VersionParserRejectsInvalidInput() => Assert.False(VersionValue.TryParse("version-x.y.z", out _));
 
     [Theory]
     [InlineData(0, "0 B")]
@@ -44,7 +40,7 @@ public sealed class CoreUtilityTests
     }
 
     [Fact]
-    public void HashCalculatorReturnsEmptyForUnsupportedAlgorithmOrOversizedFile()
+    public async Task HashCalculatorReturnsEmptyForUnsupportedAlgorithmOrOversizedFile()
     {
         var directory = Directory.CreateTempSubdirectory("msm-tests-");
         try
@@ -53,8 +49,8 @@ public sealed class CoreUtilityTests
             File.WriteAllText(file, "content");
             var calculator = new HashCalculator();
 
-            Assert.Empty(calculator.ComputeFileHash(file, "md5"));
-            Assert.Empty(calculator.ComputeFileHash(file, maxBytes: 1));
+            Assert.Empty(await calculator.ComputeFileHashAsync(file, "md5"));
+            Assert.Empty(await calculator.ComputeFileHashAsync(file, maxBytes: 1));
         }
         finally
         {
@@ -74,28 +70,32 @@ public sealed class CoreUtilityTests
         Assert.True(MemoryUtils.GetTotalSystemMemoryMb() >= 4096);
     }
 
-    [Fact]
-    public void MemoryUtilsValidatesServerMemoryBoundaries()
+    [Theory]
+    [InlineData("4096", "2048", MemoryCheckLevel.Ok)]
+    [InlineData("abc", "", MemoryCheckLevel.Error)]
+    [InlineData("0", "", MemoryCheckLevel.Error)]
+    [InlineData("2048", "4096", MemoryCheckLevel.Error)]
+    [InlineData("32768", "", MemoryCheckLevel.Error)]
+    [InlineData("12288", "1024", MemoryCheckLevel.Warning)]
+    public void MemoryUtilsChecksServerMemoryBoundaries(string max, string min, MemoryCheckLevel expected)
     {
-        var valid = MemoryUtils.ValidateAndNormalizeServerMemory("4096", "2048", totalMemoryMb: 16384);
-        Assert.True(valid.IsValid);
-        Assert.Equal(4096, valid.MemoryMaxMb);
-        Assert.Equal(2048, valid.MemoryMinMb);
-        Assert.False(valid.AdjustedMax);
+        var result = MemoryUtils.CheckServerMemory(max, min, systemMemoryMb: 16384);
+        Assert.Equal(expected, result.Level);
+        if (expected != MemoryCheckLevel.Error)
+        {
+            Assert.Equal(int.Parse(max, System.Globalization.CultureInfo.InvariantCulture), result.MaxMb);
+        }
+    }
 
-        var belowMin = MemoryUtils.ValidateAndNormalizeServerMemory("512");
-        Assert.False(belowMin.IsValid);
-        Assert.Equal("最大記憶體不可低於 1024 MB", belowMin.ErrorMessage);
+    [Fact]
+    public void MemoryUtilsClampsToSystemMemoryWhenRequested()
+    {
+        var result = MemoryUtils.CheckServerMemory("32768", "20000", systemMemoryMb: 16384, clampToSystem: true);
 
-        var minGreaterThanMax = MemoryUtils.ValidateAndNormalizeServerMemory("2048", "4096");
-        Assert.False(minGreaterThanMax.IsValid);
-        Assert.Equal("最小記憶體不可大於最大記憶體", minGreaterThanMax.ErrorMessage);
-
-        var exceedsTotal = MemoryUtils.ValidateAndNormalizeServerMemory("32768", totalMemoryMb: 16384);
-        Assert.True(exceedsTotal.IsValid);
-        Assert.True(exceedsTotal.AdjustedMax);
-        Assert.Equal(16384, exceedsTotal.MemoryMaxMb);
-        Assert.NotEmpty(exceedsTotal.WarningMessages);
+        Assert.Equal(MemoryCheckLevel.Warning, result.Level);
+        Assert.Equal(16384, result.MaxMb);
+        Assert.Equal(16384, result.MinMb);
+        Assert.Contains("已自動調整", result.Message);
     }
 
     [Fact]
@@ -131,22 +131,4 @@ public sealed class CoreUtilityTests
         var suppressed = JvmOptionPolicy.RecommendGcArgs(4096, javaMajor: 21, existingArgs: existing);
         Assert.Empty(suppressed);
     }
-
-    [Fact]
-    public void ModHelpersSelectsBestModVersion()
-    {
-        Assert.Equal("sha512", ModHelpers.NormalizeHashAlgorithm("SHA-512"));
-        Assert.True(ModHelpers.IsAllowedVersionType("release"));
-        Assert.True(ModHelpers.IsAllowedVersionType("beta"));
-        Assert.False(ModHelpers.IsAllowedVersionType("alpha"));
-
-        var vAlpha = new Domain.Mods.OnlineModVersion("1", "1.0", "Alpha", versionType: "alpha", files: [new Domain.Mods.ModFile("a.jar")]);
-        var vBeta = new Domain.Mods.OnlineModVersion("2", "1.1", "Beta", versionType: "beta", files: [new Domain.Mods.ModFile("b.jar")]);
-        var vRelease = new Domain.Mods.OnlineModVersion("3", "1.2", "Release", versionType: "release", files: [new Domain.Mods.ModFile("c.jar")]);
-
-        var best = ModHelpers.SelectBestModVersion([vAlpha, vRelease, vBeta]);
-        Assert.NotNull(best);
-        Assert.Equal("3", best.VersionId);
-    }
 }
-

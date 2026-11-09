@@ -7,6 +7,7 @@
   Title="確認刪除伺服器"
   PrimaryButtonText="{x:Bind PrimaryText, Mode=OneTime}"
   SecondaryButtonText="{x:Bind SecondaryText, Mode=OneTime}"
+  PrimaryButtonStyle="{StaticResource DangerButtonStyle}"
   CloseButtonText="取消"
   DefaultButton="Close"
   PrimaryButtonClick="Dialog_PrimaryButtonClick"

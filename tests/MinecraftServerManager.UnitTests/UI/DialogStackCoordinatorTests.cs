@@ -5,6 +5,20 @@ namespace MinecraftServerManager.UnitTests.UI;
 
 public class DialogStackCoordinatorTests
 {
+    /// <summary>
+    /// 以可觀察行為確認堆疊已清空：新對話框直接顯示，不會要求任何前層對話框隱藏
+    /// </summary>
+    private static async Task AssertStackEmptyAsync(DialogStackCoordinator coordinator)
+    {
+        bool staleHideRequested = false;
+        string probe = await coordinator.ShowDialogAsync(
+            () => Task.FromResult("probe"),
+            () => staleHideRequested = true);
+
+        Assert.Equal("probe", probe);
+        Assert.False(staleHideRequested);
+    }
+
     [Fact]
     public async Task ShowDialogAsync_SingleDialog_ReturnsResultDirectly()
     {
@@ -17,7 +31,7 @@ public class DialogStackCoordinatorTests
 
         Assert.Equal("Result1", result);
         Assert.False(hideCalled);
-        Assert.Equal(0, coordinator.Depth);
+        await AssertStackEmptyAsync(coordinator);
     }
 
     [Fact]
@@ -56,7 +70,6 @@ public class DialogStackCoordinatorTests
 
         // 等待外層對話框已顯示
         await outerShownTcs.Task;
-        Assert.Equal(1, coordinator.Depth);
 
         // 啟動內層（中斷）對話框
         int innerShowCount = 0;
@@ -79,7 +92,7 @@ public class DialogStackCoordinatorTests
 
         Assert.Equal("OuterFinalResult", finalOuterResult);
         Assert.Equal(2, outerShowCount);
-        Assert.Equal(0, coordinator.Depth);
+        await AssertStackEmptyAsync(coordinator);
     }
 
     [Fact]
@@ -129,7 +142,7 @@ public class DialogStackCoordinatorTests
 
         outerFinishTcs.TrySetResult();
         Assert.Equal("OuterDone", await outerTask);
-        Assert.Equal(0, coordinator.Depth);
+        await AssertStackEmptyAsync(coordinator);
     }
 
     [Fact]
@@ -170,6 +183,6 @@ public class DialogStackCoordinatorTests
 
         Assert.Equal("OuterDone", outerResult);
         Assert.Equal(2, outerShowCount);
-        Assert.Equal(0, coordinator.Depth);
+        await AssertStackEmptyAsync(coordinator);
     }
 }

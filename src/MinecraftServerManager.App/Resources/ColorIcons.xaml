@@ -250,24 +250,6 @@
     </Viewbox>
   </DataTemplate>
 
-  <!-- 地球圖示：線上瀏覽 (海藍地球儀) -->
-  <DataTemplate x:Key="IconGlobe">
-    <Viewbox Stretch="Uniform">
-      <Canvas Width="24"
-        Height="24">
-        <Ellipse Canvas.Left="2"
-          Canvas.Top="2"
-          Width="20"
-          Height="20"
-          Fill="#3498DB" />
-        <Path
-          Data="M2,12H22M12,2A15.3,15.3 0 0,1 16,12A15.3,15.3 0 0,1 12,22A15.3,15.3 0 0,1 8,12A15.3,15.3 0 0,1 12,2Z"
-          Stroke="#FFFFFF"
-          StrokeThickness="1.5" />
-      </Canvas>
-    </Viewbox>
-  </DataTemplate>
-
   <!-- 勾選圖示：驗證通過 (現代精美翡翠綠打勾) -->
   <DataTemplate x:Key="IconCheck">
     <Viewbox Stretch="Uniform">

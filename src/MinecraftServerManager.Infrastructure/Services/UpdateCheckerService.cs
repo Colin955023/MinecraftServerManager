@@ -1,4 +1,4 @@
-using System.Text.Json;
+using System.Text.Json.Serialization;
 using MinecraftServerManager.Core;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Utilities;
@@ -15,17 +15,13 @@ public sealed class UpdateCheckerService(IHttpPort httpPort) : IUpdateCheckerSer
     private const string TrustedAssetHost = "github.com";
     private static readonly string TrustedAssetPathPrefix = BuildTrustedAssetPathPrefix();
 
-    private static Uri BuildLatestReleaseUri()
-    {
-        string repoPath = new Uri(AppInfo.RepositoryUrl).AbsolutePath.Trim('/');
-        return new Uri($"https://api.github.com/repos/{repoPath}/releases/latest");
-    }
+    private static string RepositoryPath => new Uri(AppInfo.RepositoryUrl).AbsolutePath.Trim('/');
 
-    private static string BuildTrustedAssetPathPrefix()
-    {
-        string repoPath = new Uri(AppInfo.RepositoryUrl).AbsolutePath.Trim('/');
-        return $"/{repoPath}/releases/download/";
-    }
+    private static Uri BuildLatestReleaseUri() =>
+        new($"https://api.github.com/repos/{RepositoryPath}/releases/latest");
+
+    private static string BuildTrustedAssetPathPrefix() =>
+        $"/{RepositoryPath}/releases/download/";
 
     /// <summary>
     /// 更新資產僅接受本專案 GitHub Release 的 HTTPS 下載位址，避免遭竄改的 API 回應導向其他來源
@@ -41,60 +37,51 @@ public sealed class UpdateCheckerService(IHttpPort httpPort) : IUpdateCheckerSer
         string currentVersionStr = AppInfo.Version;
         string defaultPageUrl = AppInfo.RepositoryUrl + "/releases";
 
+        UpdateCheckResult Unavailable(string title, string notes) => new(
+            HasUpdate: false,
+            CurrentVersion: currentVersionStr,
+            LatestVersion: currentVersionStr,
+            ReleaseTitle: title,
+            ReleaseNotes: notes,
+            DownloadUrl: null,
+            Sha256ChecksumUrl: null,
+            ReleasePageUrl: defaultPageUrl);
+
         try
         {
             string? json = await httpPort.GetTextAsync(LatestReleaseUri, cancellationToken).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(json))
             {
-                return new UpdateCheckResult(
-                    HasUpdate: false,
-                    CurrentVersion: currentVersionStr,
-                    LatestVersion: currentVersionStr,
-                    ReleaseTitle: "無法取得更新資訊",
-                    ReleaseNotes: "未能自 GitHub 取得 Release 資料",
-                    DownloadUrl: null,
-                    Sha256ChecksumUrl: null,
-                    ReleasePageUrl: defaultPageUrl);
+                return Unavailable("無法取得更新資訊", "未能自 GitHub 取得 Release 資料");
             }
 
-            using var doc = JsonCodec.ParseDocument(json);
-            var root = doc.RootElement;
-
-            string tagName = root.TryGetProperty("tag_name", out var tagElem) ? tagElem.GetString() ?? "" : "";
-            string title = root.TryGetProperty("name", out var nameElem) ? nameElem.GetString() ?? tagName : tagName;
-            string body = root.TryGetProperty("body", out var bodyElem) ? bodyElem.GetString() ?? "" : "";
-            string htmlUrl = root.TryGetProperty("html_url", out var htmlElem) ? htmlElem.GetString() ?? defaultPageUrl : defaultPageUrl;
-
-            bool hasUpdate = false;
-            if (VersionValue.TryParse(tagName, out var latestVer) &&
-                VersionValue.TryParse(currentVersionStr, out var currentVer))
+            if (JsonCodec.Deserialize<GitHubReleasePayload>(json) is not { } release)
             {
-                hasUpdate = latestVer > currentVer;
+                return Unavailable("無法解析更新資訊", "GitHub Release 資料格式無效");
             }
+
+            string tagName = release.TagName ?? "";
+            bool hasUpdate = VersionValue.TryParse(tagName, out var latestVer) &&
+                VersionValue.TryParse(currentVersionStr, out var currentVer) &&
+                latestVer > currentVer;
 
             var exeAssets = new List<(string Name, string Url)>();
             var sha256Assets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            if (root.TryGetProperty("assets", out var assetsElem) && assetsElem.ValueKind == JsonValueKind.Array)
+            foreach (GitHubReleaseAsset asset in release.Assets ?? [])
             {
-                foreach (var asset in assetsElem.EnumerateArray())
+                if (string.IsNullOrWhiteSpace(asset.Name) || string.IsNullOrWhiteSpace(asset.BrowserDownloadUrl) || !IsTrustedAssetUrl(asset.BrowserDownloadUrl))
                 {
-                    string assetName = asset.TryGetProperty("name", out var aName) ? aName.GetString() ?? "" : "";
-                    string? assetDownload = asset.TryGetProperty("browser_download_url", out var aUrl) ? aUrl.GetString() : null;
+                    continue;
+                }
 
-                    if (string.IsNullOrWhiteSpace(assetName) || string.IsNullOrWhiteSpace(assetDownload) || !IsTrustedAssetUrl(assetDownload))
-                    {
-                        continue;
-                    }
-
-                    if (assetName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-                    {
-                        exeAssets.Add((assetName, assetDownload));
-                    }
-                    else if (assetName.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase))
-                    {
-                        sha256Assets[assetName] = assetDownload;
-                    }
+                if (asset.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                {
+                    exeAssets.Add((asset.Name, asset.BrowserDownloadUrl));
+                }
+                else if (asset.Name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase))
+                {
+                    sha256Assets[asset.Name] = asset.BrowserDownloadUrl;
                 }
             }
 
@@ -108,21 +95,6 @@ public sealed class UpdateCheckerService(IHttpPort httpPort) : IUpdateCheckerSer
             {
                 selectedExeName = Name;
                 downloadUrl = Url;
-            }
-            else
-            {
-                // 回退相容：若為舊版 Release 帶有 self-contained 或其他 exe
-                var scCandidate = exeAssets.FirstOrDefault(a => a.Name.Contains("self-contained", StringComparison.OrdinalIgnoreCase));
-                if (!string.IsNullOrEmpty(scCandidate.Name))
-                {
-                    selectedExeName = scCandidate.Name;
-                    downloadUrl = scCandidate.Url;
-                }
-                else if (exeAssets.Count > 0)
-                {
-                    selectedExeName = exeAssets[0].Name;
-                    downloadUrl = exeAssets[0].Url;
-                }
             }
 
             // 精準 Checksum 配對
@@ -139,23 +111,32 @@ public sealed class UpdateCheckerService(IHttpPort httpPort) : IUpdateCheckerSer
                 HasUpdate: hasUpdate,
                 CurrentVersion: currentVersionStr,
                 LatestVersion: tagName,
-                ReleaseTitle: title,
-                ReleaseNotes: body,
+                ReleaseTitle: release.Name ?? tagName,
+                ReleaseNotes: release.Body ?? "",
                 DownloadUrl: downloadUrl,
                 Sha256ChecksumUrl: checksumUrl,
-                ReleasePageUrl: htmlUrl);
+                ReleasePageUrl: release.HtmlUrl ?? defaultPageUrl);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return new UpdateCheckResult(
-                HasUpdate: false,
-                CurrentVersion: currentVersionStr,
-                LatestVersion: currentVersionStr,
-                ReleaseTitle: "檢查更新時發生例外",
-                ReleaseNotes: ex.Message,
-                DownloadUrl: null,
-                Sha256ChecksumUrl: null,
-                ReleasePageUrl: defaultPageUrl);
+            return Unavailable("檢查更新時發生例外", ex.Message);
         }
     }
 }
+
+/// <summary>
+/// GitHub 最新 Release 回應中本服務使用的欄位
+/// </summary>
+internal sealed record GitHubReleasePayload(
+    [property: JsonPropertyName("tag_name")] string? TagName,
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("body")] string? Body,
+    [property: JsonPropertyName("html_url")] string? HtmlUrl,
+    [property: JsonPropertyName("assets")] List<GitHubReleaseAsset>? Assets);
+
+/// <summary>
+/// GitHub Release 附件
+/// </summary>
+internal sealed record GitHubReleaseAsset(
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("browser_download_url")] string? BrowserDownloadUrl);

@@ -41,11 +41,6 @@ public static partial class TitleBarThemeHelper
             _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDarkMode, sizeof(int));
         }
 
-        if (!AppWindowTitleBar.IsCustomizationSupported())
-        {
-            return;
-        }
-
         var titleBar = appWindow.TitleBar;
         if (titleBar is null)
         {

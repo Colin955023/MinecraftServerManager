@@ -1,20 +1,15 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Http;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed partial class HttpDownloadClientTests
+public sealed class HttpDownloadClientTests
 {
-    [JsonSourceGenerationOptions(PropertyNameCaseInsensitive = true)]
-    [JsonSerializable(typeof(TestModel))]
-    private sealed partial class TestJsonContext : JsonSerializerContext;
-
-    private static readonly JsonSerializerContext TestJsonOptions = TestJsonContext.Default;
     [Fact]
     public void UrlPolicyRejectsInsecureAndPrivateTargets()
     {
@@ -54,19 +49,19 @@ public sealed partial class HttpDownloadClientTests
                 Content = new ByteArrayContent("下載內容"u8.ToArray()),
             });
             using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client, PublicResolver);
-            var progress = new List<HttpDownloadProgress>();
+            var downloader = new HttpDownloadClient(client);
+            var progress = new List<HttpProgress>();
 
             var result = await downloader.DownloadAsync(
                 new Uri("https://example.com/file"),
                 target,
                 new HttpDownloadOptions { MaxBytes = 1024 },
-                new SyncProgress<HttpDownloadProgress>(progress.Add));
+                new SyncProgress<HttpProgress>(progress.Add));
 
             Assert.True(result.Success);
             Assert.Equal("下載內容", File.ReadAllText(target));
             Assert.NotEmpty(progress);
-            Assert.Equal(result.BytesDownloaded, progress[^1].BytesDownloaded);
+            Assert.Equal(result.BytesProcessed, progress[^1].BytesDownloaded);
         }
         finally
         {
@@ -87,7 +82,7 @@ public sealed partial class HttpDownloadClientTests
                 Content = new ByteArrayContent("太大的內容"u8.ToArray()),
             });
             using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client, PublicResolver);
+            var downloader = new HttpDownloadClient(client);
 
             var result = await downloader.DownloadAsync(
                 new Uri("https://example.com/file"),
@@ -117,7 +112,7 @@ public sealed partial class HttpDownloadClientTests
                 Content = content,
             });
             using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client, PublicResolver);
+            var downloader = new HttpDownloadClient(client);
 
             var result = await downloader.DownloadAsync(
                 new Uri("https://example.com/file"),
@@ -144,7 +139,7 @@ public sealed partial class HttpDownloadClientTests
                 new HttpResponseMessage(HttpStatusCode.ServiceUnavailable),
                 new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent("完成"u8.ToArray()) });
             using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client, PublicResolver);
+            var downloader = new HttpDownloadClient(client);
 
             var result = await downloader.DownloadAsync(
                 new Uri("https://example.com/file"),
@@ -171,7 +166,7 @@ public sealed partial class HttpDownloadClientTests
             redirect.Headers.Location = new Uri("http://example.com/file");
             var handler = new QueueHandler(redirect);
             using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client, PublicResolver);
+            var downloader = new HttpDownloadClient(client);
 
             var result = await downloader.DownloadAsync(new Uri("https://example.com/file"), target);
 
@@ -184,10 +179,8 @@ public sealed partial class HttpDownloadClientTests
         }
     }
 
-    private sealed record TestModel(string Name, int Version);
-
     [Fact]
-    public async Task GetJsonAsyncDeserializesValidResponse()
+    public async Task GetJsonDocumentAsyncDeserializesValidResponse()
     {
         string json = """{"name": "Minecraft", "version": 2}""";
         var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
@@ -195,15 +188,16 @@ public sealed partial class HttpDownloadClientTests
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
         });
         using var client = new HttpClient(handler);
-        var http = new HttpDownloadClient(client, PublicResolver, TestJsonOptions);
+        var http = new HttpDownloadClient(client);
 
-        var response = await http.GetJsonAsync<TestModel>(new Uri("https://example.com/api"));
+        var response = await http.GetJsonDocumentAsync(new Uri("https://example.com/api"));
 
         Assert.True(response.IsSuccess);
         Assert.Equal(200, response.StatusCode);
         Assert.NotNull(response.Payload);
-        Assert.Equal("Minecraft", response.Payload.Name);
-        Assert.Equal(2, response.Payload.Version);
+        using var doc = response.Payload;
+        Assert.Equal("Minecraft", doc.RootElement.GetProperty("name").GetString());
+        Assert.Equal(2, doc.RootElement.GetProperty("version").GetInt32());
         Assert.Empty(response.ErrorKind);
     }
 
@@ -211,16 +205,16 @@ public sealed partial class HttpDownloadClientTests
     [InlineData(HttpStatusCode.NotFound, "not_found")]
     [InlineData(HttpStatusCode.BadRequest, "invalid_request")]
     [InlineData(HttpStatusCode.InternalServerError, "transient")]
-    public async Task GetJsonAsyncClassifiesStatusCodes(HttpStatusCode statusCode, string expectedErrorKind)
+    public async Task GetJsonDocumentAsyncClassifiesStatusCodes(HttpStatusCode statusCode, string expectedErrorKind)
     {
         var handler = new QueueHandler(
             new HttpResponseMessage(statusCode),
             new HttpResponseMessage(statusCode),
             new HttpResponseMessage(statusCode));
         using var client = new HttpClient(handler);
-        var http = new HttpDownloadClient(client, PublicResolver, TestJsonOptions);
+        var http = new HttpDownloadClient(client);
 
-        var response = await http.GetJsonAsync<TestModel>(new Uri("https://example.com/api"));
+        var response = await http.GetJsonDocumentAsync(new Uri("https://example.com/api"));
 
         Assert.False(response.IsSuccess);
         Assert.Equal((int)statusCode, response.StatusCode);
@@ -229,16 +223,16 @@ public sealed partial class HttpDownloadClientTests
     }
 
     [Fact]
-    public async Task GetJsonAsyncRetriesRateLimitedThenFails()
+    public async Task GetJsonDocumentAsyncRetriesRateLimitedThenFails()
     {
         var handler = new QueueHandler(
             new HttpResponseMessage(HttpStatusCode.TooManyRequests),
             new HttpResponseMessage(HttpStatusCode.TooManyRequests),
             new HttpResponseMessage(HttpStatusCode.TooManyRequests));
         using var client = new HttpClient(handler);
-        var http = new HttpDownloadClient(client, PublicResolver, TestJsonOptions);
+        var http = new HttpDownloadClient(client);
 
-        var response = await http.GetJsonAsync<TestModel>(new Uri("https://example.com/api"));
+        var response = await http.GetJsonDocumentAsync(new Uri("https://example.com/api"));
 
         Assert.False(response.IsSuccess);
         Assert.Equal(429, response.StatusCode);
@@ -247,23 +241,23 @@ public sealed partial class HttpDownloadClientTests
     }
 
     [Fact]
-    public async Task GetJsonAsyncRejectsInvalidJson()
+    public async Task GetJsonDocumentAsyncRejectsInvalidJson()
     {
         var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent("not a valid json", Encoding.UTF8, "application/json"),
         });
         using var client = new HttpClient(handler);
-        var http = new HttpDownloadClient(client, PublicResolver, TestJsonOptions);
+        var http = new HttpDownloadClient(client);
 
-        var response = await http.GetJsonAsync<TestModel>(new Uri("https://example.com/api"));
+        var response = await http.GetJsonDocumentAsync(new Uri("https://example.com/api"));
 
         Assert.False(response.IsSuccess);
         Assert.Equal("invalid_response", response.ErrorKind);
     }
 
     [Fact]
-    public async Task GetJsonAsyncAllowsCompressedResponseContentSafely()
+    public async Task GetJsonDocumentAsyncAllowsCompressedResponseContentSafely()
     {
         var content = new StringContent("""{"name": "test", "version": 1}""", Encoding.UTF8, "application/json");
         content.Headers.ContentEncoding.Add("gzip");
@@ -272,14 +266,15 @@ public sealed partial class HttpDownloadClientTests
             Content = content,
         });
         using var client = new HttpClient(handler);
-        var http = new HttpDownloadClient(client, PublicResolver, TestJsonOptions);
+        var http = new HttpDownloadClient(client);
 
-        var response = await http.GetJsonAsync<TestModel>(new Uri("https://example.com/api"));
+        var response = await http.GetJsonDocumentAsync(new Uri("https://example.com/api"));
 
         Assert.True(response.IsSuccess);
         Assert.NotNull(response.Payload);
-        Assert.Equal("test", response.Payload.Name);
-        Assert.Equal(1, response.Payload.Version);
+        using var doc = response.Payload;
+        Assert.Equal("test", doc.RootElement.GetProperty("name").GetString());
+        Assert.Equal(1, doc.RootElement.GetProperty("version").GetInt32());
     }
 
     [Fact]
@@ -290,7 +285,7 @@ public sealed partial class HttpDownloadClientTests
             Content = new StringContent("純文字內容", Encoding.UTF8, "text/plain"),
         });
         using var client = new HttpClient(handler);
-        var http = new HttpDownloadClient(client, PublicResolver);
+        var http = new HttpDownloadClient(client);
 
         string? text = await http.GetTextAsync(new Uri("https://example.com/text"));
 
@@ -307,7 +302,7 @@ public sealed partial class HttpDownloadClientTests
         response.Content.Headers.ContentLength = HttpDownloadClient.MaxTextBytes + 1;
         var handler = new QueueHandler(response);
         using var client = new HttpClient(handler);
-        var http = new HttpDownloadClient(client, PublicResolver);
+        var http = new HttpDownloadClient(client);
 
         string? text = await http.GetTextAsync(new Uri("https://example.com/text"));
 
@@ -322,9 +317,9 @@ public sealed partial class HttpDownloadClientTests
             Content = new StringContent("{}", Encoding.UTF8, "application/json"),
         });
         using var client = new HttpClient(handler);
-        var http = new HttpDownloadClient(client, PublicResolver, TestJsonOptions);
+        var http = new HttpDownloadClient(client);
 
-        await http.GetJsonAsync<TestModel>(new Uri("https://example.com/api"));
+        await http.GetJsonDocumentAsync(new Uri("https://example.com/api"));
 
         Assert.NotNull(handler.LastRequest);
         string userAgent = handler.LastRequest.Headers.UserAgent.ToString();
@@ -343,7 +338,7 @@ public sealed partial class HttpDownloadClientTests
                 Content = new ByteArrayContent("介面下載"u8.ToArray()),
             });
             using var client = new HttpClient(handler);
-            IHttpPort http = new HttpDownloadClient(client, PublicResolver);
+            IHttpPort http = new HttpDownloadClient(client);
             var progressReports = new List<HttpProgress>();
 
             var result = await http.DownloadAsync(
@@ -370,7 +365,7 @@ public sealed partial class HttpDownloadClientTests
             Content = new StringContent("{\"status\":\"ok\"}", Encoding.UTF8, "application/json"),
         });
         using var client = new HttpClient(handler);
-        var http = new HttpDownloadClient(client, PublicResolver);
+        var http = new HttpDownloadClient(client);
 
         string? response = await http.PostJsonAsync(new Uri("https://example.com/api"), "{\"test\":true}");
 
@@ -387,9 +382,9 @@ public sealed partial class HttpDownloadClientTests
             Content = new StringContent("{\"status\":\"ok\"}", Encoding.UTF8, "application/json"),
         });
         using var client = new HttpClient(handler);
-        var http = new HttpDownloadClient(client, static (_, _) => Task.FromResult(new[] { IPAddress.Parse("127.0.0.1") }));
+        var http = new HttpDownloadClient(client);
 
-        string? response = await http.PostJsonAsync(new Uri("https://example.com/api"), "{}");
+        string? response = await http.PostJsonAsync(new Uri("https://127.0.0.1/api"), "{}");
 
         Assert.Null(response);
         Assert.Equal(0, handler.RequestCount);
@@ -402,9 +397,9 @@ public sealed partial class HttpDownloadClientTests
         redirect.Headers.Location = new Uri("https://example.com/other");
         var handler = new QueueHandler(redirect);
         using var client = new HttpClient(handler);
-        var http = new HttpDownloadClient(client, PublicResolver);
+        var http = new HttpDownloadClient(client);
 
-        string? response = await http.PostJsonAsync(new Uri("https://example.com/api"), "{}");
+        string? response = await http.PostJsonAsync(new Uri("https://127.0.0.1/api"), "{}");
 
         Assert.Null(response);
     }
@@ -419,9 +414,9 @@ public sealed partial class HttpDownloadClientTests
         oversizedResponse.Content.Headers.ContentLength = HttpDownloadClient.MaxJsonBytes + 1;
         var handler = new QueueHandler(oversizedResponse);
         using var client = new HttpClient(handler);
-        var http = new HttpDownloadClient(client, PublicResolver);
+        var http = new HttpDownloadClient(client);
 
-        string? response = await http.PostJsonAsync(new Uri("https://example.com/api"), "{}");
+        string? response = await http.PostJsonAsync(new Uri("https://127.0.0.1/api"), "{}");
 
         Assert.Null(response);
     }
@@ -435,12 +430,13 @@ public sealed partial class HttpDownloadClientTests
             string target = Path.Combine(root, "file.bin");
             var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK));
             using var client = new HttpClient(handler);
-            var http = new HttpDownloadClient(client, static (_, _) => Task.FromResult(new[] { IPAddress.IPv6Loopback }));
+            var http = new HttpDownloadClient(client);
 
-            var result = await http.DownloadAsync(new Uri("https://example.com/download"), target);
+            var exception = await Assert.ThrowsAsync<HttpSecurityException>(() =>
+                http.DownloadAsync(new Uri("https://[::1]/download"), target));
 
-            Assert.False(result.Success);
-            Assert.Contains("非公開", result.Error);
+            Assert.Contains("非公開", exception.Message);
+            Assert.Equal(0, handler.RequestCount);
         }
         finally
         {
@@ -449,7 +445,7 @@ public sealed partial class HttpDownloadClientTests
     }
 
     [Fact]
-    public async Task GetJsonAsyncRejectsRedirectLimitExceeded()
+    public async Task GetJsonDocumentAsyncRejectsRedirectLimitExceeded()
     {
         var redirect = new HttpResponseMessage(HttpStatusCode.Redirect);
         redirect.Headers.Location = new Uri("https://example.com/api");
@@ -457,9 +453,9 @@ public sealed partial class HttpDownloadClientTests
             redirect, redirect, redirect, redirect, redirect,
             redirect, redirect, redirect, redirect, redirect, redirect);
         using var client = new HttpClient(handler);
-        var http = new HttpDownloadClient(client, PublicResolver, TestJsonOptions);
+        var http = new HttpDownloadClient(client);
 
-        var response = await http.GetJsonAsync<TestModel>(new Uri("https://example.com/api"));
+        var response = await http.GetJsonDocumentAsync(new Uri("https://example.com/api"));
 
         Assert.False(response.IsSuccess);
         Assert.Equal("invalid_request", response.ErrorKind);
@@ -474,7 +470,7 @@ public sealed partial class HttpDownloadClientTests
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
         });
         using var client = new HttpClient(handler);
-        var http = new HttpDownloadClient(client, PublicResolver);
+        var http = new HttpDownloadClient(client);
 
         var response = await http.GetJsonDocumentAsync(new Uri("https://example.com/stream-api"));
 
@@ -504,11 +500,13 @@ public sealed partial class HttpDownloadClientTests
 
             var handler = new QueueHandler(response);
             using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client, PublicResolver);
+            var downloader = new HttpDownloadClient(client);
 
+            // 跨呼叫續傳須有預期雜湊可驗證最終結果
             var result = await downloader.DownloadAsync(
                 new Uri("https://example.com/file"),
-                target);
+                target,
+                expectedHash: Convert.ToHexStringLower(SHA256.HashData("Part1Part2"u8)));
 
             Assert.True(result.Success);
             Assert.Equal("Part1Part2", await File.ReadAllTextAsync(target));
@@ -536,7 +534,7 @@ public sealed partial class HttpDownloadClientTests
                 Content = new ByteArrayContent("FreshFullContent"u8.ToArray()),
             });
             using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client, PublicResolver);
+            var downloader = new HttpDownloadClient(client);
 
             var result = await downloader.DownloadAsync(
                 new Uri("https://example.com/file"),
@@ -565,7 +563,7 @@ public sealed partial class HttpDownloadClientTests
                 new HttpResponseMessage(HttpStatusCode.RequestedRangeNotSatisfiable),
                 new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent("FreshData"u8.ToArray()) });
             using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client, PublicResolver);
+            var downloader = new HttpDownloadClient(client);
 
             var result = await downloader.DownloadAsync(
                 new Uri("https://example.com/file"),
@@ -575,6 +573,34 @@ public sealed partial class HttpDownloadClientTests
             Assert.True(result.Success);
             Assert.Equal("FreshData", await File.ReadAllTextAsync(target));
             Assert.Equal(2, handler.RequestCount);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadDiscardsStalePartialFileWhenNoExpectedHash()
+    {
+        string root = CreateTemporaryDirectory();
+        try
+        {
+            string target = Path.Combine(root, "download.bin");
+            await File.WriteAllTextAsync(target + ".part", "StaleBytes");
+
+            var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent("FreshContent"u8.ToArray()),
+            });
+            using var client = new HttpClient(handler);
+            var downloader = new HttpDownloadClient(client);
+
+            var result = await downloader.DownloadAsync(new Uri("https://example.com/file"), target);
+
+            Assert.True(result.Success);
+            Assert.Equal("FreshContent", await File.ReadAllTextAsync(target));
+            Assert.Null(handler.LastRequest?.Headers.Range);
         }
         finally
         {
@@ -610,12 +636,13 @@ public sealed partial class HttpDownloadClientTests
 
             var handler = new QueueHandler(rateLimited, initialResponse, fallbackResponse);
             using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client, PublicResolver);
+            var downloader = new HttpDownloadClient(client);
 
             var result = await downloader.DownloadAsync(
                 new Uri("https://example.com/file"),
                 target,
-                new HttpDownloadOptions { MaxAttempts = 3, RetryDelay = TimeSpan.Zero });
+                new HttpDownloadOptions { MaxAttempts = 3, RetryDelay = TimeSpan.Zero },
+                expectedHash: Convert.ToHexStringLower(SHA256.HashData("BrandNewVersionContent"u8)));
 
             Assert.True(result.Success);
             Assert.Equal("BrandNewVersionContent", await File.ReadAllTextAsync(target));
@@ -625,9 +652,6 @@ public sealed partial class HttpDownloadClientTests
             Directory.Delete(root, recursive: true);
         }
     }
-
-    private static Task<IPAddress[]> PublicResolver(string _, CancellationToken __) =>
-        Task.FromResult(new[] { IPAddress.Parse("93.184.216.34") });
 
     private static string CreateTemporaryDirectory()
     {

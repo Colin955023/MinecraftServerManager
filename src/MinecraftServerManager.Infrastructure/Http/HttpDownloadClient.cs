@@ -5,10 +5,8 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using MinecraftServerManager.Core;
 using MinecraftServerManager.Core.Ports;
-using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Utilities;
 
@@ -27,21 +25,6 @@ public sealed record HttpDownloadOptions
     public TimeSpan RetryDelay { get; init; } = TimeSpan.FromMilliseconds(100);
 
     public bool EnableRangeResumption { get; init; } = true;
-}
-
-public sealed record HttpDownloadProgress(long BytesDownloaded, long TotalBytes);
-
-public sealed record HttpDownloadResult(bool Success, string? Error = null, long BytesDownloaded = 0);
-
-public sealed record HttpRequestRetryOptions
-{
-    public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
-
-    public int MaxAttempts { get; init; } = 3;
-
-    public TimeSpan RetryDelay { get; init; } = TimeSpan.FromMilliseconds(100);
-
-    public int MaxRedirects { get; init; } = 10;
 }
 
 public sealed class HttpDownloadClient : IHttpPort
@@ -63,53 +46,34 @@ public sealed class HttpDownloadClient : IHttpPort
     private static readonly FrozenSet<HttpStatusCode> RetryableStatuses = RetryableStatusesSource.ToFrozenSet();
 
     private readonly HttpClient _client;
-    private readonly Func<string, CancellationToken, Task<IPAddress[]>>? _resolver;
-    private readonly JsonSerializerContext? _jsonContext;
+    private const int RequestMaxAttempts = 3;
+    private const int RequestMaxRedirects = 10;
+    private static readonly TimeSpan RequestRetryDelay = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
 
-    public HttpDownloadClient(
-        HttpClient client,
-        Func<string, CancellationToken, Task<IPAddress[]>>? resolver = null,
-        JsonSerializerContext? jsonContext = null)
+    public HttpDownloadClient(HttpClient client)
     {
         ArgumentNullException.ThrowIfNull(client);
         _client = client;
-        _resolver = resolver;
-        _jsonContext = jsonContext;
     }
 
     /// <summary>
-    /// IHttpPort 介面實作：安全下載檔案
+    /// IHttpPort 介面實作：安全下載檔案（使用預設下載選項）
     /// </summary>
-    async Task<HttpResult> IHttpPort.DownloadAsync(
+    Task<HttpResult> IHttpPort.DownloadAsync(
         Uri uri,
         string targetPath,
         IProgress<HttpProgress>? progress,
         string? expectedHash,
         string expectedHashAlgorithm,
-        CancellationToken cancellationToken)
-    {
-        IProgress<HttpDownloadProgress>? downloadProgress = progress is null
-            ? null
-            : new SynchronousProgress<HttpDownloadProgress>(value => progress.Report(new HttpProgress(value.BytesDownloaded, value.TotalBytes)));
-
-        var result = await DownloadAsync(
-            uri,
-            targetPath,
-            options: null,
-            downloadProgress,
-            expectedHash,
-            expectedHashAlgorithm,
-            cancellationToken).ConfigureAwait(false);
-
-        return new HttpResult(result.Success, result.Error, result.BytesDownloaded);
-    }
+        CancellationToken cancellationToken) =>
+        DownloadAsync(uri, targetPath, options: null, progress, expectedHash, expectedHashAlgorithm, cancellationToken);
 
     /// <summary>
     /// 執行具備重試、重定向與逾時控制的 HTTP 請求
     /// </summary>
     private async Task<TResult> ExecuteRequestWithRetryAsync<TResult>(
         Uri uri,
-        HttpRequestRetryOptions options,
         Func<HttpResponseMessage, CancellationToken, Task<(bool Handled, TResult Result)>> responseHandler,
         Func<string, int?, TResult> failureFactory,
         CancellationToken cancellationToken)
@@ -123,19 +87,19 @@ public sealed class HttpDownloadClient : IHttpPort
             return failureFactory("invalid_request", null);
         }
 
-        for (int attempt = 1; attempt <= options.MaxAttempts; attempt++)
+        for (int attempt = 1; attempt <= RequestMaxAttempts; attempt++)
         {
             using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            attemptCancellation.CancelAfter(options.Timeout);
+            attemptCancellation.CancelAfter(RequestTimeout);
 
             try
             {
-                var response = await SendWithRedirectsAsync(uri, options.MaxRedirects, attemptCancellation.Token).ConfigureAwait(false);
+                var response = await SendWithRedirectsAsync(uri, RequestMaxRedirects, attemptCancellation.Token).ConfigureAwait(false);
                 using (response)
                 {
-                    if (RetryableStatuses.Contains(response.StatusCode) && attempt < options.MaxAttempts)
+                    if (RetryableStatuses.Contains(response.StatusCode) && attempt < RequestMaxAttempts)
                     {
-                        await DelayBeforeRetryAsync(response, options.RetryDelay, attempt, cancellationToken).ConfigureAwait(false);
+                        await DelayBeforeRetryAsync(response, RequestRetryDelay, attempt, cancellationToken).ConfigureAwait(false);
                         continue;
                     }
 
@@ -150,17 +114,17 @@ public sealed class HttpDownloadClient : IHttpPort
             {
                 return failureFactory("invalid_request", null);
             }
-            catch (HttpRequestException) when (attempt < options.MaxAttempts)
+            catch (HttpRequestException) when (attempt < RequestMaxAttempts)
             {
-                await Task.Delay(ScaleDelay(options.RetryDelay, attempt), cancellationToken).ConfigureAwait(false);
+                await Task.Delay(ScaleDelay(RequestRetryDelay, attempt), cancellationToken).ConfigureAwait(false);
             }
             catch (HttpRequestException)
             {
                 return failureFactory("transient", null);
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && attempt < options.MaxAttempts)
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && attempt < RequestMaxAttempts)
             {
-                await Task.Delay(ScaleDelay(options.RetryDelay, attempt), cancellationToken).ConfigureAwait(false);
+                await Task.Delay(ScaleDelay(RequestRetryDelay, attempt), cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -184,13 +148,11 @@ public sealed class HttpDownloadClient : IHttpPort
     /// </summary>
     private Task<HttpJsonResponse<T>> ExecuteJsonRequestAsync<T>(
         Uri uri,
-        HttpRequestRetryOptions options,
         Func<MemoryStream, CancellationToken, ValueTask<(bool Success, T? Value)>> parser,
         CancellationToken cancellationToken)
     {
         return ExecuteRequestWithRetryAsync(
             uri,
-            options,
             async (response, token) =>
             {
                 int statusCode = (int)response.StatusCode;
@@ -241,61 +203,16 @@ public sealed class HttpDownloadClient : IHttpPort
     }
 
     /// <summary>
-    /// IHttpPort 介面實作：安全取得 JSON 資料並反序列化
-    /// </summary>
-    public Task<HttpJsonResponse<T>> GetJsonAsync<T>(
-        Uri uri,
-        CancellationToken cancellationToken = default) =>
-        GetJsonAsync<T>(uri, options: null, cancellationToken);
-
-    /// <summary>
-    /// 安全取得 JSON 資料並反序列化（支援自訂重試選項）
-    /// </summary>
-    public Task<HttpJsonResponse<T>> GetJsonAsync<T>(
-        Uri uri,
-        HttpRequestRetryOptions? options,
-        CancellationToken cancellationToken = default)
-    {
-        var retryOptions = options ?? new HttpRequestRetryOptions { Timeout = TimeSpan.FromSeconds(10) };
-        return ExecuteJsonRequestAsync(
-            uri,
-            retryOptions,
-            (stream, _) =>
-            {
-                ReadOnlySpan<byte> utf8Span = stream.TryGetBuffer(out ArraySegment<byte> segment)
-                    ? segment
-                    : stream.ToArray();
-                T? payload = _jsonContext is not null
-                    ? (_jsonContext.GetTypeInfo(typeof(T)) is System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo ? JsonCodec.Deserialize(utf8Span, typeInfo) : throw new JsonException($"型別 '{typeof(T).FullName}' 尚未在指定的 JsonSerializerContext 中註冊。"))
-                    : JsonCodec.Deserialize<T>(utf8Span);
-                return ValueTask.FromResult((payload is not null, payload));
-            },
-            cancellationToken);
-    }
-
-    /// <summary>
     /// IHttpPort 介面實作：安全取得 JSON 文件並以串流解析（呼叫端負責處置 JsonDocument）
     /// </summary>
     public Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentAsync(
         Uri uri,
-        CancellationToken cancellationToken = default) =>
-        GetJsonDocumentAsync(uri, options: null, cancellationToken);
-
-    /// <summary>
-    /// 安全取得 JSON 文件並以串流解析（支援自訂重試選項）
-    /// </summary>
-    public Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentAsync(
-        Uri uri,
-        HttpRequestRetryOptions? options,
         CancellationToken cancellationToken = default)
     {
-        var retryOptions = options ?? new HttpRequestRetryOptions { Timeout = TimeSpan.FromSeconds(30) };
         return ExecuteJsonRequestAsync(
             uri,
-            retryOptions,
             async (stream, token) =>
             {
-                stream.Position = 0;
                 var doc = await JsonCodec.ParseDocumentAsync(stream, cancellationToken: token).ConfigureAwait(false);
                 return (doc is not null, doc);
             },
@@ -307,21 +224,10 @@ public sealed class HttpDownloadClient : IHttpPort
     /// </summary>
     public Task<string?> GetTextAsync(
         Uri uri,
-        CancellationToken cancellationToken = default) =>
-        GetTextAsync(uri, options: null, cancellationToken);
-
-    /// <summary>
-    /// 安全取得文字內容（支援自訂重試選項）
-    /// </summary>
-    public Task<string?> GetTextAsync(
-        Uri uri,
-        HttpRequestRetryOptions? options,
         CancellationToken cancellationToken = default)
     {
-        var retryOptions = options ?? new HttpRequestRetryOptions { Timeout = TimeSpan.FromSeconds(30) };
         return ExecuteRequestWithRetryAsync<string?>(
             uri,
-            retryOptions,
             async (response, token) =>
             {
                 if (!response.IsSuccessStatusCode)
@@ -335,12 +241,7 @@ public sealed class HttpDownloadClient : IHttpPort
                     return (true, null);
                 }
 
-                using var bodyStream = await ReadLimitedMemoryStreamAsync(response, MaxTextBytes, token).ConfigureAwait(false);
-                ReadOnlySpan<byte> utf8Span = bodyStream.TryGetBuffer(out ArraySegment<byte> segment)
-                    ? segment
-                    : bodyStream.ToArray();
-
-                return (true, Encoding.UTF8.GetString(utf8Span));
+                return (true, await ReadLimitedUtf8Async(response, MaxTextBytes, token).ConfigureAwait(false));
             },
             failureFactory: (_, _) => null,
             cancellationToken);
@@ -356,10 +257,6 @@ public sealed class HttpDownloadClient : IHttpPort
         try
         {
             HttpUrlPolicy.ValidateStatic(uri);
-            if (_resolver is not null)
-            {
-                await HttpUrlPolicy.ValidatePublicHostAsync(uri, _resolver, cancellationToken).ConfigureAwait(false);
-            }
         }
         catch (HttpSecurityException)
         {
@@ -385,12 +282,7 @@ public sealed class HttpDownloadClient : IHttpPort
                     return null;
                 }
 
-                using var bodyStream = await ReadLimitedMemoryStreamAsync(response, MaxJsonBytes, cancellationToken).ConfigureAwait(false);
-                ReadOnlySpan<byte> utf8Span = bodyStream.TryGetBuffer(out ArraySegment<byte> segment)
-                    ? segment
-                    : bodyStream.ToArray();
-
-                return Encoding.UTF8.GetString(utf8Span);
+                return await ReadLimitedUtf8Async(response, MaxJsonBytes, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -404,11 +296,11 @@ public sealed class HttpDownloadClient : IHttpPort
         }
     }
 
-    public async Task<HttpDownloadResult> DownloadAsync(
+    public async Task<HttpResult> DownloadAsync(
         Uri uri,
         string targetPath,
         HttpDownloadOptions? options = null,
-        IProgress<HttpDownloadProgress>? progress = null,
+        IProgress<HttpProgress>? progress = null,
         string? expectedHash = null,
         string expectedHashAlgorithm = "sha256",
         CancellationToken cancellationToken = default)
@@ -420,19 +312,20 @@ public sealed class HttpDownloadClient : IHttpPort
         string? normalizedHash = NormalizeExpectedHash(expectedHash, expectedHashAlgorithm);
         if (normalizedHash is not null && SafeFileSystem.FileExists(target))
         {
-            string existing = HashCalculator.Shared.ComputeFileHash(target, expectedHashAlgorithm, maxBytes: options.MaxBytes);
+            string existing = await HashCalculator.Shared.ComputeFileHashAsync(target, expectedHashAlgorithm, useCache: false, maxBytes: options.MaxBytes, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (string.Equals(existing, normalizedHash, StringComparison.OrdinalIgnoreCase))
             {
-                return new HttpDownloadResult(true, BytesDownloaded: SafeFileSystem.GetFileLength(target));
+                return new HttpResult(true, BytesProcessed: SafeFileSystem.GetFileLength(target));
             }
         }
 
         string temporary = SafeFileSystem.ResolveStablePath(
             target + ".part",
             createParent: true);
-        if (!options.EnableRangeResumption && SafeFileSystem.FileExists(temporary))
+        // 前次呼叫遺留之 .part 無 ETag 可比對，僅在有預期雜湊可驗證最終結果時才沿用
+        if ((!options.EnableRangeResumption || normalizedHash is null) && SafeFileSystem.FileExists(temporary))
         {
-            TryDeleteTemporaryFile(temporary);
+            SafeFileSystem.TryDeleteFile(temporary);
         }
 
         try
@@ -452,33 +345,33 @@ public sealed class HttpDownloadClient : IHttpPort
                         temporary = string.Empty;
                     }
 
-                    return finalResult ?? new HttpDownloadResult(false, "下載失敗");
+                    return finalResult ?? new HttpResult(false, "下載失敗");
                 }
             }
 
-            return new HttpDownloadResult(false, "下載重試次數已用盡");
+            return new HttpResult(false, "下載重試次數已用盡");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return new HttpDownloadResult(false, "下載已取消");
+            return new HttpResult(false, "下載已取消");
         }
         finally
         {
             if (!options.EnableRangeResumption || string.IsNullOrEmpty(temporary))
             {
-                TryDeleteTemporaryFile(temporary);
+                SafeFileSystem.TryDeleteFile(temporary);
             }
         }
     }
 
-    private async Task<(bool ShouldRetry, HttpDownloadResult? FinalResult, string? KnownETag)> TryDownloadAttemptAsync(
+    private async Task<(bool ShouldRetry, HttpResult? FinalResult, string? KnownETag)> TryDownloadAttemptAsync(
         Uri currentUri,
         string temporary,
         string target,
         HttpDownloadOptions options,
         string? normalizedHash,
         string expectedHashAlgorithm,
-        IProgress<HttpDownloadProgress>? progress,
+        IProgress<HttpProgress>? progress,
         int attempt,
         string? knownETag,
         CancellationToken cancellationToken)
@@ -494,7 +387,7 @@ public sealed class HttpDownloadClient : IHttpPort
                 existingBytes = SafeFileSystem.GetFileLength(temporary);
                 if (existingBytes >= options.MaxBytes)
                 {
-                    TryDeleteTemporaryFile(temporary);
+                    SafeFileSystem.TryDeleteFile(temporary);
                     existingBytes = 0;
                 }
             }
@@ -509,7 +402,7 @@ public sealed class HttpDownloadClient : IHttpPort
         {
             var response = await SendWithRedirectsAsync(
                 currentUri,
-                options,
+                options.MaxRedirects,
                 attemptCancellation.Token,
                 fromByte: existingBytes > 0 ? existingBytes : null,
                 ifRangeTag: existingBytes > 0 ? knownETag : null).ConfigureAwait(false);
@@ -519,37 +412,37 @@ public sealed class HttpDownloadClient : IHttpPort
 
                 if (response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
                 {
-                    TryDeleteTemporaryFile(temporary);
+                    SafeFileSystem.TryDeleteFile(temporary);
                     if (attempt < options.MaxAttempts)
                     {
                         return (true, null, responseETag ?? knownETag);
                     }
 
-                    return (false, new HttpDownloadResult(false, "HTTP 416 Range Not Satisfiable"), responseETag ?? knownETag);
+                    return (false, new HttpResult(false, "HTTP 416 Range Not Satisfiable"), responseETag ?? knownETag);
                 }
 
                 if (RetryableStatuses.Contains(response.StatusCode) && attempt < options.MaxAttempts)
                 {
-                    await DelayBeforeRetryAsync(response, options, attempt, cancellationToken).ConfigureAwait(false);
+                    await DelayBeforeRetryAsync(response, options.RetryDelay, attempt, cancellationToken).ConfigureAwait(false);
                     return (true, null, responseETag ?? knownETag);
                 }
 
                 if (response.StatusCode is not HttpStatusCode.OK and not HttpStatusCode.PartialContent)
                 {
-                    TryDeleteTemporaryFile(temporary);
-                    return (false, new HttpDownloadResult(false, $"HTTP 狀態碼： {(int)response.StatusCode}"), responseETag ?? knownETag);
+                    SafeFileSystem.TryDeleteFile(temporary);
+                    return (false, new HttpResult(false, $"HTTP 狀態碼： {(int)response.StatusCode}"), responseETag ?? knownETag);
                 }
 
                 bool isResume = response.StatusCode == HttpStatusCode.PartialContent && existingBytes > 0;
                 if (isResume && knownETag is not null && responseETag is not null && !string.Equals(knownETag, responseETag, StringComparison.Ordinal))
                 {
-                    TryDeleteTemporaryFile(temporary);
+                    SafeFileSystem.TryDeleteFile(temporary);
                     if (attempt < options.MaxAttempts)
                     {
                         return (true, null, responseETag);
                     }
 
-                    return (false, new HttpDownloadResult(false, "遠端檔案版本已變更"), responseETag);
+                    return (false, new HttpResult(false, "遠端檔案版本已變更"), responseETag);
                 }
 
                 long totalLength = isResume
@@ -558,8 +451,8 @@ public sealed class HttpDownloadClient : IHttpPort
 
                 if (totalLength > options.MaxBytes)
                 {
-                    TryDeleteTemporaryFile(temporary);
-                    return (false, new HttpDownloadResult(false, "下載檔案超過大小上限"), responseETag ?? knownETag);
+                    SafeFileSystem.TryDeleteFile(temporary);
+                    return (false, new HttpResult(false, "下載檔案超過大小上限"), responseETag ?? knownETag);
                 }
 
                 var result = await WriteResponseAsync(
@@ -579,15 +472,15 @@ public sealed class HttpDownloadClient : IHttpPort
 
                 if (!AtomicFileWriter.ReplaceFile(temporary, target))
                 {
-                    return (false, new HttpDownloadResult(false, "無法原子提交下載檔案"), responseETag ?? knownETag);
+                    return (false, new HttpResult(false, "無法原子提交下載檔案"), responseETag ?? knownETag);
                 }
 
-                return (false, new HttpDownloadResult(true, BytesDownloaded: SafeFileSystem.GetFileLength(target)), responseETag ?? knownETag);
+                return (false, new HttpResult(true, BytesProcessed: SafeFileSystem.GetFileLength(target)), responseETag ?? knownETag);
             }
         }
         catch (HttpSecurityException exception)
         {
-            return (false, new HttpDownloadResult(false, exception.Message), knownETag);
+            return (false, new HttpResult(false, exception.Message), knownETag);
         }
         catch (HttpRequestException exception) when (attempt < options.MaxAttempts)
         {
@@ -597,7 +490,7 @@ public sealed class HttpDownloadClient : IHttpPort
         }
         catch (HttpRequestException exception)
         {
-            return (false, new HttpDownloadResult(false, exception.Message), knownETag);
+            return (false, new HttpResult(false, exception.Message), knownETag);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && attempt < options.MaxAttempts)
         {
@@ -606,25 +499,17 @@ public sealed class HttpDownloadClient : IHttpPort
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return (false, new HttpDownloadResult(false, "下載已取消"), knownETag);
+            return (false, new HttpResult(false, "下載已取消"), knownETag);
         }
         catch (OperationCanceledException)
         {
-            return (false, new HttpDownloadResult(false, "HTTP 請求逾時"), knownETag);
+            return (false, new HttpResult(false, "HTTP 請求逾時"), knownETag);
         }
         catch (IOException exception)
         {
-            return (false, new HttpDownloadResult(false, exception.Message), knownETag);
+            return (false, new HttpResult(false, exception.Message), knownETag);
         }
     }
-
-    private Task<HttpResponseMessage> SendWithRedirectsAsync(
-        Uri initialUri,
-        HttpDownloadOptions options,
-        CancellationToken cancellationToken,
-        long? fromByte = null,
-        string? ifRangeTag = null) =>
-        SendWithRedirectsAsync(initialUri, options.MaxRedirects, cancellationToken, fromByte: fromByte, ifRangeTag: ifRangeTag);
 
     private async Task<HttpResponseMessage> SendWithRedirectsAsync(
         Uri initialUri,
@@ -639,10 +524,6 @@ public sealed class HttpDownloadClient : IHttpPort
         method ??= HttpMethod.Get;
         for (int redirect = 0; ; redirect++)
         {
-            if (_resolver is not null)
-            {
-                await HttpUrlPolicy.ValidatePublicHostAsync(currentUri, _resolver, cancellationToken).ConfigureAwait(false);
-            }
             using var request = new HttpRequestMessage(method, currentUri);
             EnsureUserAgent(request);
             if (fromByte.HasValue && fromByte.Value >= 0)
@@ -680,6 +561,15 @@ public sealed class HttpDownloadClient : IHttpPort
         {
             request.Headers.UserAgent.ParseAdd($"{AppInfo.AppId}/{AppInfo.Version} (+{AppInfo.RepositoryUrl})");
         }
+    }
+
+    private static async Task<string> ReadLimitedUtf8Async(
+        HttpResponseMessage response,
+        long maxBytes,
+        CancellationToken cancellationToken)
+    {
+        using var bodyStream = await ReadLimitedMemoryStreamAsync(response, maxBytes, cancellationToken).ConfigureAwait(false);
+        return Encoding.UTF8.GetString(bodyStream.GetBuffer().AsSpan(0, (int)bodyStream.Length));
     }
 
     private static async Task<MemoryStream> ReadLimitedMemoryStreamAsync(
@@ -725,13 +615,13 @@ public sealed class HttpDownloadClient : IHttpPort
         }
     }
 
-    private static async Task<HttpDownloadResult> WriteResponseAsync(
+    private static async Task<HttpResult> WriteResponseAsync(
         HttpResponseMessage response,
         string temporaryPath,
         HttpDownloadOptions options,
         string? expectedHash,
         string expectedHashAlgorithm,
-        IProgress<HttpDownloadProgress>? progress,
+        IProgress<HttpProgress>? progress,
         CancellationToken cancellationToken,
         long existingBytes = 0,
         long totalBytes = 0)
@@ -743,8 +633,8 @@ public sealed class HttpDownloadClient : IHttpPort
             isResume ? FileMode.Append : FileMode.Create,
             FileAccess.Write,
             FileShare.None,
-            81920,
-            FileOptions.SequentialScan);
+            bufferSize: 0, // 已自備 ArrayPool 緩衝區，停用 FileStream 內部緩衝避免重複配置
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
         using var hash = (!isResume && expectedHash is not null)
             ? IncrementalHash.CreateHash(CreateHashAlgorithmName(expectedHashAlgorithm))
             : null;
@@ -760,12 +650,12 @@ public sealed class HttpDownloadClient : IHttpPort
                 downloaded += read;
                 if (downloaded > options.MaxBytes)
                 {
-                    return new HttpDownloadResult(false, "下載檔案超過大小上限", downloaded);
+                    return new HttpResult(false, "下載檔案超過大小上限", downloaded);
                 }
 
                 await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
                 hash?.AppendData(buffer, 0, read);
-                progress?.Report(new HttpDownloadProgress(downloaded, total));
+                progress?.Report(new HttpProgress(downloaded, total));
             }
 
             await output.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -779,25 +669,27 @@ public sealed class HttpDownloadClient : IHttpPort
                     byte[] expectedBytes = Convert.FromHexString(expectedHash);
                     if (!CryptographicOperations.FixedTimeEquals(actualBytes, expectedBytes))
                     {
-                        TryDeleteTemporaryFile(temporaryPath);
-                        return new HttpDownloadResult(false, "下載檔案雜湊驗證失敗", downloaded);
+                        SafeFileSystem.TryDeleteFile(temporaryPath);
+                        return new HttpResult(false, "下載檔案雜湊驗證失敗", downloaded);
                     }
                 }
                 else
                 {
-                    string computedHash = HashCalculator.Shared.ComputeFileHash(
+                    string computedHash = await HashCalculator.Shared.ComputeFileHashAsync(
                         temporaryPath,
                         expectedHashAlgorithm,
-                        maxBytes: options.MaxBytes);
+                        useCache: false,
+                        maxBytes: options.MaxBytes,
+                        cancellationToken: cancellationToken).ConfigureAwait(false);
                     if (!string.Equals(computedHash, expectedHash, StringComparison.OrdinalIgnoreCase))
                     {
-                        TryDeleteTemporaryFile(temporaryPath);
-                        return new HttpDownloadResult(false, "下載檔案雜湊驗證失敗", downloaded);
+                        SafeFileSystem.TryDeleteFile(temporaryPath);
+                        return new HttpResult(false, "下載檔案雜湊驗證失敗", downloaded);
                     }
                 }
             }
 
-            return new HttpDownloadResult(true, BytesDownloaded: downloaded);
+            return new HttpResult(true, BytesProcessed: downloaded);
         }
         finally
         {
@@ -826,13 +718,6 @@ public sealed class HttpDownloadClient : IHttpPort
             ? name
             : throw new ArgumentException("不支援的雜湊演算法", nameof(algorithm));
 
-    private static Task DelayBeforeRetryAsync(
-        HttpResponseMessage response,
-        HttpDownloadOptions options,
-        int attempt,
-        CancellationToken cancellationToken) =>
-        DelayBeforeRetryAsync(response, options.RetryDelay, attempt, cancellationToken);
-
     private static async Task DelayBeforeRetryAsync(
         HttpResponseMessage response,
         TimeSpan baseRetryDelay,
@@ -860,25 +745,5 @@ public sealed class HttpDownloadClient : IHttpPort
         ArgumentOutOfRangeException.ThrowIfNegative(options.MaxRedirects);
         ArgumentOutOfRangeException.ThrowIfLessThan(options.MaxBytes, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(options.RetryDelay, TimeSpan.Zero, nameof(options));
-    }
-
-    private static void TryDeleteTemporaryFile(string path)
-    {
-        if (string.IsNullOrEmpty(path))
-        {
-            return;
-        }
-
-        try
-        {
-            if (SafeFileSystem.FileExists(path))
-            {
-                SafeFileSystem.DeleteFile(path);
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Logger.Warning("清理暫存下載檔失敗（已忽略）: {0}", ex.Message);
-        }
     }
 }

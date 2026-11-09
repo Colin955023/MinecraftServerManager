@@ -14,7 +14,7 @@ public sealed class RestoreBackupViewModelTests
             new ServerBackupInfo("backup_2026.zip", "/backups/backup_2026.zip", 1024 * 1024, DateTimeOffset.UtcNow)
         ]);
 
-        var vm = new RestoreBackupViewModel(backupService, "TestServer", "/backups", uiService: NoOpUiService.Instance);
+        var vm = new RestoreBackupViewModel(backupService, "TestServer", NoOpUiService.Instance, "/backups", static () => false);
         await vm.RefreshBackupsAsync();
 
         var item = Assert.Single(vm.Backups);
@@ -31,9 +31,9 @@ public sealed class RestoreBackupViewModelTests
         var vm = new RestoreBackupViewModel(
             backupService,
             "TestServer",
+            NoOpUiService.Instance,
             "/backups",
-            isServerRunningCheck: static () => true,
-            uiService: NoOpUiService.Instance);
+            isServerRunningCheck: static () => true);
 
         await vm.RefreshBackupsAsync();
         vm.SelectedBackup = vm.Backups[0];
@@ -54,9 +54,9 @@ public sealed class RestoreBackupViewModelTests
         var vm = new RestoreBackupViewModel(
             backupService,
             "TestServer",
+            NoOpUiService.Instance,
             "/backups",
-            isServerRunningCheck: static () => false,
-            uiService: NoOpUiService.Instance);
+            isServerRunningCheck: static () => false);
 
         await vm.RefreshBackupsAsync();
         vm.SelectedBackup = vm.Backups[0];
@@ -101,5 +101,13 @@ public sealed class RestoreBackupViewModelTests
             string? backupDirectory = null,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(true);
+
+        public ServerBackupSummary GetBackupSummary(string serverName, string? backupDirectory) =>
+            new(ServerBackupSummaryStatus.HasBackups, backups.Count);
+
+        public string? ValidateBackupDestination(string destinationPath) => null;
+
+        public string PrepareBackupFilePath(string serverName, string destinationDirectory) =>
+            Path.Combine(destinationDirectory, $"backup-{serverName}.zip");
     }
 }

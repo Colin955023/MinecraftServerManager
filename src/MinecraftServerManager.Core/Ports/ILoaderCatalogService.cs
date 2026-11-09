@@ -9,13 +9,6 @@ namespace MinecraftServerManager.Core.Ports;
 public interface ILoaderCatalogService
 {
     /// <summary>
-    /// 取得支援的官方 Minecraft 版本清單
-    /// </summary>
-    public Task<IReadOnlyList<LoaderVersion>> GetMinecraftVersionsAsync(
-        bool includeSnapshots = false,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// 依據特定載入器取得支援的 Minecraft 版本清單（例如 Paper 僅提供官方支援發布之版本）
     /// </summary>
     public Task<IReadOnlyList<LoaderVersion>> GetMinecraftVersionsForLoaderAsync(
@@ -48,11 +41,4 @@ public interface ILoaderCatalogService
     /// 背景預熱載入器版本快取（僅在快取過期或不存在時自遠端更新）
     /// </summary>
     public Task WarmupLoadersAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// 重新載入並遞補合併最新 Minecraft 版本清單
-    /// </summary>
-    public Task<IReadOnlyList<LoaderVersion>> ReloadAndMergeMinecraftVersionsAsync(
-        bool includeSnapshots = false,
-        CancellationToken cancellationToken = default);
 }

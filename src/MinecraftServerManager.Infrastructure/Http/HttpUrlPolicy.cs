@@ -107,15 +107,6 @@ public static class HttpUrlPolicy
         }
     }
 
-    public static async Task ValidatePublicHostAsync(
-        Uri uri,
-        Func<string, CancellationToken, Task<IPAddress[]>>? resolver = null,
-        CancellationToken cancellationToken = default)
-    {
-        ValidateStatic(uri);
-        await ResolvePublicAddressesAsync(uri.Host.TrimEnd('.'), resolver, cancellationToken).ConfigureAwait(false);
-    }
-
     /// <summary>
     /// 解析主機名稱（或 IP 字面值）並確認所有位址皆為公開位址，否則擲出 HttpSecurityException
     /// </summary>

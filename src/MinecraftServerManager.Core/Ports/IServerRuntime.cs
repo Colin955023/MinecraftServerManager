@@ -29,18 +29,6 @@ public interface IServerRuntime : IAsyncDisposable
     public Task StartAsync(ServerLaunchPlan plan, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 啟動伺服器行程
-    /// </summary>
-    public Task StartAsync(
-        string javaExecutablePath,
-        string serverDirectory,
-        string executableName,
-        int memoryMaxMb,
-        int? memoryMinMb = null,
-        IReadOnlyList<string>? customJvmArgs = null,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// 寫入控制台指令
     /// </summary>
     public Task<bool> SendCommandAsync(string command, CancellationToken cancellationToken = default);

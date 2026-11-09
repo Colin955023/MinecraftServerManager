@@ -201,7 +201,8 @@ public sealed class SharedToolEntryTests : IDisposable
         }
         """;
 
-        var versions = MojangVersionCatalog.ParseManifest(manifest);
+        using var doc = JsonCodec.ParseDocument(manifest);
+        var versions = MojangVersionCatalog.ParseManifest(doc);
 
         Assert.Contains(versions, static v => v.Version == "1.21.4" && v.Stable);
         Assert.Contains(versions, static v => v.Version == "24w05a" && !v.Stable);
@@ -254,10 +255,16 @@ public sealed class SharedToolEntryTests : IDisposable
             new() { Name = "Server 1" },
         };
 
-        items.SortBy(nameof(SortRow.Name), ListSortDirection.Ascending);
+        var keys = new SortKeyMap<SortRow>((nameof(SortRow.Name), static r => r.Name));
+
+        items.SortBy(keys, nameof(SortRow.Name), ListSortDirection.Ascending);
         Assert.Equal(["Server 1", "Server 2", "Server 10"], items.Select(static i => i.Name));
 
-        items.SortBy(nameof(SortRow.Name), ListSortDirection.Descending);
+        items.SortBy(keys, nameof(SortRow.Name), ListSortDirection.Descending);
+        Assert.Equal(["Server 10", "Server 2", "Server 1"], items.Select(static i => i.Name));
+
+        // 未登錄欄位不排序
+        items.SortBy(keys, "Unknown", ListSortDirection.Ascending);
         Assert.Equal(["Server 10", "Server 2", "Server 1"], items.Select(static i => i.Name));
     }
 
@@ -280,34 +287,5 @@ public sealed class SharedToolEntryTests : IDisposable
     public sealed class SortRow
     {
         public string Name { get; init; } = string.Empty;
-    }
-
-    private sealed class StubHttpPort(Func<Uri, string?> handler) : IHttpPort
-    {
-        public int RequestCount { get; private set; }
-
-        public Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentAsync(Uri uri, CancellationToken cancellationToken = default) =>
-            TestHttpJson.FromTextAsync(this, uri, cancellationToken);
-
-        public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default)
-        {
-            RequestCount++;
-            return Task.FromResult(handler(uri));
-        }
-
-        public Task<HttpJsonResponse<T>> GetJsonAsync<T>(Uri uri, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<HttpResult> DownloadAsync(
-            Uri uri,
-            string targetPath,
-            IProgress<HttpProgress>? progress = null,
-            string? expectedHash = null,
-            string expectedHashAlgorithm = "sha256",
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<string?> PostJsonAsync(Uri uri, string jsonPayload, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
     }
 }

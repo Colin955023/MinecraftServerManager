@@ -29,38 +29,24 @@
                                                 Color="#A5ACB9" />
                                         <SolidColorBrush x:Key="AccentBrush"
                                                 Color="#4F6FD8" />
-                                        <SolidColorBrush x:Key="AccentHoverBrush"
-                                                Color="#3D5CC4" />
                                         <SolidColorBrush x:Key="WarningBrush"
                                                 Color="#F59E0B" />
                                         <SolidColorBrush x:Key="DangerBrush"
                                                 Color="#B91C1C" />
-                                        <SolidColorBrush x:Key="DangerHoverBrush"
-                                                Color="#991B1B" />
                                         <SolidColorBrush x:Key="SuccessBrush"
                                                 Color="#238636" />
-                                        <SolidColorBrush x:Key="SuccessHoverBrush"
-                                                Color="#2EA043" />
-                                        <SolidColorBrush x:Key="NotificationBrush"
-                                                Color="#283A5A" />
-                                        <SolidColorBrush x:Key="ButtonDefaultHoverBrush"
-                                                Color="#2E3440" />
-                                        <SolidColorBrush x:Key="NavButtonHoverBrush"
-                                                Color="#2D323E" />
+                                        <SolidColorBrush x:Key="SuccessTextBrush"
+                                                Color="#3FB950" />
+                                        <SolidColorBrush x:Key="DangerTextBrush"
+                                                Color="#F85149" />
+                                        <SolidColorBrush x:Key="ConsoleBackgroundBrush"
+                                                Color="#0C0C0C" />
+                                        <SolidColorBrush x:Key="ConsoleForegroundBrush"
+                                                Color="#00FF66" />
+                                        <SolidColorBrush x:Key="ConsoleMutedTextBrush"
+                                                Color="#8B949E" />
                                         <SolidColorBrush x:Key="DataGridGridLineBrush"
                                                 Color="#3F4552" />
-                                        <SolidColorBrush x:Key="ButtonDisabledBackgroundBrush"
-                                                Color="#2B2D35" />
-                                        <SolidColorBrush x:Key="ButtonDisabledForegroundBrush"
-                                                Color="#94A3B8" />
-                                        <SolidColorBrush x:Key="ButtonDisabledBorderBrush"
-                                                Color="#383C46" />
-                                        <SolidColorBrush x:Key="ComboBoxPopupBackgroundBrush"
-                                                Color="#1F2229" />
-                                        <SolidColorBrush x:Key="ComboBoxItemHoverBrush"
-                                                Color="#2E3442" />
-                                        <SolidColorBrush x:Key="ComboBoxItemSelectedBrush"
-                                                Color="#3B4459" />
 
                                         <!-- WinUI 3 原生強調色控制項筆刷覆蓋 -->
                                         <Color x:Key="SystemAccentColor">#4F6FD8</Color>
@@ -90,38 +76,24 @@
                                                 Color="#5E6675" />
                                         <SolidColorBrush x:Key="AccentBrush"
                                                 Color="#4F6FD8" />
-                                        <SolidColorBrush x:Key="AccentHoverBrush"
-                                                Color="#3D5CC4" />
                                         <SolidColorBrush x:Key="WarningBrush"
                                                 Color="#B45309" />
                                         <SolidColorBrush x:Key="DangerBrush"
                                                 Color="#DC2626" />
-                                        <SolidColorBrush x:Key="DangerHoverBrush"
-                                                Color="#B91C1C" />
                                         <SolidColorBrush x:Key="SuccessBrush"
                                                 Color="#1A7F37" />
-                                        <SolidColorBrush x:Key="SuccessHoverBrush"
-                                                Color="#1F883D" />
-                                        <SolidColorBrush x:Key="NotificationBrush"
-                                                Color="#E7EEFF" />
-                                        <SolidColorBrush x:Key="ButtonDefaultHoverBrush"
-                                                Color="#E2E8F0" />
-                                        <SolidColorBrush x:Key="NavButtonHoverBrush"
-                                                Color="#E5E7EB" />
+                                        <SolidColorBrush x:Key="SuccessTextBrush"
+                                                Color="#1A7F37" />
+                                        <SolidColorBrush x:Key="DangerTextBrush"
+                                                Color="#CF222E" />
+                                        <SolidColorBrush x:Key="ConsoleBackgroundBrush"
+                                                Color="#0C0C0C" />
+                                        <SolidColorBrush x:Key="ConsoleForegroundBrush"
+                                                Color="#00FF66" />
+                                        <SolidColorBrush x:Key="ConsoleMutedTextBrush"
+                                                Color="#8B949E" />
                                         <SolidColorBrush x:Key="DataGridGridLineBrush"
                                                 Color="#D1D5DB" />
-                                        <SolidColorBrush x:Key="ButtonDisabledBackgroundBrush"
-                                                Color="#E2E8F0" />
-                                        <SolidColorBrush x:Key="ButtonDisabledForegroundBrush"
-                                                Color="#1A1D24" />
-                                        <SolidColorBrush x:Key="ButtonDisabledBorderBrush"
-                                                Color="#CBD5E1" />
-                                        <SolidColorBrush x:Key="ComboBoxPopupBackgroundBrush"
-                                                Color="#FFFFFF" />
-                                        <SolidColorBrush x:Key="ComboBoxItemHoverBrush"
-                                                Color="#EBF0FF" />
-                                        <SolidColorBrush x:Key="ComboBoxItemSelectedBrush"
-                                                Color="#D6E4FF" />
 
                                         <!-- WinUI 3 原生強調色控制項筆刷覆蓋 -->
                                         <Color x:Key="SystemAccentColor">#4F6FD8</Color>
@@ -156,15 +128,11 @@
                                         Value="SemiBold" />
                         </Style>
 
-                        <!-- 危險動作按鈕樣式 (Danger) -->
-                        <Style x:Key="DangerButtonStyle"
+                        <!-- 實心色彩按鈕共用基底 (Danger / Success)：統一前景、圓角、邊距與字重 -->
+                        <Style x:Key="SolidColorButtonBaseStyle"
                                 TargetType="Button">
-                                <Setter Property="Background"
-                                        Value="{ThemeResource DangerBrush}" />
                                 <Setter Property="Foreground"
                                         Value="#FFFFFF" />
-                                <Setter Property="BorderBrush"
-                                        Value="{ThemeResource DangerBrush}" />
                                 <Setter Property="BorderThickness"
                                         Value="1" />
                                 <Setter Property="CornerRadius"
@@ -179,27 +147,24 @@
                                         Value="SemiBold" />
                         </Style>
 
+                        <!-- 危險動作按鈕樣式 (Danger) -->
+                        <Style x:Key="DangerButtonStyle"
+                                TargetType="Button"
+                                BasedOn="{StaticResource SolidColorButtonBaseStyle}">
+                                <Setter Property="Background"
+                                        Value="{ThemeResource DangerBrush}" />
+                                <Setter Property="BorderBrush"
+                                        Value="{ThemeResource DangerBrush}" />
+                        </Style>
+
                         <!-- 成功/確認按鈕樣式 (Success) -->
                         <Style x:Key="SuccessButtonStyle"
-                                TargetType="Button">
+                                TargetType="Button"
+                                BasedOn="{StaticResource SolidColorButtonBaseStyle}">
                                 <Setter Property="Background"
                                         Value="{ThemeResource SuccessBrush}" />
-                                <Setter Property="Foreground"
-                                        Value="#FFFFFF" />
                                 <Setter Property="BorderBrush"
                                         Value="{ThemeResource SuccessBrush}" />
-                                <Setter Property="BorderThickness"
-                                        Value="1" />
-                                <Setter Property="CornerRadius"
-                                        Value="6" />
-                                <Setter Property="Padding"
-                                        Value="14,4" />
-                                <Setter Property="MinHeight"
-                                        Value="36" />
-                                <Setter Property="VerticalContentAlignment"
-                                        Value="Center" />
-                                <Setter Property="FontWeight"
-                                        Value="SemiBold" />
                         </Style>
 
                         <!-- 左側導覽列按鈕樣式 (NavButton) -->

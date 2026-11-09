@@ -39,19 +39,13 @@ public sealed class RotatingFileLoggerTests
                 LogDirectory = tempDir,
                 MinimumLevel = LogLevel.Information,
                 ProcessId = 1234,
-                OutputToConsole = false,
             };
 
             using var provider = new RotatingFileLoggerProvider(options);
-            var scopeProvider = new LoggerExternalScopeProvider();
-            provider.SetScopeProvider(scopeProvider);
 
-            var logger = provider.CreateLogger("TestModule");
-            using (logger.BeginScope(new Dictionary<string, object?> { ["component"] = "ServerCore" }))
-            {
-                logger.LogInformation("伺服器準備啟動");
-                logger.LogWarning("記憶體設定過低");
-            }
+            var logger = provider.CreateLogger("ServerCore");
+            logger.LogInformation("伺服器準備啟動");
+            logger.LogWarning("記憶體設定過低");
 
             provider.Dispose();
 
@@ -79,7 +73,6 @@ public sealed class RotatingFileLoggerTests
                 LogDirectory = tempDir,
                 MinimumLevel = LogLevel.Information,
                 ProcessId = 5678,
-                OutputToConsole = false,
             };
 
             using var provider = new RotatingFileLoggerProvider(options);
@@ -122,7 +115,6 @@ public sealed class RotatingFileLoggerTests
                 MaxArchiveFiles = 5,
                 MinimumLevel = LogLevel.Information,
                 ProcessId = 9999,
-                OutputToConsole = false,
             };
 
             using var provider = new RotatingFileLoggerProvider(options);
@@ -191,7 +183,6 @@ public sealed class RotatingFileLoggerTests
                 LogDirectory = tempDir,
                 MinimumLevel = LogLevel.Information,
                 ProcessId = 1111,
-                OutputToConsole = false,
             };
 
             using var provider = new RotatingFileLoggerProvider(options);
@@ -289,41 +280,6 @@ public sealed class RotatingFileLoggerTests
         }
         finally
         {
-            Directory.Delete(tempDir, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void AppLoggingCreatesAndInitializesLogger()
-    {
-        string tempDir = CreateTemporaryDirectory();
-        try
-        {
-            var options = new RotatingFileLoggerOptions
-            {
-                LogDirectory = tempDir,
-                MinimumLevel = LogLevel.Information,
-                ProcessId = 7777,
-                OutputToConsole = false,
-            };
-
-            AppLogging.Shutdown();
-            AppLogging.Initialize(options);
-
-            var Logger = AppLogging.CreateComponentLogger(nameof(RotatingFileLoggerTests));
-            Logger.Information("AppLogging 初始化完成");
-
-            AppLogging.Shutdown();
-
-            string[] logFiles = Directory.GetFiles(tempDir, "*.log");
-            string item = Assert.Single(logFiles);
-
-            string content = File.ReadAllText(item);
-            Assert.Contains($" | INFO     | {nameof(RotatingFileLoggerTests)} | AppLogging 初始化完成", content, StringComparison.Ordinal);
-        }
-        finally
-        {
-            AppLogging.Shutdown();
             Directory.Delete(tempDir, recursive: true);
         }
     }

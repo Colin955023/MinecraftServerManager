@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using System.Globalization;
 using System.Text;
 using System.Text.Json.Serialization;
 using MinecraftServerManager.Core.Loaders;
@@ -24,24 +23,28 @@ public sealed partial class ServerManager : IServerManager
     private readonly string _serversRoot;
     private readonly string _registryFilePath;
     private readonly IServerInspector _inspector;
-    private readonly ILoaderInstallerService? _loaderInstaller;
-    private readonly IJavaRuntimeDetector? _javaDetector;
-    private readonly IMinecraftJavaRequirementService? _javaRequirementService;
+    private readonly ILoaderInstallerService _loaderInstaller;
+    private readonly IJavaRuntimeDetector _javaDetector;
+    private readonly IMinecraftJavaRequirementService _javaRequirementService;
     private readonly Lock _lock = new();
     private Dictionary<string, ServerConfigPayload>? _cachedRegistry;
     private DateTime _lastRegistryWriteTimeUtc;
+    private bool _unreadableRegistryPreserved;
 
     public ServerManager(
         string serversRoot,
         IServerInspector inspector,
-        ILoaderInstallerService? loaderInstaller = null,
-        IJavaRuntimeDetector? javaDetector = null,
-        IMinecraftJavaRequirementService? javaRequirementService = null)
+        ILoaderInstallerService loaderInstaller,
+        IJavaRuntimeDetector javaDetector,
+        IMinecraftJavaRequirementService javaRequirementService)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serversRoot);
         ArgumentNullException.ThrowIfNull(inspector);
+        ArgumentNullException.ThrowIfNull(loaderInstaller);
+        ArgumentNullException.ThrowIfNull(javaDetector);
+        ArgumentNullException.ThrowIfNull(javaRequirementService);
         _serversRoot = SafeFileSystem.ResolveStableDirectory(serversRoot, create: true);
-        _registryFilePath = Path.Combine(_serversRoot, "servers.json");
+        _registryFilePath = Path.Combine(_serversRoot, ServerDefaults.RegistryFileName);
         _inspector = inspector;
         _loaderInstaller = loaderInstaller;
         _javaDetector = javaDetector;
@@ -122,14 +125,14 @@ public sealed partial class ServerManager : IServerManager
         // ── Phase 1: Validate (0% ~ 5%) ──
         progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.Validate, 0, "正在驗證伺服器名稱與目錄..."));
 
-        var existing = await GetServerAsync(plan.Name.Value, cancellationToken).ConfigureAwait(false);
+        var existing = await GetServerAsync(plan.Config.Name.Value, cancellationToken).ConfigureAwait(false);
         if (existing is not null)
         {
-            return ServerCreationResult.Failed($"已存在同名的伺服器：{plan.Name.Value}");
+            return ServerCreationResult.Failed($"已存在同名的伺服器：{plan.Config.Name.Value}");
         }
 
-        string serverDir = Path.Combine(_serversRoot, plan.Name.Value);
-        if (SafeFileSystem.DirectoryExists(serverDir) && SafeFileSystem.EnumerateFileSystemEntries(serverDir).Any())
+        string serverDir = Path.Combine(_serversRoot, plan.Config.Name.Value);
+        if (SafeFileSystem.DirectoryExists(serverDir) && !SafeFileSystem.IsDirectoryEmpty(serverDir))
         {
             return ServerCreationResult.Failed($"目標目錄已存在且非空：{serverDir}");
         }
@@ -143,7 +146,7 @@ public sealed partial class ServerManager : IServerManager
         bool createdDir = false;
         string stagingDir = Path.Combine(_serversRoot, $".create-staging-{Guid.NewGuid():N}");
 
-        Logger.Information("開始建立伺服器「{Name}」 (MC: {McVer}, 載入器: {Loader} {LoaderVer}, 記憶體: {MemMax}MB)", plan.Name.Value, plan.MinecraftVersion.Value, plan.LoaderType, plan.LoaderVersion, plan.MemoryMaxMb);
+        Logger.Information("開始建立伺服器「{Name}」 (MC: {McVer}, 載入器: {Loader} {LoaderVer}, 記憶體: {MemMax}MB)", plan.Config.Name.Value, plan.Config.MinecraftVersion.Value, plan.Config.LoaderType, plan.Config.LoaderVersion, plan.Config.MemoryMaxMb);
 
         try
         {
@@ -161,15 +164,9 @@ public sealed partial class ServerManager : IServerManager
             string propertiesPath = Path.Combine(stableStaging, ServerDefaults.ServerPropertiesFileName);
             var initialProps = new Dictionary<string, string>(ServerPropertiesMetadata.DefaultProperties)
             {
-                ["motd"] = $"A Minecraft Server ({plan.Name.Value})",
-                ["server-port"] = "25565",
+                ["motd"] = $"A Minecraft Server ({plan.Config.Name.Value})",
+                ["server-port"] = ServerDefaults.DefaultPort,
             };
-
-            // 套用建立計畫中指定的自訂屬性
-            foreach (var entry in plan.Properties)
-            {
-                initialProps[entry.Key] = entry.Value;
-            }
 
             string propsText = PropertiesDocumentCodec.Serialize(initialProps);
             AtomicFileWriter.WriteText(propertiesPath, propsText);
@@ -179,53 +176,44 @@ public sealed partial class ServerManager : IServerManager
             // ── Phase 3: Artifact (15% ~ 85%) ──
             progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.Artifact, 15, "正在下載伺服器核心..."));
 
-            string? resolvedJavaPath = await ResolveJavaExecutableAsync(plan.UserJavaPath, plan.MinecraftVersion.Value, plan.LoaderType, cancellationToken).ConfigureAwait(false);
+            string? resolvedJavaPath = await ResolveJavaExecutableAsync(plan.UserJavaPath, plan.Config.MinecraftVersion.Value, plan.Config.LoaderType, cancellationToken).ConfigureAwait(false);
 
-            if (_loaderInstaller is not null)
+            int lastArtifactPct = 15;
+            Lock artifactProgressLock = new();
+            var loaderProgress = progress is null ? null : new SynchronousProgress<LoaderInstallProgress>(lp =>
             {
-                int lastArtifactPct = 15;
-                Lock artifactProgressLock = new();
-                var loaderProgress = progress is null ? null : new SynchronousProgress<LoaderInstallProgress>(lp =>
+                int mappedPct = 15 + (int)(lp.PercentCompleted * 0.70); // 15% ~ 85%
+                int clamped = Math.Clamp(mappedPct, 15, 85);
+                lock (artifactProgressLock)
                 {
-                    int mappedPct = 15 + (int)(lp.PercentCompleted * 0.70); // 15% ~ 85%
-                    int clamped = Math.Clamp(mappedPct, 15, 85);
-                    lock (artifactProgressLock)
-                    {
-                        clamped = Math.Max(lastArtifactPct, clamped);
-                        lastArtifactPct = clamped;
-                    }
-                    progress.Report(new ServerCreationProgressReport(
-                        ServerCreationPhase.Artifact, clamped, lp.Message));
-                });
+                    clamped = Math.Max(lastArtifactPct, clamped);
+                    lastArtifactPct = clamped;
+                }
+                progress.Report(new ServerCreationProgressReport(
+                    ServerCreationPhase.Artifact, clamped, lp.Message));
+            });
 
-                await _loaderInstaller.InstallLoaderAsync(
-                    loader: plan.LoaderType,
-                    minecraftVersion: plan.MinecraftVersion.Value,
-                    loaderVersion: plan.LoaderVersion,
-                    serverDirectory: stableStaging,
-                    javaExecutablePath: resolvedJavaPath ?? "java",
-                    progress: loaderProgress,
-                    cancellationToken: cancellationToken).ConfigureAwait(false);
-            }
+            await _loaderInstaller.InstallLoaderAsync(
+                loader: plan.Config.LoaderType,
+                minecraftVersion: plan.Config.MinecraftVersion.Value,
+                loaderVersion: plan.Config.LoaderVersion,
+                serverDirectory: stableStaging,
+                javaExecutablePath: resolvedJavaPath ?? "java",
+                progress: loaderProgress,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
 
             progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.Artifact, 85, "伺服器核心安裝完成"));
 
             // ── Phase 4: LaunchScript (85% ~ 95%) ──
             progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.LaunchScript, 85, "正在生成啟動腳本..."));
 
-            string? launchJar = ServerLaunchTargetResolver.ResolveLaunchTarget(stableStaging, plan.LoaderType);
+            string? launchJar = ServerLaunchTargetResolver.ResolveLaunchTarget(stableStaging, plan.Config.LoaderType);
             if (launchJar is null)
             {
-                if (_loaderInstaller is not null)
-                {
-                    return ServerCreationResult.Failed("找不到可用的啟器 JAR 或參數設定檔，伺服器核心可能下載失敗");
-                }
-
-                // 未提供安裝器時以預設檔名生成腳本
-                launchJar = "server.jar";
+                return ServerCreationResult.Failed("找不到可用的啟器 JAR 或參數設定檔，伺服器核心可能下載失敗");
             }
 
-            WriteStartScript(stableStaging, launchJar, plan.MemoryMaxMb, plan.MemoryMinMb ?? ServerDefaults.DefaultMemoryMinMb, resolvedJavaPath, plan.JvmArgs, plan.LoaderType);
+            StartScriptWriter.Write(stableStaging, launchJar, plan.Config.MemoryMaxMb, plan.Config.MemoryMinMb ?? ServerDefaults.DefaultMemoryMinMb, resolvedJavaPath, plan.Config.JvmArgs, plan.Config.LoaderType);
             CleanupRedundantStartupScripts(stableStaging);
             progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.LaunchScript, 95, "啟動腳本已生成並通過完整性驗證"));
 
@@ -242,28 +230,21 @@ public sealed partial class ServerManager : IServerManager
                 return ServerCreationResult.Failed("原子移動暫存目錄至正式伺服器目錄失敗");
             }
 
-            var config = plan.BuildConfig(serverDir);
-            if (plan.LoaderType is LoaderKind.Forge or LoaderKind.NeoForge ||
-                SafeFileSystem.FileExists(Path.Combine(serverDir, ServerDefaults.UserJvmArgsFileName)) ||
-                SafeFileSystem.FileExists(Path.Combine(serverDir, "run.bat")))
+            var config = plan.Config.WithPath(serverDir);
+            if (StartScriptWriter.UsesUserJvmArgsFile(plan.Config.LoaderType, serverDir))
             {
-                UpdateForgeUserJvmArgs(serverDir, config);
+                StartScriptWriter.UpdateUserJvmArgs(serverDir, config);
             }
 
-            lock (_lock)
-            {
-                var registry = LoadRegistry();
-                registry[plan.Name.Value] = ServerConfigPayload.FromDomain(config);
-                SaveRegistry(registry);
-            }
+            SetRegistryEntry(plan.Config.Name.Value, config);
 
             progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.Commit, 100, "伺服器建立完成！"));
-            Logger.Information("伺服器「{Name}」建立成功！路徑: {Path}", plan.Name.Value, serverDir);
+            Logger.Information("伺服器「{Name}」建立成功！路徑: {Path}", plan.Config.Name.Value, serverDir);
             return ServerCreationResult.Success(config);
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "建立伺服器「{Name}」失敗: {Message}", plan.Name.Value, ex.Message);
+            Logger.Error(ex, "建立伺服器「{Name}」失敗: {Message}", plan.Config.Name.Value, ex.Message);
             if (createdDir)
             {
                 ReadOnlySpan<string> cleanupTargets = [stagingDir, serverDir];
@@ -317,111 +298,6 @@ public sealed partial class ServerManager : IServerManager
     }
 
 
-    /// <summary>
-    /// 生成統一規範之 start_server.bat 啟動腳本。
-    /// </summary>
-    private static void WriteStartScript(
-        string directory,
-        string launchTarget,
-        int memoryMaxMb,
-        int memoryMinMb,
-        string? javaPath,
-        IReadOnlyList<string>? jvmArgs = null,
-        LoaderKind loader = LoaderKind.Unknown)
-    {
-        string resolvedPath = javaPath ?? string.Empty;
-        if (!Path.IsPathFullyQualified(resolvedPath))
-        {
-            string pf = RuntimePaths.GetProgramFilesDir();
-            resolvedPath = Path.Combine(pf, "Java", "bin", "java.exe");
-        }
-
-        string javaCommand = $"\"{resolvedPath}\"";
-        var builder = new StringBuilder();
-        builder.AppendLine("@echo off");
-        builder.AppendLine("chcp 65001 > nul");
-        builder.AppendLine("cd /d \"%~dp0\"");
-        builder.AppendLine();
-
-        string extraArgs = (jvmArgs is not null && jvmArgs.Count > 0)
-            ? string.Join(" ", jvmArgs) + " "
-            : string.Empty;
-
-        if (launchTarget.StartsWith('@'))
-        {
-            string argsFile = launchTarget[1..].Trim('"');
-            builder.AppendLine(CultureInfo.InvariantCulture, $"{javaCommand} -Xms{memoryMinMb}M -Xmx{memoryMaxMb}M {extraArgs}@\"{argsFile}\" nogui %*");
-        }
-        else
-        {
-            string jarName = launchTarget.EndsWith(".bat", StringComparison.OrdinalIgnoreCase) ? "server.jar" : launchTarget;
-            string guiFlag = (loader == LoaderKind.Paper || jarName.StartsWith("paper", StringComparison.OrdinalIgnoreCase)) ? "--nogui" : "nogui";
-            builder.AppendLine(CultureInfo.InvariantCulture, $"{javaCommand} -Xms{memoryMinMb}M -Xmx{memoryMaxMb}M {extraArgs}-jar \"{jarName}\" {guiFlag} %*");
-        }
-
-        AtomicFileWriter.WriteText(Path.Combine(directory, ServerDefaults.StartServerBatFileName), builder.ToString());
-    }
-
-    /// <summary>
-    /// 更新 Forge / NeoForge 之 user_jvm_args.txt 啟動與記憶體參數檔案（原子安全寫入）
-    /// </summary>
-    public static void UpdateForgeUserJvmArgs(string serverDirectory, ServerConfig config)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
-        ArgumentNullException.ThrowIfNull(config);
-
-        string stableDir = SafeFileSystem.ResolveStableDirectory(serverDirectory);
-        var lines = new List<string>();
-
-        var customJvmArgs = config.JvmArgs ?? [];
-        if (!JvmOptionPolicy.HasGcOption(customJvmArgs))
-        {
-            var recommendedGc = JvmOptionPolicy.RecommendGcArgs(config.MemoryMaxMb, javaMajor: null, loaderType: config.LoaderType.ToString(), existingArgs: customJvmArgs);
-            lines.AddRange(recommendedGc);
-        }
-
-        lines.AddRange(customJvmArgs);
-
-        if (config.MemoryMinMb.HasValue)
-        {
-            lines.Add($"-Xms{config.MemoryMinMb.Value}M");
-        }
-
-        if (config.MemoryMaxMb > 0)
-        {
-            lines.Add($"-Xmx{config.MemoryMaxMb}M");
-        }
-
-        string userJvmArgsPath = Path.Combine(stableDir, ServerDefaults.UserJvmArgsFileName);
-        string content = string.Join(Environment.NewLine, lines) + Environment.NewLine;
-        AtomicFileWriter.WriteText(userJvmArgsPath, content);
-        Logger.Information("已更新 Forge/NeoForge 參數檔: {Path}", userJvmArgsPath);
-    }
-
-    /// <summary>
-    /// 更新統一啟動腳本 start_server.bat 中的記憶體設定（-Xms 與 -Xmx）
-    /// </summary>
-    public static void UpdateStartScriptMemory(string serverDirectory, ServerConfig config)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
-        ArgumentNullException.ThrowIfNull(config);
-
-        string stableDir = SafeFileSystem.ResolveStableDirectory(serverDirectory);
-        string scriptPath = Path.Combine(stableDir, ServerDefaults.StartServerBatFileName);
-        if (!SafeFileSystem.FileExists(scriptPath))
-        {
-            return;
-        }
-
-        string content = SafeFileSystem.ReadAllText(scriptPath);
-        int minMb = MemoryUtils.ResolveEffectiveMinMemoryMb(config.MemoryMinMb, config.MemoryMaxMb);
-        int maxMb = config.MemoryMaxMb;
-
-        content = MemoryUtils.ApplyMemoryFlags(content, minMb, maxMb);
-        AtomicFileWriter.WriteText(scriptPath, content);
-        Logger.Information("已更新統一啟動腳本記憶體設定: {Path} (-Xms{Min}M -Xmx{Max}M)", scriptPath, minMb, maxMb);
-    }
-
     private async Task<string?> ResolveJavaExecutableAsync(
         string? configuredJava,
         string minecraftVersion,
@@ -438,39 +314,33 @@ public sealed partial class ServerManager : IServerManager
         }
 
         // 依據 Minecraft 版本尋找最合適的 Java 執行環境
-        if (_javaRequirementService is not null && _javaDetector is not null)
+        try
         {
-            try
+            int targetMajor = await _javaRequirementService.GetRequiredJavaMajorAsync(minecraftVersion, loader, cancellationToken).ConfigureAwait(false);
+            var match = await _javaDetector.FindBestMatchAsync(targetMajor, cancellationToken).ConfigureAwait(false);
+            if (match is not null && SafeFileSystem.FileExists(match.ExecutablePath))
             {
-                int targetMajor = await _javaRequirementService.GetRequiredJavaMajorAsync(minecraftVersion, loader, cancellationToken).ConfigureAwait(false);
-                var match = await _javaDetector.FindBestMatchAsync(targetMajor, cancellationToken).ConfigureAwait(false);
-                if (match is not null && SafeFileSystem.FileExists(match.ExecutablePath))
-                {
-                    return match.ExecutablePath;
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning("依 Minecraft {Version} 與載入器 {Loader} 尋找 Java 失敗: {Message}", minecraftVersion, loader, ex.Message);
+                return match.ExecutablePath;
             }
         }
-
-        if (_javaDetector is not null)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            try
+            Logger.Warning("依 Minecraft {Version} 與載入器 {Loader} 尋找 Java 失敗: {Message}", minecraftVersion, loader, ex.Message);
+        }
+
+        try
+        {
+            var list = await _javaDetector.DetectAsync(forceRefresh: false, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var best = list.Where(static j => j.Is64Bit).OrderByDescending(static j => j.MajorVersion).FirstOrDefault()
+                       ?? list.OrderByDescending(static j => j.MajorVersion).FirstOrDefault();
+            if (best is not null && SafeFileSystem.FileExists(best.ExecutablePath))
             {
-                var list = await _javaDetector.DetectAsync(forceRefresh: false, cancellationToken: cancellationToken).ConfigureAwait(false);
-                var best = list.Where(static j => j.Is64Bit).OrderByDescending(static j => j.MajorVersion).FirstOrDefault()
-                           ?? list.OrderByDescending(static j => j.MajorVersion).FirstOrDefault();
-                if (best is not null && SafeFileSystem.FileExists(best.ExecutablePath))
-                {
-                    return best.ExecutablePath;
-                }
+                return best.ExecutablePath;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Logger.Warning("自動偵測 Java 執行檔異常: {0}", ex.Message);
-            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Warning("自動偵測 Java 執行檔異常: {0}", ex.Message);
         }
 
         // 搜尋系統 PATH 中的 java.exe 完整絕對路徑
@@ -554,33 +424,26 @@ public sealed partial class ServerManager : IServerManager
             return ServerOperationResult.Fail($"找不到伺服器：{name}");
         }
 
-        string serverDir = Path.Combine(_serversRoot, name);
+        // 以註冊表記錄的實際路徑為準（存放目錄遷移後與 servers 根目錄 + 名稱可能不同）；邊界由 tombstone 搬移時強制驗證
+        string serverDir = config.Path;
 
         Logger.Information("開始刪除伺服器「{Name}」...", name);
 
         try
         {
             // 兩階段安全刪除
+            string? tombstonePath = null;
+            string? journalPath = null;
             if (SafeFileSystem.DirectoryExists(serverDir))
             {
-                var (tombstonePath, journalPath) = ServerTombstoneManager.PrepareDeleteTombstone(_serversRoot, name, serverDir);
-                lock (_lock)
-                {
-                    var registry = LoadRegistry();
-                    registry.Remove(name);
-                    SaveRegistry(registry);
-                }
-
-                ServerTombstoneManager.CleanTombstone(_serversRoot, tombstonePath, journalPath);
+                (tombstonePath, journalPath) = ServerTombstoneManager.PrepareDeleteTombstone(_serversRoot, name, serverDir);
             }
-            else
+
+            RemoveRegistryEntry(name);
+
+            if (tombstonePath is not null && journalPath is not null)
             {
-                lock (_lock)
-                {
-                    var registry = LoadRegistry();
-                    registry.Remove(name);
-                    SaveRegistry(registry);
-                }
+                ServerTombstoneManager.CleanTombstone(_serversRoot, tombstonePath, journalPath);
             }
 
             Logger.Information("伺服器「{Name}」已完全刪除並清理完畢", name);
@@ -604,23 +467,16 @@ public sealed partial class ServerManager : IServerManager
             return ServerOperationResult.Fail($"找不到要更新的伺服器：{config.Name.Value}");
         }
 
-        lock (_lock)
-        {
-            var registry = LoadRegistry();
-            registry[config.Name.Value] = ServerConfigPayload.FromDomain(config);
-            SaveRegistry(registry);
-        }
+        SetRegistryEntry(config.Name.Value, config);
 
         if (SafeFileSystem.DirectoryExists(config.Path))
         {
-            if (config.LoaderType is LoaderKind.Forge or LoaderKind.NeoForge ||
-                SafeFileSystem.FileExists(Path.Combine(config.Path, ServerDefaults.UserJvmArgsFileName)) ||
-                SafeFileSystem.FileExists(Path.Combine(config.Path, "run.bat")))
+            if (StartScriptWriter.UsesUserJvmArgsFile(config.LoaderType, config.Path))
             {
-                UpdateForgeUserJvmArgs(config.Path, config);
+                StartScriptWriter.UpdateUserJvmArgs(config.Path, config);
             }
 
-            UpdateStartScriptMemory(config.Path, config);
+            StartScriptWriter.UpdateMemory(config.Path, config);
         }
 
         string jvmText = config.JvmArgs is { Count: > 0 } ? string.Join(" ", config.JvmArgs) : "無";
@@ -750,7 +606,7 @@ public sealed partial class ServerManager : IServerManager
             int memMax = inspection.MemoryMaxMb > 0 ? inspection.MemoryMaxMb : ServerDefaults.DefaultMemoryMaxMb;
             int memMin = inspection.MemoryMinMb is > 0 ? inspection.MemoryMinMb.Value : ServerDefaults.DefaultMemoryMinMb;
             string? importJavaPath = await ResolveJavaExecutableAsync(null, inspection.MinecraftVersion, loaderKind, cancellationToken).ConfigureAwait(false);
-            WriteStartScript(stableStaging, launchTarget, memMax, memMin, importJavaPath, null, loaderKind);
+            StartScriptWriter.Write(stableStaging, launchTarget, memMax, memMin, importJavaPath, null, loaderKind);
             CleanupRedundantStartupScripts(stableStaging);
 
             progress?.Report(new ServerImportProgressReport(90, "正在移入伺服器主資料夾..."));
@@ -764,23 +620,9 @@ public sealed partial class ServerManager : IServerManager
                 SafeFileSystem.MovePath(entry.FullPath, dest);
             }
 
-            var mcVersion = MinecraftVersion.TryParse(inspection.MinecraftVersion, out var mv) ? mv : MinecraftVersion.Parse("1.20.4");
+            var config = CreateConfigFromInspection(serverName, loaderKind, inspection, targetDir);
 
-            var config = new ServerConfig(
-                name: serverName,
-                minecraftVersion: mcVersion,
-                loaderType: loaderKind,
-                loaderVersion: inspection.LoaderVersion,
-                memoryMaxMb: inspection.MemoryMaxMb,
-                memoryMinMb: inspection.MemoryMinMb,
-                path: targetDir);
-
-            lock (_lock)
-            {
-                var registry = LoadRegistry();
-                registry[targetName] = ServerConfigPayload.FromDomain(config);
-                SaveRegistry(registry);
-            }
+            SetRegistryEntry(targetName, config);
 
             completedSuccessfully = true;
 
@@ -791,10 +633,7 @@ public sealed partial class ServerManager : IServerManager
                 {
                     if (isZip)
                     {
-                        if (SafeFileSystem.FileExists(sourceDirectory))
-                        {
-                            SafeFileSystem.DeleteFile(sourceDirectory);
-                        }
+                        SafeFileSystem.DeleteFile(sourceDirectory);
                     }
                     else if (SafeFileSystem.DirectoryExists(sourceDirectory))
                     {
@@ -809,7 +648,7 @@ public sealed partial class ServerManager : IServerManager
             }
 
             progress?.Report(new ServerImportProgressReport(100, "伺服器匯入完成！"));
-            Logger.Information("伺服器「{Name}」匯入成功！目標路徑: {Path}, MC: {MC}, Loader: {Loader}", targetName, targetDir, mcVersion.Value, loaderKind);
+            Logger.Information("伺服器「{Name}」匯入成功！目標路徑: {Path}, MC: {MC}, Loader: {Loader}", targetName, targetDir, config.MinecraftVersion.Value, loaderKind);
             return ServerImportResult.Success(targetName, config);
         }
         catch (Exception ex)
@@ -914,21 +753,12 @@ public sealed partial class ServerManager : IServerManager
             }
 
             var loaderKind = LoaderKinds.ParseOrDefault(inspection.LoaderType, LoaderKind.Vanilla);
-            var mcVersion = MinecraftVersion.TryParse(inspection.MinecraftVersion, out var mv) ? mv : MinecraftVersion.Parse("1.20.4");
-
-            var config = new ServerConfig(
-                name: serverName,
-                minecraftVersion: mcVersion,
-                loaderType: loaderKind,
-                loaderVersion: inspection.LoaderVersion,
-                memoryMaxMb: inspection.MemoryMaxMb,
-                memoryMinMb: inspection.MemoryMinMb,
-                path: directory);
+            var config = CreateConfigFromInspection(serverName, loaderKind, inspection, directory);
 
             newConfigs.Add((folderName, config));
             newlyAdded++;
             newNames.Add(folderName);
-            Logger.Information("偵測並預備註冊新伺服器「{Name}」：MC {MC} / {Loader}", folderName, mcVersion.Value, loaderKind);
+            Logger.Information("偵測並預備註冊新伺服器「{Name}」：MC {MC} / {Loader}", folderName, config.MinecraftVersion.Value, loaderKind);
         }
 
         if (newConfigs.Count > 0)
@@ -948,6 +778,38 @@ public sealed partial class ServerManager : IServerManager
         return new ServerScanReport(alreadyManaged, newlyAdded, skipped, newNames);
     }
 
+    /// <summary>
+    /// 依偵測結果建立伺服器設定；無法辨識 Minecraft 版本時沿用預設 1.20.4
+    /// </summary>
+    private static ServerConfig CreateConfigFromInspection(ServerName name, LoaderKind loader, ServerInspection inspection, string path) => new(
+        name: name,
+        minecraftVersion: MinecraftVersion.TryParse(inspection.MinecraftVersion, out var version) ? version : MinecraftVersion.Parse("1.20.4"),
+        loaderType: loader,
+        loaderVersion: inspection.LoaderVersion,
+        memoryMaxMb: inspection.MemoryMaxMb,
+        memoryMinMb: inspection.MemoryMinMb,
+        path: path);
+
+    private void SetRegistryEntry(string key, ServerConfig config)
+    {
+        lock (_lock)
+        {
+            var registry = LoadRegistry();
+            registry[key] = ServerConfigPayload.FromDomain(config);
+            SaveRegistry(registry);
+        }
+    }
+
+    private void RemoveRegistryEntry(string key)
+    {
+        lock (_lock)
+        {
+            var registry = LoadRegistry();
+            registry.Remove(key);
+            SaveRegistry(registry);
+        }
+    }
+
     private Dictionary<string, ServerConfigPayload> LoadRegistry()
     {
         if (!SafeFileSystem.FileExists(_registryFilePath))
@@ -965,8 +827,15 @@ public sealed partial class ServerManager : IServerManager
             }
 
             string json = SafeFileSystem.ReadAllText(_registryFilePath, Encoding.UTF8);
-            var loaded = JsonCodec.Deserialize<Dictionary<string, ServerConfigPayload>>(json)
-                   ?? new Dictionary<string, ServerConfigPayload>(StringComparer.OrdinalIgnoreCase);
+            var loaded = JsonCodec.Deserialize<Dictionary<string, ServerConfigPayload>>(json);
+            if (loaded is null)
+            {
+                // 內容無法解析（損毀或空白）：保留原檔後以空白清單繼續，避免下次儲存永久覆蓋
+                Logger.Warning("伺服器註冊表內容無法解析，使用空白清單: {Path}", _registryFilePath);
+                PreserveUnreadableRegistry();
+                return new Dictionary<string, ServerConfigPayload>(StringComparer.OrdinalIgnoreCase);
+            }
+
             _cachedRegistry = new Dictionary<string, ServerConfigPayload>(loaded, StringComparer.OrdinalIgnoreCase);
             _lastRegistryWriteTimeUtc = lastWrite;
             return new Dictionary<string, ServerConfigPayload>(_cachedRegistry, StringComparer.OrdinalIgnoreCase);
@@ -974,12 +843,35 @@ public sealed partial class ServerManager : IServerManager
         catch (Exception ex)
         {
             Logger.Warning(ex, "讀取伺服器註冊表失敗，使用空白清單: {Path}", _registryFilePath);
+            PreserveUnreadableRegistry();
             return new Dictionary<string, ServerConfigPayload>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>
+    /// 註冊表無法讀取時保留原檔為 <c>.bad</c>，避免下次儲存以空白清單覆寫而永久遺失
+    /// </summary>
+    private void PreserveUnreadableRegistry()
+    {
+        if (_unreadableRegistryPreserved)
+        {
+            return;
+        }
+
+        try
+        {
+            SafeFileSystem.CopyFile(_registryFilePath, _registryFilePath + ".bad", overwrite: true);
+            _unreadableRegistryPreserved = true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Warning(ex, "無法備份損毀的伺服器註冊表: {Path}", _registryFilePath);
         }
     }
 
     private void SaveRegistry(Dictionary<string, ServerConfigPayload> registry)
     {
+        _unreadableRegistryPreserved = false;
         string json = JsonCodec.Serialize(registry, indented: true);
         AtomicFileWriter.WriteText(_registryFilePath, json);
         _cachedRegistry = new Dictionary<string, ServerConfigPayload>(registry, StringComparer.OrdinalIgnoreCase);

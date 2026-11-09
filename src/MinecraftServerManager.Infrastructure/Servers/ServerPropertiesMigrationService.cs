@@ -15,21 +15,10 @@ public static class ServerPropertiesMigrationService
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerPropertiesMigrationService));
 
-    private static readonly FrozenDictionary<string, string> GamemodeMap = new Dictionary<string, string>
-    {
-        ["0"] = "survival",
-        ["1"] = "creative",
-        ["2"] = "adventure",
-        ["3"] = "spectator"
-    }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+    // 舊版以數字 0–3 表示，索引即數值
+    private static readonly string[] GamemodeNames = ["survival", "creative", "adventure", "spectator"];
 
-    private static readonly FrozenDictionary<string, string> DifficultyMap = new Dictionary<string, string>
-    {
-        ["0"] = "peaceful",
-        ["1"] = "easy",
-        ["2"] = "normal",
-        ["3"] = "hard"
-    }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+    private static readonly string[] DifficultyNames = ["peaceful", "easy", "normal", "hard"];
 
     private static readonly FrozenDictionary<string, string> LevelTypeNormalizedMap = new Dictionary<string, string>
     {
@@ -39,12 +28,6 @@ public static class ServerPropertiesMigrationService
         ["large_biomes"] = "minecraft:large_biomes",
         ["amplified"] = "minecraft:amplified"
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
-
-    private static readonly FrozenDictionary<string, string>.AlternateLookup<ReadOnlySpan<char>> GamemodeSpanLookup =
-        GamemodeMap.GetAlternateLookup<ReadOnlySpan<char>>();
-
-    private static readonly FrozenDictionary<string, string>.AlternateLookup<ReadOnlySpan<char>> DifficultySpanLookup =
-        DifficultyMap.GetAlternateLookup<ReadOnlySpan<char>>();
 
     private static readonly FrozenDictionary<string, string>.AlternateLookup<ReadOnlySpan<char>> LevelTypeSpanLookup =
         LevelTypeNormalizedMap.GetAlternateLookup<ReadOnlySpan<char>>();
@@ -90,13 +73,13 @@ public static class ServerPropertiesMigrationService
             }
         }
 
-        if (newProps.TryGetValue("gamemode", out string? rawGm) && GamemodeSpanLookup.TryGetValue(rawGm.AsSpan().Trim(), out string? mappedGm))
+        if (newProps.TryGetValue("gamemode", out string? rawGm) && TryMapLegacyIndex(rawGm, GamemodeNames, out string? mappedGm))
         {
             newProps["gamemode"] = mappedGm;
             changes.Add($"遊戲模式轉換：gamemode={rawGm} ➔ {mappedGm} (1.14+)");
         }
 
-        if (newProps.TryGetValue("difficulty", out string? rawDiff) && DifficultySpanLookup.TryGetValue(rawDiff.AsSpan().Trim(), out string? mappedDiff))
+        if (newProps.TryGetValue("difficulty", out string? rawDiff) && TryMapLegacyIndex(rawDiff, DifficultyNames, out string? mappedDiff))
         {
             newProps["difficulty"] = mappedDiff;
             changes.Add($"遊戲難度轉換：difficulty={rawDiff} ➔ {mappedDiff} (1.14+)");
@@ -168,6 +151,19 @@ public static class ServerPropertiesMigrationService
         }
 
         return success;
+    }
+
+    private static bool TryMapLegacyIndex(string raw, string[] names, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? mapped)
+    {
+        ReadOnlySpan<char> trimmed = raw.AsSpan().Trim();
+        if (trimmed.Length == 1 && char.IsAsciiDigit(trimmed[0]) && trimmed[0] - '0' < names.Length)
+        {
+            mapped = names[trimmed[0] - '0'];
+            return true;
+        }
+
+        mapped = null;
+        return false;
     }
 
     private static readonly VersionValue Min119Version = new(1, 19, 0);

@@ -6,7 +6,6 @@ using Microsoft.UI.Xaml.Media;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Infrastructure.Logging;
-using Windows.Graphics;
 
 namespace MinecraftServerManager.App.Views;
 
@@ -31,13 +30,12 @@ public sealed partial class ServerMonitorWindow : Window
 
         InitializeComponent();
 
-        SystemBackdrop = new MicaBackdrop();
         ExtendsContentIntoTitleBar = true;
 
         WindowIconHelper.SetIcon(AppWindow);
         Title = _viewModel.WindowTitle;
 
-        AppWindow.Resize(new SizeInt32(1050, 680));
+        WindowLayoutHelper.ResizeToDip(this, 1050, 680);
         SetTitleBar(AppTitleBar);
 
         if (AppWindow.Presenter is OverlappedPresenter presenter)

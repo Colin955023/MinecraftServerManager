@@ -30,7 +30,7 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
     private readonly IServerBackupService _backupService;
     private readonly string _serverName;
     private readonly string _backupDirectory;
-    private readonly Func<bool>? _isServerRunningCheck;
+    private readonly Func<bool> _isServerRunningCheck;
 
     [ObservableProperty]
     public partial BackupDisplayItem? SelectedBackup { get; set; }
@@ -44,11 +44,12 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
     public RestoreBackupViewModel(
         IServerBackupService backupService,
         string serverName,
-        string? backupDirectory = null,
-        Func<bool>? isServerRunningCheck = null,
-        IUiService? uiService = null)
+        IUiService uiService,
+        string? backupDirectory,
+        Func<bool> isServerRunningCheck)
     {
-        _ui = uiService ?? NoOpUiService.Instance;
+        ArgumentNullException.ThrowIfNull(isServerRunningCheck);
+        _ui = uiService;
         _backupService = backupService;
         _serverName = serverName;
         _backupDirectory = backupDirectory ?? string.Empty;
@@ -62,7 +63,6 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
 
     public event Action<bool>? RequestClose;
 
-    [RelayCommand]
     public async Task RefreshBackupsAsync()
     {
         IsBusy = true;
@@ -107,10 +107,10 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
             return;
         }
 
-        if (_isServerRunningCheck?.Invoke() == true)
+        if (_isServerRunningCheck())
         {
             StatusMessage = "伺服器正在執行中，無法還原備份！請先停止伺服器。";
-            _ui.ShowToast("伺服器正在執行中，請先停止伺服器後再還原備份。", "無法還原", ToastType.Warning);
+            _ui.ShowNotification("伺服器正在執行中，請先停止伺服器後再還原備份。", "無法還原", NotificationType.Warning);
             return;
         }
 
@@ -125,40 +125,38 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
         IsBusy = true;
         StatusMessage = $"正在還原備份「{SelectedBackup.FileName}」...";
 
-        var progressDialog = _ui.ShowServerBackupProgress(_serverName, "還原");
-
         try
         {
-            bool success = await _backupService.RestoreBackupAsync(
-                _serverName,
-                SelectedBackup.FileName,
-                _backupDirectory,
-                progressDialog.Progress).ConfigureAwait(true);
-
-            progressDialog.Complete();
+            bool success;
+            using (var progressDialog = _ui.ShowServerBackupProgress(_serverName, "還原"))
+            {
+                success = await _backupService.RestoreBackupAsync(
+                    _serverName,
+                    SelectedBackup.FileName,
+                    _backupDirectory,
+                    progressDialog.Progress).ConfigureAwait(true);
+            }
 
             if (success)
             {
-                _ui.ShowToast($"伺服器「{_serverName}」已成功還原備份「{SelectedBackup.FileName}」！", "還原完成", ToastType.Success);
+                _ui.ShowNotification($"伺服器「{_serverName}」已成功還原備份「{SelectedBackup.FileName}」！", "還原完成", NotificationType.Success);
                 RequestClose?.Invoke(true);
             }
             else
             {
                 StatusMessage = "還原失敗，伺服器資料未變更";
-                await _ui.ShowWarningAsync("還原失敗，伺服器檔案未變更。", "還原失敗").ConfigureAwait(true);
+                await _ui.ShowErrorAsync("還原失敗，伺服器檔案未變更。", "還原失敗").ConfigureAwait(true);
             }
         }
         catch (OperationCanceledException)
         {
-            progressDialog.Complete();
             StatusMessage = "已取消備份還原操作";
         }
         catch (Exception ex)
         {
-            progressDialog.Complete();
             Logger.Error(ex, "還原備份失敗：{Message}", ex.Message);
             StatusMessage = $"還原異常：{ex.Message}";
-            await _ui.ShowWarningAsync($"還原過程發生未預期異常：{ex.Message}", "還原異常").ConfigureAwait(true);
+            await _ui.ShowErrorAsync($"還原過程發生未預期異常：{ex.Message}", "還原異常").ConfigureAwait(true);
         }
         finally
         {
@@ -207,7 +205,7 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
         {
             Logger.Error(ex, "刪除備份失敗：{Message}", ex.Message);
             StatusMessage = $"刪除異常：{ex.Message}";
-            await _ui.ShowWarningAsync($"刪除備份失敗：{ex.Message}", "刪除失敗").ConfigureAwait(true);
+            await _ui.ShowErrorAsync($"刪除備份失敗：{ex.Message}", "刪除失敗").ConfigureAwait(true);
         }
         finally
         {

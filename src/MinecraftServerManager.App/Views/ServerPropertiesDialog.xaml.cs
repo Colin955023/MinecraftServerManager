@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
@@ -20,7 +21,7 @@ public sealed partial class ServerPropertiesDialog : Window
         InitializeComponent();
         Title = "編輯伺服器屬性";
 
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(760, 680));
+        WindowLayoutHelper.ResizeToDip(this, 760, 680);
 
         ViewModel.RequestClose += success =>
         {
@@ -45,7 +46,7 @@ public sealed partial class ServerPropertiesDialog : Window
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "伺服器屬性設定視窗關閉確認異常: {Message}", ex.Message);
+                Logger.Warning(ex, "伺服器屬性設定視窗關閉確認異常: {Message}", ex.Message);
             }
         };
     }

@@ -20,7 +20,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
         new[] { ".txt", ".log", ".json", ".toml", ".properties", ".yml", ".yaml", ".ini", ".cfg", ".md", ".csv", ".html", ".htm", ".xlsx", ".xml" }
             .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-    public bool OpenFolder(string folderPath, bool isTrusted = false)
+    public bool OpenFolder(string folderPath)
     {
         if (string.IsNullOrWhiteSpace(folderPath) || !SafeFileSystem.DirectoryExists(folderPath))
         {
@@ -38,7 +38,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
         return true;
     }
 
-    public bool ShowInFolder(string filePath, bool isTrusted = false)
+    public bool ShowInFolder(string filePath)
     {
         if (string.IsNullOrWhiteSpace(filePath) || !SafeFileSystem.FileExists(filePath))
         {
@@ -171,6 +171,13 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
                 throw new FileNotFoundException("找不到系統命令解譯器 (cmd.exe)", comSpec);
             }
 
+            // cmd.exe 會在引號內仍解譯部分中繼字元，路徑或參數含中繼字元一律拒絕以防指令串接
+            if (resolvedFileName.AsSpan().ContainsAny(CmdMetaChars) ||
+                specification.Arguments.Any(static a => a.AsSpan().ContainsAny(CmdMetaChars)))
+            {
+                throw new ArgumentException("批次檔路徑或參數含 cmd 中繼字元，已拒絕執行", nameof(specification));
+            }
+
             startInfo.FileName = comSpec;
             startInfo.ArgumentList.Add("/d");
             startInfo.ArgumentList.Add("/c");
@@ -189,25 +196,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
             }
         }
 
-        if (specification.Environment is not null)
-        {
-            foreach (var (key, value) in specification.Environment)
-            {
-                if (string.IsNullOrWhiteSpace(key))
-                {
-                    throw new ArgumentException("環境變數名稱不得為空", nameof(specification));
-                }
-
-                if (value is null)
-                {
-                    startInfo.Environment.Remove(key);
-                }
-                else
-                {
-                    startInfo.Environment[key] = value;
-                }
-            }
-        }
+        ApplyEnvironment(startInfo, specification);
 
         var process = new System.Diagnostics.Process { StartInfo = startInfo };
         try
@@ -226,6 +215,31 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
             Logger.Error(ex, "啟動子行程失敗: {FileName}", resolvedFileName);
             process.Dispose();
             throw;
+        }
+    }
+
+    private static void ApplyEnvironment(ProcessStartInfo startInfo, ProcessStartSpec specification)
+    {
+        if (specification.Environment is null)
+        {
+            return;
+        }
+
+        foreach (var (key, value) in specification.Environment)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                throw new ArgumentException("環境變數名稱不得為空", nameof(specification));
+            }
+
+            if (value is null)
+            {
+                startInfo.Environment.Remove(key);
+            }
+            else
+            {
+                startInfo.Environment[key] = value;
+            }
         }
     }
 
@@ -250,25 +264,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
             startInfo.ArgumentList.Add(argument);
         }
 
-        if (specification.Environment is not null)
-        {
-            foreach (var (key, value) in specification.Environment)
-            {
-                if (string.IsNullOrWhiteSpace(key))
-                {
-                    throw new ArgumentException("環境變數名稱不得為空", nameof(specification));
-                }
-
-                if (value is null)
-                {
-                    startInfo.Environment.Remove(key);
-                }
-                else
-                {
-                    startInfo.Environment[key] = value;
-                }
-            }
-        }
+        ApplyEnvironment(startInfo, specification);
 
         using var process = System.Diagnostics.Process.Start(startInfo)
             ?? throw new InvalidOperationException($"無法啟動脫離管理的行程：{executable}");
@@ -293,10 +289,10 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
         string basePath = specification.WorkingDirectory ?? Environment.CurrentDirectory;
         string candidatePath = Path.GetFullPath(fileName, basePath);
 
+        // 純檔名不在工作目錄內解析（避免伺服器資料夾內被植入同名執行檔），交由 PATH／系統目錄搜尋
         if (Path.IsPathFullyQualified(fileName) ||
             fileName.Contains(Path.DirectorySeparatorChar) ||
-            fileName.Contains(Path.AltDirectorySeparatorChar) ||
-            SafeFileSystem.FileExists(candidatePath))
+            fileName.Contains(Path.AltDirectorySeparatorChar))
         {
             if (!SafeFileSystem.FileExists(candidatePath))
             {
@@ -353,12 +349,10 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
         private const int MaxPendingOutputLines = 256;
 
         private readonly System.Diagnostics.Process _process;
-        private readonly Channel<ProcessOutput> _outputChannel = Channel.CreateBounded<ProcessOutput>(new BoundedChannelOptions(MaxPendingOutputLines)
-        {
-            FullMode = BoundedChannelFullMode.DropOldest,
-            SingleReader = true,
-            SingleWriter = false,
-        });
+        private static readonly TimeSpan OutputDrainTimeout = TimeSpan.FromSeconds(5);
+
+        private readonly Channel<ProcessOutput> _outputChannel;
+        private long _droppedOutputLines;
         private readonly Task _standardOutputTask;
         private readonly Task _standardErrorTask;
         private readonly Task _outputDispatchTask;
@@ -367,11 +361,20 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
         private int _exitLogged;
         private bool _wasForceStopped;
         private bool _disposed;
+        private int _disposeStarted;
         private Action<ProcessOutput>? _outputReceived;
 
         public ManagedProcess(System.Diagnostics.Process process)
         {
             _process = process;
+            _outputChannel = Channel.CreateBounded<ProcessOutput>(
+                new BoundedChannelOptions(MaxPendingOutputLines)
+                {
+                    FullMode = BoundedChannelFullMode.DropOldest,
+                    SingleReader = true,
+                    SingleWriter = false,
+                },
+                _ => Interlocked.Increment(ref _droppedOutputLines));
             _outputDispatchTask = DispatchOutputAsync();
             _standardOutputTask = process.StartInfo.RedirectStandardOutput
                 ? PumpAsync(_process.StandardOutput, ProcessOutputKind.StandardOutput)
@@ -458,9 +461,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             await _process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            await Task.WhenAll(_standardOutputTask, _standardErrorTask).ConfigureAwait(false);
-            _outputChannel.Writer.TryComplete();
-            await _outputDispatchTask.ConfigureAwait(false);
+            await DrainOutputAsync().ConfigureAwait(false);
             if (Interlocked.Exchange(ref _exitLogged, 1) == 0)
             {
                 Logger.Information("子行程 (PID: {Pid}) 結束，結束代碼: {ExitCode}, 強制終止: {WasForceStopped}", _process.Id, _process.ExitCode, _wasForceStopped);
@@ -478,8 +479,8 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
             {
                 Logger.Information("正在請求子行程 (PID: {Pid}) 關閉主視窗，等候逾時: {Timeout}", _process.Id, gracefulTimeout);
                 _process.CloseMainWindow();
-                using var timeout = new CancellationTokenSource(gracefulTimeout);
-                using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                linked.CancelAfter(gracefulTimeout);
                 try
                 {
                     return await WaitForExitAsync(linked.Token).ConfigureAwait(false);
@@ -496,7 +497,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
 
         public async ValueTask DisposeAsync()
         {
-            if (_disposed)
+            if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
             {
                 return;
             }
@@ -508,10 +509,32 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
             }
 
             await _process.WaitForExitAsync().ConfigureAwait(false);
-            await Task.WhenAll(_standardOutputTask, _standardErrorTask).ConfigureAwait(false);
+            await DrainOutputAsync().ConfigureAwait(false);
+            _process.Dispose();
+        }
+
+        /// <summary>
+        /// 等待標準輸出／錯誤管線讀完並結束分派；孫行程可能繼承管線而使其永不關閉，故設逾時
+        /// </summary>
+        private async Task DrainOutputAsync()
+        {
+            try
+            {
+                await Task.WhenAll(_standardOutputTask, _standardErrorTask).WaitAsync(OutputDrainTimeout).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                Logger.Warning("子行程 (PID: {Pid}) 輸出管線未在 {Timeout} 內關閉（可能有孫行程持有管線），不再等待", _process.Id, OutputDrainTimeout);
+            }
+
             _outputChannel.Writer.TryComplete();
             await _outputDispatchTask.ConfigureAwait(false);
-            _process.Dispose();
+
+            long dropped = Interlocked.Exchange(ref _droppedOutputLines, 0);
+            if (dropped > 0)
+            {
+                Logger.Warning("子行程 (PID: {Pid}) 輸出速度超過處理能力，已捨棄 {Dropped} 行", _process.Id, dropped);
+            }
         }
 
         private void ForceKill()
@@ -574,6 +597,8 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
     }
 
     private const int MaxOutputLineLength = 8192;
+    private static readonly SearchValues<char> CmdMetaChars = SearchValues.Create("&|<>^%!()\"");
+
     private static readonly SearchValues<char> InvalidControlOrEscapeChars = SearchValues.Create(
         "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0A\x0B\x0C\x0D\x0E\x0F" +
         "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1A\x1B\x1C\x1D\x1E\x1F\x7F");

@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Core.Servers;
 
@@ -143,7 +144,7 @@ public static class ServerPropertiesMetadata
         ["player-idle-timeout"] = "0",
         ["prevent-proxy-connections"] = "false",
         ["pvp"] = "true",
-        ["query.port"] = "25565",
+        ["query.port"] = ServerDefaults.DefaultPort,
         ["rate-limit"] = "0",
         ["rcon.password"] = "",
         ["rcon.port"] = "25575",
@@ -154,7 +155,7 @@ public static class ServerPropertiesMetadata
         ["resource-pack-prompt"] = "",
         ["resource-pack-sha1"] = "",
         ["server-ip"] = "",
-        ["server-port"] = "25565",
+        ["server-port"] = ServerDefaults.DefaultPort,
         ["simulation-distance"] = "10",
         ["spawn-monsters"] = "true",
         ["spawn-protection"] = "16",
@@ -261,8 +262,6 @@ public static class ServerPropertiesMetadata
 
     public static readonly IReadOnlyDictionary<string, string> Descriptions = DescriptionsMap;
     public static readonly IReadOnlyDictionary<string, string> DefaultProperties = DefaultsMap;
-    public static readonly IReadOnlyDictionary<string, string> Categories = CategoriesDict;
-    public static readonly IReadOnlyDictionary<string, string[]> Options = OptionsDict;
 
     public static readonly FrozenSet<string> BooleanKeys = new[]
     {

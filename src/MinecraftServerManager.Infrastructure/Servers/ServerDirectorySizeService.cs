@@ -9,7 +9,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 namespace MinecraftServerManager.Infrastructure.Servers;
 
 public sealed class ServerDirectorySizeService(
-    TimeSpan? cacheDuration = null,
+    TimeSpan cacheDuration,
     int maxEntries = SafeFileSystem.DefaultMaxEntries,
     long maxTotalBytes = SafeFileSystem.DefaultMaxTotalBytes) : IServerDirectorySizeService
 {
@@ -23,9 +23,7 @@ public sealed class ServerDirectorySizeService(
     private static readonly FrozenSet<string> ExcludedDirectoryNames =
         ExcludedDirectoryNamesSource.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-    private static readonly TimeSpan DefaultCacheDuration = TimeSpan.FromSeconds(60);
-
-    private readonly TimeSpan _cacheDuration = cacheDuration ?? DefaultCacheDuration;
+    private readonly TimeSpan _cacheDuration = cacheDuration;
     private readonly int _maxEntries = maxEntries;
     private readonly long _maxTotalBytes = maxTotalBytes;
     private readonly ConcurrentDictionary<string, (long SizeBytes, long ExpireTimestamp)> _cache =
@@ -107,18 +105,4 @@ public sealed class ServerDirectorySizeService(
 
         return bytes == 0 ? "-" : UnitFormatter.FormatBytes(bytes);
     }
-
-    public void InvalidateCache(string serverPath)
-    {
-        if (string.IsNullOrWhiteSpace(serverPath))
-        {
-            return;
-        }
-
-        string normalizedPath = Path.GetFullPath(serverPath);
-        _cache.TryRemove(normalizedPath, out _);
-    }
-
-    public void ClearAllCache() => _cache.Clear();
-
 }

@@ -2,11 +2,6 @@ name: Build and Create Release
 
 on:
   workflow_dispatch:
-    inputs:
-      skip_smoke_test:
-        description: "略過發布 EXE 的啟動煙霧測試"
-        type: boolean
-        default: true
 
 concurrency:
   group: release-${{ github.repository }}
@@ -93,10 +88,6 @@ jobs:
     needs: preflight
     runs-on: windows-latest
     timeout-minutes: 30
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-      DOTNET_CLI_FORCE_UTF8_ENCODING: "1"
-
     permissions:
       contents: read
       attestations: write
@@ -119,10 +110,7 @@ jobs:
 
       - name: Publish Single Executable (Self-contained)
         shell: pwsh
-        env:
-          SKIP_SMOKE_TEST: ${{ inputs.skip_smoke_test }}
-        run: |
-              .\scripts\dotnet_publish.ps1 -SkipSmokeTest
+        run: .\scripts\dotnet_publish.ps1
 
       - name: Attest release executable provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2

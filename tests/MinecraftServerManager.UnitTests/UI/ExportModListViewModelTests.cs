@@ -13,7 +13,7 @@ public sealed class ExportModListViewModelTests
     {
         var fakeUi = new FakeUiService { SaveFileResult = null };
         var fakeExporter = new FakeExporter();
-        var vm = new ExportModListViewModel("TestServer", [], fakeExporter, null, fakeUi);
+        var vm = new ExportModListViewModel("TestServer", [], fakeExporter, NoOp.Create<IExternalLauncher>(), fakeUi);
 
         bool result = await vm.ExportAsync(ModListExportFormat.Json);
 
@@ -50,7 +50,7 @@ public sealed class ExportModListViewModelTests
             SaveFileResult = @"C:\Exports\mods.json"
         };
         var fakeExporter = new FakeExporter { ShouldThrow = true };
-        var vm = new ExportModListViewModel("TestServer", [], fakeExporter, null, fakeUi);
+        var vm = new ExportModListViewModel("TestServer", [], fakeExporter, NoOp.Create<IExternalLauncher>(), fakeUi);
 
         bool result = await vm.ExportAsync(ModListExportFormat.Json);
 
@@ -74,7 +74,7 @@ public sealed class ExportModListViewModelTests
         Assert.True(result);
         Assert.True(fakeExporter.ExportCalled);
         Assert.False(fakeUi.ShowErrorCalled);
-        Assert.True(fakeUi.ToastShown);
+        Assert.True(fakeUi.NotificationShown);
     }
 
     private sealed class FakeUiService : NoOpUiService
@@ -83,16 +83,16 @@ public sealed class ExportModListViewModelTests
         public bool ConfirmResult { get; init; }
         public bool ConfirmThrows { get; init; }
         public bool ShowErrorCalled { get; private set; }
-        public bool ToastShown { get; private set; }
+        public bool NotificationShown { get; private set; }
 
-        public override Task<string?> PickSaveFileAsync(string title, string defaultFileName, string filter) => Task.FromResult(SaveFileResult);
+        public override Task<string?> PickSaveFileAsync(string title, string defaultFileName, FileTypeChoice fileType) => Task.FromResult(SaveFileResult);
 
         public override Task<bool> ConfirmAsync(string message, string title, UiMessageLevel level = UiMessageLevel.Question) =>
             ConfirmThrows
                 ? Task.FromException<bool>(new InvalidOperationException("Only a single ContentDialog can be open at any time."))
                 : Task.FromResult(ConfirmResult);
 
-        public override void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3) => ToastShown = true;
+        public override void ShowNotification(string message, string? title = null, NotificationType type = NotificationType.Info) => NotificationShown = true;
 
         public override Task ShowErrorAsync(string message, string title)
         {
@@ -132,8 +132,8 @@ public sealed class ExportModListViewModelTests
             return true;
         }
 
-        public bool OpenFolder(string folderPath, bool isTrusted = false) => true;
-        public bool ShowInFolder(string filePath, bool isTrusted = false) => true;
+        public bool OpenFolder(string folderPath) => true;
+        public bool ShowInFolder(string filePath) => true;
         public bool OpenUrl(string url, bool isTrusted = false) => true;
     }
 }
