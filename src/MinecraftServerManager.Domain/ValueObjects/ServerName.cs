@@ -91,9 +91,7 @@ public readonly record struct ServerName
     private static bool ContainsInvalidCharacter(ReadOnlySpan<char> span) =>
         span.ContainsAny(InvalidWindowsChars);
 
-    /// <summary>
-    /// 檢查單一路徑區段或檔名是否為 Windows 保留裝置名稱（如 CON、PRN、AUX、NUL、CLOCK$、COM1..9、LPT1..9 及上標變體）。
-    /// </summary>
+    /// <summary>檢查單一路徑區段或檔名是否為 Windows 保留裝置名稱（如 CON、PRN、AUX、NUL、CLOCK$、COM1..9、LPT1..9 及上標變體）。</summary>
     public static bool IsWindowsDeviceName(ReadOnlySpan<char> value)
     {
         ReadOnlySpan<char> trimmed = value.TrimEnd(" .");

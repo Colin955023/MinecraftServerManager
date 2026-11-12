@@ -32,12 +32,11 @@ public sealed class PlayerManagementViewModelTests
     public async Task Cancel_WhenHasChangesAndUserDeclinesDiscard_DoesNotClose()
     {
         var fakeStore = new FakePlayerConfigStore(new ServerPlayerConfigBundle([], [], [], [], []));
-        var fakeUi = new ConfirmingUiService(confirmResult: false);
+        var fakeUi = new ManualUiService { ConfirmResult = false };
 
         var vm = new PlayerManagementViewModel("TestServer", "C:\\fake\\server", fakeStore, fakeUi);
         await vm.InitializeAsync();
 
-        // 觸發變更
         vm.BanIpAddress = "10.0.0.1";
         vm.AddBannedIpCommand.Execute(null);
         Assert.True(vm.HasUnsavedChanges);
@@ -54,7 +53,7 @@ public sealed class PlayerManagementViewModelTests
     public async Task Cancel_WhenHasChangesAndUserConfirmsDiscard_ClosesWithFalse()
     {
         var fakeStore = new FakePlayerConfigStore(new ServerPlayerConfigBundle([], [], [], [], []));
-        var fakeUi = new ConfirmingUiService(confirmResult: true);
+        var fakeUi = new ManualUiService { ConfirmResult = true };
 
         var vm = new PlayerManagementViewModel("TestServer", "C:\\fake\\server", fakeStore, fakeUi);
         await vm.InitializeAsync();
@@ -212,11 +211,5 @@ public sealed class PlayerManagementViewModelTests
             SavedBundle = bundleToSave;
             return Task.CompletedTask;
         }
-    }
-
-    private sealed class ConfirmingUiService(bool confirmResult) : NoOpUiService
-    {
-        public override Task<bool> ConfirmAsync(string message, string title, UiMessageLevel level = UiMessageLevel.Question) =>
-            Task.FromResult(confirmResult);
     }
 }

@@ -1,4 +1,3 @@
-using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Domain.ValueObjects;
@@ -9,14 +8,10 @@ namespace MinecraftServerManager.UnitTests;
 
 public sealed class ServerRuntimeTests : IAsyncLifetime
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerRuntimeTests));
+    private readonly TempDirectory _temp = new("msm-runtime-tests-");
     private readonly string _testDir;
 
-    public ServerRuntimeTests()
-    {
-        _testDir = Path.Combine(Path.GetTempPath(), "msm-runtime-tests-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testDir);
-    }
+    public ServerRuntimeTests() => _testDir = _temp.FullName;
 
     public ValueTask InitializeAsync()
     {
@@ -25,27 +20,10 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        for (int i = 0; i < 3; i++)
-        {
-            try
-            {
-                if (Directory.Exists(_testDir))
-                {
-                    Directory.Delete(_testDir, recursive: true);
-                }
-                break;
-            }
-            catch (Exception) when (i < 2)
-            {
-                await Task.Delay(50).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
-            }
-        }
+        _temp.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     private ServerLaunchPlan CreatePlan(string target, string javaPath, int maxMb, int? minMb = null, IReadOnlyList<string>? jvmArgs = null) =>
@@ -57,7 +35,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     [Fact]
     public async Task StartAsyncWithJarBuildsCorrectJvmArguments()
     {
-        var runner = new FakeProcessRunner();
+        var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
 
         await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 4096, 2048, ["-Dfile.encoding=UTF-8"]));
@@ -80,7 +58,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     [Fact]
     public async Task StartAsyncWithBatScriptExecutesScriptDirectly()
     {
-        var runner = new FakeProcessRunner();
+        var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
 
         await runtime.StartAsync(CreatePlan("run.bat", "java.exe", 2048));
@@ -97,7 +75,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     [Fact]
     public async Task StartAsyncWithBatScriptAndCustomJavaInjectsJavaHomeAndPathEnvironment()
     {
-        var runner = new FakeProcessRunner();
+        var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
 
         string fakeJava = Path.Combine(_testDir, "custom-jdk", "bin", "java.exe");
@@ -114,11 +92,10 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         Assert.StartsWith(Path.Combine(_testDir, "custom-jdk", "bin"), spec.Environment["PATH"]!);
     }
 
-
     [Fact]
     public async Task StartAsyncWhenAlreadyRunningThrowsInvalidOperationException()
     {
-        var runner = new FakeProcessRunner();
+        var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
 
         await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
@@ -130,7 +107,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     [Fact]
     public async Task SendCommandAsyncWritesToProcessReturnsTrueWhenRunning()
     {
-        var runner = new FakeProcessRunner();
+        var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
 
         await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
@@ -146,7 +123,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     [Fact]
     public async Task SendCommandAsyncReturnsFalseWhenNotRunning()
     {
-        var runner = new FakeProcessRunner();
+        var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
 
         bool sent = await runtime.SendCommandAsync("say hello");
@@ -156,7 +133,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     [Fact]
     public async Task OutputLineReceivedForwardsOutputFromProcess()
     {
-        var runner = new FakeProcessRunner();
+        var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
 
         var outputs = new List<string>();
@@ -173,7 +150,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     [Fact]
     public async Task OutputContainingDoneTriggersServerReadyAndSetsIsReady()
     {
-        var runner = new FakeProcessRunner();
+        var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
 
         bool readyFired = false;
@@ -194,7 +171,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     [Fact]
     public async Task StopAsyncSendsStopCommandAndWaitsForExit()
     {
-        var runner = new FakeProcessRunner();
+        var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
 
         await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
@@ -206,69 +183,67 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         Assert.Contains("stop", runner.LastCreatedProcess!.WrittenLines);
     }
 
-    private sealed class FakeProcessRunner : IProcessRunner
+    [Fact]
+    public async Task ExitCode_AfterProcessExits_RemainsReadable()
     {
-        public ProcessStartSpec? LastSpecification { get; private set; }
-        public FakeManagedProcess? LastCreatedProcess { get; private set; }
+        var runner = new StubProcessRunner(exitCode: 3, interactive: true);
+        await using var runtime = new ServerRuntime(runner);
+        var exited = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        runtime.ServerExited += code => exited.TrySetResult(code);
 
-        public Task<IManagedProcess> StartAsync(ProcessStartSpec specification, CancellationToken cancellationToken = default)
-        {
-            LastSpecification = specification;
-            LastCreatedProcess = new FakeManagedProcess();
-            return Task.FromResult<IManagedProcess>(LastCreatedProcess);
-        }
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
+        await runtime.StopAsync(TimeSpan.FromSeconds(5));
+        int exitCode = await exited.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(runtime.ExitCode);
+        Assert.Equal(exitCode, runtime.ExitCode);
     }
 
-    private sealed class FakeManagedProcess : IManagedProcess
+    [Fact]
+    public async Task ExitCode_AfterRestart_IsNull()
     {
-        private readonly TaskCompletionSource<ProcessExitResult> _exitTcs = new();
+        var runner = new StubProcessRunner(interactive: true);
+        await using var runtime = new ServerRuntime(runner);
+        var exited = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        runtime.ServerExited += code => exited.TrySetResult(code);
 
-        public int Pid => 1234;
-        public bool HasExited { get; private set; }
-        public int? ExitCode => HasExited ? 0 : null;
-        public List<string> WrittenLines { get; } = [];
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
+        await runtime.StopAsync(TimeSpan.FromSeconds(5));
+        await exited.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.NotNull(runtime.ExitCode);
 
-        public event Action<ProcessOutput>? OutputReceived;
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
 
-        public void RaiseOutput(string line) => OutputReceived?.Invoke(new ProcessOutput(ProcessOutputKind.StandardOutput, line));
+        Assert.Null(runtime.ExitCode);
+    }
 
-        public Task WriteLineAsync(string line, CancellationToken cancellationToken = default)
-        {
-            WrittenLines.Add(line);
-            if (line == "stop")
-            {
-                HasExited = true;
-                _exitTcs.TrySetResult(new ProcessExitResult(0, false));
-            }
-            return Task.CompletedTask;
-        }
+    [Fact]
+    public async Task WaitForExitAsync_WhenTimeout_ReturnsNullAndKeepsRunning()
+    {
+        var runner = new StubProcessRunner(interactive: true);
+        await using var runtime = new ServerRuntime(runner);
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
 
-        public async Task<ProcessExitResult> WaitForExitAsync(CancellationToken cancellationToken = default)
-        {
-            if (cancellationToken.CanBeCanceled)
-            {
-                await using (cancellationToken.Register(() => _exitTcs.TrySetCanceled(cancellationToken)))
-                {
-                    return await _exitTcs.Task.ConfigureAwait(false);
-                }
-            }
+        var result = await runtime.WaitForExitAsync(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
 
-            return await _exitTcs.Task.ConfigureAwait(false);
-        }
+        Assert.Null(result);
+        Assert.True(runtime.IsRunning);
+    }
 
-        public Task<ProcessExitResult> StopAsync(TimeSpan gracefulTimeout, CancellationToken cancellationToken = default)
-        {
-            HasExited = true;
-            _exitTcs.TrySetResult(new ProcessExitResult(-1, true));
-            return Task.FromResult(new ProcessExitResult(-1, true));
-        }
+    [Fact]
+    public async Task WaitForExitAsync_WhenNotRunning_ReturnsLastResult()
+    {
+        var runner = new StubProcessRunner(interactive: true);
+        await using var runtime = new ServerRuntime(runner);
 
-        public ValueTask DisposeAsync()
-        {
-            HasExited = true;
-            return ValueTask.CompletedTask;
-        }
+        var notStarted = await runtime.WaitForExitAsync(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
+        Assert.NotNull(notStarted);
 
-        public long? GetWorkingSet64() => throw new NotImplementedException();
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
+        await runtime.SendCommandAsync("stop", TestContext.Current.CancellationToken);
+        var result = await runtime.WaitForExitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.False(result.WasForceStopped);
     }
 }

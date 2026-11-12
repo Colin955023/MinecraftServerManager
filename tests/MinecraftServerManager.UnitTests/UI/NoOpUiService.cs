@@ -6,14 +6,15 @@ using MinecraftServerManager.Domain.Mods;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-/// <summary>
-/// 測試用 UI 服務替身：不顯示任何視窗，確認類對話方塊一律回傳同意。僅供單元測試使用，正式程式碼不得相依。
-/// </summary>
+/// <summary>測試用 UI 服務替身：不顯示任何視窗，確認類對話方塊一律回傳同意。僅供單元測試使用，正式程式碼不得相依。</summary>
 internal class NoOpUiService : IUiService
 {
     public static readonly NoOpUiService Instance = new();
 
     public virtual Task<bool> ConfirmAsync(string message, string title, UiMessageLevel level = UiMessageLevel.Question) =>
+        Task.FromResult(true);
+
+    public virtual Task<bool> ConfirmChoiceAsync(string message, string title, string primaryText, string closeText, UiMessageLevel level = UiMessageLevel.Question) =>
         Task.FromResult(true);
 
     public virtual Task<bool?> ConfirmYesNoCancelAsync(
@@ -32,7 +33,7 @@ internal class NoOpUiService : IUiService
 
     public void CopyToClipboard(string text) { }
 
-    public void ActivateMainWindow() { }
+    public virtual void ActivateMainWindow() { }
 
     public void ShutdownApplication(int exitCode = 0) { }
 
@@ -83,9 +84,7 @@ internal class NoOpUiService : IUiService
     public virtual Task<IReadOnlyList<ModUpdateCandidateItem>?> ShowModUpdatesAsync(IEnumerable<ModUpdateCandidateItem> items) =>
         Task.FromResult<IReadOnlyList<ModUpdateCandidateItem>?>(null);
 
-    /// <summary>
-    /// 無介面時維持原本流程：不阻擋刪除，僅刪除伺服器本體
-    /// </summary>
+    /// <summary>無介面時維持原本流程：不阻擋刪除，僅刪除伺服器本體</summary>
     public virtual Task<ServerDeleteDecision> ShowServerDeleteConfirmationAsync(string serverName, int backupCount) =>
         Task.FromResult(ServerDeleteDecision.DeleteServerOnly);
 
@@ -141,5 +140,7 @@ internal class NoOpUiService : IUiService
         }
 
         public void BringToFront() { }
+
+        public void Close() { }
     }
 }

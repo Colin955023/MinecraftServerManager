@@ -40,6 +40,4 @@ TestResults/
 *.userosscache
 *.sln.docstates
 .artifacts/
-publish/
 output/
-.gitleaks.toml

@@ -4,9 +4,7 @@ using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 提供標準確認操作之 WinUI 3 原生 ContentDialog
-/// </summary>
+/// <summary>提供標準確認操作之 WinUI 3 原生 ContentDialog</summary>
 public sealed partial class CustomConfirmDialog : ContentDialog
 {
     public string DialogTitle { get; }

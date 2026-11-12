@@ -6,36 +6,21 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-/// <summary>
-/// 本地模組檔案掃描與詮釋資料解析測試
-/// </summary>
+/// <summary>本地模組檔案掃描與詮釋資料解析測試</summary>
 public sealed partial class LocalModScannerTests : IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(LocalModScannerTests));
+    private readonly TempDirectory _testDirTemp = new("msm_test_scanner_");
     private readonly string _testDir;
     private readonly string _modsDir;
 
     public LocalModScannerTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "msm_test_scanner_" + Guid.NewGuid().ToString("N"));
+        _testDir = _testDirTemp.FullName;
         _modsDir = Path.Combine(_testDir, "mods");
         Directory.CreateDirectory(_modsDir);
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testDir))
-            {
-                Directory.Delete(_testDir, recursive: true);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
-        }
-    }
+    public void Dispose() => _testDirTemp.Dispose();
 
     [Fact]
     public async Task ScanModsWithFabricModJsonShouldExtractMetadataCorrectly()
@@ -217,7 +202,7 @@ public sealed partial class LocalModScannerTests : IDisposable
 
         LocalModInfo mod = Assert.Single(mods);
         Assert.Equal("legacy-mod", mod.Id);
-        // 邊界回退依然產出一致的 "未知" 顯示，不致拋出例外且能正常運作
+        // 邊界後備依然產出一致的 "未知" 顯示，不致擲出例外且能正常運作
         Assert.Equal("未知", mod.Version);
         Assert.Equal("未知", mod.MinecraftVersion);
         Assert.Equal("未知", mod.LoaderType);

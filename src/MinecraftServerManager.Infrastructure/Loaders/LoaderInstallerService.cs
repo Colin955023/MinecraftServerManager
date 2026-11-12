@@ -20,6 +20,7 @@ public sealed partial class LoaderInstallerService(
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(LoaderInstallerService));
     private static readonly SearchValues<char> HashSeparators = SearchValues.Create(" \t\r\n");
+    private static readonly TimeSpan InstallerTimeout = TimeSpan.FromMinutes(30);
     private readonly string _cacheDir = SafeFileSystem.ResolveStableDirectory(installerCacheDirectory, create: true);
 
     public async Task<string> InstallLoaderAsync(
@@ -87,7 +88,19 @@ public sealed partial class LoaderInstallerService(
                 SafeReport("installing", output.Text, mapped);
             };
 
-            var exitResult = await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            // 安裝器卡住時不可無限等待；逾時後離開 using 會強制終止行程樹
+            using var installTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            installTimeout.CancelAfter(InstallerTimeout);
+            ProcessExitResult exitResult;
+            try
+            {
+                exitResult = await process.WaitForExitAsync(installTimeout.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException($"{loader} 安裝器超過 {InstallerTimeout.TotalMinutes:0} 分鐘未完成，已中止");
+            }
+
             if (exitResult.ExitCode != 0)
             {
                 throw new InvalidOperationException($"{loader} 安裝失敗，行程結束代碼：{exitResult.ExitCode}");
@@ -289,9 +302,9 @@ public sealed partial class LoaderInstallerService(
                     }
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.Warning("遠端 Maven 若無校驗檔或網路異常，容許降級為一般下載: {0}", ex.Message);
+                Logger.Warning(ex, "遠端 Maven 若無雜湊檔或網路異常，容許降級為一般下載");
             }
 
             var result = await httpPort.DownloadAsync(
@@ -305,7 +318,7 @@ public sealed partial class LoaderInstallerService(
                 throw new InvalidOperationException($"下載 {loader} 安裝器失敗：{result.Error}");
             }
 
-            await SafeFileSystem.WriteAllTextAsync(hashSidecar, await HashCalculator.Shared.ComputeFileHashAsync(destination, useCache: false, cancellationToken: cancellationToken).ConfigureAwait(false), cancellationToken: cancellationToken).ConfigureAwait(false);
+            await SafeFileSystem.WriteAllTextAsync(hashSidecar, await HashCalculator.ComputeFileHashAsync(destination, cancellationToken: cancellationToken).ConfigureAwait(false), cancellationToken: cancellationToken).ConfigureAwait(false);
         }
 
         return destination;
@@ -319,7 +332,7 @@ public sealed partial class LoaderInstallerService(
         }
 
         string recorded = (await SafeFileSystem.ReadAllTextAsync(hashSidecar, cancellationToken: cancellationToken).ConfigureAwait(false)).Trim();
-        string actual = await HashCalculator.Shared.ComputeFileHashAsync(jarPath, useCache: false, cancellationToken: cancellationToken).ConfigureAwait(false);
+        string actual = await HashCalculator.ComputeFileHashAsync(jarPath, cancellationToken: cancellationToken).ConfigureAwait(false);
         if (actual.Length > 0 && string.Equals(recorded, actual, StringComparison.OrdinalIgnoreCase))
         {
             return true;
@@ -420,6 +433,11 @@ public sealed partial class LoaderInstallerService(
 
     private sealed partial class InstallerProgressEstimator
     {
+        private static readonly SearchValues<string> CompletionWords = SearchValues.Create(["successfully installed", "installation complete", "all done"], StringComparison.OrdinalIgnoreCase);
+        private static readonly SearchValues<string> PatchingWords = SearchValues.Create(["patching", "remapping", "injecting"], StringComparison.OrdinalIgnoreCase);
+        private static readonly SearchValues<string> ProcessingWords = SearchValues.Create(["processor", "processing", "applying"], StringComparison.OrdinalIgnoreCase);
+        private static readonly SearchValues<string> DownloadingWords = SearchValues.Create(["downloading", "extracting", "task"], StringComparison.OrdinalIgnoreCase);
+
         private int _current = 30;
 
         public int FeedOutput(string line)
@@ -437,19 +455,20 @@ public sealed partial class LoaderInstallerService(
                 return _current;
             }
 
-            if (line.Contains("successfully installed", StringComparison.OrdinalIgnoreCase) || line.Contains("installation complete", StringComparison.OrdinalIgnoreCase) || line.Contains("all done", StringComparison.OrdinalIgnoreCase))
+            ReadOnlySpan<char> text = line;
+            if (text.ContainsAny(CompletionWords))
             {
                 _current = 98;
             }
-            else if (line.Contains("patching", StringComparison.OrdinalIgnoreCase) || line.Contains("remapping", StringComparison.OrdinalIgnoreCase) || line.Contains("injecting", StringComparison.OrdinalIgnoreCase))
+            else if (text.ContainsAny(PatchingWords))
             {
                 _current = Math.Max(_current, 85);
             }
-            else if (line.Contains("processor", StringComparison.OrdinalIgnoreCase) || line.Contains("processing", StringComparison.OrdinalIgnoreCase) || line.Contains("applying", StringComparison.OrdinalIgnoreCase))
+            else if (text.ContainsAny(ProcessingWords))
             {
                 _current = Math.Max(_current, Math.Min(80, _current + 2));
             }
-            else if (line.Contains("downloading", StringComparison.OrdinalIgnoreCase) || line.Contains("extracting", StringComparison.OrdinalIgnoreCase) || line.Contains("task", StringComparison.OrdinalIgnoreCase))
+            else if (text.ContainsAny(DownloadingWords))
             {
                 _current = Math.Max(_current, Math.Min(65, _current + 1));
             }

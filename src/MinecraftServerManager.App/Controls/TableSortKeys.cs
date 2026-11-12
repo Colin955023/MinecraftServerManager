@@ -3,9 +3,7 @@ using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.App.Controls;
 
-/// <summary>
-/// 各表格欄位之型別化排序鍵（欄位名稱須與 XAML SortPropertyName 一致；容量與下載量採原始數值排序）
-/// </summary>
+/// <summary>各表格欄位之型別化排序鍵（欄位名稱須與 XAML SortPropertyName 一致；容量與下載量採原始數值排序）</summary>
 public static class TableSortKeys
 {
     public static readonly SortKeyMap<ServerRowItem> Servers = new SortKeyMap<ServerRowItem>(
@@ -14,10 +12,12 @@ public static class TableSortKeys
         ("Loader", static r => r.Loader),
         ("Status", static r => r.Status),
         ("Size", static r => r.RawSizeBytes),
-        ("LastModified", static r => r.LastModified),
+        ("LastModified", static r => r.RawLastModifiedTicks),
         ("BackupStatus", static r => r.BackupStatus),
         ("RelativePath", static r => r.RelativePath))
-        .WithDisplay(("Size", static r => r.Size));
+        .WithDisplay(
+            ("Size", static r => r.Size),
+            ("LastModified", static r => r.LastModified));
 
     public static readonly SortKeyMap<LocalModRowItem> LocalMods = new SortKeyMap<LocalModRowItem>(
         ("IsEnabled", static r => r.IsEnabled),
@@ -71,8 +71,8 @@ public static class TableSortKeys
     public static readonly SortKeyMap<BackupDisplayItem> Backups = new SortKeyMap<BackupDisplayItem>(
         ("FileName", static r => r.FileName),
         ("SizeFormatted", static r => r.SizeBytes),
-        ("CreatedAtFormatted", static r => r.CreatedAtFormatted))
-        .WithDisplay(("SizeFormatted", static r => r.SizeFormatted));
+        ("CreatedAtFormatted", static r => r.CreatedAtTicks))
+        .WithDisplay(("SizeFormatted", static r => r.SizeFormatted), ("CreatedAtFormatted", static r => r.CreatedAtFormatted));
 
     public static readonly SortKeyMap<OperatorRowItem> Operators = new(
         ("IsOp", static r => r.IsOp),

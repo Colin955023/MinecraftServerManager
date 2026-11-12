@@ -1,13 +1,11 @@
 using Microsoft.UI.Xaml;
 using MinecraftServerManager.App.Controls;
-using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.App.Services;
+using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 管理 Java 環境視窗（原生模態視窗，透過 ModalWindowHost 裝載）
-/// </summary>
+/// <summary>管理 Java 環境視窗（原生模態視窗，透過 ModalWindowHost 裝載）</summary>
 public sealed partial class ManageJavaDialog : Window
 {
     public ManageJavaViewModel ViewModel { get; }
@@ -17,14 +15,12 @@ public sealed partial class ManageJavaDialog : Window
     {
         ViewModel = viewModel;
         InitializeComponent();
-        Title = "管理 Java 環境";
-
-        WindowLayoutHelper.ResizeToDip(this, 820, 620);
+        ModalWindowHost.ConfigureDialogWindow(this, "管理 Java 環境", 820, 620, Bindings.StopTracking);
 
         ViewModel.RequestClose += () =>
         {
             DialogResult = true;
-            Close();
+            ModalWindowHost.CloseDeferred(this);
         };
     }
 

@@ -1,13 +1,11 @@
 using Microsoft.UI.Xaml;
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Infrastructure.Logging;
-using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 伺服器屬性設定視窗（原生模態視窗，透過 ModalWindowHost 裝載）
-/// </summary>
+/// <summary>伺服器屬性設定視窗（原生模態視窗，透過 ModalWindowHost 裝載）</summary>
 public sealed partial class ServerPropertiesDialog : Window
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerPropertiesDialog));
@@ -19,9 +17,7 @@ public sealed partial class ServerPropertiesDialog : Window
     {
         ViewModel = viewModel;
         InitializeComponent();
-        Title = "編輯伺服器屬性";
-
-        WindowLayoutHelper.ResizeToDip(this, 760, 680);
+        ModalWindowHost.ConfigureDialogWindow(this, "編輯伺服器屬性", 760, 680, Bindings.StopTracking);
 
         ViewModel.RequestClose += success =>
         {
@@ -30,30 +26,15 @@ public sealed partial class ServerPropertiesDialog : Window
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, CloseAfterSave);
         };
 
-        AppWindow.Closing += async (sender, args) =>
-        {
-            try
-            {
-                if (DialogResult is null && ViewModel.HasUnsavedChanges)
-                {
-                    args.Cancel = true;
-                    if (await ViewModel.ConfirmDiscardAsync().ConfigureAwait(true))
-                    {
-                        DialogResult = false;
-                        Close();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning(ex, "伺服器屬性設定視窗關閉確認異常: {Message}", ex.Message);
-            }
-        };
+        ModalWindowHost.RegisterUnsavedChangesPrompt(
+            this,
+            () => DialogResult is null && ViewModel.HasUnsavedChanges,
+            ViewModel.ConfirmDiscardAsync,
+            () => DialogResult = false,
+            Logger);
     }
 
-    /// <summary>
-    /// 先停止 x:Bind 追蹤並解除清單資料來源，再關閉視窗，避免拆除視覺樹時繫結回寫已釋放的控制項
-    /// </summary>
+    /// <summary>先停止 x:Bind 追蹤並解除清單資料來源，再關閉視窗，避免拆除視覺樹時繫結回寫已釋放的控制項</summary>
     private void CloseAfterSave()
     {
         try
@@ -63,7 +44,7 @@ public sealed partial class ServerPropertiesDialog : Window
         }
         catch (Exception ex)
         {
-            Logger.Warning(ex, "關閉伺服器屬性視窗前解除繫結失敗: {Message}", ex.Message);
+            Logger.Warning(ex, "關閉伺服器屬性視窗前解除繫結失敗");
         }
 
         Close();

@@ -10,9 +10,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.App;
 
-/// <summary>
-/// 應用程式進入點與整體生命週期管理
-/// </summary>
+/// <summary>應用程式進入點與整體生命週期管理</summary>
 public partial class App : Application
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(App));
@@ -46,7 +44,20 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            Logger.Warning("解除 AppInstance 單一實體註冊異常: {0}", ex.Message);
+            Logger.Warning(ex, "解除 AppInstance 單一實體註冊失敗");
+        }
+    }
+
+    /// <summary>重新啟動失敗時重新註冊單一實體金鑰，避免使用者另開第二個執行個體</summary>
+    public static void ReacquireSingleInstanceLock()
+    {
+        try
+        {
+            AppInstance.FindOrRegisterForKey("MinecraftServerManager");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "重新註冊 AppInstance 單一實體失敗");
         }
     }
 
@@ -68,7 +79,7 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
         TaskScheduler.UnobservedTaskException += TaskScheduler_UnobservedTaskException;
 
-        // 2. 單一實體防護：AppInstance 喚醒既有實例
+        // 2. 單一實體防護：AppInstance 喚醒既有執行個體
         try
         {
             var mainInstance = AppInstance.FindOrRegisterForKey("MinecraftServerManager");
@@ -92,7 +103,7 @@ public partial class App : Application
 
         // 3. 初始化記錄系統管線
         AppLogging.Initialize();
-        Logger.Information("Minecraft Server Manager 啟動中 (版本 {0})", AppInfo.Version);
+        Logger.Information("Minecraft Server Manager 啟動中 (版本 {Version})", AppInfo.Version);
 
         // 原生層級閃退（WinUI 快速失敗）不會經過受控例外處理常式，改以工作階段標記與 UI 執行緒例外追蹤留下線索
         CrashDiagnostics.Install(Environment.CurrentManagedThreadId);
@@ -129,7 +140,7 @@ public partial class App : Application
 
                 if (s_isSmokeTest)
                 {
-                    Logger.Information("偵測到 --smoke-test 參數，將於 2 秒後安全結束以供發佈測試驗證");
+                    Logger.Information("偵測到 --smoke-test 參數，將於 2 秒後安全結束以供發布測試驗證");
                     var timer = mainWindow.DispatcherQueue.CreateTimer();
                     timer.Interval = TimeSpan.FromSeconds(2);
                     timer.Tick += (s, e) =>
@@ -144,7 +155,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "應用程式啟動初始化流程發生例外: {0}", ex.Message);
+            Logger.Error(ex, "應用程式啟動初始化流程發生例外");
             string logsDir = RuntimePaths.GetLogDir();
             ShowNativeMessageBox(
                 $"應用程式啟動失敗：\n\n{ex.Message}\n\n詳細記錄請見：\n{logsDir}",
@@ -169,12 +180,12 @@ public partial class App : Application
             try
             {
                 string validated = settings.GetValidatedServersRootPath(create: true);
-                Logger.Information("已驗證既有伺服器存放目錄: {0}", validated);
+                Logger.Information("已驗證既有伺服器存放目錄: {Path}", validated);
                 return validated;
             }
             catch (Exception ex)
             {
-                Logger.Warning("既有伺服器目錄設定無效 ({0})，重新提示選取", ex.Message);
+                Logger.Warning(ex, "既有伺服器目錄設定無效，重新提示選取");
             }
         }
 
@@ -188,12 +199,12 @@ public partial class App : Application
                 {
                     settings.SetServersRoot(selectedFolder);
                     string validated = settings.GetValidatedServersRootPath(create: true);
-                    Logger.Information("使用者成功設定伺服器存放目錄: {0}", validated);
+                    Logger.Information("使用者成功設定伺服器存放目錄: {Path}", validated);
                     return validated;
                 }
                 catch (Exception ex)
                 {
-                    Logger.Error(ex, "寫入伺服器目錄設定失敗: {0}", ex.Message);
+                    Logger.Error(ex, "寫入伺服器目錄設定失敗");
                     await ui.ShowErrorAsync($"無法寫入設定或建立資料夾：{ex.Message}", "設定錯誤").ConfigureAwait(true);
                 }
             }
@@ -214,7 +225,7 @@ public partial class App : Application
 
     private void App_UnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
-        Logger.Error(e.Exception, "WinUI 攔截到未處理例外: {0}", e.Exception.Message);
+        Logger.Error(e.Exception, "WinUI 攔截到未處理例外");
 
         string logsDir = RuntimePaths.GetLogDir();
         bool shouldTerminate = RecordAndCheckThrottling();
@@ -240,7 +251,7 @@ public partial class App : Application
 
     private static void TaskScheduler_UnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
     {
-        Logger.Error(e.Exception, "TaskScheduler 攔截到未觀察任務例外: {0}", e.Exception.Message);
+        Logger.Error(e.Exception, "TaskScheduler 攔截到未觀察任務例外");
         e.SetObserved();
     }
 
@@ -248,7 +259,7 @@ public partial class App : Application
     {
         if (e.ExceptionObject is Exception ex)
         {
-            Logger.Error(ex, "AppDomain 攔截到致命未處理例外: {0}", ex.Message);
+            Logger.Error(ex, "AppDomain 攔截到致命未處理例外");
 
             string logsDir = RuntimePaths.GetLogDir();
             ShowNativeMessageBox(

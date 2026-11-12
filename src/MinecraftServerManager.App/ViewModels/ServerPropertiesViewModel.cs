@@ -9,9 +9,7 @@ using MinecraftServerManager.Core.Servers;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 屬性編輯控制項型別
-/// </summary>
+/// <summary>屬性編輯控制項型別</summary>
 public enum PropertyEditorType
 {
     Text,
@@ -19,9 +17,7 @@ public enum PropertyEditorType
     Options
 }
 
-/// <summary>
-/// 單項屬性編輯項目 ViewModel
-/// </summary>
+/// <summary>單項屬性編輯項目 ViewModel</summary>
 public sealed partial class PropertyEditItem : ObservableObject
 {
     public string Key { get; }
@@ -31,9 +27,7 @@ public sealed partial class PropertyEditItem : ObservableObject
     public PropertyEditorType EditorType { get; }
     public IReadOnlyList<string> Options { get; }
 
-    /// <summary>
-    /// 屬性值；ComboBox 於清單回收或視窗關閉時可能雙向寫回 null，一律正規化為空字串
-    /// </summary>
+    /// <summary>屬性值；ComboBox 於清單回收或視窗關閉時可能雙向寫回 null，一律正規化為空字串</summary>
     public string Value
     {
         get;
@@ -102,9 +96,7 @@ public sealed partial class PropertyEditItem : ObservableObject
     }
 }
 
-/// <summary>
-/// 伺服器屬性設定對話方塊 ViewModel
-/// </summary>
+/// <summary>伺服器屬性設定對話方塊 ViewModel</summary>
 public sealed partial class ServerPropertiesViewModel : ViewModelBase
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerPropertiesViewModel));
@@ -216,7 +208,7 @@ public sealed partial class ServerPropertiesViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            Logger.Warning(ex, "讀取伺服器屬性失敗：{Message}", ex.Message);
+            Logger.Warning(ex, "讀取伺服器屬性失敗");
             StatusMessage = $"讀取屬性失敗：{ex.Message}";
         }
     }
@@ -311,8 +303,8 @@ public sealed partial class ServerPropertiesViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "儲存伺服器屬性失敗：{Message}", ex.Message);
-            StatusMessage = $"儲存異常：{ex.Message}";
+            Logger.Error(ex, "儲存伺服器屬性失敗");
+            StatusMessage = $"儲存失敗：{ex.Message}";
         }
     }
 

@@ -18,9 +18,7 @@ public enum ServerPropertiesUpdateError
     WriteFailed,
 }
 
-/// <summary>
-/// server.properties 不可變快照與內容修訂版本
-/// </summary>
+/// <summary>server.properties 不可變快照與內容修訂版本</summary>
 public sealed record ServerPropertiesSnapshot(
     string ServerName,
     ServerPropertiesReadStatus Status,

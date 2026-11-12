@@ -3,9 +3,7 @@ using MinecraftServerManager.Core.Servers;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>
-/// 以 <see cref="ServersRootRelocator"/> 實作之伺服器存放根目錄檢查與遷移服務（耗時作業一律於背景執行緒執行）
-/// </summary>
+/// <summary>以 <see cref="ServersRootRelocator"/> 實作之伺服器存放根目錄檢查與遷移服務（耗時作業一律於背景執行緒執行）</summary>
 public sealed class ServersRootService : IServersRootService
 {
     public ServersRootCheck ValidateTargetRoot(string? currentRoot, string? newRoot)

@@ -4,37 +4,22 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests.Servers;
 
-/// <summary>
-/// latest.log 尾端讀取服務測試（行數與位元組上限、截斷首行捨棄、色碼清洗、缺檔回傳空清單）
-/// </summary>
+/// <summary>latest.log 尾端讀取服務測試（行數與位元組上限、截斷首行捨棄、色碼清洗、缺檔回傳空清單）</summary>
 public sealed class ServerLogReaderTests : IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerLogReaderTests));
     private static readonly UTF8Encoding Utf8NoBom = new(false);
+    private readonly TempDirectory _serverDirTemp = new("msm-logreader-");
     private readonly string _serverDir;
     private readonly string _logFile;
 
     public ServerLogReaderTests()
     {
-        _serverDir = Path.Combine(Path.GetTempPath(), "msm-logreader-" + Guid.NewGuid().ToString("N"));
+        _serverDir = _serverDirTemp.FullName;
         Directory.CreateDirectory(Path.Combine(_serverDir, "logs"));
         _logFile = Path.Combine(_serverDir, "logs", "latest.log");
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_serverDir))
-            {
-                Directory.Delete(_serverDir, recursive: true);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
-        }
-    }
+    public void Dispose() => _serverDirTemp.Dispose();
 
     [Fact]
     public async Task MissingLogFile_ReturnsEmpty()

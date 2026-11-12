@@ -15,33 +15,21 @@
                         <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <!-- 標題 -->
                 <StackPanel Grid.Row="0"
                         Spacing="4">
-                        <TextBlock Text="{x:Bind ViewModel.ProjectTitle, Mode=OneWay}"
+                        <TextBlock Text="{x:Bind ViewModel.ProjectTitle}"
                                 Style="{ThemeResource TitleTextBlockStyle}" />
                         <TextBlock Text="選擇要安裝的模組版本（已依伺服器的 Minecraft 版本與載入器篩選）"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                 Style="{ThemeResource CaptionTextBlockStyle}" />
                 </StackPanel>
 
-                <!-- 版本清單 ListView -->
                 <Border Grid.Row="1"
-                        Background="{ThemeResource CardBrush}"
-                        BorderBrush="{ThemeResource BorderBrush}"
-                        BorderThickness="1"
+                        Style="{StaticResource CardBorderStyle}"
                         CornerRadius="8"
                         Padding="12">
-                        <Grid>
-                                <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="*" />
-                                </Grid.RowDefinitions>
-
-                                <Border Grid.Row="0"
-                                        Background="{ThemeResource CardBrush}"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="1">
+                        <controls:TableFrame>
+                                <controls:TableFrame.Header>
                                         <Grid>
                                                 <Grid.ColumnDefinitions>
                                                         <ColumnDefinition
@@ -86,88 +74,50 @@
                                                         SortRequested="OnHeaderSortRequested"
                                                         AutoFitRequested="OnHeaderAutoFitRequested" />
                                         </Grid>
-                                </Border>
+                                </controls:TableFrame.Header>
 
-                                <Border Grid.Row="1"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="1,0,1,1">
-                                        <ListView
-                                                ItemsSource="{x:Bind ViewModel.Versions, Mode=OneWay}"
-                                                SelectedItem="{x:Bind ViewModel.SelectedVersion, Mode=TwoWay}"
-                                                SelectionMode="Single"
-                                                ItemContainerStyle="{StaticResource TableListViewItemStyle}">
-                                                <ListView.ItemTemplate>
-                                                        <DataTemplate
-                                                                x:DataType="vm:ModVersionDisplayItem">
-                                                                <Grid>
-                                                                        <Grid.ColumnDefinitions>
-                                                                                <ColumnDefinition
-                                                                                        Width="{x:Bind views:ModVersionListColumns.Current.VersionWidth, Mode=OneWay}" />
-                                                                                <ColumnDefinition
-                                                                                        Width="{x:Bind views:ModVersionListColumns.Current.GameVersionWidth, Mode=OneWay}" />
-                                                                                <ColumnDefinition
-                                                                                        Width="{x:Bind views:ModVersionListColumns.Current.LoaderWidth, Mode=OneWay}" />
-                                                                                <ColumnDefinition
-                                                                                        Width="{x:Bind views:ModVersionListColumns.Current.DateWidth, Mode=OneWay}" />
-                                                                                <ColumnDefinition
-                                                                                        Width="{x:Bind views:ModVersionListColumns.Current.FileNameWidth, Mode=OneWay}" />
-                                                                        </Grid.ColumnDefinitions>
-                                                                        <Border Grid.Column="0"
-                                                                                BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                                BorderThickness="0,0,1,0"
-                                                                                Padding="8,6">
-                                                                                <TextBlock
-                                                                                        Text="{x:Bind VersionNumber}"
-                                                                                        TextTrimming="CharacterEllipsis"
-                                                                                        ToolTipService.ToolTip="{x:Bind VersionNumber}"
-                                                                                        VerticalAlignment="Center" />
-                                                                        </Border>
-                                                                        <Border Grid.Column="1"
-                                                                                BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                                BorderThickness="0,0,1,0"
-                                                                                Padding="8,6">
-                                                                                <TextBlock
-                                                                                        Text="{x:Bind GameVersions}"
-                                                                                        TextTrimming="CharacterEllipsis"
-                                                                                        ToolTipService.ToolTip="{x:Bind GameVersions}"
-                                                                                        VerticalAlignment="Center" />
-                                                                        </Border>
-                                                                        <Border Grid.Column="2"
-                                                                                BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                                BorderThickness="0,0,1,0"
-                                                                                Padding="8,6">
-                                                                                <TextBlock
-                                                                                        Text="{x:Bind Loaders}"
-                                                                                        TextTrimming="CharacterEllipsis"
-                                                                                        ToolTipService.ToolTip="{x:Bind Loaders}"
-                                                                                        VerticalAlignment="Center" />
-                                                                        </Border>
-                                                                        <Border Grid.Column="3"
-                                                                                BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                                BorderThickness="0,0,1,0"
-                                                                                Padding="8,6">
-                                                                                <TextBlock
-                                                                                        Text="{x:Bind DatePublished}"
-                                                                                        TextTrimming="CharacterEllipsis"
-                                                                                        ToolTipService.ToolTip="{x:Bind DatePublished}"
-                                                                                        VerticalAlignment="Center" />
-                                                                        </Border>
-                                                                        <Border Grid.Column="4"
-                                                                                BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                                BorderThickness="0,0,1,0"
-                                                                                Padding="8,6">
-                                                                                <TextBlock
-                                                                                        Text="{x:Bind FileName}"
-                                                                                        TextTrimming="CharacterEllipsis"
-                                                                                        ToolTipService.ToolTip="{x:Bind FileName}"
-                                                                                        VerticalAlignment="Center" />
-                                                                        </Border>
-                                                                </Grid>
-                                                        </DataTemplate>
-                                                </ListView.ItemTemplate>
-                                        </ListView>
-                                </Border>
-                        </Grid>
+                                <ListView
+                                        ItemsSource="{x:Bind ViewModel.Versions, Mode=OneWay}"
+                                        SelectedItem="{x:Bind ViewModel.SelectedVersion, Mode=TwoWay}"
+                                        SelectionMode="Single"
+                                        controls:ListSelectionBehavior.ClearOnOutsidePress="True"
+                                        ItemContainerStyle="{StaticResource TableListViewItemStyle}">
+                                        <ListView.ItemTemplate>
+                                                <DataTemplate
+                                                        x:DataType="vm:ModVersionDisplayItem">
+                                                        <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition
+                                                                                Width="{x:Bind views:ModVersionListColumns.Current.VersionWidth, Mode=OneWay}" />
+                                                                        <ColumnDefinition
+                                                                                Width="{x:Bind views:ModVersionListColumns.Current.GameVersionWidth, Mode=OneWay}" />
+                                                                        <ColumnDefinition
+                                                                                Width="{x:Bind views:ModVersionListColumns.Current.LoaderWidth, Mode=OneWay}" />
+                                                                        <ColumnDefinition
+                                                                                Width="{x:Bind views:ModVersionListColumns.Current.DateWidth, Mode=OneWay}" />
+                                                                        <ColumnDefinition
+                                                                                Width="{x:Bind views:ModVersionListColumns.Current.FileNameWidth, Mode=OneWay}" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <controls:TableCell
+                                                                        Grid.Column="0"
+                                                                        Text="{x:Bind VersionNumber}" />
+                                                                <controls:TableCell
+                                                                        Grid.Column="1"
+                                                                        Text="{x:Bind GameVersions}" />
+                                                                <controls:TableCell
+                                                                        Grid.Column="2"
+                                                                        Text="{x:Bind Loaders}" />
+                                                                <controls:TableCell
+                                                                        Grid.Column="3"
+                                                                        Text="{x:Bind DatePublished}" />
+                                                                <controls:TableCell
+                                                                        Grid.Column="4"
+                                                                        Text="{x:Bind FileName}" />
+                                                        </Grid>
+                                                </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                </ListView>
+                        </controls:TableFrame>
                 </Border>
 
                 <!-- 狀態訊息 -->

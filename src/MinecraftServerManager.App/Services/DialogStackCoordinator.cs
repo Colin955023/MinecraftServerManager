@@ -7,17 +7,13 @@ namespace MinecraftServerManager.App.Services;
 /// </summary>
 public sealed class DialogStackCoordinator
 {
-    /// <summary>
-    /// 等待前一個對話框隱藏的逾時上限；對話框拒絕隱藏時避免永久卡住
-    /// </summary>
+    /// <summary>等待前一個對話框隱藏的逾時上限；對話框拒絕隱藏時避免永久卡住</summary>
     private static readonly TimeSpan PreviousHideTimeout = TimeSpan.FromSeconds(3);
 
     private readonly Stack<DialogEntry> _stack = new();
     private readonly Lock _lock = new();
 
-    /// <summary>
-    /// 以非同步方式排隊並顯示對話框；若已有顯示中之對話框，自動中斷並暫存其狀態，待本對話框關閉後自動喚醒恢復。
-    /// </summary>
+    /// <summary>以非同步方式排隊並顯示對話框；若已有顯示中之對話框，自動中斷並暫存其狀態，待本對話框關閉後自動喚醒恢復。</summary>
     /// <typeparam name="TResult">對話框傳回之結果型別</typeparam>
     /// <param name="showAsync">呼叫顯示對話框之委派</param>
     /// <param name="hideAction">要求對話框暫時隱藏之委派</param>
@@ -120,14 +116,10 @@ public sealed class DialogStackCoordinator
 
         public Task ResumeTask => _resumeTcs.Task;
 
-        /// <summary>
-        /// 對話框目前未顯示時即為已完成狀態
-        /// </summary>
+        /// <summary>對話框目前未顯示時即為已完成狀態</summary>
         public Task HiddenTask => _hiddenTcs.Task;
 
-        /// <summary>
-        /// 標記被上層對話框中斷，並於此時建立新的恢復訊號，確保上層關閉時的喚醒不會遺失
-        /// </summary>
+        /// <summary>標記被上層對話框中斷，並於此時建立新的恢復訊號，確保上層關閉時的喚醒不會遺失</summary>
         public void MarkInterrupted()
         {
             IsInterrupted = true;

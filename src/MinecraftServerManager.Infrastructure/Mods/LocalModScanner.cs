@@ -1,5 +1,4 @@
 using MinecraftServerManager.Infrastructure.Logging;
-using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Text.Json;
 using MinecraftServerManager.Core.Mods;
@@ -11,9 +10,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
-/// <summary>
-/// 本地模組目錄掃描器與 JAR 詮釋資料抽取實作
-/// </summary>
+/// <summary>本地模組目錄掃描器與 JAR 詮釋資料抽取實作</summary>
 public sealed class LocalModScanner : ILocalModScanner
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(LocalModScanner));
@@ -26,49 +23,34 @@ public sealed class LocalModScanner : ILocalModScanner
 
         string stableModsDir = SafeFileSystem.ResolveStableDirectory(modsDirectory, create: true);
         var entries = SafeFileSystem.ListBoundedDirectory(stableModsDir, rejectReparse: false)
-            .Where(e => !e.IsDirectory && ModHelpers.IsModFileName(e.FullPath))
+            .Where(static e => !e.IsDirectory && ModHelpers.IsModFileName(e.FullPath))
             .ToList();
 
         var persistence = new ModIndexPersistence(stableModsDir);
-        var fileNames = entries.Select(e => Path.GetFileName(e.FullPath)).ToList();
-        persistence.CleanupStaleEntries(fileNames);
+        persistence.CleanupStaleEntries(entries.Select(static e => Path.GetFileName(e.FullPath)));
 
-        var result = new ConcurrentBag<LocalModInfo>();
-        var parallelOptions = new ParallelOptions
-        {
-            MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount),
-            CancellationToken = cancellationToken
-        };
-
-        await Parallel.ForEachAsync(entries, parallelOptions, async (entry, ct) =>
-        {
-            var mod = await ScanSingleModCoreAsync(entry.FullPath, persistence, ct).ConfigureAwait(false);
-            if (mod is not null)
-            {
-                result.Add(mod);
-            }
-        }).ConfigureAwait(false);
+        // 預設平行度即為 ProcessorCount；各項結果依索引寫入陣列，免去並行集合
+        var scanned = new LocalModInfo?[entries.Count];
+        await Parallel.ForAsync(0, entries.Count, cancellationToken, async (i, ct) =>
+            scanned[i] = await ScanSingleModCoreAsync(entries[i], persistence, ct).ConfigureAwait(false)).ConfigureAwait(false);
 
         persistence.Flush();
-        return [.. result.OrderBy(m => m.Filename, StringComparer.OrdinalIgnoreCase)];
+        return [.. scanned.OfType<LocalModInfo>().OrderBy(static m => m.Filename, StringComparer.OrdinalIgnoreCase)];
     }
 
-    private static async Task<LocalModInfo?> ScanSingleModCoreAsync(string filePath, ModIndexPersistence persistence, CancellationToken cancellationToken)
+    private static async Task<LocalModInfo?> ScanSingleModCoreAsync(FileSystemEntry entry, ModIndexPersistence persistence, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!SafeFileSystem.FileExists(filePath))
-        {
-            return null;
-        }
-
-        FileSystemMetadata fileInfo = SafeFileSystem.GetFileMetadata(filePath);
-        string fileName = fileInfo.Name;
+        string filePath = entry.FullPath;
+        string fileName = Path.GetFileName(filePath);
+        long fileLength = entry.Length;
+        long lastWriteTicks = entry.LastWriteTimeUtc.Ticks;
         bool isEnabled = !ModHelpers.IsDisabledModFileName(fileName);
         string baseStem = ModHelpers.ModFilenameStem(fileName);
 
         // 讀取快取（須檔案大小與最後修改時間皆相符）
-        IReadOnlyDictionary<string, string>? cached = persistence.GetCachedMetadata(fileName, fileInfo.Length, fileInfo.LastWriteTimeUtc.Ticks);
+        IReadOnlyDictionary<string, string>? cached = persistence.GetCachedMetadata(fileName, fileLength, lastWriteTicks);
 
         LocalModMetadataBuilder metadata;
 
@@ -80,14 +62,14 @@ public sealed class LocalModScanner : ILocalModScanner
         {
             metadata = ExtractMetadataFromJar(filePath, baseStem);
             ApplyFallbackLogic(baseStem, metadata);
-            persistence.CacheMetadata(fileName, metadata.ToDictionary(), fileInfo.Length, fileInfo.LastWriteTimeUtc.Ticks);
+            persistence.CacheMetadata(fileName, metadata.ToDictionary(), fileLength, lastWriteTicks);
         }
 
         // 計算或取得雜湊
         string? cachedHash = persistence.GetCachedHash(fileName, ModHelpers.PreferredHashAlgorithm);
         if (string.IsNullOrEmpty(cachedHash))
         {
-            cachedHash = await HashCalculator.Shared.ComputeFileHashAsync(filePath, ModHelpers.PreferredHashAlgorithm, cancellationToken: cancellationToken).ConfigureAwait(false);
+            cachedHash = await HashCalculator.ComputeFileHashAsync(filePath, ModHelpers.PreferredHashAlgorithm, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (!string.IsNullOrEmpty(cachedHash))
             {
                 persistence.CacheHash(fileName, ModHelpers.PreferredHashAlgorithm, cachedHash);
@@ -98,8 +80,8 @@ public sealed class LocalModScanner : ILocalModScanner
             filePath: filePath,
             fileName: fileName,
             baseStem: baseStem,
-            fileSize: fileInfo.Length,
-            fileMtime: fileInfo.LastWriteTimeUtc.Subtract(DateTime.UnixEpoch).TotalSeconds,
+            fileSize: fileLength,
+            fileMtime: entry.LastWriteTimeUtc.Subtract(DateTime.UnixEpoch).TotalSeconds,
             isEnabled: isEnabled,
             cachedHash: cachedHash);
 
@@ -148,7 +130,7 @@ public sealed class LocalModScanner : ILocalModScanner
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning("掃描模組封裝中繼資料異常: {0}", ex.Message);
+            Logger.Warning(ex, "掃描模組封裝中繼資料失敗");
         }
 
         return meta;
@@ -206,7 +188,7 @@ public sealed class LocalModScanner : ILocalModScanner
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.Warning("讀取內嵌 JAR 模組中繼資料異常: {0}", ex.Message);
+                Logger.Warning(ex, "讀取內嵌 JAR 模組中繼資料失敗");
             }
         }
 
@@ -298,14 +280,7 @@ public sealed class LocalModScanner : ILocalModScanner
                 }
             }
 
-            if (!string.IsNullOrWhiteSpace(raw))
-            {
-                string normalized = MinecraftVersionSemantics.NormalizeMinecraftVersion(raw);
-                if (!string.IsNullOrWhiteSpace(normalized))
-                {
-                    meta.MinecraftVersion = normalized;
-                }
-            }
+            meta.SetMinecraftVersionIfValid(raw);
         }
     }
 
@@ -410,15 +385,7 @@ public sealed class LocalModScanner : ILocalModScanner
             meta.Author = ModHelpers.StripColorAndFormattingCodes(author);
         }
 
-        string? mcDepRange = ForgeTomlReader.ExtractMinecraftDependency(content);
-        if (!string.IsNullOrWhiteSpace(mcDepRange))
-        {
-            string normalized = MinecraftVersionSemantics.NormalizeMinecraftVersion(mcDepRange);
-            if (!string.IsNullOrWhiteSpace(normalized))
-            {
-                meta.MinecraftVersion = normalized;
-            }
-        }
+        meta.SetMinecraftVersionIfValid(ForgeTomlReader.ExtractMinecraftDependency(content));
     }
 
     private static void ParseLegacyMcModInfo(JsonElement root, LocalModMetadataBuilder meta)
@@ -446,15 +413,7 @@ public sealed class LocalModScanner : ILocalModScanner
 
         if (target.TryGetProperty("mcversion", out var mcElem))
         {
-            string? raw = mcElem.GetString();
-            if (!string.IsNullOrWhiteSpace(raw))
-            {
-                string normalized = MinecraftVersionSemantics.NormalizeMinecraftVersion(raw);
-                if (!string.IsNullOrWhiteSpace(normalized))
-                {
-                    meta.MinecraftVersion = normalized;
-                }
-            }
+            meta.SetMinecraftVersionIfValid(mcElem.GetString());
         }
 
         if (target.TryGetProperty("description", out var descElem))
@@ -474,9 +433,7 @@ public sealed class LocalModScanner : ILocalModScanner
 
     private readonly record struct ManifestInfo(string? EmbeddedPath, string? Title, string? Vendor, string? Version);
 
-    /// <summary>
-    /// 讀取 META-INF/MANIFEST.MF 中與模組中繼資料相關的欄位（未展開之 <c>${projectversion}</c> 視為無版本）
-    /// </summary>
+    /// <summary>讀取 META-INF/MANIFEST.MF 中與模組中繼資料相關的欄位（未展開之 <c>${projectversion}</c> 視為無版本）</summary>
     private static ManifestInfo ReadManifest(ZipArchive archive)
     {
         string? embeddedPath = null;
@@ -524,7 +481,7 @@ public sealed class LocalModScanner : ILocalModScanner
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning("讀取模組 MANIFEST.MF 異常: {0}", ex.Message);
+            Logger.Warning(ex, "讀取模組 MANIFEST.MF 失敗");
         }
 
         return new ManifestInfo(embeddedPath, title, vendor, version);
@@ -636,6 +593,18 @@ public sealed class LocalModScanner : ILocalModScanner
         public string Author { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public ModPlatform Platform { get; set; } = ModPlatform.Local;
+
+        public void SetMinecraftVersionIfValid(string? raw)
+        {
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                string normalized = MinecraftVersionSemantics.NormalizeMinecraftVersion(raw);
+                if (!string.IsNullOrWhiteSpace(normalized))
+                {
+                    MinecraftVersion = normalized;
+                }
+            }
+        }
 
         public Dictionary<string, string> ToDictionary() => new(StringComparer.OrdinalIgnoreCase)
         {

@@ -11,7 +11,7 @@ namespace MinecraftServerManager.Infrastructure.Java;
 /// <summary>
 /// Minecraft 版本 Java major 需求服務實作。
 /// 完全依據 Mojang 官方 version package JSON 的 javaVersion.majorVersion 動態取得並快取，
-/// 嚴格禁止依據版本號做硬編碼推算。
+/// 嚴格禁止依據版本號做寫死推算。
 /// </summary>
 public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementService
 {
@@ -31,7 +31,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         _cacheDirectory = SafeFileSystem.ResolveStableDirectory(cacheDirectory, create: true);
     }
 
-    /// <inheritdoc />
+    /// <summary>依 Mojang 官方資料取得指定 Minecraft 版本所需的 Java 主版本號（優先使用快取）</summary>
     public async Task<int> GetRequiredJavaMajorAsync(
         string minecraftVersion,
         LoaderKind loader = LoaderKind.Unknown,
@@ -75,7 +75,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         throw new InvalidOperationException($"無法從 Mojang 官方或載入器版本資訊取得 Minecraft 版本「{cleaned}」指定的 Java major 版本。");
     }
 
-    /// <inheritdoc />
+    /// <summary>僅從本機快取取得指定版本所需的 Java 主版本號，無快取時回傳 null</summary>
     public int? GetCachedJavaMajor(string minecraftVersion, LoaderKind loader = LoaderKind.Unknown)
     {
         if (string.IsNullOrWhiteSpace(minecraftVersion))
@@ -100,7 +100,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         return null;
     }
 
-    /// <inheritdoc />
+    /// <summary>取得快取中出現過的 Java 主版本號（8 以上，由小到大）；無快取時回傳預設常見版本</summary>
     public IReadOnlyList<int> GetCachedAvailableJavaMajors()
     {
         EnsureCacheLoaded();
@@ -113,7 +113,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         return majors.Count > 0 ? majors : [8, 11, 16, 17, 21];
     }
 
-    /// <inheritdoc />
+    /// <summary>預先載入所有 Minecraft 版本的 Java 需求至快取，<paramref name="force"/> 為 true 時忽略既有快取重新查詢</summary>
     public async Task<IReadOnlyDictionary<string, int>> PreloadAllJavaRequirementsAsync(
         bool force = false,
         CancellationToken cancellationToken = default)
@@ -216,7 +216,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>捨棄記憶體快取並重新自磁碟載入</summary>
     public void ReloadCache()
     {
         lock (_lock)
@@ -234,68 +234,66 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
             {
                 // 1. 同步更新官方 MC 快取 mc_versions_cache.json
                 string mcCachePath = MojangVersionCatalog.GetVersionsCachePath(_cacheDirectory);
-                var mcVersions = SafeFileSystem.FileExists(mcCachePath) ? MojangVersionCatalog.LoadCachedVersions(mcCachePath) : [];
-                bool mcChanged = false;
-                var updatedMc = new List<LoaderVersion>(mcVersions.Count + _memoryCache.Count);
-                var seenMc = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-                foreach (var v in mcVersions)
+                MojangVersionCatalog.UpdateCachedVersions(mcCachePath, mcVersions =>
                 {
-                    seenMc.Add(v.Version);
-                    if (_memoryCache.TryGetValue(v.Version, out int jm) && jm > 0 && v.JavaMajor != jm)
-                    {
-                        updatedMc.Add(v with { JavaMajor = jm });
-                        mcChanged = true;
-                    }
-                    else
-                    {
-                        updatedMc.Add(v);
-                    }
-                }
+                    bool mcChanged = false;
+                    var updatedMc = new List<LoaderVersion>(mcVersions.Count + _memoryCache.Count);
+                    var seenMc = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                foreach (var kvp in _memoryCache)
-                {
-                    if (!kvp.Key.Contains(':') && kvp.Value > 0 && seenMc.Add(kvp.Key))
+                    foreach (var v in mcVersions)
                     {
-                        updatedMc.Add(new LoaderVersion(kvp.Key, Stable: true, JavaMajor: kvp.Value));
-                        mcChanged = true;
-                    }
-                }
-
-                if (mcChanged)
-                {
-                    MojangVersionCatalog.SaveCachedVersions(mcCachePath, updatedMc);
-                }
-
-                // 2. 同步更新 Paper 快取 paper_mc_versions_cache.json
-                string paperCachePath = MojangVersionCatalog.GetPaperVersionsCachePath(_cacheDirectory);
-                if (SafeFileSystem.FileExists(paperCachePath))
-                {
-                    var paperVersions = MojangVersionCatalog.LoadCachedVersions(paperCachePath);
-                    bool paperChanged = false;
-                    var updatedPaper = new List<LoaderVersion>(paperVersions.Count);
-                    foreach (var v in paperVersions)
-                    {
-                        if (_memoryCache.TryGetValue($"paper:{v.Version}", out int jm) && jm > 0 && v.JavaMajor != jm)
+                        seenMc.Add(v.Version);
+                        if (_memoryCache.TryGetValue(v.Version, out int jm) && jm > 0 && v.JavaMajor != jm)
                         {
-                            updatedPaper.Add(v with { JavaMajor = jm });
-                            paperChanged = true;
+                            updatedMc.Add(v with { JavaMajor = jm });
+                            mcChanged = true;
                         }
                         else
                         {
-                            updatedPaper.Add(v);
+                            updatedMc.Add(v);
                         }
                     }
 
-                    if (paperChanged)
+                    foreach (var kvp in _memoryCache)
                     {
-                        MojangVersionCatalog.SaveCachedVersions(paperCachePath, updatedPaper);
+                        if (!kvp.Key.Contains(':') && kvp.Value > 0 && seenMc.Add(kvp.Key))
+                        {
+                            updatedMc.Add(new LoaderVersion(kvp.Key, Stable: true, JavaMajor: kvp.Value));
+                            mcChanged = true;
+                        }
                     }
+
+                    return mcChanged ? updatedMc : null;
+                });
+
+                // 2. 同步更新 Paper 快取 paper_mc_versions_cache.json（檔案不存在代表尚未建立 Paper 清單，不由此處建立）
+                string paperCachePath = MojangVersionCatalog.GetPaperVersionsCachePath(_cacheDirectory);
+                if (SafeFileSystem.FileExists(paperCachePath))
+                {
+                    MojangVersionCatalog.UpdateCachedVersions(paperCachePath, paperVersions =>
+                    {
+                        bool paperChanged = false;
+                        var updatedPaper = new List<LoaderVersion>(paperVersions.Count);
+                        foreach (var v in paperVersions)
+                        {
+                            if (_memoryCache.TryGetValue($"paper:{v.Version}", out int jm) && jm > 0 && v.JavaMajor != jm)
+                            {
+                                updatedPaper.Add(v with { JavaMajor = jm });
+                                paperChanged = true;
+                            }
+                            else
+                            {
+                                updatedPaper.Add(v);
+                            }
+                        }
+
+                        return paperChanged ? updatedPaper : null;
+                    });
                 }
             }
             catch (Exception ex)
             {
-                Logger.Warning("持久化 Java requirements 快取失敗: {Error}", ex.Message);
+                Logger.Warning(ex, "持久化 Java requirements 快取失敗");
             }
         }
     }

@@ -1,15 +1,13 @@
 using Microsoft.UI.Xaml;
 using MinecraftServerManager.App.Controls;
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
-using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 伺服器名單管理視窗（原生模態視窗，透過 ModalWindowHost 裝載）
-/// </summary>
+/// <summary>伺服器名單管理視窗（原生模態視窗，透過 ModalWindowHost 裝載）</summary>
 public sealed partial class PlayerManagementDialog : Window
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(PlayerManagementDialog));
@@ -21,9 +19,7 @@ public sealed partial class PlayerManagementDialog : Window
     {
         ViewModel = viewModel;
         InitializeComponent();
-        Title = "伺服器名單管理";
-
-        WindowLayoutHelper.ResizeToDip(this, 1060, 740);
+        ModalWindowHost.ConfigureDialogWindow(this, "伺服器名單管理", 1060, 740, Bindings.StopTracking);
 
         if (Content is FrameworkElement fe)
         {
@@ -35,7 +31,7 @@ public sealed partial class PlayerManagementDialog : Window
                 }
                 catch (Exception ex)
                 {
-                    Logger.Error(ex, "初始化名單管理失敗: {Message}", ex.Message);
+                    Logger.Error(ex, "初始化名單管理失敗");
                 }
             };
         }
@@ -43,29 +39,15 @@ public sealed partial class PlayerManagementDialog : Window
         ViewModel.RequestClose += success =>
         {
             DialogResult = success;
-            // 延後至 async 命令完成後再關閉，避免命令結束時更新已關閉視窗的按鈕狀態造成原生閃退
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, Close);
+            ModalWindowHost.CloseDeferred(this);
         };
 
-        AppWindow.Closing += async (sender, args) =>
-        {
-            try
-            {
-                if (DialogResult is null && ViewModel.HasUnsavedChanges)
-                {
-                    args.Cancel = true;
-                    if (await ViewModel.ConfirmDiscardAsync().ConfigureAwait(true))
-                    {
-                        DialogResult = false;
-                        Close();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning(ex, "名單管理視窗關閉確認異常: {Message}", ex.Message);
-            }
-        };
+        ModalWindowHost.RegisterUnsavedChangesPrompt(
+            this,
+            () => DialogResult is null && ViewModel.HasUnsavedChanges,
+            ViewModel.ConfirmDiscardAsync,
+            () => DialogResult = false,
+            Logger);
     }
 
     private void RemoveWhitelist_Click(object sender, RoutedEventArgs e)

@@ -7,38 +7,23 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests.Servers;
 
-/// <summary>
-/// 呈現層連接埠實作測試：LocalFileSystem、ModFileService、ServersRootService 與備份摘要／目的地驗證
-/// </summary>
+/// <summary>呈現層連接埠實作測試：LocalFileSystem、ModFileService、ServersRootService 與備份摘要／目的地驗證</summary>
 public sealed class PresentationPortServiceTests : IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(PresentationPortServiceTests));
+    private readonly TempDirectory _rootTemp = new("msm-ports-");
     private readonly string _root;
     private readonly string _serversRoot;
     private readonly string _externalDir;
 
     public PresentationPortServiceTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), "msm-ports-" + Guid.NewGuid().ToString("N"));
+        _root = _rootTemp.FullName;
         _serversRoot = Path.Combine(_root, "servers");
         _externalDir = Path.Combine(_root, "external-backups");
         Directory.CreateDirectory(_serversRoot);
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_root))
-            {
-                Directory.Delete(_root, recursive: true);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
-        }
-    }
+    public void Dispose() => _rootTemp.Dispose();
 
     [Fact]
     public void LocalFileSystem_ReportsExistenceAndCreatesDirectories()
@@ -141,7 +126,7 @@ public sealed class PresentationPortServiceTests : IDisposable
     [Fact]
     public void BackupSummary_ReportsNotConfiguredMissingEmptyAndCounts()
     {
-        IServerBackupService service = new ServerBackupService(_serversRoot);
+        IServerBackupService service = new ServerBackupService(_serversRoot, static () => 10);
 
         Assert.Equal(ServerBackupSummaryStatus.NotConfigured, service.GetBackupSummary("Alpha", null).Status);
         Assert.Equal(ServerBackupSummaryStatus.DirectoryMissing, service.GetBackupSummary("Alpha", _externalDir).Status);
@@ -162,7 +147,7 @@ public sealed class PresentationPortServiceTests : IDisposable
     [Fact]
     public void BackupDestination_RejectsPathsInsideServersRoot()
     {
-        IServerBackupService service = new ServerBackupService(_serversRoot);
+        IServerBackupService service = new ServerBackupService(_serversRoot, static () => 10);
 
         Assert.NotNull(service.ValidateBackupDestination(Path.Combine(_serversRoot, "Alpha", "backups")));
         Assert.NotNull(service.ValidateBackupDestination(Path.Combine(_serversRoot, "a.zip")));
@@ -172,7 +157,7 @@ public sealed class PresentationPortServiceTests : IDisposable
     [Fact]
     public void PrepareBackupFilePath_CreatesDirectoryAndTimestampedName()
     {
-        IServerBackupService service = new ServerBackupService(_serversRoot);
+        IServerBackupService service = new ServerBackupService(_serversRoot, static () => 10);
 
         string path = service.PrepareBackupFilePath("Alpha", _externalDir);
 

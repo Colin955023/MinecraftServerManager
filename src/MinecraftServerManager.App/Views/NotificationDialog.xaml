@@ -38,7 +38,7 @@
                 Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
         </Grid>
 
-        <!-- 倒數進度條 -->
+        <!-- 倒數進度列 -->
         <ProgressBar Grid.Row="1"
             x:Name="CountdownProgress"
             Height="4"

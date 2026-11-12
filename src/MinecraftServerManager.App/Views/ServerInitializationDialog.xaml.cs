@@ -2,15 +2,13 @@ using System.Diagnostics.CodeAnalysis;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using MinecraftServerManager.App.Controls;
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Infrastructure.Logging;
-using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 伺服器初次啟動初始化視窗（原生模態視窗，透過 ModalWindowHost 裝載）；流程與狀態由 <see cref="ServerInitializationViewModel"/> 管理
-/// </summary>
+/// <summary>伺服器初次啟動初始化視窗（原生模態視窗，透過 ModalWindowHost 裝載）；流程與狀態由 <see cref="ServerInitializationViewModel"/> 管理</summary>
 public sealed partial class ServerInitializationDialog : Window, IDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerInitializationDialog));
@@ -24,9 +22,7 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
         ArgumentNullException.ThrowIfNull(viewModel);
         ViewModel = viewModel;
         InitializeComponent();
-        Title = "伺服器初次啟動初始化";
-
-        WindowLayoutHelper.ResizeToDip(this, 780, 540);
+        ModalWindowHost.ConfigureDialogWindow(this, "伺服器初次啟動初始化", 780, 540, Bindings.StopTracking);
         ViewModel.CloseRequested += Close;
 
         if (Content is FrameworkElement fe)
@@ -49,15 +45,11 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "初始化視窗啟動流程失敗: {Message}", ex.Message);
+            Logger.Error(ex, "初始化視窗啟動流程失敗");
         }
     }
 
-    private void ConsoleBox_TextChanged(object sender, TextChangedEventArgs e)
-    {
-        ConsoleBox.SelectionStart = ConsoleBox.Text.Length;
-        ConsoleScrollViewer.ChangeView(null, ConsoleScrollViewer.ScrollableHeight, null);
-    }
+    private void ConsoleBox_TextChanged(object sender, TextChangedEventArgs e) => ConsoleBox.SelectionStart = ConsoleBox.Text.Length;
 
     private void CancelButton_Click(object sender, RoutedEventArgs e) => ViewModel.Cancel();
 
@@ -71,12 +63,10 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Warning("ServerInitializationDialog_Closing 異常: {Message}", ex.Message);
+            Logger.Warning(ex, "ServerInitializationDialog_Closing 失敗");
         }
     }
 
-    /// <summary>
-    /// 解除與 ViewModel 的事件連結（ViewModel 由建立者負責釋放）
-    /// </summary>
+    /// <summary>解除與 ViewModel 的事件連結（ViewModel 由建立者負責釋放）</summary>
     public void Dispose() => ViewModel.CloseRequested -= Close;
 }

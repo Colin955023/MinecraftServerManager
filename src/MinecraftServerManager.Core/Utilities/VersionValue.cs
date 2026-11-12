@@ -7,6 +7,7 @@ public readonly partial record struct VersionValue(
     int Major,
     int Minor,
     int Patch,
+    int Revision = 0,
     string PreRelease = "",
     string BuildMetadata = "") : IComparable<VersionValue>
 {
@@ -32,12 +33,12 @@ public readonly partial record struct VersionValue(
             return false;
         }
 
-        // 正規表示式已保證各段皆為數字，僅需處理溢位；第四段以後忽略
+        // 正規表示式已保證各段皆為數字（最多四段），僅需處理溢位；NeoForge 26.x 起使用四段式版本號
         ReadOnlySpan<char> versionSpan = match.Groups["version"].ValueSpan;
         Span<Range> parts = stackalloc Range[4];
         int count = versionSpan.Split(parts, '.');
-        Span<int> numbers = stackalloc int[3];
-        for (int i = 0; i < Math.Min(count, 3); i++)
+        Span<int> numbers = stackalloc int[4];
+        for (int i = 0; i < Math.Min(count, 4); i++)
         {
             if (!int.TryParse(versionSpan[parts[i]], CultureInfo.InvariantCulture, out numbers[i]))
             {
@@ -46,7 +47,7 @@ public readonly partial record struct VersionValue(
             }
         }
 
-        result = new VersionValue(numbers[0], numbers[1], numbers[2], match.Groups["pre"].Value, match.Groups["build"].Value);
+        result = new VersionValue(numbers[0], numbers[1], numbers[2], numbers[3], match.Groups["pre"].Value, match.Groups["build"].Value);
         return true;
     }
 
@@ -55,7 +56,7 @@ public readonly partial record struct VersionValue(
 
     public int CompareTo(VersionValue other)
     {
-        int numericComparison = (Major, Minor, Patch).CompareTo((other.Major, other.Minor, other.Patch));
+        int numericComparison = (Major, Minor, Patch, Revision).CompareTo((other.Major, other.Minor, other.Patch, other.Revision));
         if (numericComparison != 0)
         {
             return numericComparison;
@@ -77,7 +78,7 @@ public readonly partial record struct VersionValue(
     public bool Equals(VersionValue other) => CompareTo(other) == 0;
 
     public override int GetHashCode() =>
-        HashCode.Combine(Major, Minor, Patch, StringComparer.OrdinalIgnoreCase.GetHashCode(PreRelease ?? string.Empty));
+        HashCode.Combine(Major, Minor, Patch, Revision, StringComparer.OrdinalIgnoreCase.GetHashCode(PreRelease ?? string.Empty));
 
     public static bool operator <(VersionValue left, VersionValue right) => left.CompareTo(right) < 0;
 

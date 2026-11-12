@@ -2,9 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 模組更新候選項目檢視模型
-/// </summary>
+/// <summary>模組更新候選項目檢視模型</summary>
 public sealed partial class ModUpdateCandidateItem : ObservableObject
 {
     [ObservableProperty]

@@ -3,14 +3,10 @@ using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.Infrastructure.Utilities;
 
-/// <summary>
-/// 以 .NET 原生 PEReader 讀取 Windows 執行檔標頭（取代手寫 DOS/PE 位元組解析）
-/// </summary>
+/// <summary>以 .NET 原生 PEReader 讀取 Windows 執行檔標頭（取代手寫 DOS/PE 位元組解析）</summary>
 public static class PortableExecutableInspector
 {
-    /// <summary>
-    /// 讀取 PE 檔案之目標機器類型；非合法 PE 或無法讀取時回傳 null
-    /// </summary>
+    /// <summary>讀取 PE 檔案之目標機器類型；非合法 PE 或無法讀取時回傳 null</summary>
     public static Machine? TryReadMachine(string filePath)
     {
         try
@@ -25,8 +21,6 @@ public static class PortableExecutableInspector
         }
     }
 
-    /// <summary>
-    /// 判斷機器類型是否為 64 位元架構
-    /// </summary>
+    /// <summary>判斷機器類型是否為 64 位元架構</summary>
     public static bool Is64Bit(Machine machine) => machine is Machine.Amd64 or Machine.Arm64 or Machine.IA64;
 }

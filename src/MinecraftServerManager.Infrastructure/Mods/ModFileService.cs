@@ -4,9 +4,7 @@ using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
-/// <summary>
-/// 呈現層模組檔案輔助服務：路徑解析、暫存清理與官方來源判定
-/// </summary>
+/// <summary>呈現層模組檔案輔助服務：路徑解析、暫存清理與官方來源判定</summary>
 public sealed class ModFileService : IModFileService
 {
     private const string DisabledSuffix = ".disabled";

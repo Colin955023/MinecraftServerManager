@@ -8,20 +8,17 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 備份項目展示模型
-/// </summary>
+/// <summary>備份項目展示模型</summary>
 public sealed class BackupDisplayItem(string fileName, long sizeBytes, DateTimeOffset createdAt)
 {
     public string FileName { get; } = fileName;
     public long SizeBytes { get; } = sizeBytes;
+    public long CreatedAtTicks { get; } = createdAt.UtcTicks;
     public string SizeFormatted { get; } = Core.Utilities.UnitFormatter.FormatBytes(sizeBytes);
     public string CreatedAtFormatted { get; } = createdAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 }
 
-/// <summary>
-/// 備份還原與管理對話方塊 ViewModel
-/// </summary>
+/// <summary>備份還原與管理對話方塊 ViewModel</summary>
 public sealed partial class RestoreBackupViewModel : ViewModelBase
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(RestoreBackupViewModel));
@@ -37,9 +34,6 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
 
     [ObservableProperty]
     public partial string StatusMessage { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial bool IsBusy { get; set; }
 
     public RestoreBackupViewModel(
         IServerBackupService backupService,
@@ -65,7 +59,6 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
 
     public async Task RefreshBackupsAsync()
     {
-        IsBusy = true;
         StatusMessage = "正在讀取備份清單...";
         try
         {
@@ -89,12 +82,8 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            Logger.Warning(ex, "讀取備份清單失敗：{Message}", ex.Message);
+            Logger.Warning(ex, "讀取備份清單失敗");
             StatusMessage = $"讀取備份失敗：{ex.Message}";
-        }
-        finally
-        {
-            IsBusy = false;
         }
     }
 
@@ -122,7 +111,6 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
             return;
         }
 
-        IsBusy = true;
         StatusMessage = $"正在還原備份「{SelectedBackup.FileName}」...";
 
         try
@@ -154,13 +142,9 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "還原備份失敗：{Message}", ex.Message);
-            StatusMessage = $"還原異常：{ex.Message}";
-            await _ui.ShowErrorAsync($"還原過程發生未預期異常：{ex.Message}", "還原異常").ConfigureAwait(true);
-        }
-        finally
-        {
-            IsBusy = false;
+            Logger.Error(ex, "還原備份失敗");
+            StatusMessage = $"還原失敗：{ex.Message}";
+            await _ui.ShowErrorAsync($"還原過程發生未預期例外：{ex.Message}", "還原失敗").ConfigureAwait(true);
         }
     }
 
@@ -182,7 +166,6 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
             return;
         }
 
-        IsBusy = true;
         try
         {
             bool success = await _backupService.DeleteBackupAsync(_serverName, toDelete.FileName, _backupDirectory).ConfigureAwait(true);
@@ -203,13 +186,9 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "刪除備份失敗：{Message}", ex.Message);
-            StatusMessage = $"刪除異常：{ex.Message}";
+            Logger.Error(ex, "刪除備份失敗");
+            StatusMessage = $"刪除失敗：{ex.Message}";
             await _ui.ShowErrorAsync($"刪除備份失敗：{ex.Message}", "刪除失敗").ConfigureAwait(true);
-        }
-        finally
-        {
-            IsBusy = false;
         }
     }
 

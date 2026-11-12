@@ -6,31 +6,17 @@ namespace MinecraftServerManager.UnitTests.Servers;
 
 public sealed partial class ServerIntegrityServiceTests : IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerIntegrityServiceTests));
+    private readonly TempDirectory _testDirTemp = new("msm-integrity-tests-");
     private readonly string _testDir;
     private readonly ServerIntegrityService _integrityService;
 
     public ServerIntegrityServiceTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "msm-integrity-tests-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testDir);
+        _testDir = _testDirTemp.FullName;
         _integrityService = new ServerIntegrityService();
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testDir))
-            {
-                Directory.Delete(_testDir, recursive: true);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
-        }
-    }
+    public void Dispose() => _testDirTemp.Dispose();
 
     [Fact]
     public void CheckImportantFiles_NonExistentDirectory_ReturnsMissing()

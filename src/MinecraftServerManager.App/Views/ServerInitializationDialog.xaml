@@ -31,28 +31,23 @@
                 </StackPanel>
             </StackPanel>
 
-            <!-- 中間：主控台記錄輸出 -->
             <Border Grid.Row="1"
                 Background="{ThemeResource ConsoleBackgroundBrush}"
                 BorderBrush="{ThemeResource BorderBrush}"
                 BorderThickness="1"
                 CornerRadius="8"
                 Padding="8">
-                <ScrollViewer x:Name="ConsoleScrollViewer"
-                    VerticalScrollBarVisibility="Auto"
-                    HorizontalScrollBarVisibility="Disabled">
-                    <TextBox x:Name="ConsoleBox"
-                        Text="{x:Bind ViewModel.ConsoleText, Mode=OneWay}"
-                        TextChanged="ConsoleBox_TextChanged"
-                        Background="{ThemeResource ConsoleBackgroundBrush}"
-                        Foreground="{ThemeResource ConsoleForegroundBrush}"
-                        FontFamily="Consolas, Cascadia Code, Courier New"
-                        FontSize="12"
-                        BorderThickness="0"
-                        IsReadOnly="True"
-                        AcceptsReturn="True"
-                        TextWrapping="Wrap" />
-                </ScrollViewer>
+                <TextBox x:Name="ConsoleBox"
+                    Text="{x:Bind ViewModel.ConsoleText, Mode=OneWay}"
+                    TextChanged="ConsoleBox_TextChanged"
+                    Background="{ThemeResource ConsoleBackgroundBrush}"
+                    Foreground="{ThemeResource ConsoleForegroundBrush}"
+                    FontFamily="Consolas, Cascadia Code, Courier New"
+                    FontSize="12"
+                    BorderThickness="0"
+                    IsReadOnly="True"
+                    AcceptsReturn="True"
+                    TextWrapping="Wrap" />
             </Border>
 
             <!-- 底部按鈕列 -->

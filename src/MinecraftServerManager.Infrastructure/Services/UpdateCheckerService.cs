@@ -6,9 +6,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Services;
 
-/// <summary>
-/// GitHub Releases 應用程式更新檢查服務實作
-/// </summary>
+/// <summary>GitHub Releases 應用程式更新檢查服務實作</summary>
 public sealed class UpdateCheckerService(IHttpPort httpPort) : IUpdateCheckerService
 {
     private static readonly Uri LatestReleaseUri = BuildLatestReleaseUri();
@@ -23,9 +21,7 @@ public sealed class UpdateCheckerService(IHttpPort httpPort) : IUpdateCheckerSer
     private static string BuildTrustedAssetPathPrefix() =>
         $"/{RepositoryPath}/releases/download/";
 
-    /// <summary>
-    /// 更新資產僅接受本專案 GitHub Release 的 HTTPS 下載位址，避免遭竄改的 API 回應導向其他來源
-    /// </summary>
+    /// <summary>更新資產僅接受本專案 GitHub Release 的 HTTPS 下載位址，避免遭竄改的 API 回應導向其他來源</summary>
     private static bool IsTrustedAssetUrl(string url) =>
         Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)
         && uri.Scheme == Uri.UriSchemeHttps
@@ -65,47 +61,16 @@ public sealed class UpdateCheckerService(IHttpPort httpPort) : IUpdateCheckerSer
                 VersionValue.TryParse(currentVersionStr, out var currentVer) &&
                 latestVer > currentVer;
 
-            var exeAssets = new List<(string Name, string Url)>();
-            var sha256Assets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            // 僅接受可信來源的附件：標準單一執行檔 MinecraftServerManager.exe 與其精準配對的 .sha256
+            List<GitHubReleaseAsset> assets = release.Assets ?? [];
+            string? FindTrustedAssetUrl(string name) => assets
+                .FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrWhiteSpace(a.BrowserDownloadUrl)
+                    && IsTrustedAssetUrl(a.BrowserDownloadUrl))
+                ?.BrowserDownloadUrl;
 
-            foreach (GitHubReleaseAsset asset in release.Assets ?? [])
-            {
-                if (string.IsNullOrWhiteSpace(asset.Name) || string.IsNullOrWhiteSpace(asset.BrowserDownloadUrl) || !IsTrustedAssetUrl(asset.BrowserDownloadUrl))
-                {
-                    continue;
-                }
-
-                if (asset.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-                {
-                    exeAssets.Add((asset.Name, asset.BrowserDownloadUrl));
-                }
-                else if (asset.Name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase))
-                {
-                    sha256Assets[asset.Name] = asset.BrowserDownloadUrl;
-                }
-            }
-
-            string? selectedExeName = null;
-            string? downloadUrl = null;
-            string? checksumUrl = null;
-
-            // 優先選擇標準單一執行檔 MinecraftServerManager.exe
-            var (Name, Url) = exeAssets.FirstOrDefault(a => string.Equals(a.Name, "MinecraftServerManager.exe", StringComparison.OrdinalIgnoreCase));
-            if (!string.IsNullOrEmpty(Name))
-            {
-                selectedExeName = Name;
-                downloadUrl = Url;
-            }
-
-            // 精準 Checksum 配對
-            if (!string.IsNullOrEmpty(selectedExeName))
-            {
-                string expectedShaName = selectedExeName + ".sha256";
-                if (sha256Assets.TryGetValue(expectedShaName, out string? shaUrl))
-                {
-                    checksumUrl = shaUrl;
-                }
-            }
+            string? downloadUrl = FindTrustedAssetUrl("MinecraftServerManager.exe");
+            string? checksumUrl = downloadUrl is null ? null : FindTrustedAssetUrl("MinecraftServerManager.exe.sha256");
 
             return new UpdateCheckResult(
                 HasUpdate: hasUpdate,
@@ -124,9 +89,7 @@ public sealed class UpdateCheckerService(IHttpPort httpPort) : IUpdateCheckerSer
     }
 }
 
-/// <summary>
-/// GitHub 最新 Release 回應中本服務使用的欄位
-/// </summary>
+/// <summary>GitHub 最新 Release 回應中本服務使用的欄位</summary>
 internal sealed record GitHubReleasePayload(
     [property: JsonPropertyName("tag_name")] string? TagName,
     [property: JsonPropertyName("name")] string? Name,
@@ -134,9 +97,7 @@ internal sealed record GitHubReleasePayload(
     [property: JsonPropertyName("html_url")] string? HtmlUrl,
     [property: JsonPropertyName("assets")] List<GitHubReleaseAsset>? Assets);
 
-/// <summary>
-/// GitHub Release 附件
-/// </summary>
+/// <summary>GitHub Release 附件</summary>
 internal sealed record GitHubReleaseAsset(
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("browser_download_url")] string? BrowserDownloadUrl);

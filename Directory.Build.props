@@ -24,7 +24,6 @@
     <NoWarn>$(NoWarn);1591</NoWarn>
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1900</WarningsNotAsErrors>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
     <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
     <CsWinRTWindowsMetadata
       Condition="'$(CsWinRTWindowsMetadata)' == '' and '$(WindowsSdkDir)' == ''">local</CsWinRTWindowsMetadata>

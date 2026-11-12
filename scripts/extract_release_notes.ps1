@@ -5,7 +5,6 @@ param(
     [switch]$Strict
 )
 
-$ErrorActionPreference = "Stop"
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $commonScript = Join-Path $PSScriptRoot "lib\Common.ps1"
 if (-not (Test-Path -LiteralPath $commonScript))
@@ -13,6 +12,7 @@ if (-not (Test-Path -LiteralPath $commonScript))
     throw "找不到共用函式庫：$commonScript"
 }
 . $commonScript
+Initialize-ScriptEnvironment
 
 $version = Get-ProjectVersion -RepoRoot $repoRoot
 

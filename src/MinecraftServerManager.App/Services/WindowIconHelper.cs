@@ -5,9 +5,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.Services;
 
-/// <summary>
-/// 視窗圖示載入輔助工具：直接讀取內嵌於 EXE 之圖示資源並指派至 AppWindow
-/// </summary>
+/// <summary>視窗圖示載入輔助工具：直接讀取內嵌於 EXE 之圖示資源並指派至 AppWindow</summary>
 public static partial class WindowIconHelper
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(WindowIconHelper));
@@ -23,9 +21,7 @@ public static partial class WindowIconHelper
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static partial IntPtr LoadIcon(IntPtr hInstance, IntPtr lpIconName);
 
-    /// <summary>
-    /// 為指定的 AppWindow 套用應用程式主圖示
-    /// </summary>
+    /// <summary>為指定的 AppWindow 套用應用程式主圖示</summary>
     public static void SetIcon(AppWindow appWindow)
     {
         ArgumentNullException.ThrowIfNull(appWindow);
@@ -57,7 +53,7 @@ public static partial class WindowIconHelper
             }
             catch (Exception ex)
             {
-                Logger.Warning("載入視窗主圖示資源失敗，維持系統預設圖示: {0}", ex.Message);
+                Logger.Warning(ex, "載入視窗主圖示資源失敗，維持系統預設圖示");
             }
         }
     }

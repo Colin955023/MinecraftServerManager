@@ -1,8 +1,6 @@
 namespace MinecraftServerManager.Domain.Servers;
 
-/// <summary>
-/// 伺服器操作結果（供 UI 層與工作流程呈現結果）
-/// </summary>
+/// <summary>伺服器操作結果（供 UI 層與工作流程呈現結果）</summary>
 public sealed record ServerOperationResult(
     bool Success,
     string Message = "",

@@ -18,8 +18,10 @@ public sealed class ServerMemoryViewModelTests
             minMb,
             "C:\\Servers\\TestServer");
 
-    [Fact]
-    public async Task SaveAsync_WhenMaxInvalid_SetsErrorMessageAndDoesNotInvokeCallback()
+    [Theory]
+    [InlineData("-100", "1024", "大於 0 的整數")]
+    [InlineData("2048", "4096", "最小記憶體不可大於最大記憶體")]
+    public async Task SaveAsync_WhenInvalid_SetsErrorMessageAndDoesNotInvokeCallback(string maxMb, string minMb, string expectedError)
     {
         bool callbackInvoked = false;
         var config = CreateSampleConfig();
@@ -33,38 +35,14 @@ public sealed class ServerMemoryViewModelTests
             systemMemoryMb: 16384,
             uiService: NoOpUiService.Instance)
         {
-            MaxMemoryMb = "-100"
+            MaxMemoryMb = maxMb,
+            MinMemoryMb = minMb
         };
 
         await vm.SaveAsync();
 
         Assert.False(callbackInvoked);
-        Assert.Contains("大於 0 的整數", vm.ErrorMessage);
-    }
-
-    [Fact]
-    public async Task SaveAsync_WhenMinGreaterThanMax_SetsErrorMessage()
-    {
-        bool callbackInvoked = false;
-        var config = CreateSampleConfig();
-        var vm = new ServerMemoryViewModel(
-            config,
-            (max, min) =>
-            {
-                callbackInvoked = true;
-                return Task.FromResult(true);
-            },
-            systemMemoryMb: 16384,
-            uiService: NoOpUiService.Instance)
-        {
-            MaxMemoryMb = "2048",
-            MinMemoryMb = "4096"
-        };
-
-        await vm.SaveAsync();
-
-        Assert.False(callbackInvoked);
-        Assert.Contains("最小記憶體不可大於最大記憶體", vm.ErrorMessage);
+        Assert.Contains(expectedError, vm.ErrorMessage);
     }
 
     [Fact]

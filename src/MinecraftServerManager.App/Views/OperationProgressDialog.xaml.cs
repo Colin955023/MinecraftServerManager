@@ -4,18 +4,20 @@ using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 通用非同步作業進度 WinUI 3 原生 ContentDialog
-/// </summary>
+/// <summary>通用非同步作業進度 WinUI 3 原生 ContentDialog</summary>
 public sealed partial class OperationProgressDialog : ContentDialog, INotifyPropertyChanged
 {
-    public event PropertyChangedEventHandler? PropertyChanged;
+    private static readonly PropertyChangedEventArgs PhaseMessageChangedArgs = new(nameof(PhaseMessage));
+    private static readonly PropertyChangedEventArgs ProgressValueChangedArgs = new(nameof(ProgressValue));
+    private static readonly PropertyChangedEventArgs PercentDisplayChangedArgs = new(nameof(PercentDisplay));
 
     private readonly IUiService _ui;
     private bool _completed;
     private bool _allowNestedHide;
     private int _lastReportedPercent = -1;
     private string? _lastReportedMessage;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 
     public string DialogHeading { get; }
     public string PhaseMessage { get; private set; }
@@ -58,9 +60,7 @@ public sealed partial class OperationProgressDialog : ContentDialog, INotifyProp
 
     public void MarkCompleted() => _completed = true;
 
-    /// <summary>
-    /// 暫時隱藏以讓位給巢狀對話框（作業尚未完成時亦允許）
-    /// </summary>
+    /// <summary>暫時隱藏以讓位給巢狀對話框（作業尚未完成時亦允許）</summary>
     public void HideForNestedDialog()
     {
         _allowNestedHide = true;
@@ -89,13 +89,13 @@ public sealed partial class OperationProgressDialog : ContentDialog, INotifyProp
         {
             ProgressValue = pct;
             PercentDisplay = $"{pct}%";
+            PropertyChanged?.Invoke(this, ProgressValueChangedArgs);
+            PropertyChanged?.Invoke(this, PercentDisplayChangedArgs);
             if (!string.IsNullOrWhiteSpace(message))
             {
                 PhaseMessage = message;
+                PropertyChanged?.Invoke(this, PhaseMessageChangedArgs);
             }
-
-            // 一次通知所有繫結屬性
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(string.Empty));
         });
     }
 }

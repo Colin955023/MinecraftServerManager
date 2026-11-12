@@ -7,9 +7,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 伺服器記憶體設定對話方塊 ViewModel
-/// </summary>
+/// <summary>伺服器記憶體設定對話方塊 ViewModel</summary>
 public sealed partial class ServerMemoryViewModel(
     ServerConfig config,
     Func<int, int?, Task<bool>> saveCallback,
@@ -99,7 +97,7 @@ public sealed partial class ServerMemoryViewModel(
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "儲存記憶體設定出錯：{Message}", ex.Message);
+            Logger.Error(ex, "儲存記憶體設定出錯");
             ErrorMessage = $"儲存出錯：{ex.Message}";
             await _ui.ShowErrorAsync($"儲存記憶體設定時發生錯誤：\n{ex.Message}", "儲存錯誤").ConfigureAwait(true);
         }

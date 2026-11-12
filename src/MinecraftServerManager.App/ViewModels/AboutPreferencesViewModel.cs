@@ -3,14 +3,13 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.Core;
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Settings;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 關於與偏好設定整合頁面 ViewModel
-/// </summary>
+/// <summary>關於與偏好設定整合頁面 ViewModel</summary>
 public sealed partial class AboutPreferencesViewModel : PageViewModel
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AboutPreferencesViewModel));
@@ -30,13 +29,19 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     public bool IsManualCheckVisible => !IsAutoUpdateEnabled;
 
     [ObservableProperty]
+    public partial bool IsAutoBackupBeforeStartEnabled { get; set; }
+
+    [ObservableProperty]
+    public partial double BackupRetentionCount { get; set; } = ServerDefaults.DefaultBackupRetentionCount;
+
+    [ObservableProperty]
     public partial int SelectedThemeModeIndex { get; set; }
 
     [ObservableProperty]
-    public partial string ScreenResolutionInfo { get; set; } = "目前螢幕解析度：1920 × 1080";
+    public partial string ScreenResolutionInfo { get; set; } = string.Empty;
 
     [ObservableProperty]
-    public partial string CurrentWindowSizeInfo { get; set; } = "目前主視窗大小：1350 × 820";
+    public partial string CurrentWindowSizeInfo { get; set; } = string.Empty;
 
     [ObservableProperty]
     public partial string? CustomAccentColor { get; set; }
@@ -77,6 +82,8 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         _launcher = launcher;
 
         IsAutoUpdateEnabled = _settingsManager.IsAutoUpdateEnabled();
+        IsAutoBackupBeforeStartEnabled = _settingsManager.IsAutoBackupBeforeStartEnabled();
+        BackupRetentionCount = _settingsManager.GetBackupRetentionCount();
         string theme = _settingsManager.GetThemeMode();
         SelectedThemeModeIndex = theme switch
         {
@@ -103,6 +110,15 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         }
     }
 
+    /// <summary>依主視窗即時尺寸更新「目前螢幕解析度」與「目前主視窗大小」顯示文字</summary>
+    public void UpdateWindowMetrics(WindowMetrics metrics)
+    {
+        int percent = (int)Math.Round(metrics.Scale * 100);
+        string scaleText = percent == 100 ? string.Empty : $"（縮放 {percent}%）";
+        ScreenResolutionInfo = $"目前螢幕解析度：{metrics.ScreenWidth} × {metrics.ScreenHeight}{scaleText}";
+        CurrentWindowSizeInfo = $"目前主視窗大小：{metrics.WindowWidth} × {metrics.WindowHeight}";
+    }
+
     public static string AppVersion => AppInfo.Version;
 
     public static string AppDescription => AppInfo.AppName;
@@ -116,6 +132,26 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     public static IReadOnlyList<string> ThemeModes => ThemeModesCache;
 
     partial void OnIsAutoUpdateEnabledChanged(bool value) => _settingsManager.SetAutoUpdateEnabled(value);
+
+    partial void OnIsAutoBackupBeforeStartEnabledChanged(bool value) => _settingsManager.SetAutoBackupBeforeStartEnabled(value);
+
+    partial void OnBackupRetentionCountChanged(double value)
+    {
+        if (double.IsNaN(value))
+        {
+            BackupRetentionCount = _settingsManager.GetBackupRetentionCount();
+            return;
+        }
+
+        int rounded = (int)Math.Clamp(Math.Round(value), ServerDefaults.MinBackupRetentionCount, ServerDefaults.MaxBackupRetentionCount);
+        if (rounded != value)
+        {
+            BackupRetentionCount = rounded;
+            return;
+        }
+
+        _settingsManager.SetBackupRetentionCount(rounded);
+    }
 
     partial void OnSelectedThemeModeIndexChanged(int value)
     {
@@ -134,6 +170,9 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     public void OpenGithub() => _launcher.OpenUrl(AppInfo.RepositoryUrl, isTrusted: true);
 
     [RelayCommand]
+    public void OpenLicense() => _launcher.OpenUrl(AppInfo.LicenseUrl, isTrusted: true);
+
+    [RelayCommand]
     private async Task CheckForUpdatesAsync()
     {
         try
@@ -150,14 +189,12 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         }
         catch (Exception ex)
         {
-            Logger.Warning(ex, "檢查更新失敗：{Message}", ex.Message);
+            Logger.Warning(ex, "檢查更新失敗");
             _ui.Notify($"檢查更新失敗：{ex.Message}", NotificationType.Error);
         }
     }
 
-    /// <summary>
-    /// 處理檢查更新結果：提示使用者更新，若使用者確認則執行安全下載驗證與重啟流程
-    /// </summary>
+    /// <summary>處理檢查更新結果：提示使用者更新，若使用者確認則執行安全下載驗證與重新啟動流程</summary>
     public async Task HandleUpdateResultAsync(UpdateCheckResult result, CancellationToken cancellationToken = default)
     {
         string cleanedNotes = CleanReleaseNotes(result.ReleaseNotes);
@@ -213,7 +250,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "主程式更新流程異常: {Message}", ex.Message);
+            Logger.Error(ex, "主程式更新流程失敗");
             bool fallback = await _ui.ConfirmAsync(
                 $"更新主程式失敗：{ex.Message}\n\n是否改為前往 GitHub 手動下載最新版本？",
                 "更新失敗",
@@ -291,6 +328,8 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         }
 
         IsAutoUpdateEnabled = true;
+        IsAutoBackupBeforeStartEnabled = false;
+        BackupRetentionCount = ServerDefaults.DefaultBackupRetentionCount;
         SelectedThemeModeIndex = 0;
         ResetAccentColor();
 

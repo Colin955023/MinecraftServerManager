@@ -12,7 +12,7 @@ using MinecraftServerManager.Infrastructure.Settings;
 namespace MinecraftServerManager.Infrastructure.Serialization;
 
 /// <summary>
-/// 應用程式集中管理的 System.Text.Json 源產生器（Source Generator）內容，
+/// 應用程式集中管理的 System.Text.Json 來源產生器（Source Generator）內容，
 /// 編譯期生成序列化中繼資料以達成零反射、低記憶體與高吞吐 JSON 處理。
 /// </summary>
 [JsonSourceGenerationOptions(
@@ -21,6 +21,8 @@ namespace MinecraftServerManager.Infrastructure.Serialization;
     PropertyNameCaseInsensitive = true,
     WriteIndented = false)]
 [JsonSerializable(typeof(UserSettings))]
+[JsonSerializable(typeof(List<Core.Ports.TrackedServerProcess>))]
+[JsonSerializable(typeof(Core.Ports.TrackedServerProcess))]
 [JsonSerializable(typeof(WindowPreferences))]
 [JsonSerializable(typeof(JavaCachePayload))]
 [JsonSerializable(typeof(JavaCacheEntry))]

@@ -4,9 +4,7 @@ using Microsoft.UI.Xaml.Input;
 
 namespace MinecraftServerManager.App.Controls;
 
-/// <summary>
-/// 為 ComboBox 提供滑鼠滾輪快速切換選項之附加屬性
-/// </summary>
+/// <summary>為 ComboBox 提供滑鼠滾輪快速切換選項之附加屬性</summary>
 public static class ComboBoxScrollHelper
 {
     public static readonly DependencyProperty EnableWheelScrollProperty =

@@ -1,26 +1,19 @@
 using System.Buffers;
 using System.Collections.Frozen;
 using System.Text;
+using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>
-/// 伺服器啟動腳本與指令安全性檢驗器
-/// </summary>
+/// <summary>伺服器啟動腳本與指令安全性檢驗器</summary>
 public static class SafeScriptValidator
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(SafeScriptValidator));
 
-    /// <summary>
-    /// 批次命令中嚴格禁止出現的危險字元（防範命令串接、管道、重新導向與逸出逃逸）
-    /// </summary>
     private static readonly SearchValues<char> StrictForbiddenBatchChars = SearchValues.Create("&|<>^\0");
 
-    /// <summary>
-    /// 合法 Java 執行檔名稱集合
-    /// </summary>
     private static readonly FrozenSet<string> ValidJavaExecutables = new[]
     {
         "java",
@@ -29,9 +22,9 @@ public static class SafeScriptValidator
         "javaw.exe"
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// 檢查 Java 執行檔路徑是否安全合規。
-    /// </summary>
+    /// <summary>純檔名是否為允許的 Java 執行檔名稱（java／javaw，含 .exe）</summary>
+    internal static bool IsJavaExecutableName(string fileName) => ValidJavaExecutables.Contains(fileName);
+
     internal static bool IsSafeJavaExecutable(string javaPath)
     {
         if (string.IsNullOrWhiteSpace(javaPath))
@@ -44,13 +37,13 @@ public static class SafeScriptValidator
             string fullPath = Path.GetFullPath(javaPath);
             if (!SafeFileSystem.FileExists(fullPath))
             {
-                Logger.Warning("Java 執行檔不存在：{Path}", fullPath);
+                Logger.Warning("Java 執行檔不存在: {Path}", fullPath);
                 return false;
             }
 
             if (SafeFileSystem.IsReparsePoint(fullPath))
             {
-                Logger.Warning("拒絕使用符號連結或 Reparse Point 之 Java 執行檔：{Path}", fullPath);
+                Logger.Warning("拒絕使用符號連結或 Reparse Point 之 Java 執行檔: {Path}", fullPath);
                 return false;
             }
 
@@ -59,14 +52,12 @@ public static class SafeScriptValidator
         }
         catch (Exception ex)
         {
-            Logger.Warning("檢驗 Java 執行檔時發生例外：{Message}", ex.Message);
+            Logger.Warning(ex, "檢驗 Java 執行檔時發生例外");
             return false;
         }
     }
 
-    /// <summary>
-    /// 驗證啟動參數所引用的 JAR 與引數檔（如 @args.txt）是否完全位於伺服器目錄內且非 Reparse Point。
-    /// </summary>
+    /// <summary>驗證啟動參數所引用的 JAR 與引數檔（如 @args.txt）是否完全位於伺服器目錄內且非 Reparse Point。</summary>
     public static bool ValidateCommandInputs(string serverDirectory, IReadOnlyList<string> arguments)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
@@ -98,19 +89,19 @@ public static class SafeScriptValidator
 
             if (!SafeFileSystem.IsPathWithin(stableServerDir, targetFullPath, strict: false))
             {
-                Logger.Warning("啟動參數引用之檔案路徑越界：{Target} (伺服器目錄: {ServerDir})", targetFullPath, stableServerDir);
+                Logger.Warning("啟動參數引用之檔案路徑超出邊界: {Target} (伺服器目錄: {ServerDir})", targetFullPath, stableServerDir);
                 return false;
             }
 
             if (SafeFileSystem.IsReparsePoint(targetFullPath))
             {
-                Logger.Warning("啟動參數引用之檔案為 Reparse Point：{Target}", targetFullPath);
+                Logger.Warning("啟動參數引用之檔案為 Reparse Point: {Target}", targetFullPath);
                 return false;
             }
 
             if (!SafeFileSystem.FileExists(targetFullPath))
             {
-                Logger.Warning("啟動參數引用之檔案不存在：{Target}", targetFullPath);
+                Logger.Warning("啟動參數引用之檔案不存在: {Target}", targetFullPath);
                 return false;
             }
         }
@@ -118,9 +109,7 @@ public static class SafeScriptValidator
         return true;
     }
 
-    /// <summary>
-    /// 檢查批次腳本內容是否安全合規（防範批次注入、路徑越界、任意命令執行）。
-    /// </summary>
+    /// <summary>檢查批次腳本內容是否安全合規（防範批次注入、路徑超出邊界、任意命令執行）。</summary>
     public static bool ValidateScriptContent(string scriptPath, string serverDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(scriptPath);
@@ -131,13 +120,13 @@ public static class SafeScriptValidator
 
         if (!SafeFileSystem.IsPathWithin(stableServerDir, fullScriptPath, strict: false))
         {
-            Logger.Warning("啟動腳本不在伺服器目錄內：{ScriptPath}", fullScriptPath);
+            Logger.Warning("啟動腳本不在伺服器目錄內: {ScriptPath}", fullScriptPath);
             return false;
         }
 
         if (SafeFileSystem.IsReparsePoint(fullScriptPath) || !SafeFileSystem.FileExists(fullScriptPath))
         {
-            Logger.Warning("啟動腳本不存在或為 Reparse Point：{ScriptPath}", fullScriptPath);
+            Logger.Warning("啟動腳本不存在或為 Reparse Point: {ScriptPath}", fullScriptPath);
             return false;
         }
 
@@ -158,38 +147,38 @@ public static class SafeScriptValidator
                     lineToCheck = safeStripped;
                 }
 
-                // 1. 禁止未受信任之命令串接、管道、重新導向與轉義符號（除上述安全的 chcp > nul 特例除外）
+                // 1. 禁止未受信任之命令串接、管線、重新導向與逸出符號（除上述安全的 chcp > nul 特例除外）
                 if (lineToCheck.AsSpan().ContainsAny(StrictForbiddenBatchChars))
                 {
-                    Logger.Warning("啟動腳本包含不安全之命令串接或重新導向字元：{Line}", line);
+                    Logger.Warning("啟動腳本包含不安全之命令串接或重新導向字元: {Line}", line);
                     return false;
                 }
 
                 // 2. 禁止延遲變數展開字元 !
                 if (lineToCheck.Contains('!'))
                 {
-                    Logger.Warning("啟動腳本包含延遲變數展開字元 !：{Line}", line);
+                    Logger.Warning("啟動腳本包含延遲變數展開字元 !: {Line}", line);
                     return false;
                 }
 
                 // 3. 檢查變數展開 %，僅允許相容之合法位置參數（例如 %*、%~dp0、%1 等）
                 if (HasUnsafePercentUsage(lineToCheck))
                 {
-                    Logger.Warning("啟動腳本包含未受信任之環境變數展開語法：{Line}", line);
+                    Logger.Warning("啟動腳本包含未受信任之環境變數展開語法: {Line}", line);
                     return false;
                 }
 
                 // 4. 防範路徑穿越
                 if (lineToCheck.Contains(".."))
                 {
-                    Logger.Warning("啟動腳本包含相對路徑穿越序列 ..：{Line}", line);
+                    Logger.Warning("啟動腳本包含相對路徑穿越序列 ..: {Line}", line);
                     return false;
                 }
 
                 // 5. 結構化指令格式白名單檢驗
                 if (!IsAllowedScriptCommand(lineToCheck))
                 {
-                    Logger.Warning("啟動腳本包含未受信任之指令：{Line}", line);
+                    Logger.Warning("啟動腳本包含未受信任之指令: {Line}", line);
                     return false;
                 }
             }
@@ -198,14 +187,11 @@ public static class SafeScriptValidator
         }
         catch (Exception ex)
         {
-            Logger.Warning("讀取啟動腳本失敗：{Message}", ex.Message);
+            Logger.Warning(ex, "讀取啟動腳本失敗");
             return false;
         }
     }
 
-    /// <summary>
-    /// 判斷行是否以指定批次命令字起始（後面須為行尾或空白，避免 echoevil 誤判為 echo）
-    /// </summary>
     private static bool IsCommandWord(string line, string word) =>
         line.StartsWith(word, StringComparison.OrdinalIgnoreCase) && (line.Length == word.Length || char.IsWhiteSpace(line[word.Length]));
 
@@ -268,10 +254,16 @@ public static class SafeScriptValidator
             {
                 try
                 {
+                    if (SafeFileSystem.FileExists(exePath) && SafeFileSystem.IsReparsePoint(exePath))
+                    {
+                        return false;
+                    }
+
                     string fileName = Path.GetFileName(exePath);
                     if (ValidJavaExecutables.Contains(fileName))
                     {
-                        return true;
+                        // Java 路徑合規後仍須排除可執行任意外部命令的 JVM 選項（不需要 & | 等字元即可生效）
+                        return !JvmOptionPolicy.ContainsCommandExecutionOption(line);
                     }
                 }
                 catch (ArgumentException)
@@ -389,9 +381,6 @@ public static class SafeScriptValidator
         return false;
     }
 
-    /// <summary>
-    /// 檢查並安全剝離合規的字碼頁切換重導向（如 chcp 65001 > nul），確保其通過後續安全性檢驗。
-    /// </summary>
     private static bool TryStripSafeChcpNulRedirection(string line, out string strippedLine)
     {
         strippedLine = line;

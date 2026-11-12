@@ -5,9 +5,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Logging;
 
-/// <summary>
-/// 記錄敏感資訊遮罩工具
-/// </summary>
+/// <summary>記錄敏感資訊遮罩工具</summary>
 public static partial class LogDataMasker
 {
     private const string MaskReplacement = "***";
@@ -23,9 +21,7 @@ public static partial class LogDataMasker
     [GeneratedRegex(@"(?i)(bearer\s+)[a-zA-Z0-9_\-\.]+")]
     private static partial Regex BearerTokenRegex();
 
-    /// <summary>
-    /// 遮罩字串中潛在的敏感資訊（密碼、token、金鑰等）
-    /// </summary>
+    /// <summary>遮罩字串中潛在的敏感資訊（密碼、token、金鑰等）</summary>
     public static string Mask(string? message)
     {
         if (string.IsNullOrEmpty(message))
@@ -36,14 +32,9 @@ public static partial class LogDataMasker
         string masked = message;
         if (!string.IsNullOrEmpty(CachedUserProfile))
         {
-            if (masked.Contains(CachedUserProfile, StringComparison.OrdinalIgnoreCase))
-            {
-                masked = masked.Replace(CachedUserProfile, "~", StringComparison.OrdinalIgnoreCase);
-            }
-            if (masked.Contains(CachedUserProfileSlash, StringComparison.OrdinalIgnoreCase))
-            {
-                masked = masked.Replace(CachedUserProfileSlash, "~", StringComparison.OrdinalIgnoreCase);
-            }
+            masked = masked
+                .Replace(CachedUserProfile, "~", StringComparison.OrdinalIgnoreCase)
+                .Replace(CachedUserProfileSlash, "~", StringComparison.OrdinalIgnoreCase);
         }
 
         if (!MayContainSensitiveData(masked))
@@ -51,20 +42,8 @@ public static partial class LogDataMasker
             return masked;
         }
 
-        masked = SensitiveKeyValueRegex().Replace(masked, static match =>
-        {
-            string key = match.Groups[1].Value;
-            string delimiter = match.Groups[2].Value;
-            return $"{key}{delimiter}{MaskReplacement}";
-        });
-
-        masked = BearerTokenRegex().Replace(masked, static match =>
-        {
-            string prefix = match.Groups[1].Value;
-            return $"{prefix}{MaskReplacement}";
-        });
-
-        return masked;
+        masked = SensitiveKeyValueRegex().Replace(masked, "$1$2" + MaskReplacement);
+        return BearerTokenRegex().Replace(masked, "$1" + MaskReplacement);
     }
 
     private static bool MayContainSensitiveData(string text) =>

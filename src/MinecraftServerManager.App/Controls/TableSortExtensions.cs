@@ -6,9 +6,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.Controls;
 
-/// <summary>
-/// 表格欄位名稱對應排序鍵選擇器之唯讀對照表（不分大小寫）
-/// </summary>
+/// <summary>表格欄位名稱對應排序鍵選擇器之唯讀對照表（不分大小寫）</summary>
 public sealed class SortKeyMap<T>
 {
     private readonly FrozenDictionary<string, Func<T, object?>> _selectors;
@@ -20,9 +18,7 @@ public sealed class SortKeyMap<T>
         _selectors = entries.ToFrozenDictionary(static e => e.Column, static e => e.Selector, StringComparer.OrdinalIgnoreCase);
     }
 
-    /// <summary>
-    /// 登錄排序鍵非顯示文字之欄位（如原始位元組數）所對應的顯示文字選擇器，供自動欄寬計算
-    /// </summary>
+    /// <summary>登錄排序鍵非顯示文字之欄位（如原始位元組數）所對應的顯示文字選擇器，供自動欄寬計算</summary>
     public SortKeyMap<T> WithDisplay(params (string Column, Func<T, string?> Display)[] entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
@@ -30,9 +26,7 @@ public sealed class SortKeyMap<T>
         return this;
     }
 
-    /// <summary>
-    /// 取得指定欄位各列之顯示文字：優先使用顯示文字選擇器，否則採字串型別之排序鍵，其餘欄位僅以表頭文字計算
-    /// </summary>
+    /// <summary>取得指定欄位各列之顯示文字：優先使用顯示文字選擇器，否則採字串型別之排序鍵，其餘欄位僅以表頭文字計算</summary>
     public IEnumerable<string?> GetDisplayTexts(IEnumerable<T> items, string column)
     {
         if (_displays.TryGetValue(column, out var display))
@@ -43,9 +37,7 @@ public sealed class SortKeyMap<T>
         return TryGetSelector(column, out var selector) ? items.Select(item => selector(item) as string) : [];
     }
 
-    /// <summary>
-    /// 取得指定欄位之排序鍵選擇器
-    /// </summary>
+    /// <summary>取得指定欄位之排序鍵選擇器</summary>
     public bool TryGetSelector(string column, out Func<T, object?> selector)
     {
         if (!string.IsNullOrEmpty(column) && _selectors.TryGetValue(column, out var found))
@@ -59,16 +51,12 @@ public sealed class SortKeyMap<T>
     }
 }
 
-/// <summary>
-/// 表格欄位排序的唯一共用入口：以型別化排序鍵與 Windows 自然排序規則重新排列可觀察集合
-/// </summary>
+/// <summary>表格欄位排序的唯一共用入口：以型別化排序鍵與 Windows 自然排序規則重新排列可觀察集合</summary>
 public static class TableSortExtensions
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(TableSortExtensions));
 
-    /// <summary>
-    /// 依欄位名稱與方向排序集合；BulkObservableCollection 以單次 Reset 通知整批替換。欄位未登錄時不排序並記錄警告
-    /// </summary>
+    /// <summary>依欄位名稱與方向排序集合；BulkObservableCollection 以單次 Reset 通知整批替換。欄位未登錄時不排序並記錄警告</summary>
     public static void SortBy<T>(this ObservableCollection<T> items, SortKeyMap<T> keys, string column, ListSortDirection direction)
     {
         ArgumentNullException.ThrowIfNull(items);
@@ -100,9 +88,7 @@ public static class TableSortExtensions
         }
     }
 
-    /// <summary>
-    /// 表頭點兩下自動欄寬的唯一共用入口：依欄位顯示文字對齊最寬項目；集合為空時不調整
-    /// </summary>
+    /// <summary>表頭按兩下自動欄寬的唯一共用入口：依欄位顯示文字對齊最寬項目；集合為空時不調整</summary>
     public static void AutoFit<T>(this SortableTableHeader header, IReadOnlyCollection<T> items, SortKeyMap<T> keys)
     {
         ArgumentNullException.ThrowIfNull(header);
@@ -114,9 +100,7 @@ public static class TableSortExtensions
         }
     }
 
-    /// <summary>
-    /// 依表頭排序事件參數排序集合
-    /// </summary>
+    /// <summary>依表頭排序事件參數排序集合</summary>
     public static void SortBy<T>(this ObservableCollection<T> items, SortKeyMap<T> keys, SortRequestedEventArgs request)
     {
         ArgumentNullException.ThrowIfNull(request);

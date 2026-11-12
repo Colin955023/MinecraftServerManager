@@ -7,9 +7,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Logging;
 
-/// <summary>
-/// 提供單檔上限 10 MiB 輪替與最多 10 檔保留之檔案記錄器提供者
-/// </summary>
+/// <summary>提供單檔上限 10 MiB 輪替與最多 10 檔保留之檔案記錄器提供者</summary>
 public sealed class RotatingFileLoggerProvider : ILoggerProvider
 {
     private readonly RotatingFileLoggerOptions _options;
@@ -27,9 +25,7 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider
         InitializeWriter();
     }
 
-    /// <summary>
-    /// 目前寫入中的記錄檔完整路徑；初始化失敗時為空字串
-    /// </summary>
+    /// <summary>目前寫入中的記錄檔完整路徑；初始化失敗時為空字串</summary>
     internal string CurrentFilePath
     {
         get

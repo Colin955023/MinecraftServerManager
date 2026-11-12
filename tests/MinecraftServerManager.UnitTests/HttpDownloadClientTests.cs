@@ -40,143 +40,113 @@ public sealed class HttpDownloadClientTests
     [Fact]
     public async Task DownloadStreamsToAtomicTargetAndReportsProgress()
     {
-        string root = CreateTemporaryDirectory();
-        try
+        using var rootTemp = new TempDirectory("msm-http-");
+        string root = rootTemp.FullName;
+        string target = Path.Combine(root, "download.bin");
+        var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            string target = Path.Combine(root, "download.bin");
-            var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new ByteArrayContent("下載內容"u8.ToArray()),
-            });
-            using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client);
-            var progress = new List<HttpProgress>();
+            Content = new ByteArrayContent("下載內容"u8.ToArray()),
+        });
+        using var client = new HttpClient(handler);
+        var downloader = new HttpDownloadClient(client);
+        var progress = new List<HttpProgress>();
 
-            var result = await downloader.DownloadAsync(
-                new Uri("https://example.com/file"),
-                target,
-                new HttpDownloadOptions { MaxBytes = 1024 },
-                new SyncProgress<HttpProgress>(progress.Add));
+        var result = await downloader.DownloadAsync(
+            new Uri("https://example.com/file"),
+            target,
+            new HttpDownloadOptions { MaxBytes = 1024 },
+            new SyncProgress<HttpProgress>(progress.Add));
 
-            Assert.True(result.Success);
-            Assert.Equal("下載內容", File.ReadAllText(target));
-            Assert.NotEmpty(progress);
-            Assert.Equal(result.BytesProcessed, progress[^1].BytesDownloaded);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        Assert.True(result.Success);
+        Assert.Equal("下載內容", File.ReadAllText(target));
+        Assert.NotEmpty(progress);
+        Assert.Equal(result.BytesProcessed, progress[^1].BytesDownloaded);
     }
 
     [Fact]
     public async Task DownloadRejectsOversizedResponseWithoutOverwritingTarget()
     {
-        string root = CreateTemporaryDirectory();
-        try
+        using var rootTemp = new TempDirectory("msm-http-");
+        string root = rootTemp.FullName;
+        string target = Path.Combine(root, "download.bin");
+        File.WriteAllText(target, "保留內容");
+        var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            string target = Path.Combine(root, "download.bin");
-            File.WriteAllText(target, "保留內容");
-            var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new ByteArrayContent("太大的內容"u8.ToArray()),
-            });
-            using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client);
+            Content = new ByteArrayContent("太大的內容"u8.ToArray()),
+        });
+        using var client = new HttpClient(handler);
+        var downloader = new HttpDownloadClient(client);
 
-            var result = await downloader.DownloadAsync(
-                new Uri("https://example.com/file"),
-                target,
-                new HttpDownloadOptions { MaxBytes = 1 });
+        var result = await downloader.DownloadAsync(
+            new Uri("https://example.com/file"),
+            target,
+            new HttpDownloadOptions { MaxBytes = 1 });
 
-            Assert.False(result.Success);
-            Assert.Equal("保留內容", File.ReadAllText(target));
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        Assert.False(result.Success);
+        Assert.Equal("保留內容", File.ReadAllText(target));
     }
 
     [Fact]
     public async Task DownloadAllowsCompressedResponseContentSafely()
     {
-        string root = CreateTemporaryDirectory();
-        try
+        using var rootTemp = new TempDirectory("msm-http-");
+        string root = rootTemp.FullName;
+        string target = Path.Combine(root, "download.bin");
+        var content = new ByteArrayContent("解壓縮後的內容"u8.ToArray());
+        content.Headers.ContentEncoding.Add("gzip");
+        var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            string target = Path.Combine(root, "download.bin");
-            var content = new ByteArrayContent("解壓縮後的內容"u8.ToArray());
-            content.Headers.ContentEncoding.Add("gzip");
-            var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = content,
-            });
-            using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client);
+            Content = content,
+        });
+        using var client = new HttpClient(handler);
+        var downloader = new HttpDownloadClient(client);
 
-            var result = await downloader.DownloadAsync(
-                new Uri("https://example.com/file"),
-                target,
-                new HttpDownloadOptions { MaxBytes = 1024 });
+        var result = await downloader.DownloadAsync(
+            new Uri("https://example.com/file"),
+            target,
+            new HttpDownloadOptions { MaxBytes = 1024 });
 
-            Assert.True(result.Success);
-            Assert.Equal("解壓縮後的內容", File.ReadAllText(target));
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        Assert.True(result.Success);
+        Assert.Equal("解壓縮後的內容", File.ReadAllText(target));
     }
 
     [Fact]
     public async Task DownloadRetriesTransientStatus()
     {
-        string root = CreateTemporaryDirectory();
-        try
-        {
-            string target = Path.Combine(root, "download.bin");
-            var handler = new QueueHandler(
-                new HttpResponseMessage(HttpStatusCode.ServiceUnavailable),
-                new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent("完成"u8.ToArray()) });
-            using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client);
+        using var rootTemp = new TempDirectory("msm-http-");
+        string root = rootTemp.FullName;
+        string target = Path.Combine(root, "download.bin");
+        var handler = new QueueHandler(
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable),
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent("完成"u8.ToArray()) });
+        using var client = new HttpClient(handler);
+        var downloader = new HttpDownloadClient(client);
 
-            var result = await downloader.DownloadAsync(
-                new Uri("https://example.com/file"),
-                target,
-                new HttpDownloadOptions { MaxAttempts = 2, RetryDelay = TimeSpan.Zero });
+        var result = await downloader.DownloadAsync(
+            new Uri("https://example.com/file"),
+            target,
+            new HttpDownloadOptions { MaxAttempts = 2, RetryDelay = TimeSpan.Zero });
 
-            Assert.True(result.Success);
-            Assert.Equal(2, handler.RequestCount);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        Assert.True(result.Success);
+        Assert.Equal(2, handler.RequestCount);
     }
 
     [Fact]
     public async Task DownloadRejectsUnsafeRedirect()
     {
-        string root = CreateTemporaryDirectory();
-        try
-        {
-            string target = Path.Combine(root, "download.bin");
-            var redirect = new HttpResponseMessage(HttpStatusCode.Found);
-            redirect.Headers.Location = new Uri("http://example.com/file");
-            var handler = new QueueHandler(redirect);
-            using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client);
+        using var rootTemp = new TempDirectory("msm-http-");
+        string root = rootTemp.FullName;
+        string target = Path.Combine(root, "download.bin");
+        var redirect = new HttpResponseMessage(HttpStatusCode.Found);
+        redirect.Headers.Location = new Uri("http://example.com/file");
+        var handler = new QueueHandler(redirect);
+        using var client = new HttpClient(handler);
+        var downloader = new HttpDownloadClient(client);
 
-            var result = await downloader.DownloadAsync(new Uri("https://example.com/file"), target);
+        var result = await downloader.DownloadAsync(new Uri("https://example.com/file"), target);
 
-            Assert.False(result.Success);
-            Assert.Equal(1, handler.RequestCount);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        Assert.False(result.Success);
+        Assert.Equal(1, handler.RequestCount);
     }
 
     [Fact]
@@ -329,32 +299,26 @@ public sealed class HttpDownloadClientTests
     [Fact]
     public async Task IHttpPortDownloadAsyncBridgesCorrectly()
     {
-        string root = CreateTemporaryDirectory();
-        try
+        using var rootTemp = new TempDirectory("msm-http-");
+        string root = rootTemp.FullName;
+        string target = Path.Combine(root, "port_download.bin");
+        var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            string target = Path.Combine(root, "port_download.bin");
-            var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new ByteArrayContent("介面下載"u8.ToArray()),
-            });
-            using var client = new HttpClient(handler);
-            IHttpPort http = new HttpDownloadClient(client);
-            var progressReports = new List<HttpProgress>();
+            Content = new ByteArrayContent("介面下載"u8.ToArray()),
+        });
+        using var client = new HttpClient(handler);
+        IHttpPort http = new HttpDownloadClient(client);
+        var progressReports = new List<HttpProgress>();
 
-            var result = await http.DownloadAsync(
-                new Uri("https://example.com/port-file"),
-                target,
-                new SyncProgress<HttpProgress>(progressReports.Add));
+        var result = await http.DownloadAsync(
+            new Uri("https://example.com/port-file"),
+            target,
+            new SyncProgress<HttpProgress>(progressReports.Add));
 
-            Assert.True(result.Success);
-            Assert.Equal("介面下載", File.ReadAllText(target));
-            Assert.NotEmpty(progressReports);
-            Assert.Equal(result.BytesProcessed, progressReports[^1].BytesDownloaded);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        Assert.True(result.Success);
+        Assert.Equal("介面下載", File.ReadAllText(target));
+        Assert.NotEmpty(progressReports);
+        Assert.Equal(result.BytesProcessed, progressReports[^1].BytesDownloaded);
     }
 
     [Fact]
@@ -399,9 +363,10 @@ public sealed class HttpDownloadClientTests
         using var client = new HttpClient(handler);
         var http = new HttpDownloadClient(client);
 
-        string? response = await http.PostJsonAsync(new Uri("https://127.0.0.1/api"), "{}");
+        string? response = await http.PostJsonAsync(new Uri("https://example.com/api"), "{}");
 
         Assert.Null(response);
+        Assert.Equal(1, handler.RequestCount);
     }
 
     [Fact]
@@ -416,32 +381,27 @@ public sealed class HttpDownloadClientTests
         using var client = new HttpClient(handler);
         var http = new HttpDownloadClient(client);
 
-        string? response = await http.PostJsonAsync(new Uri("https://127.0.0.1/api"), "{}");
+        string? response = await http.PostJsonAsync(new Uri("https://example.com/api"), "{}");
 
         Assert.Null(response);
+        Assert.Equal(1, handler.RequestCount);
     }
 
     [Fact]
     public async Task DownloadRejectsIPv6LoopbackAndPrivateIp()
     {
-        string root = CreateTemporaryDirectory();
-        try
-        {
-            string target = Path.Combine(root, "file.bin");
-            var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK));
-            using var client = new HttpClient(handler);
-            var http = new HttpDownloadClient(client);
+        using var rootTemp = new TempDirectory("msm-http-");
+        string root = rootTemp.FullName;
+        string target = Path.Combine(root, "file.bin");
+        var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK));
+        using var client = new HttpClient(handler);
+        var http = new HttpDownloadClient(client);
 
-            var exception = await Assert.ThrowsAsync<HttpSecurityException>(() =>
-                http.DownloadAsync(new Uri("https://[::1]/download"), target));
+        var exception = await Assert.ThrowsAsync<HttpSecurityException>(() =>
+            http.DownloadAsync(new Uri("https://[::1]/download"), target));
 
-            Assert.Contains("非公開", exception.Message);
-            Assert.Equal(0, handler.RequestCount);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        Assert.Contains("非公開", exception.Message);
+        Assert.Equal(0, handler.RequestCount);
     }
 
     [Fact]
@@ -485,179 +445,142 @@ public sealed class HttpDownloadClientTests
     [Fact]
     public async Task DownloadResumesFromExistingPartialFileWhenServerReturns206()
     {
-        string root = CreateTemporaryDirectory();
-        try
+        using var rootTemp = new TempDirectory("msm-http-");
+        string root = rootTemp.FullName;
+        string target = Path.Combine(root, "download.bin");
+        string partial = target + ".part";
+        await File.WriteAllTextAsync(partial, "Part1");
+
+        var response = new HttpResponseMessage(HttpStatusCode.PartialContent)
         {
-            string target = Path.Combine(root, "download.bin");
-            string partial = target + ".part";
-            await File.WriteAllTextAsync(partial, "Part1");
+            Content = new ByteArrayContent("Part2"u8.ToArray()),
+        };
+        response.Content.Headers.ContentRange = new System.Net.Http.Headers.ContentRangeHeaderValue(5, 9, 10);
 
-            var response = new HttpResponseMessage(HttpStatusCode.PartialContent)
-            {
-                Content = new ByteArrayContent("Part2"u8.ToArray()),
-            };
-            response.Content.Headers.ContentRange = new System.Net.Http.Headers.ContentRangeHeaderValue(5, 9, 10);
+        var handler = new QueueHandler(response);
+        using var client = new HttpClient(handler);
+        var downloader = new HttpDownloadClient(client);
 
-            var handler = new QueueHandler(response);
-            using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client);
+        // 跨呼叫續傳須有預期雜湊可驗證最終結果
+        var result = await downloader.DownloadAsync(
+            new Uri("https://example.com/file"),
+            target,
+            expectedHash: Convert.ToHexStringLower(SHA256.HashData("Part1Part2"u8)));
 
-            // 跨呼叫續傳須有預期雜湊可驗證最終結果
-            var result = await downloader.DownloadAsync(
-                new Uri("https://example.com/file"),
-                target,
-                expectedHash: Convert.ToHexStringLower(SHA256.HashData("Part1Part2"u8)));
-
-            Assert.True(result.Success);
-            Assert.Equal("Part1Part2", await File.ReadAllTextAsync(target));
-            Assert.NotNull(handler.LastRequest?.Headers.Range);
-            Assert.Equal(5, handler.LastRequest!.Headers.Range!.Ranges.First().From);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        Assert.True(result.Success);
+        Assert.Equal("Part1Part2", await File.ReadAllTextAsync(target));
+        Assert.NotNull(handler.LastRequest?.Headers.Range);
+        Assert.Equal(5, handler.LastRequest!.Headers.Range!.Ranges.First().From);
     }
 
     [Fact]
     public async Task DownloadFallsBackToFullDownloadWhenServerReturns200ForRangeRequest()
     {
-        string root = CreateTemporaryDirectory();
-        try
+        using var rootTemp = new TempDirectory("msm-http-");
+        string root = rootTemp.FullName;
+        string target = Path.Combine(root, "download.bin");
+        string partial = target + ".part";
+        await File.WriteAllTextAsync(partial, "OldCorruptContent");
+
+        var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            string target = Path.Combine(root, "download.bin");
-            string partial = target + ".part";
-            await File.WriteAllTextAsync(partial, "OldCorruptContent");
+            Content = new ByteArrayContent("FreshFullContent"u8.ToArray()),
+        });
+        using var client = new HttpClient(handler);
+        var downloader = new HttpDownloadClient(client);
 
-            var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new ByteArrayContent("FreshFullContent"u8.ToArray()),
-            });
-            using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client);
+        var result = await downloader.DownloadAsync(
+            new Uri("https://example.com/file"),
+            target);
 
-            var result = await downloader.DownloadAsync(
-                new Uri("https://example.com/file"),
-                target);
-
-            Assert.True(result.Success);
-            Assert.Equal("FreshFullContent", await File.ReadAllTextAsync(target));
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        Assert.True(result.Success);
+        Assert.Equal("FreshFullContent", await File.ReadAllTextAsync(target));
     }
 
     [Fact]
     public async Task DownloadResetsTemporaryFileWhenServerReturns416()
     {
-        string root = CreateTemporaryDirectory();
-        try
-        {
-            string target = Path.Combine(root, "download.bin");
-            string partial = target + ".part";
-            await File.WriteAllTextAsync(partial, "StaleBytes");
+        using var rootTemp = new TempDirectory("msm-http-");
+        string root = rootTemp.FullName;
+        string target = Path.Combine(root, "download.bin");
+        string partial = target + ".part";
+        await File.WriteAllTextAsync(partial, "StaleBytes");
 
-            var handler = new QueueHandler(
-                new HttpResponseMessage(HttpStatusCode.RequestedRangeNotSatisfiable),
-                new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent("FreshData"u8.ToArray()) });
-            using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client);
+        var handler = new QueueHandler(
+            new HttpResponseMessage(HttpStatusCode.RequestedRangeNotSatisfiable),
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent("FreshData"u8.ToArray()) });
+        using var client = new HttpClient(handler);
+        var downloader = new HttpDownloadClient(client);
 
-            var result = await downloader.DownloadAsync(
-                new Uri("https://example.com/file"),
-                target,
-                new HttpDownloadOptions { MaxAttempts = 2, RetryDelay = TimeSpan.Zero });
+        var result = await downloader.DownloadAsync(
+            new Uri("https://example.com/file"),
+            target,
+            new HttpDownloadOptions { MaxAttempts = 2, RetryDelay = TimeSpan.Zero });
 
-            Assert.True(result.Success);
-            Assert.Equal("FreshData", await File.ReadAllTextAsync(target));
-            Assert.Equal(2, handler.RequestCount);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        Assert.True(result.Success);
+        Assert.Equal("FreshData", await File.ReadAllTextAsync(target));
+        Assert.Equal(2, handler.RequestCount);
     }
 
     [Fact]
     public async Task DownloadDiscardsStalePartialFileWhenNoExpectedHash()
     {
-        string root = CreateTemporaryDirectory();
-        try
+        using var rootTemp = new TempDirectory("msm-http-");
+        string root = rootTemp.FullName;
+        string target = Path.Combine(root, "download.bin");
+        await File.WriteAllTextAsync(target + ".part", "StaleBytes");
+
+        var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            string target = Path.Combine(root, "download.bin");
-            await File.WriteAllTextAsync(target + ".part", "StaleBytes");
+            Content = new ByteArrayContent("FreshContent"u8.ToArray()),
+        });
+        using var client = new HttpClient(handler);
+        var downloader = new HttpDownloadClient(client);
 
-            var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new ByteArrayContent("FreshContent"u8.ToArray()),
-            });
-            using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client);
+        var result = await downloader.DownloadAsync(new Uri("https://example.com/file"), target);
 
-            var result = await downloader.DownloadAsync(new Uri("https://example.com/file"), target);
-
-            Assert.True(result.Success);
-            Assert.Equal("FreshContent", await File.ReadAllTextAsync(target));
-            Assert.Null(handler.LastRequest?.Headers.Range);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        Assert.True(result.Success);
+        Assert.Equal("FreshContent", await File.ReadAllTextAsync(target));
+        Assert.Null(handler.LastRequest?.Headers.Range);
     }
 
     [Fact]
     public async Task DownloadDiscardsPartialFileWhenETagChanges()
     {
-        string root = CreateTemporaryDirectory();
-        try
+        using var rootTemp = new TempDirectory("msm-http-");
+        string root = rootTemp.FullName;
+        string target = Path.Combine(root, "download.bin");
+        string partial = target + ".part";
+        await File.WriteAllTextAsync(partial, "OldVersionPart");
+
+        var initialResponse = new HttpResponseMessage(HttpStatusCode.PartialContent)
         {
-            string target = Path.Combine(root, "download.bin");
-            string partial = target + ".part";
-            await File.WriteAllTextAsync(partial, "OldVersionPart");
+            Content = new ByteArrayContent("MoreOldVersion"u8.ToArray()),
+        };
+        initialResponse.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"v2\"");
 
-            var initialResponse = new HttpResponseMessage(HttpStatusCode.PartialContent)
-            {
-                Content = new ByteArrayContent("MoreOldVersion"u8.ToArray()),
-            };
-            initialResponse.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"v2\"");
-
-            var fallbackResponse = new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new ByteArrayContent("BrandNewVersionContent"u8.ToArray()),
-            };
-            fallbackResponse.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"v2\"");
-
-            // 第一次用 429 記住 v1
-            var rateLimited = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
-            rateLimited.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"v1\"");
-
-            var handler = new QueueHandler(rateLimited, initialResponse, fallbackResponse);
-            using var client = new HttpClient(handler);
-            var downloader = new HttpDownloadClient(client);
-
-            var result = await downloader.DownloadAsync(
-                new Uri("https://example.com/file"),
-                target,
-                new HttpDownloadOptions { MaxAttempts = 3, RetryDelay = TimeSpan.Zero },
-                expectedHash: Convert.ToHexStringLower(SHA256.HashData("BrandNewVersionContent"u8)));
-
-            Assert.True(result.Success);
-            Assert.Equal("BrandNewVersionContent", await File.ReadAllTextAsync(target));
-        }
-        finally
+        var fallbackResponse = new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Directory.Delete(root, recursive: true);
-        }
-    }
+            Content = new ByteArrayContent("BrandNewVersionContent"u8.ToArray()),
+        };
+        fallbackResponse.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"v2\"");
 
-    private static string CreateTemporaryDirectory()
-    {
-        string path = Path.Combine(Path.GetTempPath(), "msm-http-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(path);
-        return path;
+        // 第一次用 429 記住 v1
+        var rateLimited = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+        rateLimited.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"v1\"");
+
+        var handler = new QueueHandler(rateLimited, initialResponse, fallbackResponse);
+        using var client = new HttpClient(handler);
+        var downloader = new HttpDownloadClient(client);
+
+        var result = await downloader.DownloadAsync(
+            new Uri("https://example.com/file"),
+            target,
+            new HttpDownloadOptions { MaxAttempts = 3, RetryDelay = TimeSpan.Zero },
+            expectedHash: Convert.ToHexStringLower(SHA256.HashData("BrandNewVersionContent"u8)));
+
+        Assert.True(result.Success);
+        Assert.Equal("BrandNewVersionContent", await File.ReadAllTextAsync(target));
     }
 
     private sealed partial class QueueHandler(params HttpResponseMessage[] responses) : HttpMessageHandler

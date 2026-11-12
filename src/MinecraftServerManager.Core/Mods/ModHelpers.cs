@@ -5,9 +5,7 @@ using MinecraftServerManager.Domain.Mods;
 
 namespace MinecraftServerManager.Core.Mods;
 
-/// <summary>
-/// 模組檔名與識別字輔助工具
-/// </summary>
+/// <summary>模組檔名與識別字輔助工具</summary>
 public static partial class ModHelpers
 {
     public const string PreferredHashAlgorithm = "sha512";
@@ -15,32 +13,22 @@ public static partial class ModHelpers
     public const string DisabledModExtension = ".jar.disabled";
     private static readonly SearchValues<char> FormattingChars = SearchValues.Create("\x1B§\\");
 
-    /// <summary>
-    /// 判斷檔名是否以 .jar 結尾（不分大小寫）
-    /// </summary>
+    /// <summary>判斷檔名是否以 .jar 結尾（不分大小寫）</summary>
     public static bool IsJarFileName(ReadOnlySpan<char> fileName) =>
         fileName.EndsWith(JarExtension, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// 判斷檔名是否為已停用模組（.jar.disabled）
-    /// </summary>
+    /// <summary>判斷檔名是否為已停用模組（.jar.disabled）</summary>
     public static bool IsDisabledModFileName(ReadOnlySpan<char> fileName) =>
         fileName.EndsWith(DisabledModExtension, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// 判斷檔名是否為模組檔案（啟用中 .jar 或已停用 .jar.disabled）
-    /// </summary>
+    /// <summary>判斷檔名是否為模組檔案（啟用中 .jar 或已停用 .jar.disabled）</summary>
     public static bool IsModFileName(ReadOnlySpan<char> fileName) =>
         IsJarFileName(fileName) || IsDisabledModFileName(fileName);
 
-    /// <summary>
-    /// 由模組檔名主幹組成啟用中模組檔名（stem.jar）
-    /// </summary>
+    /// <summary>由模組檔名主幹組成啟用中模組檔名（stem.jar）</summary>
     public static string ToEnabledModFileName(ReadOnlySpan<char> stem) => string.Concat(stem, JarExtension);
 
-    /// <summary>
-    /// 由模組檔名主幹組成已停用模組檔名（stem.jar.disabled）
-    /// </summary>
+    /// <summary>由模組檔名主幹組成已停用模組檔名（stem.jar.disabled）</summary>
     public static string ToDisabledModFileName(ReadOnlySpan<char> stem) => string.Concat(stem, DisabledModExtension);
 
     public static string ModFilenameStem(string? filename) =>
@@ -60,9 +48,7 @@ public static partial class ModHelpers
         return raw;
     }
 
-    /// <summary>
-    /// 從線上模組檔案中挑選最佳雜湊值（優先 sha512，次選 sha1）並回傳對應演算法名稱。
-    /// </summary>
+    /// <summary>從線上模組檔案中挑選最佳雜湊值（優先 sha512，次選 sha1）並回傳對應演算法名稱。</summary>
     public static string? ResolveHash(ModFile? file, out string algorithm)
     {
         algorithm = PreferredHashAlgorithm;
@@ -86,12 +72,17 @@ public static partial class ModHelpers
         return null;
     }
 
+    /// <summary>目前雜湊是否與線上檔案的 sha512 或 sha1 任一相符（不分大小寫）。</summary>
+    public static bool HashMatches(ModFile? file, string? currentHash) =>
+        !string.IsNullOrWhiteSpace(currentHash) &&
+        file?.Hashes is { } hashes &&
+        ((hashes.TryGetValue("sha512", out string? sha512) && string.Equals(currentHash, sha512, StringComparison.OrdinalIgnoreCase)) ||
+         (hashes.TryGetValue("sha1", out string? sha1) && string.Equals(currentHash, sha1, StringComparison.OrdinalIgnoreCase)));
+
     public static string NormalizeIdentifier(string? value) =>
         (value ?? string.Empty).Trim().ToLowerInvariant();
 
-    /// <summary>
-    /// 清除字串中的 ANSI 跳脫序列（CSI、OSC、2-char ESC）以及 Minecraft 格式化代碼（§、\u00a7、Hex 格式）
-    /// </summary>
+    /// <summary>清除字串中的 ANSI 跳脫序列（CSI、OSC、2-char ESC）以及 Minecraft 格式化代碼（§、\u00a7、Hex 格式）</summary>
     public static string StripColorAndFormattingCodes(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))

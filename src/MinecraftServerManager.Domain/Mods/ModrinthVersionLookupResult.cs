@@ -1,8 +1,6 @@
 namespace MinecraftServerManager.Domain.Mods;
 
-/// <summary>
-/// 以檔案雜湊查詢遠端模組平台版本之結果
-/// </summary>
+/// <summary>以檔案雜湊查詢遠端模組平台版本之結果</summary>
 public sealed record ModrinthVersionLookupResult
 {
     public string Algorithm { get; }

@@ -53,7 +53,7 @@
             <StackPanel Orientation="Horizontal"
               VerticalAlignment="Center"
               Spacing="12">
-              <controls:ColorIcon Source="{StaticResource IconCreateServer}"
+              <ContentPresenter ContentTemplate="{StaticResource IconCreateServer}"
                 Width="18"
                 Height="18"
                 VerticalAlignment="Center" />
@@ -70,7 +70,7 @@
             <StackPanel Orientation="Horizontal"
               VerticalAlignment="Center"
               Spacing="12">
-              <controls:ColorIcon Source="{StaticResource IconManageServer}"
+              <ContentPresenter ContentTemplate="{StaticResource IconManageServer}"
                 Width="18"
                 Height="18"
                 VerticalAlignment="Center" />
@@ -87,7 +87,7 @@
             <StackPanel Orientation="Horizontal"
               VerticalAlignment="Center"
               Spacing="12">
-              <controls:ColorIcon Source="{StaticResource IconMods}"
+              <ContentPresenter ContentTemplate="{StaticResource IconMods}"
                 Width="18"
                 Height="18"
                 VerticalAlignment="Center" />
@@ -109,7 +109,7 @@
             <StackPanel Orientation="Horizontal"
               VerticalAlignment="Center"
               Spacing="12">
-              <controls:ColorIcon Source="{StaticResource IconImport}"
+              <ContentPresenter ContentTemplate="{StaticResource IconImport}"
                 Width="18"
                 Height="18"
                 VerticalAlignment="Center" />
@@ -126,7 +126,7 @@
             <StackPanel Orientation="Horizontal"
               VerticalAlignment="Center"
               Spacing="12">
-              <controls:ColorIcon Source="{StaticResource IconFolder}"
+              <ContentPresenter ContentTemplate="{StaticResource IconFolder}"
                 Width="18"
                 Height="18"
                 VerticalAlignment="Center" />
@@ -148,7 +148,7 @@
             <StackPanel Orientation="Horizontal"
               VerticalAlignment="Center"
               Spacing="12">
-              <controls:ColorIcon Source="{StaticResource IconAbout}"
+              <ContentPresenter ContentTemplate="{StaticResource IconAbout}"
                 Width="18"
                 Height="18"
                 VerticalAlignment="Center" />

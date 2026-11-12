@@ -9,31 +9,46 @@ namespace MinecraftServerManager.UnitTests.UI;
 
 public sealed partial class AboutPreferencesViewModelTests : IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AboutPreferencesViewModelTests));
+    private readonly TempDirectory _testDirTemp = new("msm_test_");
     private readonly string _testDir;
 
     public AboutPreferencesViewModelTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "msm_test_" + Guid.NewGuid().ToString("N"));
+        _testDir = _testDirTemp.FullName;
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testDir))
-            {
-                Directory.Delete(_testDir, recursive: true);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
-        }
-    }
+    public void Dispose() => _testDirTemp.Dispose();
 
     private AboutPreferencesViewModel Create(IUiService uiService, SettingsManager? settings = null, IUpdateCheckerService? updateChecker = null, IAppUpdateService? appUpdateService = null, Action? onResetWindowSizeRequested = null) =>
         new(uiService, settings ?? new SettingsManager(_testDir), updateChecker ?? NoOp.Create<IUpdateCheckerService>(), static _ => { }, onResetWindowSizeRequested ?? (static () => { }), NoOp.Create<IExternalLauncher>(), appUpdateService ?? NoOp.Create<IAppUpdateService>());
+
+    [Fact]
+    public void OpenLicense_OpensGplV3FullText()
+    {
+        var launcher = new RecordingLauncher();
+        var vm = new AboutPreferencesViewModel(new NoOpUiService(), new SettingsManager(_testDir), NoOp.Create<IUpdateCheckerService>(), static _ => { }, static () => { }, launcher, NoOp.Create<IAppUpdateService>());
+
+        vm.OpenLicenseCommand.Execute(null);
+
+        Assert.Equal(AppInfo.LicenseUrl, Assert.Single(launcher.OpenedUrls));
+        Assert.Equal("https://www.gnu.org/licenses/gpl-3.0.html", AppInfo.LicenseUrl);
+    }
+
+    [Theory]
+    [InlineData(1.0, "目前螢幕解析度：1920 × 1080")]
+    [InlineData(1.5, "目前螢幕解析度：1920 × 1080（縮放 150%）")]
+    public void UpdateWindowMetrics_ShowsCurrentSizesAndScale(double scale, string expectedScreen)
+    {
+        var vm = Create(new NoOpUiService());
+
+        vm.UpdateWindowMetrics(new WindowMetrics(1280, 720, 1920, 1080, scale));
+
+        Assert.Equal(expectedScreen, vm.ScreenResolutionInfo);
+        Assert.Equal("目前主視窗大小：1280 × 720", vm.CurrentWindowSizeInfo);
+
+        vm.UpdateWindowMetrics(new WindowMetrics(1500, 900, 1920, 1080, scale));
+        Assert.Equal("目前主視窗大小：1500 × 900", vm.CurrentWindowSizeInfo);
+    }
 
     [Fact]
     public void ShouldAlignWithAppInfo()
@@ -146,7 +161,7 @@ public sealed partial class AboutPreferencesViewModelTests : IDisposable
             Sha256ChecksumUrl: null,
             ReleasePageUrl: "https://example.com"));
         var mockUpdateService = new MockAppUpdateService();
-        var fakeUi = new ConfirmingUiService(confirmResult: false);
+        var fakeUi = new ManualUiService { ConfirmResult = false };
 
         var vm = Create(
             fakeUi,
@@ -172,7 +187,7 @@ public sealed partial class AboutPreferencesViewModelTests : IDisposable
             Sha256ChecksumUrl: null,
             ReleasePageUrl: "https://example.com"));
         var mockUpdateService = new MockAppUpdateService();
-        var fakeUi = new ConfirmingUiService(confirmResult: true);
+        var fakeUi = new ManualUiService { ConfirmResult = true };
 
         var vm = Create(
             fakeUi,
@@ -220,12 +235,6 @@ public sealed partial class AboutPreferencesViewModelTests : IDisposable
         Assert.Null(settings.Snapshot.WindowPreferences.CustomAccentColor);
     }
 
-    private sealed class ConfirmingUiService(bool confirmResult) : NoOpUiService
-    {
-        public override Task<bool> ConfirmAsync(string message, string title, UiMessageLevel level = UiMessageLevel.Question) =>
-            Task.FromResult(confirmResult);
-    }
-
     private sealed class MockAppUpdateService : IAppUpdateService
     {
         public bool DownloadInvoked { get; private set; }
@@ -247,5 +256,59 @@ public sealed partial class AboutPreferencesViewModelTests : IDisposable
     {
         public Task<UpdateCheckResult> CheckForUpdateAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(result);
+    }
+
+    [Fact]
+    public void BackupSettings_LoadFromAndWriteToSettings()
+    {
+        var settings = new SettingsManager(_testDir);
+        var vm = Create(new NoOpUiService(), settings);
+        Assert.False(vm.IsAutoBackupBeforeStartEnabled);
+        Assert.Equal(10, vm.BackupRetentionCount);
+
+        vm.IsAutoBackupBeforeStartEnabled = true;
+        vm.BackupRetentionCount = 7;
+
+        Assert.True(settings.IsAutoBackupBeforeStartEnabled());
+        Assert.Equal(7, settings.GetBackupRetentionCount());
+    }
+
+    [Fact]
+    public void BackupRetentionCount_NaN_RestoresCurrentSetting()
+    {
+        var settings = new SettingsManager(_testDir);
+        settings.SetBackupRetentionCount(5);
+        var vm = Create(new NoOpUiService(), settings);
+
+        vm.BackupRetentionCount = double.NaN;
+
+        Assert.Equal(5, vm.BackupRetentionCount);
+        Assert.Equal(5, settings.GetBackupRetentionCount());
+    }
+
+    [Fact]
+    public void BackupRetentionCount_OutOfRangeIsClamped()
+    {
+        var settings = new SettingsManager(_testDir);
+        var vm = Create(new NoOpUiService(), settings);
+
+        vm.BackupRetentionCount = 999;
+
+        Assert.Equal(100, vm.BackupRetentionCount);
+        Assert.Equal(100, settings.GetBackupRetentionCount());
+    }
+
+    [Fact]
+    public async Task ResetAllSettings_RestoresBackupDefaults()
+    {
+        var settings = new SettingsManager(_testDir);
+        settings.SetAutoBackupBeforeStartEnabled(true);
+        settings.SetBackupRetentionCount(3);
+        var vm = Create(new NoOpUiService(), settings);
+
+        await vm.ResetAllSettingsCommand.ExecuteAsync(null);
+
+        Assert.False(settings.IsAutoBackupBeforeStartEnabled());
+        Assert.Equal(10, settings.GetBackupRetentionCount());
     }
 }

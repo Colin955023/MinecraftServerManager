@@ -6,36 +6,20 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-/// <summary>
-/// 初次啟動初始化視窗 ViewModel 測試（啟動檔解析、輸出彙整、就緒判定、倒數關閉與關閉攔截）
-/// </summary>
+/// <summary>初次啟動初始化視窗 ViewModel 測試（啟動檔解析、輸出彙整、就緒判定、倒數關閉與關閉攔截）</summary>
 public sealed class ServerInitializationViewModelTests : IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerInitializationViewModelTests));
+    private readonly TempDirectory _serverDirTemp = new("msm-init-vm-");
     private readonly string _serverDir;
     private readonly FakeServerRuntime _runtime = new();
     private readonly ManualUiService _ui = new();
 
     public ServerInitializationViewModelTests()
     {
-        _serverDir = Path.Combine(Path.GetTempPath(), "msm-init-vm-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_serverDir);
+        _serverDir = _serverDirTemp.FullName;
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_serverDir))
-            {
-                Directory.Delete(_serverDir, recursive: true);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
-        }
-    }
+    public void Dispose() => _serverDirTemp.Dispose();
 
     private ServerInitializationViewModel CreateViewModel() => new(
         _runtime,

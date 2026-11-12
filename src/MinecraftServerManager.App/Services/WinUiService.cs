@@ -17,7 +17,7 @@ namespace MinecraftServerManager.App.Services;
 /// <summary>
 /// <see cref="IUiService"/> 的 WinUI 3 原生實作。
 /// 管理 ContentDialog 佇列（<see cref="DialogStackCoordinator"/>）、模態視窗宿主（<see cref="ModalWindowHost"/>）、
-/// 檔案與資料夾選取器（透過 AppWindow.Id 綁定視窗）、UI 執行緒派送與計時器。
+/// 檔案與資料夾選取器（透過 AppWindow.Id 繫結視窗）、UI 執行緒派送與計時器。
 /// </summary>
 public sealed partial class WinUiService : IUiService
 {
@@ -25,7 +25,7 @@ public sealed partial class WinUiService : IUiService
 
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly IProcessRunner _processRunner;
-    private readonly Stack<Window> _windowStack = new();
+    private readonly List<Window> _windowStack = [];
     private readonly Lock _windowLock = new();
     private readonly ConditionalWeakTable<XamlRoot, DialogStackCoordinator> _coordinators = [];
 
@@ -68,7 +68,7 @@ public sealed partial class WinUiService : IUiService
         {
             if (!_windowStack.Contains(mainWindow))
             {
-                _windowStack.Push(mainWindow);
+                _windowStack.Add(mainWindow);
             }
         }
     }
@@ -79,12 +79,12 @@ public sealed partial class WinUiService : IUiService
         {
             lock (_windowLock)
             {
-                while (_windowStack.Count > 0)
+                for (int i = _windowStack.Count - 1; i >= 0; i--)
                 {
-                    var top = _windowStack.Peek();
+                    var top = _windowStack[i];
                     if (top.AppWindow is null)
                     {
-                        _windowStack.Pop();
+                        _windowStack.RemoveAt(i);
                         continue;
                     }
                     return top;
@@ -99,7 +99,7 @@ public sealed partial class WinUiService : IUiService
         ArgumentNullException.ThrowIfNull(window);
         lock (_windowLock)
         {
-            _windowStack.Push(window);
+            _windowStack.Add(window);
         }
     }
 
@@ -108,10 +108,7 @@ public sealed partial class WinUiService : IUiService
         ArgumentNullException.ThrowIfNull(window);
         lock (_windowLock)
         {
-            if (_windowStack.Count > 0 && ReferenceEquals(_windowStack.Peek(), window))
-            {
-                _windowStack.Pop();
-            }
+            _windowStack.Remove(window);
         }
     }
 
@@ -134,9 +131,7 @@ public sealed partial class WinUiService : IUiService
         throw new InvalidOperationException("無法取得作用中的 XamlRoot。");
     }
 
-    /// <summary>
-    /// 將非同步 UI 作業派送至 UI 執行緒執行並等待結果（例外與取消皆原樣傳回呼叫端）
-    /// </summary>
+    /// <summary>將非同步 UI 作業派送至 UI 執行緒執行並等待結果（例外與取消皆原樣傳回呼叫端）</summary>
     private async Task<T> InvokeOnUiAsync<T>(Func<Task<T>> operation)
     {
         var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -199,6 +194,14 @@ public sealed partial class WinUiService : IUiService
         return result == ContentDialogResult.Primary;
     }
 
+    public async Task<bool> ConfirmChoiceAsync(string message, string title, string primaryText, string closeText, UiMessageLevel level = UiMessageLevel.Question)
+    {
+        AudioFeedback.Play(level);
+        var dialog = new CustomConfirmDialog(message, title, level, primaryText, null, closeText);
+        var result = await ShowContentDialogAsync(dialog);
+        return result == ContentDialogResult.Primary;
+    }
+
     public async Task<bool?> ConfirmYesNoCancelAsync(
         string message,
         string title,
@@ -218,9 +221,7 @@ public sealed partial class WinUiService : IUiService
         };
     }
 
-    /// <summary>
-    /// 通知提示唯一入口：資訊、成功與警告以 InfoBar 浮動顯示，錯誤以對話方塊顯示（經 DialogStackCoordinator 排隊）
-    /// </summary>
+    /// <summary>通知提示唯一入口：資訊、成功與警告以 InfoBar 浮動顯示，錯誤以對話方塊顯示（經 DialogStackCoordinator 排隊）</summary>
     public void ShowNotification(string message, string? title = null, NotificationType type = NotificationType.Info)
     {
         if (NotificationPresentation.UsesDialog(type))
@@ -246,7 +247,7 @@ public sealed partial class WinUiService : IUiService
         }
         catch (Exception ex)
         {
-            Logger.Warning("顯示通知對話方塊失敗: {Message}", ex.Message);
+            Logger.Warning(ex, "顯示通知對話方塊失敗");
         }
     }
 
@@ -297,12 +298,21 @@ public sealed partial class WinUiService : IUiService
         string? exePath = Environment.ProcessPath;
         if (!string.IsNullOrWhiteSpace(exePath))
         {
+            // 新行程需先取得單一實體金鑰，故啟動前釋放；啟動失敗時須取回，否則使用者可另開第二個執行個體
             App.ReleaseSingleInstanceLock();
-            _processRunner.StartDetached(new ProcessStartSpec(
-                exePath,
-                [],
-                WorkingDirectory: Path.GetDirectoryName(exePath) ?? AppContext.BaseDirectory,
-                CreateNoWindow: false));
+            try
+            {
+                _processRunner.StartDetached(new ProcessStartSpec(
+                    exePath,
+                    [],
+                    WorkingDirectory: Path.GetDirectoryName(exePath) ?? AppContext.BaseDirectory,
+                    CreateNoWindow: false));
+            }
+            catch (Exception)
+            {
+                App.ReacquireSingleInstanceLock();
+                throw;
+            }
         }
 
         ShutdownApplication(0);
@@ -488,16 +498,12 @@ public sealed partial class WinUiService : IUiService
     public IOperationProgress ShowModOperationProgress(string title, string initialMessage) =>
         new ModOperationProgressHandle(OpenProgressDialog(title, initialMessage));
 
-    /// <summary>
-    /// 以目前作用中視窗為擁有者開啟原生模態視窗並等待結果（統一主題、置中與視窗堆疊）
-    /// </summary>
+    /// <summary>以目前作用中視窗為擁有者開啟原生模態視窗並等待結果（統一主題、置中與視窗堆疊）</summary>
     private Task<TResult> ShowModalAsync<TWindow, TResult>(TWindow window, Func<TWindow, TResult> resultSelector)
         where TWindow : Window =>
         ModalWindowHost.ShowModalAsync(window, CurrentActiveWindow, CurrentTheme, resultSelector, PushWindow, PopWindow);
 
-    /// <summary>
-    /// 開啟進度對話框；顯示失敗時記錄並關閉，避免作業完成後殘留無法關閉的視窗
-    /// </summary>
+    /// <summary>開啟進度對話框；顯示失敗時記錄並關閉，避免作業完成後殘留無法關閉的視窗</summary>
     private OperationProgressDialog OpenProgressDialog(string heading, string initialMessage)
     {
         var dialog = new OperationProgressDialog(this, heading, initialMessage);
@@ -513,7 +519,7 @@ public sealed partial class WinUiService : IUiService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Error(ex, "顯示進度對話框失敗: {Message}", ex.Message);
+            Logger.Error(ex, "顯示進度對話框失敗");
             dialog.MarkCompleted();
         }
     }
@@ -566,6 +572,8 @@ public sealed partial class WinUiService : IUiService
         public event Action? Closed;
 
         public void BringToFront() => _window.Activate();
+
+        public void Close() => _window.Close();
     }
 
     private sealed partial class ProgressSession<TReport>(IProgress<TReport> progress, OperationProgressDialog dialog) : IProgressSession<TReport>

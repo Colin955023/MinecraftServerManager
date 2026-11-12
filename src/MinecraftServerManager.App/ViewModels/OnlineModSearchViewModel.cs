@@ -9,9 +9,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 線上模組搜尋項目模型
-/// </summary>
+/// <summary>線上模組搜尋項目模型</summary>
 public sealed class OnlineModRowItem
 {
     public string Id { get; init; } = string.Empty;
@@ -33,10 +31,8 @@ public sealed class OnlineModRowItem
     public string ServerSide { get; init; } = string.Empty;
 }
 
-/// <summary>
-/// 模組頁：線上平台、關鍵字、排序與搜尋結果
-/// </summary>
-public sealed partial class OnlineModSearchViewModel : ViewModelBase
+/// <summary>模組頁：線上平台、關鍵字、排序與搜尋結果</summary>
+public sealed partial class OnlineModSearchViewModel : ViewModelBase, IDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(OnlineModSearchViewModel));
     private const string CurseForgeComingSoonHint = "CurseForge 模組搜尋即將推出，敬請期待";
@@ -50,11 +46,13 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase
     private readonly IUiService _ui;
     private readonly List<OnlineModRowItem> _allOnlineMods = [];
     private CancellationTokenSource? _searchCts;
+    private bool _disposed;
 
     [ObservableProperty]
     public partial string OnlineSearchText { get; set; } = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(OpenPlatformPageButtonText))]
     public partial string SelectedPlatform { get; set; } = "Modrinth";
 
     [ObservableProperty]
@@ -72,9 +70,7 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase
     [ObservableProperty]
     public partial string OnlineResultHint { get; set; } = string.Empty;
 
-    /// <summary>
-    /// 線上分頁是否為目前顯示分頁（由父 ViewModel 設定）
-    /// </summary>
+    /// <summary>線上分頁是否為目前顯示分頁（由父 ViewModel 設定）</summary>
     public bool IsActiveTab { get; private set; }
 
     public BulkObservableCollection<OnlineModRowItem> OnlineMods { get; } = [];
@@ -111,9 +107,7 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase
             : NoServerFilterHint;
     }
 
-    /// <summary>
-    /// 通知分頁切換；首次切換至線上分頁時自動預載推薦模組
-    /// </summary>
+    /// <summary>通知分頁切換；首次切換至線上分頁時自動預載推薦模組</summary>
     public void SetActiveTab(bool isActive)
     {
         IsActiveTab = isActive;
@@ -141,7 +135,6 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase
 
     partial void OnSelectedPlatformChanged(string value)
     {
-        OnPropertyChanged(nameof(OpenPlatformPageButtonText));
         if (IsCurseForge)
         {
             ClearResults();
@@ -180,6 +173,7 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase
         if (previousCts is not null)
         {
             await previousCts.CancelAsync().ConfigureAwait(true);
+            previousCts.Dispose();
         }
 
         CancellationToken token = searchCts.Token;
@@ -242,7 +236,7 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Error(ex, "線上搜尋失敗: {Message}", ex.Message);
+            Logger.Error(ex, "線上搜尋失敗");
             _ui.Notify($"搜尋失敗：{ex.Message}", NotificationType.Error);
         }
         finally
@@ -262,16 +256,14 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase
         IEnumerable<OnlineModRowItem> sorted = SelectedOnlineSort switch
         {
             "下載量" => _allOnlineMods.OrderByDescending(static m => m.DownloadCountRaw),
-            "名稱" => _allOnlineMods.OrderBy(static m => m.Title, StringNaturalComparer.Instance),
+            "名稱" => _allOnlineMods.OrderBy(static m => m.Title, NaturalSortHelper.StringComparer),
             _ => _allOnlineMods
         };
 
         OnlineMods.ReplaceAll(sorted);
     }
 
-    /// <summary>
-    /// 於瀏覽器開啟選取模組的線上專案頁面。
-    /// </summary>
+    /// <summary>於瀏覽器開啟選取模組的線上專案頁面。</summary>
     [RelayCommand]
     public void OpenModPlatformPage()
     {
@@ -289,5 +281,19 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase
         {
             _ui.Notify($"無法開啟連結：{url}", NotificationType.Warning);
         }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _context.ServerChanged -= OnServerChanged;
+        var cts = Interlocked.Exchange(ref _searchCts, null);
+        cts?.Cancel();
+        cts?.Dispose();
     }
 }

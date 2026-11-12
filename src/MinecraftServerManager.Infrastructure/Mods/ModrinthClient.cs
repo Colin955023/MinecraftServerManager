@@ -8,9 +8,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
-/// <summary>
-/// Modrinth REST API 客戶端實作
-/// </summary>
+/// <summary>Modrinth REST API 用戶端實作</summary>
 public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
 {
     private static string GetStringOrEmpty(JsonElement element, string propertyName) =>
@@ -65,8 +63,8 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         }
 
         var versionIds = results
-            .Select(m => m.LatestVersion)
-            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(static m => m.LatestVersion)
+            .Where(static id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -237,7 +235,7 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
             return new Dictionary<string, ModrinthVersionLookupResult>();
         }
 
-        var cleanHashes = hashes.Select(h => h.Trim().ToLowerInvariant()).Where(h => !string.IsNullOrEmpty(h)).Distinct().ToList();
+        var cleanHashes = hashes.Select(static h => h.Trim().ToLowerInvariant()).Where(static h => !string.IsNullOrEmpty(h)).Distinct().ToList();
         var result = new Dictionary<string, ModrinthVersionLookupResult>(StringComparer.OrdinalIgnoreCase);
 
         // 每批最多 50 個
@@ -294,14 +292,13 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
                 string latestVer = GetStringOrEmpty(hit, "latest_version");
                 int downloads = hit.TryGetProperty("downloads", out var dlElem) && dlElem.TryGetInt64(out long dl) ? (int)Math.Min(dl, int.MaxValue) : 0;
                 string serverSide = GetStringOrEmpty(hit, "server_side");
-                string clientSide = GetStringOrEmpty(hit, "client_side");
 
                 if (serverSide.Equals("unsupported", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                list.Add(new OnlineModInfo(projectId, slug, title, author, desc, latestVer, downloads, serverSide, clientSide));
+                list.Add(new OnlineModInfo(projectId, slug, title, author, desc, latestVer, downloads, serverSide));
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -324,12 +321,20 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
 
             foreach (var elem in doc.RootElement.EnumerateArray())
             {
-                list.Add(ParseSingleVersion(elem));
+                try
+                {
+                    list.Add(ParseSingleVersion(elem));
+                }
+                catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException or FormatException)
+                {
+                    // 單筆格式異常只略過該筆，不可讓整份版本清單遺失
+                    Logger.Warning(ex, "略過格式異常的 Modrinth 版本項目");
+                }
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning(ex, "解析 Modrinth 版本列表 JSON 失敗");
+            Logger.Warning(ex, "解析 Modrinth 版本清單 JSON 失敗");
         }
         return list;
     }

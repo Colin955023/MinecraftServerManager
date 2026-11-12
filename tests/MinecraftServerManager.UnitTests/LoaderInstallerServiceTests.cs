@@ -7,34 +7,21 @@ namespace MinecraftServerManager.UnitTests;
 
 public sealed partial class LoaderInstallerServiceTests : IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(LoaderInstallerServiceTests));
+    private readonly TempDirectory _testRootTemp = new("msm-installer-tests-");
     private readonly string _testRoot;
     private readonly string _cacheDir;
     private readonly string _serverDir;
 
     public LoaderInstallerServiceTests()
     {
-        _testRoot = Path.Combine(Path.GetTempPath(), "msm-installer-tests-" + Guid.NewGuid().ToString("N"));
+        _testRoot = _testRootTemp.FullName;
         _cacheDir = Path.Combine(_testRoot, "cache");
         _serverDir = Path.Combine(_testRoot, "server");
         Directory.CreateDirectory(_cacheDir);
         Directory.CreateDirectory(_serverDir);
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testRoot))
-            {
-                Directory.Delete(_testRoot, recursive: true);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
-        }
-    }
+    public void Dispose() => _testRootTemp.Dispose();
 
     [Fact]
     public async Task InstallLoaderPaperDownloadsServerJarSuccessfully()
@@ -54,7 +41,7 @@ public sealed partial class LoaderInstallerServiceTests : IDisposable
         """;
 
         var http = CreateHttpPort(paperBuildJson: paperBuildJson);
-        var runner = new MockInstallerProcessRunner(0);
+        var runner = new StubProcessRunner(0);
         var service = new LoaderInstallerService(http, runner, _cacheDir);
 
         string target = await service.InstallLoaderAsync(
@@ -85,7 +72,7 @@ public sealed partial class LoaderInstallerServiceTests : IDisposable
         }
         """;
 
-        var service = new LoaderInstallerService(CreateHttpPort(paperBuildJson: paperBuildJson), new MockInstallerProcessRunner(0), _cacheDir);
+        var service = new LoaderInstallerService(CreateHttpPort(paperBuildJson: paperBuildJson), new StubProcessRunner(0), _cacheDir);
 
         string target = await service.InstallLoaderAsync(LoaderKind.Paper, "1.20.4", "497", _serverDir, "java.exe");
 
@@ -98,9 +85,8 @@ public sealed partial class LoaderInstallerServiceTests : IDisposable
     {
         await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy vanilla");
         var http = CreateHttpPort("", "");
-        var runner = new MockInstallerProcessRunner(0, onRun: () =>
+        var runner = new StubProcessRunner(0, onStart: _ =>
         {
-            // 模擬 installer 產出檔案
             File.WriteAllText(Path.Combine(_serverDir, "fabric-server-launch.jar"), "dummy launch");
         });
 
@@ -115,7 +101,7 @@ public sealed partial class LoaderInstallerServiceTests : IDisposable
 
         Assert.Equal("fabric-server-launch.jar", target);
 
-        var spec = runner.LastSpec;
+        var spec = runner.LastSpecification;
         Assert.NotNull(spec);
         Assert.Contains("server", spec.Arguments);
         Assert.Contains("-mcversion", spec.Arguments);
@@ -152,7 +138,7 @@ public sealed partial class LoaderInstallerServiceTests : IDisposable
         """;
 
         var http = CreateHttpPort(manifestJson, metaJson);
-        var runner = new MockInstallerProcessRunner(0, onRun: () =>
+        var runner = new StubProcessRunner(0, onStart: _ =>
         {
             File.WriteAllText(Path.Combine(_serverDir, "fabric-server-launch.jar"), "dummy launch");
         });
@@ -174,7 +160,7 @@ public sealed partial class LoaderInstallerServiceTests : IDisposable
     public async Task InstallLoaderForgeDetectsRunBatWhenCreated()
     {
         var http = CreateHttpPort("", "");
-        var runner = new MockInstallerProcessRunner(0, onRun: () =>
+        var runner = new StubProcessRunner(0, onStart: _ =>
         {
             File.WriteAllText(Path.Combine(_serverDir, "run.bat"), "@echo off\n");
         });
@@ -190,7 +176,7 @@ public sealed partial class LoaderInstallerServiceTests : IDisposable
 
         Assert.Equal("run.bat", target);
 
-        var spec = runner.LastSpec;
+        var spec = runner.LastSpecification;
         Assert.NotNull(spec);
         Assert.Contains("--installServer", spec.Arguments);
     }
@@ -200,7 +186,7 @@ public sealed partial class LoaderInstallerServiceTests : IDisposable
     {
         await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy vanilla");
         var http = CreateHttpPort("", "");
-        var runner = new MockInstallerProcessRunner(1);
+        var runner = new StubProcessRunner(1);
 
         var service = new LoaderInstallerService(http, runner, _cacheDir);
 
@@ -223,7 +209,7 @@ public sealed partial class LoaderInstallerServiceTests : IDisposable
         var http = CreateHttpPort(customGetText: uri => uri.AbsoluteUri.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase)
             ? expectedHexSha256
             : null);
-        var runner = new MockInstallerProcessRunner(0, onRun: () =>
+        var runner = new StubProcessRunner(0, onStart: _ =>
         {
             File.WriteAllText(Path.Combine(_serverDir, "fabric-server-launch.jar"), "dummy launch");
         });
@@ -270,40 +256,4 @@ public sealed partial class LoaderInstallerServiceTests : IDisposable
                 return Task.FromResult(new HttpResult(true));
             },
         };
-
-    private sealed class MockInstallerProcessRunner(int exitCode, Action? onRun = null) : IProcessRunner
-    {
-        public ProcessStartSpec? LastSpec { get; private set; }
-
-        public Task<IManagedProcess> StartAsync(ProcessStartSpec specification, CancellationToken cancellationToken = default)
-        {
-            LastSpec = specification;
-            onRun?.Invoke();
-            return Task.FromResult<IManagedProcess>(new MockInstallerProcess(exitCode));
-        }
-    }
-
-    private sealed class MockInstallerProcess(int exitCode) : IManagedProcess
-    {
-        public int Pid => 999;
-        public bool HasExited => true;
-        public int? ExitCode => exitCode;
-
-        public event Action<ProcessOutput>? OutputReceived
-        {
-            add { }
-            remove { }
-        }
-
-        public Task WriteLineAsync(string line, CancellationToken cancellationToken = default) => Task.CompletedTask;
-
-        public Task<ProcessExitResult> WaitForExitAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ProcessExitResult(exitCode, false));
-
-        public Task<ProcessExitResult> StopAsync(TimeSpan gracefulTimeout, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ProcessExitResult(exitCode, false));
-
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-        public long? GetWorkingSet64() => throw new NotImplementedException();
-    }
 }

@@ -1,13 +1,11 @@
 using Microsoft.UI.Xaml;
 using MinecraftServerManager.App.Controls;
-using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.App.Services;
+using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 備份還原與管理視窗（原生模態視窗，透過 ModalWindowHost 裝載）
-/// </summary>
+/// <summary>備份還原與管理視窗（原生模態視窗，透過 ModalWindowHost 裝載）</summary>
 public sealed partial class RestoreBackupDialog : Window
 {
     public RestoreBackupViewModel ViewModel { get; }
@@ -17,14 +15,12 @@ public sealed partial class RestoreBackupDialog : Window
     {
         ViewModel = viewModel;
         InitializeComponent();
-        Title = "備份還原與管理";
-
-        WindowLayoutHelper.ResizeToDip(this, 720, 520);
+        ModalWindowHost.ConfigureDialogWindow(this, "備份還原與管理", 720, 520, Bindings.StopTracking);
 
         ViewModel.RequestClose += success =>
         {
             DialogResult = success;
-            Close();
+            ModalWindowHost.CloseDeferred(this);
         };
     }
 

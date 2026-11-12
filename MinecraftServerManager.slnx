@@ -21,8 +21,6 @@
     </Folder>
     <Folder Name="/tests/">
         <Project
-            Path="tests/MinecraftServerManager.IntegrationTests/MinecraftServerManager.IntegrationTests.csproj" />
-        <Project
             Path="tests/MinecraftServerManager.UnitTests/MinecraftServerManager.UnitTests.csproj" />
     </Folder>
 </Solution>

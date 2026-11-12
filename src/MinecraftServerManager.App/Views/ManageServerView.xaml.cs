@@ -6,9 +6,7 @@ using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 管理伺服器頁面 View
-/// </summary>
+/// <summary>管理伺服器頁面 View</summary>
 public sealed partial class ManageServerView : UserControl
 {
     public ManageServerViewModel ViewModel { get; }

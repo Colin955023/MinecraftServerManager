@@ -8,10 +8,8 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 模組管理頁面 ViewModel：負責伺服器選取與分頁導覽，並組合本地、線上、安裝佇列與更新子 ViewModel
-/// </summary>
-public sealed partial class ModsViewModel : PageViewModel
+/// <summary>模組管理頁面 ViewModel：負責伺服器選取與分頁導覽，並組合本地、線上、安裝佇列與更新子 ViewModel</summary>
+public sealed partial class ModsViewModel : PageViewModel, IDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModsViewModel));
     private const string NoServerPlaceholder = "請選擇伺服器";
@@ -31,29 +29,19 @@ public sealed partial class ModsViewModel : PageViewModel
 
     public ObservableCollection<string> Servers { get; } = [];
 
-    /// <summary>
-    /// 子 ViewModel 共用之伺服器狀態
-    /// </summary>
+    /// <summary>子 ViewModel 共用之伺服器狀態</summary>
     public ModsContext Context { get; } = new();
 
-    /// <summary>
-    /// 本地模組清單
-    /// </summary>
+    /// <summary>本地模組清單</summary>
     public LocalModsViewModel Local { get; }
 
-    /// <summary>
-    /// 線上模組搜尋
-    /// </summary>
+    /// <summary>線上模組搜尋</summary>
     public OnlineModSearchViewModel Online { get; }
 
-    /// <summary>
-    /// 安裝佇列
-    /// </summary>
+    /// <summary>安裝佇列</summary>
     public ModInstallQueueViewModel Queue { get; }
 
-    /// <summary>
-    /// 更新檢查
-    /// </summary>
+    /// <summary>更新檢查</summary>
     public ModUpdateViewModel Updates { get; }
 
     public ModsViewModel(
@@ -83,8 +71,6 @@ public sealed partial class ModsViewModel : PageViewModel
         Online = new OnlineModSearchViewModel(Context, uiService, modrinthClient, launcher);
         Queue = new ModInstallQueueViewModel(Context, dependencyPlanner, modFileService, uiService, modManager, modrinthClient);
         Updates = new ModUpdateViewModel(Context, dependencyPlanner, modFileService, uiService, modManager, modrinthClient);
-
-        _ = RunSafeAsync(LoadServersInternalAsync, "初始化伺服器清單", Logger);
     }
 
     partial void OnSelectedTabIndexChanged(int value) => Online.SetActiveTab(value == 1);
@@ -102,23 +88,28 @@ public sealed partial class ModsViewModel : PageViewModel
         Logger.Information("伺服器下拉清單已重新整理");
     }
 
-    /// <summary>
-    /// 重新讀取選取伺服器設定快照並重新載入本地模組
-    /// </summary>
+    /// <summary>重新讀取選取伺服器設定快照並重新載入本地模組</summary>
     public async Task ReloadSelectedServerAsync()
     {
         ServerConfig? server = null;
+        string requestedServer = SelectedServer;
         if (HasSelectedServer)
         {
             try
             {
-                server = await _serverManager.GetServerAsync(SelectedServer);
+                server = await _serverManager.GetServerAsync(requestedServer);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.Error(ex, "讀取伺服器「{Name}」設定失敗: {Message}", SelectedServer, ex.Message);
+                Logger.Error(ex, "讀取伺服器「{Name}」設定失敗", requestedServer);
                 _ui.Notify($"讀取伺服器設定失敗：{ex.Message}", NotificationType.Error);
             }
+        }
+
+        // 讀取期間使用者已改選其他伺服器時，捨棄過時結果（新的選取會另行觸發載入）
+        if (!string.Equals(requestedServer, SelectedServer, StringComparison.Ordinal))
+        {
+            return;
         }
 
         Context.SetServer(server);
@@ -174,7 +165,7 @@ public sealed partial class ModsViewModel : PageViewModel
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Error(ex, "載入伺服器清單失敗: {Message}", ex.Message);
+            Logger.Error(ex, "載入伺服器清單失敗");
             _ui.Notify($"載入伺服器清單失敗：{ex.Message}", NotificationType.Error);
         }
         finally
@@ -183,16 +174,14 @@ public sealed partial class ModsViewModel : PageViewModel
         }
     }
 
-    /// <summary>
-    /// 挑選線上模組版本並加入安裝清單（未指定時使用線上清單選取項目）
-    /// </summary>
+    /// <summary>挑選線上模組版本並加入安裝清單（未指定時使用線上清單選取項目）</summary>
     [RelayCommand]
     public Task PickOnlineModVersionAsync(OnlineModRowItem? mod) =>
         Queue.PickVersionAndQueueAsync(mod ?? Online.SelectedOnlineMod);
 
-    /// <summary>
-    /// 檢查本地已勾選模組之相容更新
-    /// </summary>
+    /// <summary>檢查本地已勾選模組之相容更新</summary>
     [RelayCommand]
     public Task CheckModUpdatesAsync() => Updates.CheckModUpdatesAsync(Local.GetCheckedMods());
+
+    public void Dispose() => Online.Dispose();
 }

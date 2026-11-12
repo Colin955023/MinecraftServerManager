@@ -5,9 +5,7 @@ namespace MinecraftServerManager.UnitTests.UI;
 
 public class DialogStackCoordinatorTests
 {
-    /// <summary>
-    /// 以可觀察行為確認堆疊已清空：新對話框直接顯示，不會要求任何前層對話框隱藏
-    /// </summary>
+    /// <summary>以可觀察行為確認堆疊已清空：新對話框直接顯示，不會要求任何前層對話框隱藏</summary>
     private static async Task AssertStackEmptyAsync(DialogStackCoordinator coordinator)
     {
         bool staleHideRequested = false;
@@ -171,13 +169,13 @@ public class DialogStackCoordinatorTests
 
         await outerShownTcs.Task;
 
-        // 內層對話框拋出例外
+        // 內層對話框擲出例外
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             coordinator.ShowDialogAsync<string>(
                 () => throw new InvalidOperationException("Inner failure"),
                 () => { }));
 
-        // 確保內層拋出後，外層仍可正確恢復並完成
+        // 確保內層擲出後，外層仍可正確恢復並完成
         outerFinishTcs.TrySetResult();
         string outerResult = await outerTask;
 

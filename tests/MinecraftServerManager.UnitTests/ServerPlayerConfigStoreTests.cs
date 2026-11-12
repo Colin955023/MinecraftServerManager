@@ -6,31 +6,17 @@ namespace MinecraftServerManager.UnitTests;
 
 public sealed partial class ServerPlayerConfigStoreTests : IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerPlayerConfigStoreTests));
+    private readonly TempDirectory _testDirTemp = new("msm_player_store_tests_");
     private readonly string _testDir;
     private readonly ServerPlayerConfigStore _store;
 
     public ServerPlayerConfigStoreTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "msm_player_store_tests_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testDir);
+        _testDir = _testDirTemp.FullName;
         _store = new ServerPlayerConfigStore();
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testDir))
-            {
-                Directory.Delete(_testDir, recursive: true);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
-        }
-    }
+    public void Dispose() => _testDirTemp.Dispose();
 
     [Fact]
     public async Task LoadBundleAsync_WhenDirectoryHasNoJsonFiles_ReturnsEmptyCollections()

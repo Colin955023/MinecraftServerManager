@@ -4,9 +4,7 @@ using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Core.Utilities;
 
-/// <summary>
-/// 記憶體設定檢查等級
-/// </summary>
+/// <summary>記憶體設定檢查等級</summary>
 public enum MemoryCheckLevel
 {
     Ok,
@@ -14,14 +12,10 @@ public enum MemoryCheckLevel
     Error,
 }
 
-/// <summary>
-/// 記憶體設定檢查結果（Error 不可儲存；Warning 可儲存但需提示）
-/// </summary>
+/// <summary>記憶體設定檢查結果（Error 不可儲存；Warning 可儲存但需提示）</summary>
 public readonly record struct MemoryCheckResult(MemoryCheckLevel Level, string Message, int MaxMb = 0, int? MinMb = null);
 
-/// <summary>
-/// 伺服器記憶體工具類別
-/// </summary>
+/// <summary>伺服器記憶體工具類別</summary>
 public static partial class MemoryUtils
 {
     [GeneratedRegex(@"-(Xmx|Xms)(\d+)([kmgt]?)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
@@ -33,18 +27,14 @@ public static partial class MemoryUtils
     [GeneratedRegex(@"-Xms[0-9]+[kmgt]?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex XmsFlagRegex();
 
-    /// <summary>
-    /// 取得系統實體記憶體總量（MB）
-    /// </summary>
+    /// <summary>取得系統實體記憶體總量（MB）</summary>
     public static int GetTotalSystemMemoryMb()
     {
         long memoryBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
         return memoryBytes > 0 ? (int)(memoryBytes / (1024L * 1024L)) : 0;
     }
 
-    /// <summary>
-    /// 解析 Java 記憶體參數（-Xmx 或 -Xms）。若同一段文字出現多次相同參數，依 JVM 規範以最後一個為準。
-    /// </summary>
+    /// <summary>解析 Java 記憶體參數（-Xmx 或 -Xms）。若同一段文字出現多次相同參數，依 JVM 規範以最後一個為準。</summary>
     public static int? ParseMemorySetting(string? text, string settingType = "Xmx")
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -100,15 +90,11 @@ public static partial class MemoryUtils
         return parsedResult;
     }
 
-    /// <summary>
-    /// 取得實際生效之最小記憶體（MB）：未指定時取預設值與最大記憶體之較小者
-    /// </summary>
+    /// <summary>取得實際生效之最小記憶體（MB）：未指定時取預設值與最大記憶體之較小者</summary>
     public static int ResolveEffectiveMinMemoryMb(int? memoryMinMb, int memoryMaxMb) =>
         memoryMinMb ?? Math.Min(ServerDefaults.DefaultMemoryMinMb, memoryMaxMb);
 
-    /// <summary>
-    /// 將啟動腳本內容中的 -Xmx／-Xms 參數改寫為指定 MB 值；缺少 -Xms 時插入於第一個 -Xmx 之前。
-    /// </summary>
+    /// <summary>將啟動腳本內容中的 -Xmx／-Xms 參數改寫為指定 MB 值；缺少 -Xms 時插入於第一個 -Xmx 之前。</summary>
     public static string ApplyMemoryFlags(string content, int minMb, int maxMb)
     {
         ArgumentNullException.ThrowIfNull(content);

@@ -5,9 +5,7 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-/// <summary>
-/// Modrinth REST API 客戶端測試
-/// </summary>
+/// <summary>Modrinth REST API 用戶端測試</summary>
 public sealed class ModrinthClientTests
 {
     [Fact]
@@ -111,6 +109,24 @@ public sealed class ModrinthClientTests
     }
 
     [Fact]
+    public async Task GetProjectVersionsAsyncSkipsMalformedEntriesAndKeepsTheRest()
+    {
+        string jsonResponse = """
+        [
+            { "version_number": "broken-without-id" },
+            { "id": "bad-file", "version_number": "0.1", "files": [ { "filename": "no-url.jar" } ] },
+            { "id": "good", "version_number": "1.0", "files": [ { "url": "https://cdn.modrinth.com/data/a.jar", "filename": "a.jar" } ] }
+        ]
+        """;
+
+        var client = new ModrinthClient(CreateHttpPort(uri => uri.AbsoluteUri.Contains("/version") ? jsonResponse : null));
+
+        var versions = await client.GetProjectVersionsAsync("sodium");
+
+        Assert.Equal("good", Assert.Single(versions).VersionId);
+    }
+
+    [Fact]
     public async Task GetProjectVersionsAsyncShouldParseVersionsAndDependencies()
     {
         string jsonResponse = """
@@ -209,7 +225,7 @@ public sealed class ModrinthClientTests
         var fakeHttp = CreateHttpPort(_ => malformedJson);
         var client = new ModrinthClient(fakeHttp);
 
-        // 1. 搜尋在遭遇畸形 JSON 時，安全記錄並回傳空清單，不拋出未捕捉例外
+        // 1. 搜尋在遭遇畸形 JSON 時，安全記錄並回傳空清單，不擲出未攔截例外
         var searchResults = await client.SearchModsAsync("test");
         Assert.Empty(searchResults);
 
@@ -221,14 +237,11 @@ public sealed class ModrinthClientTests
     [Fact]
     public async Task GetProjectTitlesAsyncMapsIdAndSlugToTitleAndCachesResults()
     {
-        int requestCount = 0;
-        var client = new ModrinthClient(CreateHttpPort(uri =>
-        {
-            requestCount++;
-            return uri.AbsoluteUri.Contains("/projects?ids=", StringComparison.Ordinal)
+        var fakeHttp = CreateHttpPort(uri =>
+            uri.AbsoluteUri.Contains("/projects?ids=", StringComparison.Ordinal)
                 ? """[{"id":"7tEfOcA7","slug":"geckolib","title":"GeckoLib"}]"""
-                : null;
-        }));
+                : null);
+        var client = new ModrinthClient(fakeHttp);
 
         var first = await client.GetProjectTitlesAsync(["7tEfOcA7", "unknown-project"]);
         var second = await client.GetProjectTitlesAsync(["geckolib"]);
@@ -236,7 +249,7 @@ public sealed class ModrinthClientTests
         Assert.Equal("GeckoLib", first["7tEfOcA7"]);
         Assert.False(first.ContainsKey("unknown-project"));
         Assert.Equal("GeckoLib", second["geckolib"]);
-        Assert.Equal(1, requestCount);
+        Assert.Equal(1, fakeHttp.RequestCount);
     }
 
     private static StubHttpPort CreateHttpPort(Func<Uri, string?> handler) =>

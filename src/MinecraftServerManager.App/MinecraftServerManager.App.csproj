@@ -29,6 +29,7 @@
     <XmlResolverIsNetworkingEnabledByDefault>false</XmlResolverIsNetworkingEnabledByDefault>
     <DebuggerSupport>false</DebuggerSupport>
     <EventSourceSupport>false</EventSourceSupport>
+    <MvvmToolkitEnableINotifyPropertyChangingSupport>false</MvvmToolkitEnableINotifyPropertyChangingSupport>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" />
@@ -67,7 +68,7 @@
                    !$([System.String]::Copy('%(None.Link)').StartsWith('zh-TW'))" />
     </ItemGroup>
   </Target>
-  <!-- 發布單一檔案前精簡移除未使用的 WebView2 原生組件與多餘語系 MUI 資源 -->
+  <!-- 發布單一檔案前精簡移除未使用的 WebView2 原生元件與多餘語系 MUI 資源 -->
   <Target Name="PruneUnusedSingleFilePayload" BeforeTargets="_ComputeFilesToBundle">
     <ItemGroup>
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
@@ -80,7 +81,19 @@
                    '%(Filename)%(Extension)' == 'PushNotificationsLongRunningTask.ProxyStub.dll' or
                    '%(Filename)%(Extension)' == 'RestartAgent.exe' or
                    '%(Filename)%(Extension)' == 'map.html' or
-                   '%(Filename)%(Extension)' == 'Microsoft.UI.Xaml.Controls.pri'" />
+                   '%(Filename)%(Extension)' == 'Microsoft.UI.Xaml.Controls.pri' or
+                   '%(Filename)%(Extension)' == 'packages.lock.json' or
+                   '%(Filename)%(Extension)' == 'app.manifest'" />
+      <!-- 實測走訪主要畫面與對話框皆未載入：Phone（Pivot／選擇器／導覽轉場）、設計階段專用 Designer、系統 DWrite 已足夠的 DWriteCore -->
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(Filename)%(Extension)' == 'Microsoft.UI.Xaml.Phone.dll' or
+                   '%(Filename)%(Extension)' == 'Microsoft.UI.Xaml.Phone.dll.mui' or
+                   '%(Filename)%(Extension)' == 'Microsoft.UI.Designer.dll' or
+                   '%(Filename)%(Extension)' == 'DWriteCore.dll'" />
+      <!-- WinRT 型別中繼資料已由 CsWinRT 投影編入組件、XAML 已編譯為 .pri 內的 XBF，執行期不讀 .winmd 與散放
+      .xaml（實測畫面與載入模組與未裁剪版相同） -->
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(Extension)' == '.winmd' or '%(Extension)' == '.xaml'" />
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
         Condition="'%(Extension)' == '.mui' and
                    '%(RelativePath)' != '' and

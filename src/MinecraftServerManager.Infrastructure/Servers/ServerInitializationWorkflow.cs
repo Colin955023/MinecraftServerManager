@@ -29,22 +29,16 @@ public sealed class ServerInitializationWorkflow : IDisposable
         _runtime.ServerReady += OnServerReady;
     }
 
-    /// <summary>
-    /// 是否已偵測到伺服器就緒訊號（初始化已完成）
-    /// </summary>
+    /// <summary>是否已偵測到伺服器就緒訊號（初始化已完成）</summary>
     public bool ReadyDetected => _readyDetected;
 
-    /// <summary>
-    /// 解析初次啟動所用的啟動檔：存在啟動腳本時優先使用，否則使用 server.jar
-    /// </summary>
+    /// <summary>解析初次啟動所用的啟動檔：存在啟動腳本時優先使用，否則使用 server.jar</summary>
     public static string ResolveExecutableName(string serverPath) =>
         !string.IsNullOrWhiteSpace(serverPath) && SafeFileSystem.FileExists(Path.Combine(serverPath, ServerDefaults.StartServerBatFileName))
             ? ServerDefaults.StartServerBatFileName
             : "server.jar";
 
-    /// <summary>
-    /// 以指定的啟動檔案啟動伺服器行程（經啟動規劃器套用安全檢驗、GC 與 nogui 參數）
-    /// </summary>
+    /// <summary>以指定的啟動檔案啟動伺服器行程（經啟動規劃器套用安全檢驗、GC 與 nogui 參數）</summary>
     public async Task StartAsync(string javaExecutablePath, ServerConfig config, string executableName)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -52,9 +46,7 @@ public sealed class ServerInitializationWorkflow : IDisposable
         await _runtime.StartAsync(plan).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// 平順停止伺服器；伺服器未執行時不做任何事
-    /// </summary>
+    /// <summary>平順停止伺服器；伺服器未執行時不做任何事</summary>
     public async Task StopAsync(TimeSpan gracefulTimeout)
     {
         if (!_runtime.IsRunning)
@@ -90,7 +82,7 @@ public sealed class ServerInitializationWorkflow : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Warning("傳送 stop 指令或終止行程時發生異常: {Message}", ex.Message);
+            Logger.Warning(ex, "傳送 stop 指令或終止行程時發生例外");
         }
     }
 }

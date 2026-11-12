@@ -51,7 +51,7 @@
                     <StackPanel Orientation="Horizontal"
                         Spacing="6"
                         VerticalAlignment="Center">
-                        <controls:ColorIcon Source="{StaticResource IconFolder}"
+                        <ContentPresenter ContentTemplate="{StaticResource IconFolder}"
                             Width="15"
                             Height="15"
                             VerticalAlignment="Center" />
@@ -69,7 +69,7 @@
                     <StackPanel Orientation="Horizontal"
                         Spacing="6"
                         VerticalAlignment="Center">
-                        <controls:ColorIcon Source="{StaticResource IconSearch}"
+                        <ContentPresenter ContentTemplate="{StaticResource IconSearch}"
                             Width="15"
                             Height="15"
                             VerticalAlignment="Center" />
@@ -83,7 +83,7 @@
                     <StackPanel Orientation="Horizontal"
                         Spacing="6"
                         VerticalAlignment="Center">
-                        <controls:ColorIcon Source="{StaticResource IconCreateServer}"
+                        <ContentPresenter ContentTemplate="{StaticResource IconCreateServer}"
                             Width="15"
                             Height="15"
                             VerticalAlignment="Center" />
@@ -97,7 +97,7 @@
                     <StackPanel Orientation="Horizontal"
                         Spacing="6"
                         VerticalAlignment="Center">
-                        <controls:ColorIcon Source="{StaticResource IconRefresh}"
+                        <ContentPresenter ContentTemplate="{StaticResource IconRefresh}"
                             Width="15"
                             Height="15"
                             VerticalAlignment="Center" />
@@ -124,111 +124,102 @@
             </StackPanel>
         </StackPanel>
 
-        <!-- 中間卡片：伺服器列表 -->
+        <!-- 中間卡片：伺服器清單 -->
         <Border Grid.Row="2"
-            Background="{ThemeResource CardBrush}"
-            BorderBrush="{ThemeResource BorderBrush}"
-            BorderThickness="1"
+            Style="{StaticResource CardBorderStyle}"
             CornerRadius="8"
             Padding="16"
             Margin="0,0,0,14">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
                 <TextBlock Grid.Row="0"
-                    Text="伺服器列表"
+                    Text="伺服器清單"
                     FontSize="18"
                     FontWeight="SemiBold"
                     Foreground="{ThemeResource TextBrush}"
                     Margin="0,0,0,12" />
 
-                <!-- 欄位標頭列 -->
-                <Border Grid.Row="1"
-                    Background="{ThemeResource CardBrush}"
-                    BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                    BorderThickness="1">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition
-                                Width="{x:Bind views:ServerListColumns.Current.NameWidth, Mode=OneWay}" />
-                            <ColumnDefinition
-                                Width="{x:Bind views:ServerListColumns.Current.VersionWidth, Mode=OneWay}" />
-                            <ColumnDefinition
-                                Width="{x:Bind views:ServerListColumns.Current.LoaderWidth, Mode=OneWay}" />
-                            <ColumnDefinition
-                                Width="{x:Bind views:ServerListColumns.Current.StatusWidth, Mode=OneWay}" />
-                            <ColumnDefinition
-                                Width="{x:Bind views:ServerListColumns.Current.SizeWidth, Mode=OneWay}" />
-                            <ColumnDefinition
-                                Width="{x:Bind views:ServerListColumns.Current.ModifiedWidth, Mode=OneWay}" />
-                            <ColumnDefinition
-                                Width="{x:Bind views:ServerListColumns.Current.BackupWidth, Mode=OneWay}" />
-                            <ColumnDefinition
-                                Width="{x:Bind views:ServerListColumns.Current.PathWidth, Mode=OneWay}" />
-                        </Grid.ColumnDefinitions>
+                <controls:TableFrame Grid.Row="1">
+                    <controls:TableFrame.Header>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition
+                                    Width="{x:Bind views:ServerListColumns.Current.NameWidth, Mode=OneWay}" />
+                                <ColumnDefinition
+                                    Width="{x:Bind views:ServerListColumns.Current.VersionWidth, Mode=OneWay}" />
+                                <ColumnDefinition
+                                    Width="{x:Bind views:ServerListColumns.Current.LoaderWidth, Mode=OneWay}" />
+                                <ColumnDefinition
+                                    Width="{x:Bind views:ServerListColumns.Current.StatusWidth, Mode=OneWay}" />
+                                <ColumnDefinition
+                                    Width="{x:Bind views:ServerListColumns.Current.SizeWidth, Mode=OneWay}" />
+                                <ColumnDefinition
+                                    Width="{x:Bind views:ServerListColumns.Current.ModifiedWidth, Mode=OneWay}" />
+                                <ColumnDefinition
+                                    Width="{x:Bind views:ServerListColumns.Current.BackupWidth, Mode=OneWay}" />
+                                <ColumnDefinition
+                                    Width="{x:Bind views:ServerListColumns.Current.PathWidth, Mode=OneWay}" />
+                            </Grid.ColumnDefinitions>
 
-                        <controls:SortableTableHeader Grid.Column="0"
-                            Text="名稱"
-                            SortPropertyName="Name"
-                            ColumnWidth="{x:Bind views:ServerListColumns.Current.NameWidth, Mode=TwoWay}"
-                            SortRequested="OnHeaderSortRequested"
-                            AutoFitRequested="OnHeaderAutoFitRequested" />
-                        <controls:SortableTableHeader Grid.Column="1"
-                            Text="版本"
-                            SortPropertyName="Version"
-                            ColumnWidth="{x:Bind views:ServerListColumns.Current.VersionWidth, Mode=TwoWay}"
-                            SortRequested="OnHeaderSortRequested"
-                            AutoFitRequested="OnHeaderAutoFitRequested" />
-                        <controls:SortableTableHeader Grid.Column="2"
-                            Text="載入器"
-                            SortPropertyName="Loader"
-                            ColumnWidth="{x:Bind views:ServerListColumns.Current.LoaderWidth, Mode=TwoWay}"
-                            SortRequested="OnHeaderSortRequested"
-                            AutoFitRequested="OnHeaderAutoFitRequested" />
-                        <controls:SortableTableHeader Grid.Column="3"
-                            Text="狀態"
-                            SortPropertyName="Status"
-                            ColumnWidth="{x:Bind views:ServerListColumns.Current.StatusWidth, Mode=TwoWay}"
-                            SortRequested="OnHeaderSortRequested"
-                            AutoFitRequested="OnHeaderAutoFitRequested" />
-                        <controls:SortableTableHeader Grid.Column="4"
-                            Text="目錄大小"
-                            SortPropertyName="Size"
-                            ColumnWidth="{x:Bind views:ServerListColumns.Current.SizeWidth, Mode=TwoWay}"
-                            SortRequested="OnHeaderSortRequested"
-                            AutoFitRequested="OnHeaderAutoFitRequested" />
-                        <controls:SortableTableHeader Grid.Column="5"
-                            Text="修改日期"
-                            SortPropertyName="LastModified"
-                            ColumnWidth="{x:Bind views:ServerListColumns.Current.ModifiedWidth, Mode=TwoWay}"
-                            SortRequested="OnHeaderSortRequested"
-                            AutoFitRequested="OnHeaderAutoFitRequested" />
-                        <controls:SortableTableHeader Grid.Column="6"
-                            Text="備份狀態"
-                            SortPropertyName="BackupStatus"
-                            ColumnWidth="{x:Bind views:ServerListColumns.Current.BackupWidth, Mode=TwoWay}"
-                            SortRequested="OnHeaderSortRequested"
-                            AutoFitRequested="OnHeaderAutoFitRequested" />
-                        <controls:SortableTableHeader Grid.Column="7"
-                            Text="相對路徑"
-                            SortPropertyName="RelativePath"
-                            ColumnWidth="{x:Bind views:ServerListColumns.Current.PathWidth, Mode=TwoWay}"
-                            SortRequested="OnHeaderSortRequested"
-                            AutoFitRequested="OnHeaderAutoFitRequested" />
-                    </Grid>
-                </Border>
+                            <controls:SortableTableHeader Grid.Column="0"
+                                Text="名稱"
+                                SortPropertyName="Name"
+                                ColumnWidth="{x:Bind views:ServerListColumns.Current.NameWidth, Mode=TwoWay}"
+                                SortRequested="OnHeaderSortRequested"
+                                AutoFitRequested="OnHeaderAutoFitRequested" />
+                            <controls:SortableTableHeader Grid.Column="1"
+                                Text="版本"
+                                SortPropertyName="Version"
+                                ColumnWidth="{x:Bind views:ServerListColumns.Current.VersionWidth, Mode=TwoWay}"
+                                SortRequested="OnHeaderSortRequested"
+                                AutoFitRequested="OnHeaderAutoFitRequested" />
+                            <controls:SortableTableHeader Grid.Column="2"
+                                Text="載入器"
+                                SortPropertyName="Loader"
+                                ColumnWidth="{x:Bind views:ServerListColumns.Current.LoaderWidth, Mode=TwoWay}"
+                                SortRequested="OnHeaderSortRequested"
+                                AutoFitRequested="OnHeaderAutoFitRequested" />
+                            <controls:SortableTableHeader Grid.Column="3"
+                                Text="狀態"
+                                SortPropertyName="Status"
+                                ColumnWidth="{x:Bind views:ServerListColumns.Current.StatusWidth, Mode=TwoWay}"
+                                SortRequested="OnHeaderSortRequested"
+                                AutoFitRequested="OnHeaderAutoFitRequested" />
+                            <controls:SortableTableHeader Grid.Column="4"
+                                Text="目錄大小"
+                                SortPropertyName="Size"
+                                ColumnWidth="{x:Bind views:ServerListColumns.Current.SizeWidth, Mode=TwoWay}"
+                                SortRequested="OnHeaderSortRequested"
+                                AutoFitRequested="OnHeaderAutoFitRequested" />
+                            <controls:SortableTableHeader Grid.Column="5"
+                                Text="修改日期"
+                                SortPropertyName="LastModified"
+                                ColumnWidth="{x:Bind views:ServerListColumns.Current.ModifiedWidth, Mode=TwoWay}"
+                                SortRequested="OnHeaderSortRequested"
+                                AutoFitRequested="OnHeaderAutoFitRequested" />
+                            <controls:SortableTableHeader Grid.Column="6"
+                                Text="備份狀態"
+                                SortPropertyName="BackupStatus"
+                                ColumnWidth="{x:Bind views:ServerListColumns.Current.BackupWidth, Mode=TwoWay}"
+                                SortRequested="OnHeaderSortRequested"
+                                AutoFitRequested="OnHeaderAutoFitRequested" />
+                            <controls:SortableTableHeader Grid.Column="7"
+                                Text="相對路徑"
+                                SortPropertyName="RelativePath"
+                                ColumnWidth="{x:Bind views:ServerListColumns.Current.PathWidth, Mode=TwoWay}"
+                                SortRequested="OnHeaderSortRequested"
+                                AutoFitRequested="OnHeaderAutoFitRequested" />
+                        </Grid>
+                    </controls:TableFrame.Header>
 
-                <!-- 虛擬化伺服器清單 -->
-                <Border Grid.Row="2"
-                    BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                    BorderThickness="1,0,1,1">
-                    <ListView ItemsSource="{x:Bind ViewModel.List.Servers, Mode=OneWay}"
+                    <ListView ItemsSource="{x:Bind ViewModel.List.Servers}"
                         SelectedItem="{x:Bind ViewModel.List.SelectedServer, Mode=TwoWay}"
                         SelectionMode="Single"
+                        controls:ListSelectionBehavior.ClearOnOutsidePress="True"
                         MinHeight="180"
                         ItemContainerStyle="{StaticResource TableListViewItemStyle}"
                         DoubleTapped="OnServersListViewDoubleTapped">
@@ -268,33 +259,12 @@
                                             Width="{x:Bind views:ServerListColumns.Current.PathWidth, Mode=OneWay}" />
                                     </Grid.ColumnDefinitions>
 
-                                    <Border Grid.Column="0"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="0,0,1,0"
-                                        Padding="8,6">
-                                        <TextBlock Text="{x:Bind Name, Mode=OneWay}"
-                                            TextTrimming="CharacterEllipsis"
-                                            ToolTipService.ToolTip="{x:Bind Name, Mode=OneWay}"
-                                            VerticalAlignment="Center" />
-                                    </Border>
-                                    <Border Grid.Column="1"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="0,0,1,0"
-                                        Padding="8,6">
-                                        <TextBlock Text="{x:Bind Version, Mode=OneWay}"
-                                            TextTrimming="CharacterEllipsis"
-                                            ToolTipService.ToolTip="{x:Bind Version, Mode=OneWay}"
-                                            VerticalAlignment="Center" />
-                                    </Border>
-                                    <Border Grid.Column="2"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="0,0,1,0"
-                                        Padding="8,6">
-                                        <TextBlock Text="{x:Bind Loader, Mode=OneWay}"
-                                            TextTrimming="CharacterEllipsis"
-                                            ToolTipService.ToolTip="{x:Bind Loader, Mode=OneWay}"
-                                            VerticalAlignment="Center" />
-                                    </Border>
+                                    <controls:TableCell Grid.Column="0"
+                                        Text="{x:Bind Name, Mode=OneWay}" />
+                                    <controls:TableCell Grid.Column="1"
+                                        Text="{x:Bind Version, Mode=OneWay}" />
+                                    <controls:TableCell Grid.Column="2"
+                                        Text="{x:Bind Loader, Mode=OneWay}" />
                                     <Border Grid.Column="3"
                                         BorderBrush="{ThemeResource DataGridGridLineBrush}"
                                         BorderThickness="0,0,1,0"
@@ -305,33 +275,12 @@
                                             ToolTipService.ToolTip="{x:Bind Status, Mode=OneWay}"
                                             VerticalAlignment="Center" />
                                     </Border>
-                                    <Border Grid.Column="4"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="0,0,1,0"
-                                        Padding="8,6">
-                                        <TextBlock Text="{x:Bind Size, Mode=OneWay}"
-                                            TextTrimming="CharacterEllipsis"
-                                            ToolTipService.ToolTip="{x:Bind Size, Mode=OneWay}"
-                                            VerticalAlignment="Center" />
-                                    </Border>
-                                    <Border Grid.Column="5"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="0,0,1,0"
-                                        Padding="8,6">
-                                        <TextBlock Text="{x:Bind LastModified, Mode=OneWay}"
-                                            TextTrimming="CharacterEllipsis"
-                                            ToolTipService.ToolTip="{x:Bind LastModified, Mode=OneWay}"
-                                            VerticalAlignment="Center" />
-                                    </Border>
-                                    <Border Grid.Column="6"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="0,0,1,0"
-                                        Padding="8,6">
-                                        <TextBlock Text="{x:Bind BackupStatus, Mode=OneWay}"
-                                            TextTrimming="CharacterEllipsis"
-                                            ToolTipService.ToolTip="{x:Bind BackupStatus, Mode=OneWay}"
-                                            VerticalAlignment="Center" />
-                                    </Border>
+                                    <controls:TableCell Grid.Column="4"
+                                        Text="{x:Bind Size, Mode=OneWay}" />
+                                    <controls:TableCell Grid.Column="5"
+                                        Text="{x:Bind LastModified, Mode=OneWay}" />
+                                    <controls:TableCell Grid.Column="6"
+                                        Text="{x:Bind BackupStatus, Mode=OneWay}" />
                                     <Border Grid.Column="7"
                                         BorderBrush="{ThemeResource DataGridGridLineBrush}"
                                         BorderThickness="0,0,1,0"
@@ -345,7 +294,7 @@
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>
-                </Border>
+                </controls:TableFrame>
             </Grid>
         </Border>
 
@@ -358,7 +307,7 @@
                 Foreground="{ThemeResource TextBrush}" />
 
             <!-- 未選取伺服器時的提示 -->
-            <TextBlock Text="請於上方列表中選取伺服器以檢視詳細資訊與執行操作"
+            <TextBlock Text="請於上方清單中選取伺服器以檢視詳細資訊與執行操作"
                 Foreground="{ThemeResource MutedTextBrush}"
                 Margin="0,0,0,10"
                 Visibility="{x:Bind controls:UiBindHelpers.InverseBoolToVis(ViewModel.List.HasSelectedServer), Mode=OneWay}" />
@@ -479,10 +428,8 @@
                 </TextBlock>
             </Grid>
 
-            <!-- 底部動作按鈕群 -->
             <controls:WrapPanel ItemSpacing="8"
                 LineSpacing="8">
-                <!-- 啟動按鈕 (未執行時顯示) -->
                 <Button Command="{x:Bind ViewModel.Lifecycle.StartServerCommand}"
                     IsEnabled="{x:Bind ViewModel.List.CanStartOrMonitorServer, Mode=OneWay}"
                     Visibility="{x:Bind controls:UiBindHelpers.InverseBoolToVis(ViewModel.List.IsSelectedServerActive), Mode=OneWay}"
@@ -492,7 +439,7 @@
                     <StackPanel Orientation="Horizontal"
                         Spacing="6"
                         VerticalAlignment="Center">
-                        <controls:ColorIcon Source="{StaticResource IconStart}"
+                        <ContentPresenter ContentTemplate="{StaticResource IconStart}"
                             Width="15"
                             Height="15"
                             VerticalAlignment="Center" />
@@ -501,7 +448,6 @@
                     </StackPanel>
                 </Button>
 
-                <!-- 停止按鈕 (執行中時顯示) -->
                 <Button Command="{x:Bind ViewModel.Lifecycle.StopServerCommand}"
                     IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Visibility="{x:Bind ViewModel.List.IsSelectedServerActive, Mode=OneWay}"
@@ -521,7 +467,6 @@
                     </StackPanel>
                 </Button>
 
-                <!-- 監控 -->
                 <Button Command="{x:Bind ViewModel.Lifecycle.MonitorServerCommand}"
                     IsEnabled="{x:Bind ViewModel.List.CanStartOrMonitorServer, Mode=OneWay}"
                     Width="120"
@@ -529,7 +474,7 @@
                     <StackPanel Orientation="Horizontal"
                         Spacing="6"
                         VerticalAlignment="Center">
-                        <controls:ColorIcon Source="{StaticResource IconConsole}"
+                        <ContentPresenter ContentTemplate="{StaticResource IconConsole}"
                             Width="15"
                             Height="15"
                             VerticalAlignment="Center" />
@@ -538,7 +483,6 @@
                     </StackPanel>
                 </Button>
 
-                <!-- 設定 -->
                 <Button Command="{x:Bind ViewModel.ConfigureServerCommand}"
                     IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Width="120"
@@ -546,7 +490,7 @@
                     <StackPanel Orientation="Horizontal"
                         Spacing="6"
                         VerticalAlignment="Center">
-                        <controls:ColorIcon Source="{StaticResource IconServerSettings}"
+                        <ContentPresenter ContentTemplate="{StaticResource IconServerSettings}"
                             Width="15"
                             Height="15"
                             VerticalAlignment="Center" />
@@ -555,7 +499,6 @@
                     </StackPanel>
                 </Button>
 
-                <!-- 名單管理 -->
                 <Button Command="{x:Bind ViewModel.ManagePlayersCommand}"
                     IsEnabled="{x:Bind ViewModel.List.CanManagePlayers, Mode=OneWay}"
                     ToolTipService.ToolTip="管理伺服器管理員 (ops)、白名單 (whitelist) 與封鎖名單 (bans)"
@@ -564,7 +507,7 @@
                     <StackPanel Orientation="Horizontal"
                         Spacing="6"
                         VerticalAlignment="Center">
-                        <controls:ColorIcon Source="{StaticResource IconUserGroup}"
+                        <ContentPresenter ContentTemplate="{StaticResource IconUserGroup}"
                             Width="15"
                             Height="15"
                             VerticalAlignment="Center" />
@@ -573,7 +516,6 @@
                     </StackPanel>
                 </Button>
 
-                <!-- 開啟資料夾 -->
                 <Button Command="{x:Bind ViewModel.OpenServerFolderCommand}"
                     IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Width="120"
@@ -581,7 +523,7 @@
                     <StackPanel Orientation="Horizontal"
                         Spacing="6"
                         VerticalAlignment="Center">
-                        <controls:ColorIcon Source="{StaticResource IconFolder}"
+                        <ContentPresenter ContentTemplate="{StaticResource IconFolder}"
                             Width="15"
                             Height="15"
                             VerticalAlignment="Center" />
@@ -590,7 +532,6 @@
                     </StackPanel>
                 </Button>
 
-                <!-- 備份伺服器 -->
                 <Button Command="{x:Bind ViewModel.Backup.BackupServerCommand}"
                     IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Width="120"
@@ -598,7 +539,7 @@
                     <StackPanel Orientation="Horizontal"
                         Spacing="6"
                         VerticalAlignment="Center">
-                        <controls:ColorIcon Source="{StaticResource IconBackup}"
+                        <ContentPresenter ContentTemplate="{StaticResource IconBackup}"
                             Width="15"
                             Height="15"
                             VerticalAlignment="Center" />
@@ -607,7 +548,6 @@
                     </StackPanel>
                 </Button>
 
-                <!-- 還原備份 -->
                 <Button Command="{x:Bind ViewModel.Backup.RestoreBackupCommand}"
                     IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Width="120"
@@ -615,7 +555,7 @@
                     <StackPanel Orientation="Horizontal"
                         Spacing="6"
                         VerticalAlignment="Center">
-                        <controls:ColorIcon Source="{StaticResource IconRestore}"
+                        <ContentPresenter ContentTemplate="{StaticResource IconRestore}"
                             Width="15"
                             Height="15"
                             VerticalAlignment="Center" />
@@ -624,7 +564,6 @@
                     </StackPanel>
                 </Button>
 
-                <!-- 刪除 -->
                 <Button Command="{x:Bind ViewModel.DeleteServerCommand}"
                     IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Style="{StaticResource DangerButtonStyle}"
@@ -633,7 +572,7 @@
                     <StackPanel Orientation="Horizontal"
                         Spacing="6"
                         VerticalAlignment="Center">
-                        <controls:ColorIcon Source="{StaticResource IconDelete}"
+                        <ContentPresenter ContentTemplate="{StaticResource IconDelete}"
                             Width="15"
                             Height="15"
                             VerticalAlignment="Center" />

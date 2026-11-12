@@ -9,9 +9,7 @@ using MinecraftServerManager.Domain.Mods;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 模組版本展示模型
-/// </summary>
+/// <summary>模組版本展示模型</summary>
 public sealed class ModVersionDisplayItem
 {
     public string VersionId { get; init; } = string.Empty;
@@ -30,14 +28,12 @@ public sealed class ModVersionDisplayItem
 
     public string? ExpectedHash { get; init; }
 
-    public string HashAlgorithm { get; init; } = "sha512";
+    public string HashAlgorithm { get; init; } = ModHelpers.PreferredHashAlgorithm;
 
     public IReadOnlyList<string> Dependencies { get; init; } = [];
 }
 
-/// <summary>
-/// 線上模組版本選擇對話方塊 ViewModel
-/// </summary>
+/// <summary>線上模組版本選擇對話方塊 ViewModel</summary>
 public sealed partial class ModVersionPickerViewModel : ViewModelBase
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModVersionPickerViewModel));
@@ -50,10 +46,7 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
     public partial ModVersionDisplayItem? SelectedVersion { get; set; }
 
     [ObservableProperty]
-    public partial string StatusMessage { get; set; } = "正在讀取版本清單…";
-
-    [ObservableProperty]
-    public partial bool IsBusy { get; set; }
+    public partial string StatusMessage { get; set; } = "正在讀取版本清單...";
 
     public ModVersionPickerViewModel(
         IModrinthClient modrinthClient,
@@ -77,21 +70,16 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
 
     public BulkObservableCollection<ModVersionDisplayItem> Versions { get; }
 
-    /// <summary>
-    /// 使用者選擇「加入安裝清單」時所挑定的版本。
-    /// </summary>
+    /// <summary>使用者選擇「加入安裝清單」時所挑定的版本。</summary>
     public ModVersionDisplayItem? QueuedVersion { get; private set; }
 
-    /// <summary>
-    /// 使用者是否選擇立即安裝（false 代表僅加入安裝清單）。
-    /// </summary>
+    /// <summary>使用者是否選擇立即安裝（false 代表僅加入安裝清單）。</summary>
     public bool InstallImmediately { get; private set; }
 
     public event Action<bool>? RequestClose;
 
     public async Task LoadVersionsAsync()
     {
-        IsBusy = true;
         try
         {
             var list = await _modrinthClient
@@ -134,12 +122,8 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
         }
         catch (Exception exception)
         {
-            Logger.Warning(exception, "讀取模組版本清單失敗：{Message}", exception.Message);
+            Logger.Warning(exception, "讀取模組版本清單失敗");
             StatusMessage = $"讀取版本清單失敗：{exception.Message}";
-        }
-        finally
-        {
-            IsBusy = false;
         }
     }
 

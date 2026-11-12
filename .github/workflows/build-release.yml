@@ -33,6 +33,14 @@ jobs:
         shell: pwsh
         run: ./scripts/extract_release_notes.ps1 -Strict
 
+      - name: Upload release notes
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release_notes
+          path: release_notes.md
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Verify Tag Availability
         shell: pwsh
         env:
@@ -42,7 +50,7 @@ jobs:
           $tag = $env:RELEASE_TAG
           $headCommit = (git rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or -not $headCommit) {
-              Write-Error "Preflight 失敗：無法取得當前 HEAD commit"
+              Write-Error "Preflight 失敗：無法取得目前 HEAD commit"
               exit 1
           }
 
@@ -54,7 +62,7 @@ jobs:
                   Write-Error "Preflight 失敗：Tag $tag 已存在且指向不同 commit [$existingTagCommit]，請更新版本號！"
                   exit 1
               }
-              Write-Host "Tag $tag 已存在且指向當前 HEAD；將沿用該標籤建立 Release。"
+              Write-Host "Tag $tag 已存在且指向目前 HEAD；將沿用該標籤建立 Release。"
           } else {
               Write-Host "Tag $tag 尚未建立，可安全建立新標籤發布。"
           }
@@ -112,17 +120,77 @@ jobs:
         shell: pwsh
         run: .\scripts\dotnet_publish.ps1
 
-      - name: Attest release executable provenance
+      - name: Generate SBOM (SPDX 2.2)
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          SBOM_TOOL_VERSION: v4.1.5
+          SBOM_TOOL_SHA256: 625767b371b7fdd58f40f618b8a86da0247a33c89e419039c86b4edba1dad4b5
+        run: |
+          # 釘選 Microsoft SBOM Tool 固定發行版本與 SHA-256 雜湊，確保建置可重現性與防竄改
+          $versionTag = $env:SBOM_TOOL_VERSION
+          $expectedSha = $env:SBOM_TOOL_SHA256.ToUpperInvariant()
+          $downloadUrl = "https://github.com/microsoft/sbom-tool/releases/download/$versionTag/sbom-tool-win-x64.exe"
+
+          $sbomToolPath = Join-Path $env:RUNNER_TEMP "sbom-tool-win-x64.exe"
+          Write-Host "正在下載 Microsoft SBOM Tool $versionTag..."
+          $downloadSuccess = $false
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+              try {
+                  Invoke-WebRequest -Uri $downloadUrl -OutFile $sbomToolPath
+                  $downloadSuccess = $true
+                  break
+              } catch {
+                  Write-Warning "下載 SBOM Tool 失敗 (第 $attempt 次)，等候重試..."
+                  Start-Sleep -Seconds ($attempt * 2)
+              }
+          }
+          if (-not $downloadSuccess) {
+              throw "無法下載 Microsoft SBOM Tool"
+          }
+          $actualSha = (Get-FileHash -LiteralPath $sbomToolPath -Algorithm SHA256).Hash
+          if ($actualSha -ne $expectedSha) {
+              Remove-Item -LiteralPath $sbomToolPath -Force
+              throw "SBOM Tool SHA-256 不符：預期 $expectedSha，實際 $actualSha"
+          }
+
+          $version = $env:RELEASE_VERSION
+          Write-Host "正在為版本 $version 產生 SPDX 2.2 SBOM..."
+          & $sbomToolPath generate -b "output" -bc "src" -pn "MinecraftServerManager" -pv $version -ps "Colin955023" -nsb "https://github.com/Colin955023/MinecraftServerManager" -mi "SPDX:2.2"
+          if ($LASTEXITCODE -ne 0) {
+              throw "SBOM 產生失敗"
+          }
+
+          # 不假設輸出子目錄名稱（會隨工具版本變動），改以檔名搜尋，並驗證實際的 spdxVersion
+          $spdxFile = Get-ChildItem -Path "output/_manifest" -Recurse -Filter "manifest.spdx.json" -File | Select-Object -First 1
+          if ($null -eq $spdxFile) {
+              throw "SPDX 清單檔案未產生"
+          }
+          $spdxVersion = (Get-Content -LiteralPath $spdxFile.FullName -Raw | ConvertFrom-Json).spdxVersion
+          if ($spdxVersion -ne "SPDX-2.2") {
+              throw "SBOM 格式版本不符：預期 SPDX-2.2，實際 $spdxVersion"
+          }
+
+          $destSbom = "output/MinecraftServerManager.spdx.json"
+          Copy-Item -LiteralPath $spdxFile.FullName -Destination $destSbom -Force
+          Remove-Item -Path "output/_manifest" -Recurse -Force
+          . ./scripts/lib/Common.ps1
+          $null = Write-Sha256File -LiteralPath $destSbom
+          Write-Host "SBOM 與 SHA-256 產生完成: $destSbom (SBOM Tool $versionTag)"
+
+      - name: Attest release artifacts provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: "output/*.exe"
+          subject-path: |
+            output/*.exe
+            output/*.spdx.json
 
       - name: Verify generated attestation
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          Get-ChildItem -Path 'output' -Filter '*.exe' -File | ForEach-Object {
+          Get-ChildItem -Path 'output' -Include '*.exe', '*.spdx.json' -Recurse -File | ForEach-Object {
               gh attestation verify $_.FullName --repo $env:GITHUB_REPOSITORY
               if ($LASTEXITCODE -ne 0) { throw "Artifact attestation verification failed: $($_.Name)" }
           }
@@ -161,51 +229,6 @@ jobs:
               }
           }
 
-      - name: Generate SBOM (SPDX 2.2)
-        shell: pwsh
-        env:
-          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
-          SBOM_TOOL_VERSION: v4.1.5
-          SBOM_TOOL_SHA256: 625767b371b7fdd58f40f618b8a86da0247a33c89e419039c86b4edba1dad4b5
-        run: |
-          # 釘選 Microsoft SBOM Tool 固定發行版本與 SHA-256 雜湊，確保建置可重現性與防篡改
-          $versionTag = $env:SBOM_TOOL_VERSION
-          $expectedSha = $env:SBOM_TOOL_SHA256.ToUpperInvariant()
-          $downloadUrl = "https://github.com/microsoft/sbom-tool/releases/download/$versionTag/sbom-tool-win-x64.exe"
-
-          $sbomToolPath = Join-Path $env:RUNNER_TEMP "sbom-tool-win-x64.exe"
-          Write-Host "正在下載 Microsoft SBOM Tool $versionTag..."
-          Invoke-WebRequest -Uri $downloadUrl -OutFile $sbomToolPath
-          $actualSha = (Get-FileHash -LiteralPath $sbomToolPath -Algorithm SHA256).Hash
-          if ($actualSha -ne $expectedSha) {
-              Remove-Item -LiteralPath $sbomToolPath -Force
-              throw "SBOM Tool SHA-256 不符：預期 $expectedSha，實際 $actualSha"
-          }
-
-          $version = $env:RELEASE_VERSION
-          Write-Host "正在為版本 $version 產生 SPDX 2.2 SBOM..."
-          & $sbomToolPath generate -b "output" -bc "src" -pn "MinecraftServerManager" -pv $version -ps "Colin955023" -nsb "https://github.com/Colin955023/MinecraftServerManager" -mi "SPDX:2.2"
-          if ($LASTEXITCODE -ne 0) {
-              throw "SBOM 產生失敗"
-          }
-
-          # 不假設輸出子目錄名稱（會隨工具版本變動），改以檔名搜尋，並驗證實際的 spdxVersion
-          $spdxFile = Get-ChildItem -Path "output/_manifest" -Recurse -Filter "manifest.spdx.json" -File | Select-Object -First 1
-          if ($null -eq $spdxFile) {
-              throw "SPDX 清單檔案未產生"
-          }
-          $spdxVersion = (Get-Content -LiteralPath $spdxFile.FullName -Raw | ConvertFrom-Json).spdxVersion
-          if ($spdxVersion -ne "SPDX-2.2") {
-              throw "SBOM 格式版本不符：預期 SPDX-2.2，實際 $spdxVersion"
-          }
-
-          $destSbom = "output/MinecraftServerManager.spdx.json"
-          Copy-Item -LiteralPath $spdxFile.FullName -Destination $destSbom -Force
-          Remove-Item -Path "output/_manifest" -Recurse -Force
-          . ./scripts/lib/Common.ps1
-          $null = Write-Sha256File -LiteralPath $destSbom
-          Write-Host "SBOM 與 SHA-256 產生完成: $destSbom (SBOM Tool $versionTag)"
-
       - name: Upload release payload
         if: success()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -240,9 +263,10 @@ jobs:
           name: release_payload
           path: output
 
-      - name: Generate release notes
-        shell: pwsh
-        run: ./scripts/extract_release_notes.ps1 -Strict
+      - name: Download release notes
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release_notes
 
       - name: Create release tag
         env:
@@ -252,7 +276,7 @@ jobs:
           git fetch --tags --force
           $tag = $env:RELEASE_TAG
           if ([string](git tag -l $tag)) {
-              Write-Host "Tag $tag 已存在（Preflight 已驗證指向當前 HEAD），略過建立。"
+              Write-Host "Tag $tag 已存在（Preflight 已驗證指向目前 HEAD），略過建立。"
               exit 0
           }
 
@@ -391,12 +415,12 @@ jobs:
                       $targetFile = Join-Path $verifyDir $targetFileName
 
                       if (-not (Test-Path -LiteralPath $targetFile -PathType Leaf)) {
-                          throw "雜湊校驗失敗：$($shaFile.Name) 指定的檔案不存在 ($targetFileName)"
+                          throw "雜湊驗證失敗：$($shaFile.Name) 指定的檔案不存在 ($targetFileName)"
                       }
 
                       $actualHash = (Get-FileHash -LiteralPath $targetFile -Algorithm SHA256).Hash.ToUpperInvariant()
                       if ($actualHash -ne $expectedHash) {
-                          throw "雜湊校驗不符：$targetFileName 預期 $expectedHash，實際 $actualHash"
+                          throw "雜湊驗證不符：$targetFileName 預期 $expectedHash，實際 $actualHash"
                       }
                       Write-Host " [SHA256 驗證通過] $targetFileName ($actualHash)"
                   } else {

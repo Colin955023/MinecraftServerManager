@@ -1,23 +1,20 @@
 using Microsoft.Win32.SafeHandles;
 using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Utilities;
 
-/// <summary>
-/// 關鍵檔案原子寫入：先寫入同目錄暫存檔並落盤，再以 Replace／Move 一次替換目標
-/// </summary>
+/// <summary>關鍵檔案原子寫入：先寫入同目錄暫存檔並寫入磁碟，再以 Replace／Move 一次替換目標</summary>
 public static class AtomicFileWriter
 {
-    /// <summary>
-    /// 原子寫入暫存檔副檔名
-    /// </summary>
+    /// <summary>原子寫入暫存檔副檔名</summary>
     public const string TempFileExtension = ".tmp";
 
-    /// <summary>
-    /// 產生與目標同目錄、不可預測之暫存檔路徑（target.{guid}.tmp），供原子替換使用
-    /// </summary>
+    /// <summary>產生與目標同目錄、不可預測之暫存檔路徑（target.{guid}.tmp），供原子替換使用</summary>
     public static string CreateTempSiblingPath(string targetPath) =>
         $"{targetPath}.{Guid.NewGuid():N}{TempFileExtension}";
+
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AtomicFileWriter));
 
     private const int StripeCount = 128;
     private static readonly Lock[] StripeLocks = [.. Enumerable.Range(0, StripeCount).Select(static _ => new Lock())];
@@ -56,6 +53,7 @@ public static class AtomicFileWriter
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
+                Logger.Warning(ex, "原子寫入失敗: {Path}", target);
                 return false;
             }
             finally
@@ -100,6 +98,7 @@ public static class AtomicFileWriter
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            Logger.Warning(ex, "原子寫入失敗: {Path}", target);
             return false;
         }
         finally
@@ -114,6 +113,24 @@ public static class AtomicFileWriter
     {
         byte[]? payload = JsonCodec.SerializeToUtf8Bytes(value, indented);
         return payload is not null && WriteBytes(filePath, payload, skipIfUnchanged);
+    }
+
+    /// <summary>寫入失敗時擲出 <see cref="IOException"/>；供不可靜默失敗的關鍵檔案（登錄檔、啟動腳本、初始設定）使用</summary>
+    public static void WriteTextOrThrow(string filePath, string content)
+    {
+        if (!WriteText(filePath, content))
+        {
+            throw new IOException($"無法寫入檔案：{filePath}");
+        }
+    }
+
+    /// <summary>寫入失敗時擲出 <see cref="IOException"/>；供不可靜默失敗的關鍵檔案使用</summary>
+    public static void WriteJsonOrThrow<T>(string filePath, T? value, bool indented = true)
+    {
+        if (!WriteJson(filePath, value, indented))
+        {
+            throw new IOException($"無法寫入檔案：{filePath}");
+        }
     }
 
     public static bool ReplaceFile(string sourcePath, string targetPath)
@@ -132,6 +149,7 @@ public static class AtomicFileWriter
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            Logger.Warning(ex, "原子替換失敗: {SourcePath} -> {TargetPath}", sourcePath, targetPath);
             return false;
         }
     }

@@ -1,11 +1,48 @@
 namespace MinecraftServerManager.Core.Utilities;
 
-/// <summary>
-/// 集中產生 Minecraft 伺服器 JVM 啟動參數建議
-/// </summary>
+/// <summary>集中產生 Minecraft 伺服器 JVM 啟動參數建議</summary>
 public static class JvmOptionPolicy
 {
     private const string GcOptionPrefix = "-XX:+Use";
+
+    // 可在 JVM 內執行任意外部命令或載入原生程式庫的選項；Minecraft 伺服器不需要
+    private static readonly string[] CommandExecutionOptionPrefixes =
+    [
+        "-XX:OnError",
+        "-XX:OnOutOfMemoryError",
+        "-agentpath",
+        "-agentlib",
+        "-Xbootclasspath",
+    ];
+
+    /// <summary>參數是否為可執行任意外部命令或載入原生程式庫的 JVM 選項</summary>
+    public static bool IsCommandExecutionOption(ReadOnlySpan<char> argument)
+    {
+        argument = argument.Trim().Trim('"');
+        foreach (string prefix in CommandExecutionOptionPrefixes)
+        {
+            if (argument.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>命令列文字中是否含有可執行任意外部命令的 JVM 選項（供啟動腳本逐行檢查）</summary>
+    public static bool ContainsCommandExecutionOption(ReadOnlySpan<char> commandLine)
+    {
+        foreach (string prefix in CommandExecutionOptionPrefixes)
+        {
+            if (commandLine.Contains(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// 將使用者自訂 JVM 參數正規化為清單（依據標準命令列殼層引號規則，
@@ -96,14 +133,10 @@ public static class JvmOptionPolicy
         return [.. tokens.Where(static token => token.Length > 0)];
     }
 
-    /// <summary>
-    /// 檢查參數中是否已包含 GC 選項
-    /// </summary>
+    /// <summary>檢查參數中是否已包含 GC 選項</summary>
     public static bool HasGcOption(IEnumerable<string> args) => args.Any(static arg => arg.StartsWith(GcOptionPrefix, StringComparison.OrdinalIgnoreCase) && arg.EndsWith("GC", StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>
-    /// 取得建議的 JVM 參數與其對應的繁體中文說明
-    /// </summary>
+    /// <summary>取得建議的 JVM 參數與其對應的繁體中文說明</summary>
     public static IReadOnlyList<(string Option, string Description)> GetRecommendedJvmArgsDetails(
         int? javaMajor,
         int memoryMaxMb,
@@ -120,13 +153,13 @@ public static class JvmOptionPolicy
                 args.Add(("-XX:+ZGenerational", "啟用分代 ZGC 大幅降低 CPU 使用率並減少記憶體停頓"));
             }
             args.Add(("-XX:+AlwaysPreTouch", "啟動時預先配置實體記憶體分頁以避免執行時延遲"));
-            args.Add(("-XX:+DisableExplicitGC", "禁止模組手動觸發 GC 避免非預期卡頓"));
+            args.Add(("-XX:+DisableExplicitGC", "禁止模組手動觸發 GC 避免非預期停頓"));
         }
         else
         {
             // G1GC (Aikar's Flags)
             args.Add(("-XX:+UseG1GC", "啟用 G1GC 垃圾回收器平衡吞吐量與延遲"));
-            args.Add(("-XX:+ParallelRefProcEnabled", "啟用多執行緒處理弱引用減少暫停時間"));
+            args.Add(("-XX:+ParallelRefProcEnabled", "啟用多執行緒處理弱參考減少暫停時間"));
             args.Add(("-XX:MaxGCPauseMillis=200", "設定最大 GC 暫停時間目標為 200 毫秒"));
             args.Add(("-XX:+UnlockExperimentalVMOptions", "解鎖實驗性 JVM 參數以允許進階效能調校"));
             args.Add(("-XX:+DisableExplicitGC", "禁止手動觸發 System.gc"));
@@ -171,9 +204,7 @@ public static class JvmOptionPolicy
         return args;
     }
 
-    /// <summary>
-    /// 依記憶體與 Java 版本產生 JVM 建議參數
-    /// </summary>
+    /// <summary>依記憶體與 Java 版本產生 JVM 建議參數</summary>
     public static IReadOnlyList<string> RecommendGcArgs(
         int memoryMaxMb,
         int? javaMajor = null,

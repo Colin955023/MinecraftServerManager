@@ -36,31 +36,9 @@ Assert-SingleExecutable "發布後"
 if ($env:GITHUB_ACTIONS -ne "true")
 {
     Write-Host "=== 執行啟動煙霧測試 ==="
-    $smokeDataDir = Join-Path ([System.IO.Path]::GetTempPath()) ("msm_smoke_" + [Guid]::NewGuid().ToString("N"))
-    $psi = [System.Diagnostics.ProcessStartInfo]::new($targetExe, "--smoke-test")
-    $psi.EnvironmentVariables["MSM_USER_DATA_DIR"] = $smokeDataDir
-    $psi.UseShellExecute = $false
-    $proc = [System.Diagnostics.Process]::Start($psi)
-    try
-    {
-        if (-not $proc.WaitForExit(30000))
-        {
-            $proc.Kill($true)
-            throw "煙霧測試逾時（30 秒）"
-        }
-        if ($proc.ExitCode -ne 0)
-        {
-            throw "煙霧測試失敗，結束代碼：$($proc.ExitCode)"
-        }
-        Assert-SingleExecutable "煙霧測試後"
-    }
-    finally
-    {
-        $proc.Dispose()
-        Remove-Item -LiteralPath $smokeDataDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
+    Invoke-SmokeTest -ExePath $targetExe
 }
 
-$targetSha = Write-Sha256File -LiteralPath $targetExe
+if ($env:GITHUB_ACTIONS -eq "true") { $null = Write-Sha256File -LiteralPath $targetExe }
 Write-Host ("檔案大小：{0:N2} MB" -f ((Get-Item -LiteralPath $targetExe).Length / 1MB))
-Write-Host "SHA-256 ：$((Get-Content -LiteralPath $targetSha -Raw).Trim())"
+$hash = (Get-FileHash -LiteralPath $targetExe -Algorithm SHA256).Hash.ToLowerInvariant(); Write-Host "SHA-256 ：$hash  $exeName"

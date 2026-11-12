@@ -3,9 +3,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.Services;
 
-/// <summary>
-/// 提供標準 Windows 系統音效回饋輔助工具（透過 Win32 MessageBeep 原生 API 播放）
-/// </summary>
+/// <summary>提供標準 Windows 系統音效回饋輔助工具（透過 Win32 MessageBeep 原生 API 播放）</summary>
 public static partial class AudioFeedback
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AudioFeedback));
@@ -18,9 +16,7 @@ public static partial class AudioFeedback
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool MessageBeep(uint uType);
 
-    /// <summary>
-    /// 依訊息層級播放對應之系統音效
-    /// </summary>
+    /// <summary>依訊息層級播放對應之系統音效</summary>
     public static void Play(UiMessageLevel level)
     {
         switch (level)
@@ -39,19 +35,13 @@ public static partial class AudioFeedback
         }
     }
 
-    /// <summary>
-    /// 播放警告音效
-    /// </summary>
+    /// <summary>播放警告音效</summary>
     public static void PlayWarning() => PlayCore(MB_ICONEXCLAMATION, "播放警告提示音效失敗");
 
-    /// <summary>
-    /// 播放錯誤音效
-    /// </summary>
+    /// <summary>播放錯誤音效</summary>
     public static void PlayError() => PlayCore(MB_ICONHAND, "播放錯誤提示音效失敗");
 
-    /// <summary>
-    /// 播放提示資訊與確認詢問音效（兩者共用系統「星號」音效）
-    /// </summary>
+    /// <summary>播放提示資訊與確認詢問音效（兩者共用系統「星號」音效）</summary>
     public static void PlayInfo() => PlayCore(MB_ICONASTERISK, "播放資訊提示音效失敗");
 
     private static void PlayCore(uint uType, string errorMessage)

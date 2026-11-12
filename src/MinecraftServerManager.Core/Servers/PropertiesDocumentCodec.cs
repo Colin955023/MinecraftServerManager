@@ -3,9 +3,7 @@ using System.Text;
 
 namespace MinecraftServerManager.Core.Servers;
 
-/// <summary>
-/// Java .properties 格式檔案編解碼器
-/// </summary>
+/// <summary>Java .properties 格式檔案編解碼器</summary>
 public static class PropertiesDocumentCodec
 {
     private static readonly SearchValues<char> KeyEscapeChars = SearchValues.Create("\\=: ");

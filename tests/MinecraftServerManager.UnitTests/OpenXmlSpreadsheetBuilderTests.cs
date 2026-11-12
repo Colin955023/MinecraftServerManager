@@ -33,12 +33,11 @@ public sealed class OpenXmlSpreadsheetBuilderTests
     }
 
     [Fact]
-    public void SanitizeXmlText_RemovesControlCharacters()
+    public void SanitizeXmlText_RemovesControlCharactersAndKeepsEmoji()
     {
         string raw = "Hello\x00\x01\x08World\t\r\nEnd\x1F";
-        string sanitized = OpenXmlSpreadsheetBuilder.SanitizeXmlText(raw);
-
-        Assert.Equal("HelloWorld\t\r\nEnd", sanitized);
+        Assert.Equal("HelloWorld\t\r\nEnd", OpenXmlSpreadsheetBuilder.SanitizeXmlText(raw));
+        Assert.Equal("Mod 🎮 名稱尾", OpenXmlSpreadsheetBuilder.SanitizeXmlText("Mod 🎮 名稱\u0001\uD800尾"));
     }
 
     [Fact]

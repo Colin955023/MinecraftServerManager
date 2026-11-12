@@ -2,21 +2,15 @@ using MinecraftServerManager.Core.Servers;
 
 namespace MinecraftServerManager.Core.Ports;
 
-/// <summary>
-/// server.properties 存取與原子更新抽象介面
-/// </summary>
+/// <summary>server.properties 存取與原子更新抽象介面</summary>
 public interface IServerPropertiesStore
 {
-    /// <summary>
-    /// 讀取伺服器屬性快照
-    /// </summary>
+    /// <summary>讀取伺服器屬性快照</summary>
     public Task<ServerPropertiesSnapshot> ReadAsync(
         string serverName,
         CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// 以指定預期版本原子更新伺服器屬性（防止並行衝突）
-    /// </summary>
+    /// <summary>以指定預期版本原子更新伺服器屬性（防止並行衝突）</summary>
     public Task<ServerPropertiesUpdateResult> UpdateAsync(
         string serverName,
         IReadOnlyDictionary<string, string> patches,

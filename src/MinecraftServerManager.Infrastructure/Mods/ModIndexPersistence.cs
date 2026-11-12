@@ -4,9 +4,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
-/// <summary>
-/// 模組快取索引持久化管理員
-/// </summary>
+/// <summary>模組快取索引持久化管理員</summary>
 public sealed class ModIndexPersistence
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModIndexPersistence));
@@ -28,7 +26,7 @@ public sealed class ModIndexPersistence
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning("設定快取目錄隱藏屬性失敗: {0}", ex.Message);
+            Logger.Warning(ex, "設定快取目錄隱藏屬性失敗");
         }
 
         _indexFilePath = Path.Combine(cacheDir, "mod_index.json");
@@ -137,12 +135,12 @@ public sealed class ModIndexPersistence
                 {
                     return;
                 }
-                AtomicFileWriter.WriteBytes(_indexFilePath, utf8Bytes);
-                _dirty = false;
+                // 寫入失敗時保留 dirty 旗標，下次 Flush 會重試
+                _dirty = !AtomicFileWriter.WriteBytes(_indexFilePath, utf8Bytes);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.Warning(ex, "寫入模組索引檔案失敗: {0}", _indexFilePath);
+                Logger.Warning(ex, "寫入模組索引檔案失敗: {IndexFilePath}", _indexFilePath);
             }
         }
     }
@@ -169,7 +167,7 @@ public sealed class ModIndexPersistence
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.Warning(ex, "讀取模組索引檔案失敗，重設為空索引: {0}", _indexFilePath);
+                Logger.Warning(ex, "讀取模組索引檔案失敗，重設為空索引: {IndexFilePath}", _indexFilePath);
                 _index = new Dictionary<string, ModCacheEntry>(StringComparer.OrdinalIgnoreCase);
             }
         }

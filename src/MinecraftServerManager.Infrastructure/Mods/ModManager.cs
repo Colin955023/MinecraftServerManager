@@ -5,9 +5,7 @@ using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
-/// <summary>
-/// 模組管理外觀服務實作
-/// </summary>
+/// <summary>模組管理外觀服務實作</summary>
 public sealed class ModManager(
     ILocalModScanner scanner,
     IModFileInstaller installer) : IModManager
@@ -19,7 +17,7 @@ public sealed class ModManager(
     {
         string modsDir = ResolveModsDirectory(serverDirectory);
         var mods = await scanner.ScanModsAsync(modsDir, cancellationToken).ConfigureAwait(false);
-        return includeDisabled ? mods : [.. mods.Where(m => m.Status == ModStatus.Enabled)];
+        return includeDisabled ? mods : [.. mods.Where(static m => m.Status == ModStatus.Enabled)];
     }
 
     public Task<LocalModMutationResult> SetModStateAsync(
@@ -27,7 +25,8 @@ public sealed class ModManager(
         string modId,
         bool enable,
         CancellationToken cancellationToken = default) =>
-        installer.SetModStateAsync(ResolveModsDirectory(serverDirectory), modId, enable, cancellationToken);
+        // 啟停前置檔案檢查為同步 I/O，以 Task.Run 避免佔用呼叫端（UI）執行緒
+        Task.Run(() => installer.SetModStateAsync(ResolveModsDirectory(serverDirectory), modId, enable, cancellationToken), cancellationToken);
 
     public Task<LocalModMutationResult> DeleteModsAsync(
         string serverDirectory,

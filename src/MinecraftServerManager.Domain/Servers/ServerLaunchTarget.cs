@@ -1,8 +1,6 @@
 namespace MinecraftServerManager.Domain.Servers;
 
-/// <summary>
-/// 由伺服器檢查選出的唯一啟動目標
-/// </summary>
+/// <summary>由伺服器檢查選出的唯一啟動目標</summary>
 public sealed record ServerLaunchTarget
 {
     public LaunchTargetKind Kind { get; }

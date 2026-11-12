@@ -3,9 +3,7 @@ using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 伺服器記憶體設定 WinUI 3 原生 ContentDialog
-/// </summary>
+/// <summary>伺服器記憶體設定 WinUI 3 原生 ContentDialog</summary>
 public sealed partial class ServerMemoryDialog : ContentDialog
 {
     public ServerMemoryViewModel ViewModel { get; }

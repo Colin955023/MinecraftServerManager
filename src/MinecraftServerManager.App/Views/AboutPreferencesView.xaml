@@ -10,18 +10,13 @@
 
   <ScrollViewer VerticalScrollBarVisibility="Auto"
     HorizontalScrollBarVisibility="Disabled">
-    <!-- 左右分欄版面配置 -->
     <Grid Margin="12,4,16,24">
       <Grid.ColumnDefinitions>
-        <!-- 左欄：關於程式 -->
         <ColumnDefinition Width="*" />
-        <!-- 中間垂直分隔線 -->
         <ColumnDefinition Width="Auto" />
-        <!-- 右欄：視窗偏好設定 -->
         <ColumnDefinition Width="*" />
       </Grid.ColumnDefinitions>
 
-      <!-- 左欄：關於程式 -->
       <StackPanel Grid.Column="0"
         Margin="10,0,24,0">
         <TextBlock Text="🎮 Minecraft Server Manager"
@@ -42,15 +37,12 @@
           HorizontalAlignment="Center"
           Margin="0,0,0,18" />
 
-        <!-- 開發資訊 -->
         <TextBlock Text="👨‍💻 開發資訊"
           FontSize="16"
           FontWeight="SemiBold"
           Foreground="{ThemeResource TextBrush}"
           Margin="0,0,0,8" />
-        <Border Background="{ThemeResource CardBrush}"
-          BorderBrush="{ThemeResource BorderBrush}"
-          BorderThickness="1"
+        <Border Style="{StaticResource CardBorderStyle}"
           CornerRadius="6"
           Padding="12,10"
           Margin="0,0,0,14">
@@ -75,10 +67,7 @@
           </StackPanel>
         </Border>
 
-        <!-- GitHub 連結 -->
-        <Border Background="{ThemeResource CardBrush}"
-          BorderBrush="{ThemeResource BorderBrush}"
-          BorderThickness="1"
+        <Border Style="{StaticResource CardBorderStyle}"
           CornerRadius="6"
           Padding="12,8"
           Margin="0,0,0,14">
@@ -87,27 +76,35 @@
             Padding="0" />
         </Border>
 
-        <!-- 授權條款 -->
         <TextBlock Text="📄 授權條款"
           FontSize="16"
           FontWeight="SemiBold"
           Foreground="{ThemeResource TextBrush}"
           Margin="0,0,0,8" />
-        <Border Background="{ThemeResource CardBrush}"
-          BorderBrush="{ThemeResource BorderBrush}"
-          BorderThickness="1"
+        <Border Style="{StaticResource CardBorderStyle}"
           CornerRadius="6"
           Padding="12,10"
           Margin="0,0,0,14">
           <StackPanel>
-            <TextBlock Text="• 本專案採用 GNU General Public License v3.0 授權條款"
+            <TextBlock Text="• Copyright (C) 2025-2026 Colin955023"
               Foreground="{ThemeResource TextBrush}"
               Margin="0,2" />
-            <TextBlock Text="• 部分設計理念參考 Prism Launcher 等開放原始碼專案"
+            <TextBlock Text="• 本專案採用 GNU General Public License v3.0（僅限第 3 版）授權條款"
+              Foreground="{ThemeResource TextBrush}"
+              Margin="0,2" />
+            <TextBlock Text="• 本程式不提供任何擔保（詳見 GPLv3 第 15、16 條）"
               Foreground="{ThemeResource TextBrush}"
               Margin="0,2" />
             <TextBlock Text="• 可依 GPLv3 條款使用、修改與散布"
               Foreground="{ThemeResource TextBrush}"
+              Margin="0,2" />
+            <TextBlock Text="• 版本比較引擎（FlexVersion）移植自 Prism Launcher（GPL-3.0-only），版權聲明見 COPYING.md"
+              Foreground="{ThemeResource TextBrush}"
+              TextWrapping="Wrap"
+              Margin="0,2" />
+            <HyperlinkButton Content="檢視 GPLv3 授權全文"
+              Command="{x:Bind ViewModel.OpenLicenseCommand}"
+              Padding="0"
               Margin="0,2" />
             <TextBlock Text="• 請遵守 Minecraft EULA 和相關法令"
               Foreground="{ThemeResource TextBrush}"
@@ -118,7 +115,6 @@
           </StackPanel>
         </Border>
 
-        <!-- 更新設定 -->
         <TextBlock Text="🔄 更新設定"
           FontSize="16"
           FontWeight="SemiBold"
@@ -140,13 +136,11 @@
           Height="32" />
       </StackPanel>
 
-      <!-- 中間垂直分隔線 -->
       <Border Grid.Column="1"
         Width="1"
         Background="{ThemeResource BorderBrush}"
         Margin="0,8" />
 
-      <!-- 右欄：視窗偏好設定 -->
       <StackPanel Grid.Column="2"
         Margin="24,0,10,0">
         <TextBlock Text="🖥️ 視窗偏好設定"
@@ -156,15 +150,12 @@
           Foreground="{ThemeResource TextBrush}"
           Margin="0,0,0,24" />
 
-        <!-- 主視窗設定 -->
         <TextBlock Text="🏠 主視窗設定"
           FontSize="16"
           FontWeight="SemiBold"
           Foreground="{ThemeResource TextBrush}"
           Margin="0,0,0,8" />
-        <Border Background="{ThemeResource CardBrush}"
-          BorderBrush="{ThemeResource BorderBrush}"
-          BorderThickness="1"
+        <Border Style="{StaticResource CardBorderStyle}"
           CornerRadius="6"
           Padding="12,10"
           Margin="0,0,0,10">
@@ -185,7 +176,6 @@
           Height="32"
           Margin="0,0,0,20" />
 
-        <!-- 顯示設定 -->
         <TextBlock Text="🎨 顯示設定"
           FontSize="16"
           FontWeight="SemiBold"
@@ -208,10 +198,7 @@
             HorizontalAlignment="Left" />
         </Grid>
 
-        <!-- 強調色彩設定卡片 -->
-        <Border Background="{ThemeResource CardBrush}"
-          BorderBrush="{ThemeResource BorderBrush}"
-          BorderThickness="1"
+        <Border Style="{StaticResource CardBorderStyle}"
           CornerRadius="6"
           Padding="12,10"
           Margin="0,0,0,24">
@@ -222,7 +209,6 @@
             <StackPanel Orientation="Horizontal"
               Spacing="10"
               VerticalAlignment="Center">
-              <!-- 色彩預覽圓角方塊 -->
               <Border Width="28"
                 Height="28"
                 CornerRadius="4"
@@ -238,7 +224,6 @@
             </StackPanel>
             <StackPanel Orientation="Horizontal"
               Spacing="8">
-              <!-- 自訂選色按鈕 + Flyout 搭配原生 ColorPicker -->
               <Button Content="🎨 挑選自訂顏色"
                 Height="32"
                 Padding="12,4"
@@ -280,7 +265,29 @@
           </StackPanel>
         </Border>
 
-        <!-- 底部偏好設定操作按鈕 (還原預設) -->
+        <TextBlock Text="💾 備份設定"
+          FontSize="16"
+          FontWeight="SemiBold"
+          Foreground="{ThemeResource TextBrush}"
+          Margin="0,0,0,10" />
+        <CheckBox Content="啟動伺服器前自動備份"
+          IsChecked="{x:Bind ViewModel.IsAutoBackupBeforeStartEnabled, Mode=TwoWay}"
+          Foreground="{ThemeResource TextBrush}"
+          Margin="0,0,0,10" />
+        <NumberBox Header="每台伺服器保留備份份數"
+          Minimum="1"
+          Maximum="100"
+          SpinButtonPlacementMode="Inline"
+          SmallChange="1"
+          Width="160"
+          HorizontalAlignment="Left"
+          Value="{x:Bind ViewModel.BackupRetentionCount, Mode=TwoWay}" />
+        <TextBlock Text="超過份數時自動刪除最舊的備份；需先為伺服器設定備份資料夾，自動備份才會執行。"
+          FontSize="12"
+          Foreground="{ThemeResource MutedTextBrush}"
+          TextWrapping="Wrap"
+          Margin="0,8,0,16" />
+
         <Border Height="1"
           Background="{ThemeResource BorderBrush}"
           Margin="0,0,0,20" />

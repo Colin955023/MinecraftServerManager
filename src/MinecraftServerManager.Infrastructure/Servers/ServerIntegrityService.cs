@@ -30,7 +30,7 @@ public sealed class ServerIntegrityService : IServerIntegrityService
                     {
                         bool hasPaper = SafeFileSystem.FileExists(Path.Combine(serverPath, "paper.jar")) ||
                                         SafeFileSystem.FileExists(Path.Combine(serverPath, "server.jar")) ||
-                                        SafeFileSystem.EnumerateFiles(serverPath, "paper*.jar", SearchOption.TopDirectoryOnly).Count > 0;
+                                        SafeFileSystem.HasAnyFile(serverPath, "paper*.jar");
                         return hasPaper
                             ? new ServerIntegrityResult(false, EmptyList)
                             : new ServerIntegrityResult(true, PaperMissingList);
@@ -39,7 +39,7 @@ public sealed class ServerIntegrityService : IServerIntegrityService
                 case LoaderKind.Vanilla:
                     {
                         bool hasServer = SafeFileSystem.FileExists(Path.Combine(serverPath, "server.jar")) ||
-                                         SafeFileSystem.EnumerateFiles(serverPath, "minecraft_server*.jar", SearchOption.TopDirectoryOnly).Count > 0;
+                                         SafeFileSystem.HasAnyFile(serverPath, "minecraft_server*.jar");
                         return hasServer
                             ? new ServerIntegrityResult(false, EmptyList)
                             : new ServerIntegrityResult(true, ServerJarMissingList);
@@ -93,7 +93,7 @@ public sealed class ServerIntegrityService : IServerIntegrityService
 
                 case LoaderKind.Forge:
                     {
-                        bool hasLegacyForge = SafeFileSystem.EnumerateFiles(serverPath, "forge*.jar", SearchOption.TopDirectoryOnly).Count > 0;
+                        bool hasLegacyForge = SafeFileSystem.HasAnyFile(serverPath, "forge*.jar");
                         if (hasLegacyForge)
                         {
                             return new ServerIntegrityResult(false, EmptyList);

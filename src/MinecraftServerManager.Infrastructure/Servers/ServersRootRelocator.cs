@@ -1,4 +1,3 @@
-using System.Text;
 using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
@@ -8,16 +7,12 @@ using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>
-/// 負責伺服器存放根目錄變更時之路徑驗證、既有內容探測、全量資料遷移、跨磁碟區搬移、失敗回滾與註冊表路徑更新。
-/// </summary>
+/// <summary>負責伺服器存放根目錄變更時之路徑驗證、既有內容探測、全量資料遷移、跨磁碟區搬移、失敗回復與登錄檔路徑更新。</summary>
 public static class ServersRootRelocator
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServersRootRelocator));
 
-    /// <summary>
-    /// 驗證新設定之伺服器存放根目錄是否合法。
-    /// </summary>
+    /// <summary>驗證新設定之伺服器存放根目錄是否合法。</summary>
     public static RelocationPathCheckResult ValidateTargetRoot(
         string? currentRoot,
         string? newRoot,
@@ -53,9 +48,7 @@ public static class ServersRootRelocator
         return RelocationPathCheckResult.Valid;
     }
 
-    /// <summary>
-    /// 檢查原伺服器根目錄是否存放有伺服器或檔案（若僅有空的 servers.json 視為無存放資料）。
-    /// </summary>
+    /// <summary>檢查原伺服器根目錄是否存放有伺服器或檔案（若僅有空的 servers.json 視為無存放資料）。</summary>
     public static bool HasStoredContent(string? currentRoot)
     {
         string normalized = SettingsManager.NormalizeExactServersRootPath(currentRoot);
@@ -76,8 +69,7 @@ public static class ServersRootRelocator
                 !entries[0].IsDirectory &&
                 string.Equals(Path.GetFileName(entries[0].FullPath), ServerDefaults.RegistryFileName, StringComparison.OrdinalIgnoreCase))
             {
-                string json = SafeFileSystem.ReadAllText(entries[0].FullPath, Encoding.UTF8);
-                var registry = JsonCodec.Deserialize<Dictionary<string, ServerConfigPayload>>(json);
+                var registry = JsonCodec.ReadFile<Dictionary<string, ServerConfigPayload>>(entries[0].FullPath);
                 return registry is { Count: > 0 };
             }
 
@@ -85,14 +77,12 @@ public static class ServersRootRelocator
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning(ex, "檢查原伺服器根目錄內容時發生例外，保守視為有內容: {0}", normalized);
+            Logger.Warning(ex, "檢查原伺服器根目錄內容時發生例外，保守視為有內容: {Path}", normalized);
             return true;
         }
     }
 
-    /// <summary>
-    /// 檢查目標目錄是否為空資料夾（或尚不存在）。
-    /// </summary>
+    /// <summary>檢查目標目錄是否為空資料夾（或尚不存在）。</summary>
     public static bool IsTargetDirectoryEmpty(string? targetRoot)
     {
         string normalized = SettingsManager.NormalizeExactServersRootPath(targetRoot);
@@ -152,11 +142,11 @@ public static class ServersRootRelocator
                 int pct = (int)(i * 90.0 / entries.Count);
                 progress?.Report((Math.Clamp(pct, 5, 90), $"正在搬移：{name}..."));
 
-                MoveEntryWithCrossVolumeSupport(entry.FullPath, destPath, entry.IsDirectory);
+                MoveEntryWithCrossVolumeSupport(entry.FullPath, destPath, entry.IsDirectory, cancellationToken);
                 movedItems.Add((destPath, entry.FullPath, entry.IsDirectory));
             }
 
-            progress?.Report((95, "正在更新伺服器路徑註冊表..."));
+            progress?.Report((95, "正在更新伺服器路徑登錄檔..."));
             RewriteRegistryPaths(dstRoot, srcRoot, dstRoot);
             progress?.Report((100, "資料遷移完成！"));
 
@@ -165,7 +155,7 @@ public static class ServersRootRelocator
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "遷移伺服器根目錄失敗，開始復原已搬移項目: {Message}", ex.Message);
+            Logger.Error(ex, "遷移伺服器根目錄失敗，開始復原已搬移項目");
             for (int i = movedItems.Count - 1; i >= 0; i--)
             {
                 var (DestPath, SourcePath, IsDirectory) = movedItems[i];
@@ -173,12 +163,13 @@ public static class ServersRootRelocator
                 {
                     if (IsDirectory ? SafeFileSystem.DirectoryExists(DestPath) : SafeFileSystem.FileExists(DestPath))
                     {
-                        MoveEntryWithCrossVolumeSupport(DestPath, SourcePath, IsDirectory);
+                        // 復原不可沿用可能已取消的權杖，否則跨磁碟項目會留在新位置
+                        MoveEntryWithCrossVolumeSupport(DestPath, SourcePath, IsDirectory, CancellationToken.None);
                     }
                 }
                 catch (Exception rollbackEx) when (rollbackEx is not OperationCanceledException)
                 {
-                    Logger.Warning(rollbackEx, "復原搬移項目失敗: {0} -> {1}", DestPath, SourcePath);
+                    Logger.Warning(rollbackEx, "復原搬移項目失敗: {DestPath} -> {SourcePath}", DestPath, SourcePath);
                 }
             }
 
@@ -186,9 +177,7 @@ public static class ServersRootRelocator
         }
     }
 
-    /// <summary>
-    /// 遷移完成後，若原根目錄已無任何內容則刪除；仍有內容（含無法搬移之項目）則保留。失敗僅記錄，不影響遷移結果。
-    /// </summary>
+    /// <summary>遷移完成後，若原根目錄已無任何內容則刪除；仍有內容（含無法搬移之項目）則保留。失敗僅記錄，不影響遷移結果。</summary>
     private static void TryDeleteEmptySourceRoot(string srcRoot)
     {
         try
@@ -203,11 +192,11 @@ public static class ServersRootRelocator
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning(ex, "刪除已清空的原伺服器根目錄失敗，予以保留: {0}", srcRoot);
+            Logger.Warning(ex, "刪除已清空的原伺服器根目錄失敗，予以保留: {Path}", srcRoot);
         }
     }
 
-    private static void MoveEntryWithCrossVolumeSupport(string sourcePath, string destinationPath, bool isDirectory)
+    private static void MoveEntryWithCrossVolumeSupport(string sourcePath, string destinationPath, bool isDirectory, CancellationToken cancellationToken = default)
     {
         if (!isDirectory)
         {
@@ -228,11 +217,30 @@ public static class ServersRootRelocator
             }
             catch (IOException ex)
             {
-                Logger.Warning("同磁碟目錄直接移動失敗，改用複製後刪除 ({0}): {1}", sourcePath, ex.Message);
+                Logger.Warning(ex, "同磁碟目錄直接移動失敗，改用複製後刪除 ({SourcePath})", sourcePath);
             }
         }
 
-        SafeFileSystem.CopyDirectoryTreeSafe(sourcePath, destinationPath);
+        try
+        {
+            SafeFileSystem.CopyDirectoryTreeSafe(sourcePath, destinationPath, cancellationToken);
+        }
+        catch (Exception)
+        {
+            if (SafeFileSystem.DirectoryExists(destinationPath))
+            {
+                try
+                {
+                    SafeFileSystem.DeleteDirectory(destinationPath, recursive: true);
+                }
+                catch (Exception cleanupEx) when (cleanupEx is not OperationCanceledException)
+                {
+                    Logger.Warning(cleanupEx, "清理未完成的跨磁碟複製目標失敗: {DestinationPath}", destinationPath);
+                }
+            }
+            throw;
+        }
+
         SafeFileSystem.DeleteDirectory(sourcePath, recursive: true);
     }
 
@@ -246,8 +254,7 @@ public static class ServersRootRelocator
 
         try
         {
-            string json = SafeFileSystem.ReadAllText(registryPath, Encoding.UTF8);
-            var loaded = JsonCodec.Deserialize<Dictionary<string, ServerConfigPayload>>(json);
+            var loaded = JsonCodec.ReadFile<Dictionary<string, ServerConfigPayload>>(registryPath);
             if (loaded is null || loaded.Count == 0)
             {
                 return;
@@ -269,12 +276,11 @@ public static class ServersRootRelocator
                 };
             }
 
-            string outJson = JsonCodec.Serialize(updated, indented: true);
-            AtomicFileWriter.WriteText(registryPath, outJson);
+            AtomicFileWriter.WriteJsonOrThrow(registryPath, updated);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning(ex, "更新遷移後的 servers.json 路徑時發生例外: {0}", registryPath);
+            Logger.Warning(ex, "更新遷移後的 servers.json 路徑時發生例外: {RegistryPath}", registryPath);
             throw;
         }
     }
@@ -296,7 +302,7 @@ public static class ServersRootRelocator
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning("轉換伺服器相對路徑失敗 ({0}): {1}", originalPath, ex.Message);
+            Logger.Warning(ex, "轉換伺服器相對路徑失敗 ({OriginalPath})", originalPath);
         }
 
         return originalPath;

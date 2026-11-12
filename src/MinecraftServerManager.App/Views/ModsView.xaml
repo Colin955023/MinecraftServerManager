@@ -23,7 +23,7 @@
       Orientation="Horizontal"
       VerticalAlignment="Center"
       Spacing="10">
-      <controls:ColorIcon Source="{StaticResource IconMods}"
+      <ContentPresenter ContentTemplate="{StaticResource IconMods}"
         Width="24"
         Height="24"
         VerticalAlignment="Center" />
@@ -40,9 +40,7 @@
 
     <!-- 伺服器選擇列 -->
     <Border Grid.Row="1"
-      Background="{ThemeResource CardBrush}"
-      BorderBrush="{ThemeResource BorderBrush}"
-      BorderThickness="1"
+      Style="{StaticResource CardBorderStyle}"
       CornerRadius="8"
       Padding="14,10"
       Margin="0,0,0,14">
@@ -57,7 +55,7 @@
           VerticalAlignment="Center"
           Margin="0,0,12,0"
           Spacing="6">
-          <controls:ColorIcon Source="{StaticResource IconFolder}"
+          <ContentPresenter ContentTemplate="{StaticResource IconFolder}"
             Width="16"
             Height="16"
             VerticalAlignment="Center" />
@@ -76,7 +74,7 @@
           <StackPanel Orientation="Horizontal"
             Spacing="6"
             VerticalAlignment="Center">
-            <controls:ColorIcon Source="{StaticResource IconRefresh}"
+            <ContentPresenter ContentTemplate="{StaticResource IconRefresh}"
               Width="14"
               Height="14"
               VerticalAlignment="Center" />
@@ -129,7 +127,7 @@
               Height="32">
               <StackPanel Orientation="Horizontal"
                 Spacing="6">
-                <controls:ColorIcon Source="{StaticResource IconCreateServer}"
+                <ContentPresenter ContentTemplate="{StaticResource IconCreateServer}"
                   Width="14"
                   Height="14"
                   VerticalAlignment="Center" />
@@ -142,7 +140,7 @@
               Height="32">
               <StackPanel Orientation="Horizontal"
                 Spacing="6">
-                <controls:ColorIcon Source="{StaticResource IconRefresh}"
+                <ContentPresenter ContentTemplate="{StaticResource IconRefresh}"
                   Width="14"
                   Height="14"
                   VerticalAlignment="Center" />
@@ -156,7 +154,7 @@
               Height="32">
               <StackPanel Orientation="Horizontal"
                 Spacing="6">
-                <controls:ColorIcon Source="{StaticResource IconRefresh}"
+                <ContentPresenter ContentTemplate="{StaticResource IconRefresh}"
                   Width="14"
                   Height="14"
                   VerticalAlignment="Center" />
@@ -165,7 +163,7 @@
                   Foreground="{ThemeResource TextBrush}" />
               </StackPanel>
             </Button>
-            <Button Command="{x:Bind ViewModel.Local.ToggleSelectAllCommand}"
+            <Button Click="OnSelectAllLocalModsClicked"
               Height="32">
               <TextBlock Text="全選"
                 VerticalAlignment="Center"
@@ -182,7 +180,7 @@
               Height="32">
               <StackPanel Orientation="Horizontal"
                 Spacing="6">
-                <controls:ColorIcon Source="{StaticResource IconFolder}"
+                <ContentPresenter ContentTemplate="{StaticResource IconFolder}"
                   Width="14"
                   Height="14"
                   VerticalAlignment="Center" />
@@ -197,7 +195,7 @@
               Height="32">
               <StackPanel Orientation="Horizontal"
                 Spacing="6">
-                <controls:ColorIcon Source="{StaticResource IconDelete}"
+                <ContentPresenter ContentTemplate="{StaticResource IconDelete}"
                   Width="14"
                   Height="14"
                   VerticalAlignment="Center" />
@@ -230,7 +228,7 @@
               Padding="12,0">
               <StackPanel Orientation="Horizontal"
                 Spacing="6">
-                <controls:ColorIcon Source="{StaticResource IconFolder}"
+                <ContentPresenter ContentTemplate="{StaticResource IconFolder}"
                   Width="14"
                   Height="14"
                   VerticalAlignment="Center" />
@@ -244,22 +242,11 @@
 
         <!-- 本地模組清單 -->
         <Border Grid.Row="1"
-          Background="{ThemeResource CardBrush}"
-          BorderBrush="{ThemeResource BorderBrush}"
-          BorderThickness="1"
+          Style="{StaticResource CardBorderStyle}"
           CornerRadius="8"
           Padding="12">
-          <Grid>
-            <Grid.RowDefinitions>
-              <RowDefinition Height="Auto" />
-              <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
-
-            <!-- 標頭 -->
-            <Border Grid.Row="0"
-              Background="{ThemeResource CardBrush}"
-              BorderBrush="{ThemeResource DataGridGridLineBrush}"
-              BorderThickness="1">
+          <controls:TableFrame>
+            <controls:TableFrame.Header>
               <Grid>
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition
@@ -337,140 +324,81 @@
                   SortRequested="OnLocalSortRequested"
                   AutoFitRequested="OnLocalAutoFitRequested" />
               </Grid>
-            </Border>
+            </controls:TableFrame.Header>
+            <ListView x:Name="LocalModsListView"
+              ItemsSource="{x:Bind ViewModel.Local.LocalMods}"
+              SelectedItem="{x:Bind ViewModel.Local.SelectedLocalMod, Mode=TwoWay}"
+              SelectionMode="Extended"
+              controls:ListSelectionBehavior.ClearOnOutsidePress="True"
+              SelectionChanged="OnLocalModsSelectionChanged"
+              ItemContainerStyle="{StaticResource TableListViewItemStyle}">
+              <ListView.ContextFlyout>
+                <MenuFlyout>
+                  <MenuFlyoutItem Text="複製模組資訊"
+                    Click="OnCopyLocalModInfoClicked" />
+                  <MenuFlyoutItem Text="在資料夾中顯示"
+                    Click="OnShowInFolderClicked" />
+                  <MenuFlyoutSeparator />
+                  <MenuFlyoutItem Text="刪除模組"
+                    Command="{x:Bind ViewModel.Local.DeleteSelectedModCommand}" />
+                </MenuFlyout>
+              </ListView.ContextFlyout>
 
-            <!-- 項目清單 -->
-            <Border Grid.Row="1"
-              BorderBrush="{ThemeResource DataGridGridLineBrush}"
-              BorderThickness="1,0,1,1">
-              <ListView ItemsSource="{x:Bind ViewModel.Local.LocalMods, Mode=OneWay}"
-                SelectedItem="{x:Bind ViewModel.Local.SelectedLocalMod, Mode=TwoWay}"
-                SelectionMode="Single"
-                ItemContainerStyle="{StaticResource TableListViewItemStyle}">
-                <ListView.ContextFlyout>
-                  <MenuFlyout>
-                    <MenuFlyoutItem Text="複製模組資訊"
-                      Click="OnCopyLocalModInfoClicked" />
-                    <MenuFlyoutItem Text="在資料夾中顯示"
-                      Click="OnShowInFolderClicked" />
-                    <MenuFlyoutSeparator />
-                    <MenuFlyoutItem Text="刪除模組"
-                      Command="{x:Bind ViewModel.Local.DeleteSelectedModCommand}" />
-                  </MenuFlyout>
-                </ListView.ContextFlyout>
+              <ListView.ItemTemplate>
+                <DataTemplate x:DataType="vm:LocalModRowItem">
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition
+                        Width="{x:Bind views:LocalModListColumns.Current.EnabledWidth, Mode=OneWay}" />
+                      <ColumnDefinition
+                        Width="{x:Bind views:LocalModListColumns.Current.NameWidth, Mode=OneWay}" />
+                      <ColumnDefinition
+                        Width="{x:Bind views:LocalModListColumns.Current.VersionWidth, Mode=OneWay}" />
+                      <ColumnDefinition
+                        Width="{x:Bind views:LocalModListColumns.Current.AuthorWidth, Mode=OneWay}" />
+                      <ColumnDefinition
+                        Width="{x:Bind views:LocalModListColumns.Current.LoaderWidth, Mode=OneWay}" />
+                      <ColumnDefinition
+                        Width="{x:Bind views:LocalModListColumns.Current.PlatformWidth, Mode=OneWay}" />
+                      <ColumnDefinition
+                        Width="{x:Bind views:LocalModListColumns.Current.SizeWidth, Mode=OneWay}" />
+                      <ColumnDefinition
+                        Width="{x:Bind views:LocalModListColumns.Current.ModifiedWidth, Mode=OneWay}" />
+                      <ColumnDefinition
+                        Width="{x:Bind views:LocalModListColumns.Current.DescriptionWidth, Mode=OneWay}" />
+                    </Grid.ColumnDefinitions>
 
-                <ListView.ItemTemplate>
-                  <DataTemplate x:DataType="vm:LocalModRowItem">
-                    <Grid>
-                      <Grid.ColumnDefinitions>
-                        <ColumnDefinition
-                          Width="{x:Bind views:LocalModListColumns.Current.EnabledWidth, Mode=OneWay}" />
-                        <ColumnDefinition
-                          Width="{x:Bind views:LocalModListColumns.Current.NameWidth, Mode=OneWay}" />
-                        <ColumnDefinition
-                          Width="{x:Bind views:LocalModListColumns.Current.VersionWidth, Mode=OneWay}" />
-                        <ColumnDefinition
-                          Width="{x:Bind views:LocalModListColumns.Current.AuthorWidth, Mode=OneWay}" />
-                        <ColumnDefinition
-                          Width="{x:Bind views:LocalModListColumns.Current.LoaderWidth, Mode=OneWay}" />
-                        <ColumnDefinition
-                          Width="{x:Bind views:LocalModListColumns.Current.PlatformWidth, Mode=OneWay}" />
-                        <ColumnDefinition
-                          Width="{x:Bind views:LocalModListColumns.Current.SizeWidth, Mode=OneWay}" />
-                        <ColumnDefinition
-                          Width="{x:Bind views:LocalModListColumns.Current.ModifiedWidth, Mode=OneWay}" />
-                        <ColumnDefinition
-                          Width="{x:Bind views:LocalModListColumns.Current.DescriptionWidth, Mode=OneWay}" />
-                      </Grid.ColumnDefinitions>
-
-                      <Border Grid.Column="0"
-                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                        BorderThickness="0,0,1,0"
-                        Padding="4,2">
-                        <CheckBox IsChecked="{x:Bind IsEnabled, Mode=OneWay}"
-                          Click="OnModToggleClicked"
-                          MinWidth="0"
-                          HorizontalAlignment="Center"
-                          VerticalAlignment="Center" />
-                      </Border>
-                      <Border Grid.Column="1"
-                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                        BorderThickness="0,0,1,0"
-                        Padding="8,6">
-                        <TextBlock Text="{x:Bind Name, Mode=OneWay}"
-                          TextTrimming="CharacterEllipsis"
-                          ToolTipService.ToolTip="{x:Bind Name, Mode=OneWay}"
-                          VerticalAlignment="Center" />
-                      </Border>
-                      <Border Grid.Column="2"
-                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                        BorderThickness="0,0,1,0"
-                        Padding="8,6">
-                        <TextBlock Text="{x:Bind Version, Mode=OneWay}"
-                          TextTrimming="CharacterEllipsis"
-                          ToolTipService.ToolTip="{x:Bind Version, Mode=OneWay}"
-                          VerticalAlignment="Center" />
-                      </Border>
-                      <Border Grid.Column="3"
-                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                        BorderThickness="0,0,1,0"
-                        Padding="8,6">
-                        <TextBlock Text="{x:Bind Author, Mode=OneWay}"
-                          TextTrimming="CharacterEllipsis"
-                          ToolTipService.ToolTip="{x:Bind Author, Mode=OneWay}"
-                          VerticalAlignment="Center" />
-                      </Border>
-                      <Border Grid.Column="4"
-                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                        BorderThickness="0,0,1,0"
-                        Padding="8,6">
-                        <TextBlock Text="{x:Bind LoaderType, Mode=OneWay}"
-                          TextTrimming="CharacterEllipsis"
-                          ToolTipService.ToolTip="{x:Bind LoaderType, Mode=OneWay}"
-                          VerticalAlignment="Center" />
-                      </Border>
-                      <Border Grid.Column="5"
-                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                        BorderThickness="0,0,1,0"
-                        Padding="8,6">
-                        <TextBlock Text="{x:Bind SourcePlatform, Mode=OneWay}"
-                          TextTrimming="CharacterEllipsis"
-                          ToolTipService.ToolTip="{x:Bind SourcePlatform, Mode=OneWay}"
-                          VerticalAlignment="Center" />
-                      </Border>
-                      <Border Grid.Column="6"
-                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                        BorderThickness="0,0,1,0"
-                        Padding="8,6">
-                        <TextBlock Text="{x:Bind FileSize, Mode=OneWay}"
-                          TextTrimming="CharacterEllipsis"
-                          ToolTipService.ToolTip="{x:Bind FileSize, Mode=OneWay}"
-                          VerticalAlignment="Center" />
-                      </Border>
-                      <Border Grid.Column="7"
-                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                        BorderThickness="0,0,1,0"
-                        Padding="8,6">
-                        <TextBlock Text="{x:Bind ModifiedTime, Mode=OneWay}"
-                          TextTrimming="CharacterEllipsis"
-                          ToolTipService.ToolTip="{x:Bind ModifiedTime, Mode=OneWay}"
-                          VerticalAlignment="Center" />
-                      </Border>
-                      <Border Grid.Column="8"
-                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                        BorderThickness="0,0,1,0"
-                        Padding="8,6">
-                        <TextBlock Text="{x:Bind Description, Mode=OneWay}"
-                          TextTrimming="CharacterEllipsis"
-                          ToolTipService.ToolTip="{x:Bind Description, Mode=OneWay}"
-                          VerticalAlignment="Center" />
-                      </Border>
-                    </Grid>
-                  </DataTemplate>
-                </ListView.ItemTemplate>
-              </ListView>
-            </Border>
-          </Grid>
+                    <Border Grid.Column="0"
+                      BorderBrush="{ThemeResource DataGridGridLineBrush}"
+                      BorderThickness="0,0,1,0"
+                      Padding="4,2">
+                      <CheckBox IsChecked="{x:Bind IsEnabled, Mode=OneWay}"
+                        Click="OnModToggleClicked"
+                        MinWidth="0"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center" />
+                    </Border>
+                    <controls:TableCell Grid.Column="1"
+                      Text="{x:Bind Name}" />
+                    <controls:TableCell Grid.Column="2"
+                      Text="{x:Bind Version}" />
+                    <controls:TableCell Grid.Column="3"
+                      Text="{x:Bind Author}" />
+                    <controls:TableCell Grid.Column="4"
+                      Text="{x:Bind LoaderType}" />
+                    <controls:TableCell Grid.Column="5"
+                      Text="{x:Bind SourcePlatform, Mode=OneWay}" />
+                    <controls:TableCell Grid.Column="6"
+                      Text="{x:Bind FileSize}" />
+                    <controls:TableCell Grid.Column="7"
+                      Text="{x:Bind ModifiedTime}" />
+                    <controls:TableCell Grid.Column="8"
+                      Text="{x:Bind Description}" />
+                  </Grid>
+                </DataTemplate>
+              </ListView.ItemTemplate>
+            </ListView>
+          </controls:TableFrame>
         </Border>
       </Grid>
 
@@ -486,15 +414,13 @@
 
         <!-- 頂部相容條件提示標籤 -->
         <Border Grid.Row="0"
-          Background="{ThemeResource CardBrush}"
-          BorderBrush="{ThemeResource BorderBrush}"
-          BorderThickness="1"
+          Style="{StaticResource CardBorderStyle}"
           CornerRadius="6"
           Padding="12,8"
           Margin="0,0,0,10">
           <StackPanel Orientation="Horizontal"
             Spacing="8">
-            <controls:ColorIcon Source="{StaticResource IconCheck}"
+            <ContentPresenter ContentTemplate="{StaticResource IconCheck}"
               Width="15"
               Height="15"
               VerticalAlignment="Center" />
@@ -553,7 +479,7 @@
             <StackPanel Orientation="Horizontal"
               Spacing="6"
               VerticalAlignment="Center">
-              <controls:ColorIcon Source="{StaticResource IconSearch}"
+              <ContentPresenter ContentTemplate="{StaticResource IconSearch}"
                 Width="15"
                 Height="15"
                 VerticalAlignment="Center" />
@@ -582,22 +508,11 @@
 
         <!-- 線上瀏覽結果清單 -->
         <Border Grid.Row="2"
-          Background="{ThemeResource CardBrush}"
-          BorderBrush="{ThemeResource BorderBrush}"
-          BorderThickness="1"
+          Style="{StaticResource CardBorderStyle}"
           CornerRadius="8"
           Padding="12">
-          <Grid>
-            <Grid.RowDefinitions>
-              <RowDefinition Height="Auto" />
-              <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
-
-            <!-- 標頭 -->
-            <Border Grid.Row="0"
-              Background="{ThemeResource CardBrush}"
-              BorderBrush="{ThemeResource DataGridGridLineBrush}"
-              BorderThickness="1">
+          <controls:TableFrame>
+            <controls:TableFrame.Header>
               <Grid>
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition
@@ -643,84 +558,44 @@
                   SortRequested="OnOnlineSortRequested"
                   AutoFitRequested="OnOnlineAutoFitRequested" />
               </Grid>
-            </Border>
+            </controls:TableFrame.Header>
+            <ListView ItemsSource="{x:Bind ViewModel.Online.OnlineMods}"
+              SelectedItem="{x:Bind ViewModel.Online.SelectedOnlineMod, Mode=TwoWay}"
+              SelectionMode="Single"
+              controls:ListSelectionBehavior.ClearOnOutsidePress="True"
+              ItemContainerStyle="{StaticResource TableListViewItemStyle}"
+              DoubleTapped="OnOnlineModsDoubleTapped">
+              <ListView.ItemTemplate>
+                <DataTemplate x:DataType="vm:OnlineModRowItem">
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition
+                        Width="{x:Bind views:OnlineModListColumns.Current.TitleWidth, Mode=OneWay}" />
+                      <ColumnDefinition
+                        Width="{x:Bind views:OnlineModListColumns.Current.AuthorWidth, Mode=OneWay}" />
+                      <ColumnDefinition
+                        Width="{x:Bind views:OnlineModListColumns.Current.DownloadsWidth, Mode=OneWay}" />
+                      <ColumnDefinition
+                        Width="{x:Bind views:OnlineModListColumns.Current.VersionWidth, Mode=OneWay}" />
+                      <ColumnDefinition
+                        Width="{x:Bind views:OnlineModListColumns.Current.DescriptionWidth, Mode=OneWay}" />
+                    </Grid.ColumnDefinitions>
 
-            <!-- 清單 -->
-            <Border Grid.Row="1"
-              BorderBrush="{ThemeResource DataGridGridLineBrush}"
-              BorderThickness="1,0,1,1">
-              <ListView ItemsSource="{x:Bind ViewModel.Online.OnlineMods, Mode=OneWay}"
-                SelectedItem="{x:Bind ViewModel.Online.SelectedOnlineMod, Mode=TwoWay}"
-                SelectionMode="Single"
-                ItemContainerStyle="{StaticResource TableListViewItemStyle}"
-                DoubleTapped="OnOnlineModsDoubleTapped">
-                <ListView.ItemTemplate>
-                  <DataTemplate x:DataType="vm:OnlineModRowItem">
-                    <Grid>
-                      <Grid.ColumnDefinitions>
-                        <ColumnDefinition
-                          Width="{x:Bind views:OnlineModListColumns.Current.TitleWidth, Mode=OneWay}" />
-                        <ColumnDefinition
-                          Width="{x:Bind views:OnlineModListColumns.Current.AuthorWidth, Mode=OneWay}" />
-                        <ColumnDefinition
-                          Width="{x:Bind views:OnlineModListColumns.Current.DownloadsWidth, Mode=OneWay}" />
-                        <ColumnDefinition
-                          Width="{x:Bind views:OnlineModListColumns.Current.VersionWidth, Mode=OneWay}" />
-                        <ColumnDefinition
-                          Width="{x:Bind views:OnlineModListColumns.Current.DescriptionWidth, Mode=OneWay}" />
-                      </Grid.ColumnDefinitions>
-
-                      <Border Grid.Column="0"
-                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                        BorderThickness="0,0,1,0"
-                        Padding="8,6">
-                        <TextBlock Text="{x:Bind Title}"
-                          TextTrimming="CharacterEllipsis"
-                          ToolTipService.ToolTip="{x:Bind Title}"
-                          VerticalAlignment="Center" />
-                      </Border>
-                      <Border Grid.Column="1"
-                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                        BorderThickness="0,0,1,0"
-                        Padding="8,6">
-                        <TextBlock Text="{x:Bind Author}"
-                          TextTrimming="CharacterEllipsis"
-                          ToolTipService.ToolTip="{x:Bind Author}"
-                          VerticalAlignment="Center" />
-                      </Border>
-                      <Border Grid.Column="2"
-                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                        BorderThickness="0,0,1,0"
-                        Padding="8,6">
-                        <TextBlock Text="{x:Bind Downloads}"
-                          TextTrimming="CharacterEllipsis"
-                          ToolTipService.ToolTip="{x:Bind Downloads}"
-                          VerticalAlignment="Center" />
-                      </Border>
-                      <Border Grid.Column="3"
-                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                        BorderThickness="0,0,1,0"
-                        Padding="8,6">
-                        <TextBlock Text="{x:Bind LatestVersion}"
-                          TextTrimming="CharacterEllipsis"
-                          ToolTipService.ToolTip="{x:Bind LatestVersion}"
-                          VerticalAlignment="Center" />
-                      </Border>
-                      <Border Grid.Column="4"
-                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                        BorderThickness="0,0,1,0"
-                        Padding="8,6">
-                        <TextBlock Text="{x:Bind Description}"
-                          TextTrimming="CharacterEllipsis"
-                          ToolTipService.ToolTip="{x:Bind Description}"
-                          VerticalAlignment="Center" />
-                      </Border>
-                    </Grid>
-                  </DataTemplate>
-                </ListView.ItemTemplate>
-              </ListView>
-            </Border>
-          </Grid>
+                    <controls:TableCell Grid.Column="0"
+                      Text="{x:Bind Title}" />
+                    <controls:TableCell Grid.Column="1"
+                      Text="{x:Bind Author}" />
+                    <controls:TableCell Grid.Column="2"
+                      Text="{x:Bind Downloads}" />
+                    <controls:TableCell Grid.Column="3"
+                      Text="{x:Bind LatestVersion}" />
+                    <controls:TableCell Grid.Column="4"
+                      Text="{x:Bind Description}" />
+                  </Grid>
+                </DataTemplate>
+              </ListView.ItemTemplate>
+            </ListView>
+          </controls:TableFrame>
         </Border>
 
         <!-- 底部安裝操作列 -->

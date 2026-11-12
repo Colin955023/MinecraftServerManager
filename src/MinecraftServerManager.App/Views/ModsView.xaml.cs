@@ -6,9 +6,7 @@ using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 模組管理與線上探索分頁 View
-/// </summary>
+/// <summary>模組管理與線上探索分頁 View</summary>
 public sealed partial class ModsView : UserControl
 {
     public ModsViewModel ViewModel { get; }
@@ -25,6 +23,21 @@ public sealed partial class ModsView : UserControl
 
     [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "WinUI 3 x:Bind requires instance method")]
     public Visibility GetOnlineTabVisibility(int index) => index == 1 ? Visibility.Visible : Visibility.Collapsed;
+
+    private void OnLocalModsSelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        ViewModel.Local.SetSelectedMods(LocalModsListView.SelectedItems.OfType<LocalModRowItem>());
+
+    private void OnSelectAllLocalModsClicked(object sender, RoutedEventArgs e)
+    {
+        if (LocalModsListView.SelectedItems.Count == ViewModel.Local.LocalMods.Count && LocalModsListView.SelectedItems.Count > 0)
+        {
+            LocalModsListView.SelectedItems.Clear();
+        }
+        else
+        {
+            LocalModsListView.SelectAll();
+        }
+    }
 
     private void OnLocalSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.Local.LocalMods.SortBy(TableSortKeys.LocalMods, e);
 

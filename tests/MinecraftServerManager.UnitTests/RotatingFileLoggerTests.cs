@@ -13,7 +13,6 @@ namespace MinecraftServerManager.UnitTests;
 [Collection("EnvironmentVariableCollection")]
 public sealed class RotatingFileLoggerTests
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(RotatingFileLoggerTests));
     [Fact]
     public void MaskerHidesPasswordsAndTokens()
     {
@@ -31,263 +30,204 @@ public sealed class RotatingFileLoggerTests
     [Fact]
     public void LoggerOutputsFormattedMessageWithComponentAndLevel()
     {
-        string tempDir = CreateTemporaryDirectory();
-        try
+        using var tempDirTemp = new TempDirectory("msm-log-test-");
+        string tempDir = tempDirTemp.FullName;
+        var options = new RotatingFileLoggerOptions
         {
-            var options = new RotatingFileLoggerOptions
-            {
-                LogDirectory = tempDir,
-                MinimumLevel = LogLevel.Information,
-                ProcessId = 1234,
-            };
+            LogDirectory = tempDir,
+            MinimumLevel = LogLevel.Information,
+            ProcessId = 1234,
+        };
 
-            using var provider = new RotatingFileLoggerProvider(options);
+        using var provider = new RotatingFileLoggerProvider(options);
 
-            var logger = provider.CreateLogger("ServerCore");
-            logger.LogInformation("伺服器準備啟動");
-            logger.LogWarning("記憶體設定過低");
+        var logger = provider.CreateLogger("ServerCore");
+        logger.LogInformation("伺服器準備啟動");
+        logger.LogWarning("記憶體設定過低");
 
-            provider.Dispose();
+        provider.Dispose();
 
-            string[] logFiles = Directory.GetFiles(tempDir, "*.log");
-            string item = Assert.Single(logFiles);
+        string[] logFiles = Directory.GetFiles(tempDir, "*.log");
+        string item = Assert.Single(logFiles);
 
-            string content = File.ReadAllText(item);
-            Assert.Contains(" | INFO     | ServerCore | 伺服器準備啟動", content, StringComparison.Ordinal);
-            Assert.Contains(" | WARNING  | ServerCore | 記憶體設定過低", content, StringComparison.Ordinal);
-        }
-        finally
-        {
-            Directory.Delete(tempDir, recursive: true);
-        }
+        string content = File.ReadAllText(item);
+        Assert.Contains(" | INFO     | ServerCore | 伺服器準備啟動", content, StringComparison.Ordinal);
+        Assert.Contains(" | WARNING  | ServerCore | 記憶體設定過低", content, StringComparison.Ordinal);
     }
 
     [Fact]
     public void LoggerIncludesExceptionStackTrace()
     {
-        string tempDir = CreateTemporaryDirectory();
+        using var tempDirTemp = new TempDirectory("msm-log-test-");
+        string tempDir = tempDirTemp.FullName;
+        var options = new RotatingFileLoggerOptions
+        {
+            LogDirectory = tempDir,
+            MinimumLevel = LogLevel.Information,
+            ProcessId = 5678,
+        };
+
+        using var provider = new RotatingFileLoggerProvider(options);
+        var logger = provider.CreateLogger("ExceptionLogger");
+
         try
         {
-            var options = new RotatingFileLoggerOptions
-            {
-                LogDirectory = tempDir,
-                MinimumLevel = LogLevel.Information,
-                ProcessId = 5678,
-            };
-
-            using var provider = new RotatingFileLoggerProvider(options);
-            var logger = provider.CreateLogger("ExceptionLogger");
-
-            try
-            {
-                throw new InvalidOperationException("測試例外錯誤");
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "發生嚴重異常");
-            }
-
-            provider.Dispose();
-
-            string[] logFiles = Directory.GetFiles(tempDir, "*.log");
-            string item = Assert.Single(logFiles);
-
-            string content = File.ReadAllText(item);
-            Assert.Contains(" | ERROR    | ExceptionLogger | 發生嚴重異常", content, StringComparison.Ordinal);
-            Assert.Contains("System.InvalidOperationException: 測試例外錯誤", content, StringComparison.Ordinal);
+            throw new InvalidOperationException("測試例外錯誤");
         }
-        finally
+        catch (Exception ex)
         {
-            Directory.Delete(tempDir, recursive: true);
+            logger.LogError(ex, "發生嚴重例外");
         }
+
+        provider.Dispose();
+
+        string[] logFiles = Directory.GetFiles(tempDir, "*.log");
+        string item = Assert.Single(logFiles);
+
+        string content = File.ReadAllText(item);
+        Assert.Contains(" | ERROR    | ExceptionLogger | 發生嚴重例外", content, StringComparison.Ordinal);
+        Assert.Contains("System.InvalidOperationException: 測試例外錯誤", content, StringComparison.Ordinal);
     }
 
     [Fact]
     public void LoggerRotatesWhenExceedingMaxFileBytes()
     {
-        string tempDir = CreateTemporaryDirectory();
-        try
+        using var tempDirTemp = new TempDirectory("msm-log-test-");
+        string tempDir = tempDirTemp.FullName;
+        var options = new RotatingFileLoggerOptions
         {
-            var options = new RotatingFileLoggerOptions
-            {
-                LogDirectory = tempDir,
-                MaxFileBytes = 300, // 極小限制以觸發輪替
-                MaxArchiveFiles = 5,
-                MinimumLevel = LogLevel.Information,
-                ProcessId = 9999,
-            };
+            LogDirectory = tempDir,
+            MaxFileBytes = 300, // 極小限制以觸發輪替
+            MaxArchiveFiles = 5,
+            MinimumLevel = LogLevel.Information,
+            ProcessId = 9999,
+        };
 
-            using var provider = new RotatingFileLoggerProvider(options);
-            var logger = provider.CreateLogger("RotationTest");
+        using var provider = new RotatingFileLoggerProvider(options);
+        var logger = provider.CreateLogger("RotationTest");
 
-            // 寫入足量訊息使總長度遠超 300 bytes
-            for (int i = 0; i < 20; i++)
-            {
-                logger.LogInformation("這是一條測試記錄訊息編號 {Index} 用於觸發檔案自動輪替機制", i);
-            }
-
-            provider.Dispose();
-
-            string[] allFiles = Directory.GetFiles(tempDir);
-            // 應存在基底檔案與至少一個 .1 備份檔案
-            Assert.True(allFiles.Length >= 2);
-            Assert.Contains(allFiles, static f => f.EndsWith(".1", StringComparison.OrdinalIgnoreCase));
-        }
-        finally
+        // 寫入足量訊息使總長度遠超 300 bytes
+        for (int i = 0; i < 20; i++)
         {
-            Directory.Delete(tempDir, recursive: true);
+            logger.LogInformation("這是一條測試記錄訊息編號 {Index} 用於觸發檔案自動輪替機制", i);
         }
+
+        provider.Dispose();
+
+        string[] allFiles = Directory.GetFiles(tempDir);
+        // 應存在基底檔案與至少一個 .1 備份檔案
+        Assert.True(allFiles.Length >= 2);
+        Assert.Contains(allFiles, static f => f.EndsWith(".1", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
     public void PruneLogsDeletesOldestFilesWhenExceedingKeepCount()
     {
-        string tempDir = CreateTemporaryDirectory();
-        try
+        using var tempDirTemp = new TempDirectory("msm-log-test-");
+        string tempDir = tempDirTemp.FullName;
+        var now = DateTime.UtcNow;
+        for (int i = 1; i <= 5; i++)
         {
-            var now = DateTime.UtcNow;
-            for (int i = 1; i <= 5; i++)
-            {
-                string filePath = Path.Combine(tempDir, $"2026-09-16-0{i}-00-00-p100.log");
-                File.WriteAllText(filePath, $"log content {i}");
-                File.SetLastWriteTimeUtc(filePath, now.AddMinutes(i));
-            }
-
-            Assert.Equal(5, Directory.GetFiles(tempDir).Length);
-
-            // 保留最新的 3 個檔案
-            RotatingFileLoggerProvider.PruneLogs(tempDir, 3);
-
-            string[] remaining = Directory.GetFiles(tempDir);
-            Assert.Equal(3, remaining.Length);
-
-            // 舊的 01 與 02 應被清理，保留 03, 04, 05
-            Assert.DoesNotContain(remaining, static f => f.Contains("-01-", StringComparison.Ordinal));
-            Assert.DoesNotContain(remaining, static f => f.Contains("-02-", StringComparison.Ordinal));
-            Assert.Contains(remaining, static f => f.Contains("-05-", StringComparison.Ordinal));
+            string filePath = Path.Combine(tempDir, $"2026-09-16-0{i}-00-00-p100.log");
+            File.WriteAllText(filePath, $"log content {i}");
+            File.SetLastWriteTimeUtc(filePath, now.AddMinutes(i));
         }
-        finally
-        {
-            Directory.Delete(tempDir, recursive: true);
-        }
+
+        Assert.Equal(5, Directory.GetFiles(tempDir).Length);
+
+        // 保留最新的 3 個檔案
+        RotatingFileLoggerProvider.PruneLogs(tempDir, 3);
+
+        string[] remaining = Directory.GetFiles(tempDir);
+        Assert.Equal(3, remaining.Length);
+
+        // 舊的 01 與 02 應被清理，保留 03, 04, 05
+        Assert.DoesNotContain(remaining, static f => f.Contains("-01-", StringComparison.Ordinal));
+        Assert.DoesNotContain(remaining, static f => f.Contains("-02-", StringComparison.Ordinal));
+        Assert.Contains(remaining, static f => f.Contains("-05-", StringComparison.Ordinal));
     }
 
     [Fact]
     public async Task ConcurrentWritesDoNotThrowOrCorrupt()
     {
-        string tempDir = CreateTemporaryDirectory();
-        try
+        using var tempDirTemp = new TempDirectory("msm-log-test-");
+        string tempDir = tempDirTemp.FullName;
+        var options = new RotatingFileLoggerOptions
         {
-            var options = new RotatingFileLoggerOptions
-            {
-                LogDirectory = tempDir,
-                MinimumLevel = LogLevel.Information,
-                ProcessId = 1111,
-            };
+            LogDirectory = tempDir,
+            MinimumLevel = LogLevel.Information,
+            ProcessId = 1111,
+        };
 
-            using var provider = new RotatingFileLoggerProvider(options);
-            var logger = provider.CreateLogger("ConcurrencyTest");
+        using var provider = new RotatingFileLoggerProvider(options);
+        var logger = provider.CreateLogger("ConcurrencyTest");
 
-            var tasks = Enumerable.Range(0, 50).Select(i => Task.Run(() =>
-            {
-                logger.LogInformation("執行緒 {ThreadId} 寫入平行測試記錄項 {Index}", Environment.CurrentManagedThreadId, i);
-            }));
-
-            await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(15));
-
-            provider.Dispose();
-
-            string[] files = Directory.GetFiles(tempDir, "*.log");
-            string item = Assert.Single(files);
-
-            string[] lines = File.ReadAllLines(item);
-            Assert.Equal(50, lines.Length);
-        }
-        finally
+        var tasks = Enumerable.Range(0, 50).Select(i => Task.Run(() =>
         {
-            try
-            {
-                if (Directory.Exists(tempDir))
-                {
-                    Directory.Delete(tempDir, recursive: true);
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
-            }
-        }
+            logger.LogInformation("執行緒 {ThreadId} 寫入平行測試記錄項 {Index}", Environment.CurrentManagedThreadId, i);
+        }));
+
+        await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(15));
+
+        provider.Dispose();
+
+        string[] files = Directory.GetFiles(tempDir, "*.log");
+        string item = Assert.Single(files);
+
+        string[] lines = File.ReadAllLines(item);
+        Assert.Equal(50, lines.Length);
     }
 
     [Fact]
     public void SafeFileSystemMoveWithinAndDeleteWithinEnforceBoundaries()
     {
-        string tempDir = CreateTemporaryDirectory();
-        string externalDir = CreateTemporaryDirectory();
-        try
-        {
-            string subFile = Path.Combine(tempDir, "inner.txt");
-            File.WriteAllText(subFile, "test");
+        using var tempDirTemp = new TempDirectory("msm-log-test-");
+        string tempDir = tempDirTemp.FullName;
+        using var externalDirTemp = new TempDirectory("msm-log-test-");
+        string externalDir = externalDirTemp.FullName;
+        string subFile = Path.Combine(tempDir, "inner.txt");
+        File.WriteAllText(subFile, "test");
 
-            string targetFile = Path.Combine(tempDir, "moved.txt");
-            bool moveSuccess = SafeFileSystem.MoveWithin(tempDir, subFile, targetFile);
-            Assert.True(moveSuccess);
-            Assert.False(File.Exists(subFile));
-            Assert.True(File.Exists(targetFile));
+        string targetFile = Path.Combine(tempDir, "moved.txt");
+        bool moveSuccess = SafeFileSystem.MoveWithin(tempDir, subFile, targetFile);
+        Assert.True(moveSuccess);
+        Assert.False(File.Exists(subFile));
+        Assert.True(File.Exists(targetFile));
 
-            // 嘗試移動到外部目錄應被拒絕
-            string extTarget = Path.Combine(externalDir, "escaped.txt");
-            bool invalidMove = SafeFileSystem.MoveWithin(tempDir, targetFile, extTarget);
-            Assert.False(invalidMove);
-            Assert.True(File.Exists(targetFile));
+        // 嘗試移動到外部目錄應被拒絕
+        string extTarget = Path.Combine(externalDir, "escaped.txt");
+        bool invalidMove = SafeFileSystem.MoveWithin(tempDir, targetFile, extTarget);
+        Assert.False(invalidMove);
+        Assert.True(File.Exists(targetFile));
 
-            // 嘗試刪除外部目錄檔案應被拒絕
-            string extFile = Path.Combine(externalDir, "safe.txt");
-            File.WriteAllText(extFile, "external");
-            bool invalidDelete = SafeFileSystem.DeleteWithin(tempDir, extFile);
-            Assert.False(invalidDelete);
-            Assert.True(File.Exists(extFile));
+        // 嘗試刪除外部目錄檔案應被拒絕
+        string extFile = Path.Combine(externalDir, "safe.txt");
+        File.WriteAllText(extFile, "external");
+        bool invalidDelete = SafeFileSystem.DeleteWithin(tempDir, extFile);
+        Assert.False(invalidDelete);
+        Assert.True(File.Exists(extFile));
 
-            // 正常刪除內部檔案應成功
-            bool deleteSuccess = SafeFileSystem.DeleteWithin(tempDir, targetFile);
-            Assert.True(deleteSuccess);
-            Assert.False(File.Exists(targetFile));
-        }
-        finally
-        {
-            Directory.Delete(tempDir, recursive: true);
-            Directory.Delete(externalDir, recursive: true);
-        }
+        // 正常刪除內部檔案應成功
+        bool deleteSuccess = SafeFileSystem.DeleteWithin(tempDir, targetFile);
+        Assert.True(deleteSuccess);
+        Assert.False(File.Exists(targetFile));
     }
 
     [Fact]
     public void RuntimePathsRespectsEnvironmentOverride()
     {
-        string tempDir = CreateTemporaryDirectory();
+        using var tempDirTemp = new TempDirectory("msm-log-test-");
+        string tempDir = tempDirTemp.FullName;
+        Environment.SetEnvironmentVariable("MSM_USER_DATA_DIR", tempDir);
         try
         {
-            Environment.SetEnvironmentVariable("MSM_USER_DATA_DIR", tempDir);
-            try
-            {
-                Assert.Equal(Path.GetFullPath(tempDir), RuntimePaths.GetUserDataDir());
-                Assert.Equal(Path.Combine(Path.GetFullPath(tempDir), "Logs"), RuntimePaths.GetLogDir());
-                Assert.Equal(Path.Combine(Path.GetFullPath(tempDir), "Cache"), RuntimePaths.GetCacheDir());
-            }
-            finally
-            {
-                Environment.SetEnvironmentVariable("MSM_USER_DATA_DIR", null);
-            }
+            Assert.Equal(Path.GetFullPath(tempDir), RuntimePaths.GetUserDataDir());
+            Assert.Equal(Path.Combine(Path.GetFullPath(tempDir), "Logs"), RuntimePaths.GetLogDir());
+            Assert.Equal(Path.Combine(Path.GetFullPath(tempDir), "Cache"), RuntimePaths.GetCacheDir());
         }
         finally
         {
-            Directory.Delete(tempDir, recursive: true);
+            Environment.SetEnvironmentVariable("MSM_USER_DATA_DIR", null);
         }
-    }
-
-    private static string CreateTemporaryDirectory()
-    {
-        string path = Path.Combine(Path.GetTempPath(), "msm-log-test-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(path);
-        return path;
     }
 }

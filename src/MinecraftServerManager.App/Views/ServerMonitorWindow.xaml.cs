@@ -9,9 +9,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 伺服器監控與控制台即時視窗
-/// </summary>
+/// <summary>伺服器監控與主控台即時視窗</summary>
 public sealed partial class ServerMonitorWindow : Window
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerMonitorWindow));
@@ -91,7 +89,7 @@ public sealed partial class ServerMonitorWindow : Window
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warning("日誌自動捲動異常: {0}", ex.Message);
+                    Logger.Warning(ex, "日誌自動捲動失敗");
                 }
             }, afterLayout: true);
         }
@@ -129,8 +127,24 @@ public sealed partial class ServerMonitorWindow : Window
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "傳送控制台指令時發生例外: {Message}", ex.Message);
+                Logger.Error(ex, "傳送主控台指令時發生例外");
             }
+        }
+    }
+
+    /// <summary>方向鍵上下瀏覽歷史指令；用 PreviewKeyDown 是因為 TextBox 會自行處理方向鍵而不引發 KeyDown</summary>
+    private void CommandInputBox_PreviewKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (e.Key is not (Windows.System.VirtualKey.Up or Windows.System.VirtualKey.Down) || sender is not TextBox box)
+        {
+            return;
+        }
+
+        if (_viewModel.NavigateHistory(previous: e.Key == Windows.System.VirtualKey.Up) is { } text)
+        {
+            box.Text = text;
+            box.SelectionStart = text.Length;
+            e.Handled = true;
         }
     }
 
@@ -150,6 +164,7 @@ public sealed partial class ServerMonitorWindow : Window
         {
             notify.CollectionChanged -= OnLogsCollectionChanged;
         }
+        Bindings.StopTracking();
         _viewModel.Dispose();
         Logger.Information("伺服器監控視窗已關閉");
     }

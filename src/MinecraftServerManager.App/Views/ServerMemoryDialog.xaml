@@ -13,20 +13,18 @@
 
   <StackPanel Margin="0,12,0,0"
     MinWidth="420">
-    <TextBlock Text="{x:Bind ViewModel.ServerDetails, Mode=OneWay}"
+    <TextBlock Text="{x:Bind ViewModel.ServerDetails}"
       Foreground="{ThemeResource MutedTextBrush}"
       FontSize="13"
       Margin="0,0,0,4" />
 
-    <TextBlock Text="{x:Bind ViewModel.SystemMemoryText, Mode=OneWay}"
+    <TextBlock Text="{x:Bind ViewModel.SystemMemoryText}"
       Foreground="{ThemeResource AccentBrush}"
       FontSize="13"
       Margin="0,0,0,16" />
 
     <!-- 卡片輸入區 -->
-    <Border Background="{ThemeResource CardBrush}"
-      BorderBrush="{ThemeResource BorderBrush}"
-      BorderThickness="1"
+    <Border Style="{StaticResource CardBorderStyle}"
       CornerRadius="8"
       Padding="16"
       Margin="0,0,0,14">

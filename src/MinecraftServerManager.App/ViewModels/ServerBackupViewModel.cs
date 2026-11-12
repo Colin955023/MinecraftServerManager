@@ -5,9 +5,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 伺服器管理頁：建立備份、還原備份與外部備份資料夾設定
-/// </summary>
+/// <summary>伺服器管理頁：建立備份、還原備份與外部備份資料夾設定</summary>
 public sealed partial class ServerBackupViewModel : ViewModelBase, IDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerBackupViewModel));
@@ -15,7 +13,7 @@ public sealed partial class ServerBackupViewModel : ViewModelBase, IDisposable
     private readonly IUiService _ui;
     private readonly IServerManager _serverManager;
     private readonly IServerBackupService _backupService;
-    private readonly IServerRuntime _serverRuntime;
+    private readonly IServerRuntimeHost _runtimeHost;
     private readonly ILocalFileSystem _fileSystem;
     private readonly IExternalLauncher _launcher;
     private readonly ServerListViewModel _list;
@@ -23,7 +21,7 @@ public sealed partial class ServerBackupViewModel : ViewModelBase, IDisposable
     public ServerBackupViewModel(
         IServerManager serverManager,
         IServerBackupService backupService,
-        IServerRuntime serverRuntime,
+        IServerRuntimeHost runtimeHost,
         ILocalFileSystem fileSystem,
         ServerListViewModel list,
         IUiService uiService,
@@ -33,14 +31,14 @@ public sealed partial class ServerBackupViewModel : ViewModelBase, IDisposable
         ArgumentNullException.ThrowIfNull(uiService);
         ArgumentNullException.ThrowIfNull(serverManager);
         ArgumentNullException.ThrowIfNull(backupService);
-        ArgumentNullException.ThrowIfNull(serverRuntime);
+        ArgumentNullException.ThrowIfNull(runtimeHost);
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(list);
 
         _ui = uiService;
         _serverManager = serverManager;
         _backupService = backupService;
-        _serverRuntime = serverRuntime;
+        _runtimeHost = runtimeHost;
         _fileSystem = fileSystem;
         _launcher = launcher;
         _list = list;
@@ -68,6 +66,12 @@ public sealed partial class ServerBackupViewModel : ViewModelBase, IDisposable
         }
 
         string serverName = selected.Name;
+
+        if (_runtimeHost.IsRunning(serverName))
+        {
+            _ui.ShowNotification("伺服器正在執行中，請先停止伺服器後再備份。", "無法備份", NotificationType.Warning);
+            return;
+        }
 
         if (string.IsNullOrWhiteSpace(selected.BackupPath))
         {
@@ -101,7 +105,7 @@ public sealed partial class ServerBackupViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Error(ex, "建立備份目錄失敗：{Message}", ex.Message);
+            Logger.Error(ex, "建立備份目錄失敗");
             _ui.Notify($"建立備份目錄失敗：{ex.Message}", NotificationType.Error);
             return;
         }
@@ -128,7 +132,7 @@ public sealed partial class ServerBackupViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "備份伺服器失敗: {Message}", ex.Message);
+            Logger.Error(ex, "備份伺服器失敗");
             _ui.Notify($"備份伺服器失敗：{ex.Message}", NotificationType.Error);
         }
     }
@@ -149,8 +153,7 @@ public sealed partial class ServerBackupViewModel : ViewModelBase, IDisposable
             _ui,
             selected.BackupPath,
             // 每次還原前即時查詢，避免對話框開啟期間伺服器已啟動仍誤判為停止
-            isServerRunningCheck: () => _serverRuntime.IsRunning &&
-                string.Equals(_serverRuntime.ActiveServerName, serverName, StringComparison.OrdinalIgnoreCase));
+            isServerRunningCheck: () => _runtimeHost.IsRunning(serverName));
         if (await _ui.ShowRestoreBackupAsync(vm) == true)
         {
             Logger.Information("伺服器「{Name}」備份已成功還原", serverName);

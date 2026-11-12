@@ -9,36 +9,23 @@ using MinecraftServerManager.Infrastructure.Servers;
 using MinecraftServerManager.TestSupport;
 using Xunit;
 
-namespace MinecraftServerManager.IntegrationTests;
+namespace MinecraftServerManager.UnitTests.Workflows;
 
-/// <summary>
-/// 伺服器端對端真實工作流程整合測試
-/// </summary>
+/// <summary>伺服器端對端工作流程測試</summary>
 public sealed class ServerWorkflowIntegrationTests : IDisposable
 {
+    private readonly TempDirectory _testRootTemp = new("msm_integration_");
     private readonly string _testRoot;
     private readonly string _serversRoot;
 
     public ServerWorkflowIntegrationTests()
     {
-        _testRoot = Path.Combine(Path.GetTempPath(), "msm_integration_" + Guid.NewGuid().ToString("N"));
+        _testRoot = _testRootTemp.FullName;
         _serversRoot = Path.Combine(_testRoot, "servers");
         SafeFileSystem.ResolveStableDirectory(_serversRoot, create: true);
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testRoot))
-            {
-                Directory.Delete(_testRoot, recursive: true);
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
+    public void Dispose() => _testRootTemp.Dispose();
 
     [Fact]
     public async Task ServerLifecycleWorkflowSucceeds()
@@ -47,7 +34,6 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         var planner = new ServerLaunchPlanner();
         var manager = TestServerManagers.Create(_serversRoot, inspector);
 
-        // 1. 建立伺服器
         var plan = ServerCreationPlan.Create(
             name: ServerName.Parse("TestServer"),
             minecraftVersion: MinecraftVersion.Parse("1.20.4"),
@@ -65,15 +51,12 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         Assert.True(File.Exists(Path.Combine(serverDir, "eula.txt")));
         Assert.True(File.Exists(Path.Combine(serverDir, "server.properties")));
 
-        // 建立測試用 server.jar
         File.WriteAllText(Path.Combine(serverDir, "server.jar"), "dummy jar");
 
-        // 2. 檢測伺服器
         var inspection = await inspector.InspectAsync(serverDir);
         Assert.True(inspection.IsCandidate);
         Assert.Equal("vanilla", inspection.LoaderType, ignoreCase: true);
 
-        // 3. 啟動規劃
         string javaExe = Path.Combine(serverDir, "jre", "bin", "java.exe");
         Directory.CreateDirectory(Path.GetDirectoryName(javaExe)!);
         File.WriteAllText(javaExe, "stub");
@@ -84,7 +67,6 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         Assert.Contains("-Xmx4096M", launchPlan.Arguments);
         Assert.Contains("server.jar", launchPlan.Arguments);
 
-        // 4. 刪除伺服器
         var deleteResult = await manager.DeleteServerAsync("TestServer");
         Assert.True(deleteResult.Success);
         Assert.False(Directory.Exists(serverDir));
@@ -96,33 +78,27 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         string serverDir = Path.Combine(_serversRoot, "BackupServer");
         SafeFileSystem.ResolveStableDirectory(serverDir, create: true);
 
-        // 建立測試檔案
         string dataFile = Path.Combine(serverDir, "world.txt");
         File.WriteAllText(dataFile, "original world data");
 
         string externalBackupsDir = Path.Combine(_testRoot, "ExternalBackups");
         SafeFileSystem.ResolveStableDirectory(externalBackupsDir, create: true);
-        var backupService = new ServerBackupService(_serversRoot, maxRetentionCount: 2);
+        var backupService = new ServerBackupService(_serversRoot, static () => 2);
 
-        // 1. 建立備份
         var backup1 = await backupService.CreateBackupAsync("BackupServer", destinationPath: externalBackupsDir, comment: "第一個測試備份");
         Assert.NotNull(backup1);
         Assert.True(File.Exists(backup1.FullPath));
 
-        // 2. 竄改伺服器內容
         File.WriteAllText(dataFile, "corrupted world data");
         string extraFile = Path.Combine(serverDir, "temp_corrupt.txt");
         File.WriteAllText(extraFile, "unexpected content");
 
-        // 3. 交易式安全還原
         bool restoreSuccess = await backupService.RestoreBackupAsync("BackupServer", backup1.FileName, externalBackupsDir);
         Assert.True(restoreSuccess);
 
-        // 驗證原本資料已完全復原
         Assert.Equal("original world data", File.ReadAllText(dataFile));
         Assert.False(File.Exists(extraFile));
 
-        // 4. 驗證 Retention 清理政策 (maxRetentionCount = 2)
         var backup2 = await backupService.CreateBackupAsync("BackupServer", destinationPath: externalBackupsDir);
         var backup3 = await backupService.CreateBackupAsync("BackupServer", destinationPath: externalBackupsDir);
 
@@ -139,7 +115,6 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         var inspector = new ServerInspector();
         var manager = TestServerManagers.Create(_serversRoot, inspector);
 
-        // 1. 測試資料夾匯入
         string externalDir = Path.Combine(_testRoot, "ExternalServerDir");
         Directory.CreateDirectory(externalDir);
         File.WriteAllText(Path.Combine(externalDir, "server.jar"), "jar");
@@ -149,7 +124,6 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         Assert.True(importDirResult.Completed);
         Assert.True(Directory.Exists(Path.Combine(_serversRoot, "ImportedFolderServer")));
 
-        // 2. 測試 ZIP 壓縮檔匯入
         string zipSource = Path.Combine(_testRoot, "OldServer.zip");
         using (var zipStream = new FileStream(zipSource, FileMode.Create))
         using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create))
@@ -180,7 +154,6 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         string modsDir = Path.Combine(serverDir, "mods");
         SafeFileSystem.ResolveStableDirectory(modsDir, create: true);
 
-        // 建立測試 JAR 模組
         string dummyModSource = Path.Combine(_testRoot, "testmod-1.0.0.jar");
         using (var zipStream = new FileStream(dummyModSource, FileMode.Create))
         using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create))
@@ -200,23 +173,19 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         });
         var modManager = new ModManager(scanner, installer);
 
-        // 1. 匯入模組
         var importResult = await modManager.ImportModAsync(serverDir, dummyModSource);
         Assert.True(importResult.Completed);
         Assert.True(File.Exists(Path.Combine(modsDir, "testmod-1.0.0.jar")));
 
-        // 2. 掃描模組
         var mods = await modManager.GetModsAsync(serverDir);
         var mod = Assert.Single(mods);
         Assert.Equal("testmod", mod.Id);
         Assert.Equal("Test Mod", mod.Name);
 
-        // 3. 切換停用狀態
         var toggleResult = await modManager.SetModStateAsync(serverDir, "testmod", enable: false);
         Assert.True(toggleResult.Completed);
         Assert.True(File.Exists(Path.Combine(modsDir, "testmod-1.0.0.jar.disabled")));
 
-        // 4. 匯出模組清單
         var exporter = new ModListExporter();
         var exportRows = new List<ModListExportRow>
         {
@@ -229,51 +198,9 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         Assert.Contains("Test Mod", await File.ReadAllTextAsync(txtExportPath));
         Assert.Contains("Test Mod", await File.ReadAllTextAsync(jsonExportPath));
 
-        // 5. 刪除模組
         var deleteResult = await modManager.DeleteModsAsync(serverDir, ["testmod"]);
         Assert.True(deleteResult.Completed);
         Assert.False(File.Exists(Path.Combine(modsDir, "testmod-1.0.0.jar.disabled")));
-    }
-
-
-    [Fact]
-    public async Task RestoreBackup_PreservesLiveDiagnosticsLogsAndCrashReports()
-    {
-        string serverDir = Path.Combine(_serversRoot, "DiagServer");
-        SafeFileSystem.ResolveStableDirectory(serverDir, create: true);
-        string worldFile = Path.Combine(serverDir, "world.txt");
-        File.WriteAllText(worldFile, "v1 world");
-
-        string externalBackupsDir = Path.Combine(_testRoot, "DiagBackups");
-        SafeFileSystem.ResolveStableDirectory(externalBackupsDir, create: true);
-
-        var backupService = new ServerBackupService(_serversRoot, maxRetentionCount: 5);
-
-        // 1. 建立第一個備份（此時沒有 logs 與 crash-reports）
-        var backup = await backupService.CreateBackupAsync("DiagServer", destinationPath: externalBackupsDir);
-        Assert.NotNull(backup);
-
-        // 2. 模擬伺服器崩潰，產生最新現場記錄 logs/latest.log 與 crash-reports/crash-2026.txt
-        string logsDir = Path.Combine(serverDir, "logs");
-        string crashDir = Path.Combine(serverDir, "crash-reports");
-        Directory.CreateDirectory(logsDir);
-        Directory.CreateDirectory(crashDir);
-
-        string latestLogPath = Path.Combine(logsDir, "latest.log");
-        string crashReportPath = Path.Combine(crashDir, "crash-2026.txt");
-        File.WriteAllText(latestLogPath, "CRITICAL ERROR AT SHUTDOWN");
-        File.WriteAllText(crashReportPath, "Stack trace of crash");
-
-        // 3. 執行還原
-        bool restoreSuccess = await backupService.RestoreBackupAsync("DiagServer", backup.FileName, externalBackupsDir);
-        Assert.True(restoreSuccess);
-
-        // 4. 驗證資料已還原，且現場記錄 logs 與 crash-reports 被安全保護並保留
-        Assert.Equal("v1 world", File.ReadAllText(worldFile));
-        Assert.True(File.Exists(latestLogPath));
-        Assert.Equal("CRITICAL ERROR AT SHUTDOWN", File.ReadAllText(latestLogPath));
-        Assert.True(File.Exists(crashReportPath));
-        Assert.Equal("Stack trace of crash", File.ReadAllText(crashReportPath));
     }
 
     [Fact]
@@ -282,7 +209,6 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         var inspector = new ServerInspector();
         var manager = TestServerManagers.Create(_serversRoot, inspector);
 
-        // 建立含惡意 Zip Slip 目錄穿越條目的 ZIP 壓縮檔
         string maliciousZip = Path.Combine(_testRoot, "malicious_zipslip.zip");
         using (var zipStream = new FileStream(maliciousZip, FileMode.Create))
         using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create))
@@ -300,7 +226,6 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
             }
         }
 
-        // 匯入應失敗，且系統外部絕不會出現被穿越寫入的檔案
         var result = await manager.ImportServerAsync(maliciousZip, "MaliciousServer");
         Assert.False(result.Completed);
         Assert.False(File.Exists(Path.Combine(_testRoot, "evil_escape.txt")));

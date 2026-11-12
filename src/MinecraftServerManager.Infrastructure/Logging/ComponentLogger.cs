@@ -3,9 +3,7 @@ using Microsoft.Extensions.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Logging;
 
-/// <summary>
-/// 以元件名稱為類別的記錄器包裝，僅開放 Information／Warning／Error 三種等級
-/// </summary>
+/// <summary>以元件名稱為類別的記錄器包裝，僅開放 Information／Warning／Error 三種等級</summary>
 public sealed class ComponentLogger(ILogger logger)
 {
     private readonly ILogger _logger = logger ?? throw new ArgumentNullException(nameof(logger));

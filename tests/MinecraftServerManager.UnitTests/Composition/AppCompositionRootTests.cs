@@ -8,29 +8,15 @@ namespace MinecraftServerManager.UnitTests.Composition;
 
 public sealed partial class AppCompositionRootTests : IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AppCompositionRootTests));
+    private readonly TempDirectory _testRootTemp = new("msm-composition-test-");
     private readonly string _testRoot;
 
     public AppCompositionRootTests()
     {
-        _testRoot = Path.Combine(Path.GetTempPath(), "msm-composition-test-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testRoot);
+        _testRoot = _testRootTemp.FullName;
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testRoot))
-            {
-                Directory.Delete(_testRoot, recursive: true);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
-        }
-    }
+    public void Dispose() => _testRootTemp.Dispose();
 
     [Fact]
     public async Task ConstructsCompleteObjectGraphSuccessfully()

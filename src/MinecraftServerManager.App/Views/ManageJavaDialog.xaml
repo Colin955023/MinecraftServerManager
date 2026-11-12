@@ -1,6 +1,7 @@
 <Window x:Class="MinecraftServerManager.App.Views.ManageJavaDialog"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:MinecraftServerManager.App.Controls"
     xmlns:views="using:MinecraftServerManager.App.Views"
     xmlns:vm="using:MinecraftServerManager.App.ViewModels"
     xmlns:helpers="using:MinecraftServerManager.App.Controls">
@@ -18,9 +19,7 @@
 
         <!-- 頂部資訊卡片 -->
         <Border Grid.Row="0"
-            Background="{ThemeResource CardBrush}"
-            BorderBrush="{ThemeResource BorderBrush}"
-            BorderThickness="1"
+            Style="{StaticResource CardBorderStyle}"
             CornerRadius="8"
             Padding="16,12">
             <Grid>
@@ -40,7 +39,7 @@
                         <TextBlock Text="目前 Minecraft 版本："
                             Foreground="{ThemeResource MutedTextBrush}"
                             Style="{ThemeResource CaptionTextBlockStyle}" />
-                        <TextBlock Text="{x:Bind ViewModel.MinecraftVersionText, Mode=OneWay}"
+                        <TextBlock Text="{x:Bind ViewModel.MinecraftVersionText}"
                             FontWeight="SemiBold"
                             Foreground="{ThemeResource TextBrush}"
                             Style="{ThemeResource CaptionTextBlockStyle}" />
@@ -72,9 +71,7 @@
 
         <!-- winget 線上安裝區塊 -->
         <Border Grid.Row="1"
-            Background="{ThemeResource CardBrush}"
-            BorderBrush="{ThemeResource BorderBrush}"
-            BorderThickness="1"
+            Style="{StaticResource CardBorderStyle}"
             CornerRadius="8"
             Padding="16,10">
             <Grid ColumnSpacing="8">
@@ -113,24 +110,12 @@
             </Grid>
         </Border>
 
-        <!-- 已安裝清單 ListView -->
         <Border Grid.Row="2"
-            Background="{ThemeResource CardBrush}"
-            BorderBrush="{ThemeResource BorderBrush}"
-            BorderThickness="1"
+            Style="{StaticResource CardBorderStyle}"
             CornerRadius="8"
             Padding="12">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-
-                <!-- 欄位標頭 -->
-                <Border Grid.Row="0"
-                    Background="{ThemeResource CardBrush}"
-                    BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                    BorderThickness="1">
+            <controls:TableFrame>
+                <controls:TableFrame.Header>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition
@@ -167,77 +152,73 @@
                             SortRequested="OnHeaderSortRequested"
                             AutoFitRequested="OnHeaderAutoFitRequested" />
                     </Grid>
-                </Border>
+                </controls:TableFrame.Header>
 
-                <!-- 資料項目清單 -->
-                <Border Grid.Row="1"
-                    BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                    BorderThickness="1,0,1,1">
-                    <ListView ItemsSource="{x:Bind ViewModel.InstalledJavas, Mode=OneWay}"
-                        SelectedItem="{x:Bind ViewModel.SelectedJava, Mode=TwoWay}"
-                        SelectionMode="Single"
-                        ItemContainerStyle="{StaticResource TableListViewItemStyle}"
-                        DoubleTapped="ListView_DoubleTapped">
-                        <ListView.ItemTemplate>
-                            <DataTemplate x:DataType="vm:JavaItemViewModel">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition
-                                            Width="{x:Bind views:JavaListColumns.Current.VersionWidth, Mode=OneWay}" />
-                                        <ColumnDefinition
-                                            Width="{x:Bind views:JavaListColumns.Current.VendorWidth, Mode=OneWay}" />
-                                        <ColumnDefinition
-                                            Width="{x:Bind views:JavaListColumns.Current.StatusWidth, Mode=OneWay}" />
-                                        <ColumnDefinition
-                                            Width="{x:Bind views:JavaListColumns.Current.PathWidth, Mode=OneWay}" />
-                                    </Grid.ColumnDefinitions>
-                                    <Border Grid.Column="0"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="0,0,1,0"
-                                        Padding="8,6">
-                                        <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}"
-                                            Foreground="{ThemeResource TextBrush}"
-                                            TextTrimming="CharacterEllipsis"
-                                            ToolTipService.ToolTip="{x:Bind DisplayName, Mode=OneWay}"
-                                            VerticalAlignment="Center" />
-                                    </Border>
-                                    <Border Grid.Column="1"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="0,0,1,0"
-                                        Padding="8,6">
-                                        <TextBlock Text="{x:Bind Vendor, Mode=OneWay}"
-                                            Foreground="{ThemeResource TextBrush}"
-                                            TextTrimming="CharacterEllipsis"
-                                            ToolTipService.ToolTip="{x:Bind Vendor, Mode=OneWay}"
-                                            VerticalAlignment="Center" />
-                                    </Border>
-                                    <Border Grid.Column="2"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="0,0,1,0"
-                                        Padding="8,6">
-                                        <TextBlock Text="{x:Bind StatusText, Mode=OneWay}"
-                                            FontWeight="{x:Bind helpers:UiBindHelpers.FormatStatusWeight(IsRecommended), Mode=OneWay}"
-                                            helpers:ThemeBrush.ForegroundKey="{x:Bind helpers:UiBindHelpers.FormatStatusBrushKey(IsRecommended), Mode=OneWay}"
-                                            TextTrimming="CharacterEllipsis"
-                                            ToolTipService.ToolTip="{x:Bind StatusText, Mode=OneWay}"
-                                            VerticalAlignment="Center" />
-                                    </Border>
-                                    <Border Grid.Column="3"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="0,0,1,0"
-                                        Padding="8,6">
-                                        <TextBlock Text="{x:Bind ExecutablePath, Mode=OneWay}"
-                                            Foreground="{ThemeResource TextBrush}"
-                                            TextTrimming="CharacterEllipsis"
-                                            ToolTipService.ToolTip="{x:Bind ExecutablePath, Mode=OneWay}"
-                                            VerticalAlignment="Center" />
-                                    </Border>
-                                </Grid>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
-                </Border>
-            </Grid>
+                <ListView ItemsSource="{x:Bind ViewModel.InstalledJavas}"
+                    SelectedItem="{x:Bind ViewModel.SelectedJava, Mode=TwoWay}"
+                    SelectionMode="Single"
+                    controls:ListSelectionBehavior.ClearOnOutsidePress="True"
+                    ItemContainerStyle="{StaticResource TableListViewItemStyle}"
+                    DoubleTapped="ListView_DoubleTapped">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="vm:JavaItemViewModel">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition
+                                        Width="{x:Bind views:JavaListColumns.Current.VersionWidth, Mode=OneWay}" />
+                                    <ColumnDefinition
+                                        Width="{x:Bind views:JavaListColumns.Current.VendorWidth, Mode=OneWay}" />
+                                    <ColumnDefinition
+                                        Width="{x:Bind views:JavaListColumns.Current.StatusWidth, Mode=OneWay}" />
+                                    <ColumnDefinition
+                                        Width="{x:Bind views:JavaListColumns.Current.PathWidth, Mode=OneWay}" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0"
+                                    BorderBrush="{ThemeResource DataGridGridLineBrush}"
+                                    BorderThickness="0,0,1,0"
+                                    Padding="8,6">
+                                    <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}"
+                                        Foreground="{ThemeResource TextBrush}"
+                                        TextTrimming="CharacterEllipsis"
+                                        ToolTipService.ToolTip="{x:Bind DisplayName, Mode=OneWay}"
+                                        VerticalAlignment="Center" />
+                                </Border>
+                                <Border Grid.Column="1"
+                                    BorderBrush="{ThemeResource DataGridGridLineBrush}"
+                                    BorderThickness="0,0,1,0"
+                                    Padding="8,6">
+                                    <TextBlock Text="{x:Bind Vendor, Mode=OneWay}"
+                                        Foreground="{ThemeResource TextBrush}"
+                                        TextTrimming="CharacterEllipsis"
+                                        ToolTipService.ToolTip="{x:Bind Vendor, Mode=OneWay}"
+                                        VerticalAlignment="Center" />
+                                </Border>
+                                <Border Grid.Column="2"
+                                    BorderBrush="{ThemeResource DataGridGridLineBrush}"
+                                    BorderThickness="0,0,1,0"
+                                    Padding="8,6">
+                                    <TextBlock Text="{x:Bind StatusText, Mode=OneWay}"
+                                        FontWeight="{x:Bind helpers:UiBindHelpers.FormatStatusWeight(IsRecommended), Mode=OneWay}"
+                                        helpers:ThemeBrush.ForegroundKey="{x:Bind helpers:UiBindHelpers.FormatStatusBrushKey(IsRecommended), Mode=OneWay}"
+                                        TextTrimming="CharacterEllipsis"
+                                        ToolTipService.ToolTip="{x:Bind StatusText, Mode=OneWay}"
+                                        VerticalAlignment="Center" />
+                                </Border>
+                                <Border Grid.Column="3"
+                                    BorderBrush="{ThemeResource DataGridGridLineBrush}"
+                                    BorderThickness="0,0,1,0"
+                                    Padding="8,6">
+                                    <TextBlock Text="{x:Bind ExecutablePath, Mode=OneWay}"
+                                        Foreground="{ThemeResource TextBrush}"
+                                        TextTrimming="CharacterEllipsis"
+                                        ToolTipService.ToolTip="{x:Bind ExecutablePath, Mode=OneWay}"
+                                        VerticalAlignment="Center" />
+                                </Border>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </controls:TableFrame>
         </Border>
 
         <!-- 狀態列提示 -->

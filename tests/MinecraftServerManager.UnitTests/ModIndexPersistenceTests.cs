@@ -3,34 +3,18 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-/// <summary>
-/// 模組快取索引持久化測試
-/// </summary>
+/// <summary>模組快取索引持久化測試</summary>
 public sealed partial class ModIndexPersistenceTests : IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModIndexPersistenceTests));
+    private readonly TempDirectory _testDirTemp = new("msm_test_mod_index_");
     private readonly string _testDir;
 
     public ModIndexPersistenceTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "msm_test_mod_index_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testDir);
+        _testDir = _testDirTemp.FullName;
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testDir))
-            {
-                Directory.Delete(_testDir, recursive: true);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
-        }
-    }
+    public void Dispose() => _testDirTemp.Dispose();
 
     [Fact]
     public void CacheMetadataAndRetrieveShouldPersistAcrossInstances()

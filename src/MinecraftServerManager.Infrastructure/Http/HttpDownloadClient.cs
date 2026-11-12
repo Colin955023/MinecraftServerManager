@@ -57,9 +57,7 @@ public sealed class HttpDownloadClient : IHttpPort
         _client = client;
     }
 
-    /// <summary>
-    /// IHttpPort 介面實作：安全下載檔案（使用預設下載選項）
-    /// </summary>
+    /// <summary>IHttpPort 介面實作：安全下載檔案（使用預設下載選項）</summary>
     Task<HttpResult> IHttpPort.DownloadAsync(
         Uri uri,
         string targetPath,
@@ -69,14 +67,13 @@ public sealed class HttpDownloadClient : IHttpPort
         CancellationToken cancellationToken) =>
         DownloadAsync(uri, targetPath, options: null, progress, expectedHash, expectedHashAlgorithm, cancellationToken);
 
-    /// <summary>
-    /// 執行具備重試、重定向與逾時控制的 HTTP 請求
-    /// </summary>
+    /// <summary>執行具備重試、重新導向與逾時控制的 HTTP 請求</summary>
     private async Task<TResult> ExecuteRequestWithRetryAsync<TResult>(
         Uri uri,
         Func<HttpResponseMessage, CancellationToken, Task<(bool Handled, TResult Result)>> responseHandler,
         Func<string, int?, TResult> failureFactory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<HttpResponseMessage>>? requestSender = null)
     {
         try
         {
@@ -94,7 +91,9 @@ public sealed class HttpDownloadClient : IHttpPort
 
             try
             {
-                var response = await SendWithRedirectsAsync(uri, RequestMaxRedirects, attemptCancellation.Token).ConfigureAwait(false);
+                var response = requestSender is not null
+                    ? await requestSender(attemptCancellation.Token).ConfigureAwait(false)
+                    : await SendWithRedirectsAsync(uri, RequestMaxRedirects, attemptCancellation.Token).ConfigureAwait(false);
                 using (response)
                 {
                     if (RetryableStatuses.Contains(response.StatusCode) && attempt < RequestMaxAttempts)
@@ -143,9 +142,7 @@ public sealed class HttpDownloadClient : IHttpPort
         return failureFactory("transient", null);
     }
 
-    /// <summary>
-    /// 執行通用 JSON 請求解析
-    /// </summary>
+    /// <summary>執行通用 JSON 請求解析</summary>
     private Task<HttpJsonResponse<T>> ExecuteJsonRequestAsync<T>(
         Uri uri,
         Func<MemoryStream, CancellationToken, ValueTask<(bool Success, T? Value)>> parser,
@@ -202,9 +199,7 @@ public sealed class HttpDownloadClient : IHttpPort
             cancellationToken);
     }
 
-    /// <summary>
-    /// IHttpPort 介面實作：安全取得 JSON 文件並以串流解析（呼叫端負責處置 JsonDocument）
-    /// </summary>
+    /// <summary>IHttpPort 介面實作：安全取得 JSON 文件並以串流解析（呼叫端負責處置 JsonDocument）</summary>
     public Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentAsync(
         Uri uri,
         CancellationToken cancellationToken = default)
@@ -219,9 +214,7 @@ public sealed class HttpDownloadClient : IHttpPort
             cancellationToken);
     }
 
-    /// <summary>
-    /// IHttpPort 介面實作：安全取得文字內容
-    /// </summary>
+    /// <summary>IHttpPort 介面實作：安全取得文字內容</summary>
     public Task<string?> GetTextAsync(
         Uri uri,
         CancellationToken cancellationToken = default)
@@ -246,53 +239,49 @@ public sealed class HttpDownloadClient : IHttpPort
             failureFactory: (_, _) => null,
             cancellationToken);
     }
-    /// <summary>
-    /// IHttpPort 介面實作：安全傳送 POST JSON 請求並取得文字回應
-    /// </summary>
-    public async Task<string?> PostJsonAsync(
+    /// <summary>IHttpPort 介面實作：安全傳送 POST JSON 請求並取得文字回應</summary>
+    public Task<string?> PostJsonAsync(
         Uri uri,
         string jsonPayload,
         CancellationToken cancellationToken = default)
     {
-        try
-        {
-            HttpUrlPolicy.ValidateStatic(uri);
-        }
-        catch (HttpSecurityException)
-        {
-            return null;
-        }
-
-        try
-        {
-            using var content = new StringContent(jsonPayload ?? "{}", Encoding.UTF8, "application/json");
-            using var request = new HttpRequestMessage(HttpMethod.Post, uri) { Content = content };
-            EnsureUserAgent(request);
-            var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-            using (response)
+        return ExecuteRequestWithRetryAsync<string?>(
+            uri,
+            async (response, token) =>
             {
                 if (IsRedirect(response.StatusCode) || !response.IsSuccessStatusCode)
                 {
-                    return null;
+                    return (true, null);
                 }
 
                 long contentLength = response.Content.Headers.ContentLength ?? 0;
                 if (contentLength > MaxJsonBytes)
                 {
-                    return null;
+                    return (true, null);
                 }
 
-                return await ReadLimitedUtf8Async(response, MaxJsonBytes, cancellationToken).ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                return (true, await ReadLimitedUtf8Async(response, MaxJsonBytes, token).ConfigureAwait(false));
+            },
+            failureFactory: static (error, _) =>
+            {
+                Logger.Warning("POST JSON 請求失敗: {Error}", error);
+                return null;
+            },
+            cancellationToken,
+            requestSender: token =>
+            {
+                var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+                var request = new HttpRequestMessage(HttpMethod.Post, uri) { Content = content };
+                EnsureUserAgent(request);
+                return SendAndDisposeRequestAsync(request, token);
+            });
+    }
+
+    private async Task<HttpResponseMessage> SendAndDisposeRequestAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        using (request)
         {
-            throw;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning("POST JSON 請求失敗: {0}", ex.Message);
-            return null;
+            return await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -312,7 +301,7 @@ public sealed class HttpDownloadClient : IHttpPort
         string? normalizedHash = NormalizeExpectedHash(expectedHash, expectedHashAlgorithm);
         if (normalizedHash is not null && SafeFileSystem.FileExists(target))
         {
-            string existing = await HashCalculator.Shared.ComputeFileHashAsync(target, expectedHashAlgorithm, useCache: false, maxBytes: options.MaxBytes, cancellationToken: cancellationToken).ConfigureAwait(false);
+            string existing = await HashCalculator.ComputeFileHashAsync(target, expectedHashAlgorithm, maxBytes: options.MaxBytes, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (string.Equals(existing, normalizedHash, StringComparison.OrdinalIgnoreCase))
             {
                 return new HttpResult(true, BytesProcessed: SafeFileSystem.GetFileLength(target));
@@ -393,9 +382,16 @@ public sealed class HttpDownloadClient : IHttpPort
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.Warning("讀取續傳暫存檔長度失敗，改為重新下載: {0}", ex.Message);
+                Logger.Warning(ex, "讀取續傳暫存檔長度失敗，改為重新下載");
                 existingBytes = 0;
             }
+        }
+
+        // 既無預期雜湊可驗證結果、也無 ETag 可確認遠端版本時，續傳可能拼接出不同版本的內容，一律重新下載
+        if (existingBytes > 0 && normalizedHash is null && knownETag is null)
+        {
+            SafeFileSystem.TryDeleteFile(temporary);
+            existingBytes = 0;
         }
 
         try
@@ -464,7 +460,9 @@ public sealed class HttpDownloadClient : IHttpPort
                     progress,
                     attemptCancellation.Token,
                     isResume ? existingBytes : 0,
-                    totalLength).ConfigureAwait(false);
+                    totalLength,
+                    // 逾時為「閒置逾時」：每收到資料就重新計時，大檔在慢速網路下不會因總時間而中斷
+                    onDataReceived: () => attemptCancellation.CancelAfter(options.Timeout)).ConfigureAwait(false);
                 if (!result.Success)
                 {
                     return (false, result, responseETag ?? knownETag);
@@ -485,7 +483,7 @@ public sealed class HttpDownloadClient : IHttpPort
         catch (HttpRequestException exception) when (attempt < options.MaxAttempts)
         {
             await Task.Delay(ScaleDelay(options.RetryDelay, attempt), cancellationToken).ConfigureAwait(false);
-            Logger.Warning("HTTP 下載要求失敗，準備進行第 {0} 次重試: {1}", attempt, exception.Message);
+            Logger.Warning(exception, "HTTP 下載要求失敗，準備進行第 {Attempt} 次重試", attempt);
             return (true, null, knownETag);
         }
         catch (HttpRequestException exception)
@@ -515,20 +513,17 @@ public sealed class HttpDownloadClient : IHttpPort
         Uri initialUri,
         int maxRedirects,
         CancellationToken cancellationToken,
-        HttpMethod? method = null,
         long? fromByte = null,
-        long? toByte = null,
         string? ifRangeTag = null)
     {
         var currentUri = initialUri;
-        method ??= HttpMethod.Get;
         for (int redirect = 0; ; redirect++)
         {
-            using var request = new HttpRequestMessage(method, currentUri);
+            using var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
             EnsureUserAgent(request);
             if (fromByte.HasValue && fromByte.Value >= 0)
             {
-                request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(fromByte.Value, toByte);
+                request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(fromByte.Value, null);
                 if (!string.IsNullOrWhiteSpace(ifRangeTag))
                 {
                     request.Headers.IfRange = new System.Net.Http.Headers.RangeConditionHeaderValue(ifRangeTag);
@@ -624,7 +619,8 @@ public sealed class HttpDownloadClient : IHttpPort
         IProgress<HttpProgress>? progress,
         CancellationToken cancellationToken,
         long existingBytes = 0,
-        long totalBytes = 0)
+        long totalBytes = 0,
+        Action? onDataReceived = null)
     {
         bool isResume = existingBytes > 0;
         using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
@@ -647,6 +643,7 @@ public sealed class HttpDownloadClient : IHttpPort
             int read;
             while ((read = await source.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false)) > 0)
             {
+                onDataReceived?.Invoke();
                 downloaded += read;
                 if (downloaded > options.MaxBytes)
                 {
@@ -675,10 +672,9 @@ public sealed class HttpDownloadClient : IHttpPort
                 }
                 else
                 {
-                    string computedHash = await HashCalculator.Shared.ComputeFileHashAsync(
+                    string computedHash = await HashCalculator.ComputeFileHashAsync(
                         temporaryPath,
                         expectedHashAlgorithm,
-                        useCache: false,
                         maxBytes: options.MaxBytes,
                         cancellationToken: cancellationToken).ConfigureAwait(false);
                     if (!string.Equals(computedHash, expectedHash, StringComparison.OrdinalIgnoreCase))

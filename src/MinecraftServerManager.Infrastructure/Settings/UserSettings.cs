@@ -23,10 +23,12 @@ public sealed record WindowPreferences(
 public sealed record UserSettings(
     [property: JsonPropertyName("servers_root")] string ServersRoot = "",
     [property: JsonPropertyName("auto_update_enabled")] bool AutoUpdateEnabled = true,
-    [property: JsonPropertyName("window_preferences")] WindowPreferences WindowPreferences = null!)
+    [property: JsonPropertyName("window_preferences")] WindowPreferences WindowPreferences = null!,
+    [property: JsonPropertyName("auto_backup_before_start")] bool AutoBackupBeforeStart = false,
+    [property: JsonPropertyName("backup_retention_count")] int BackupRetentionCount = 10)
 {
     public UserSettings()
-        : this("", true, new WindowPreferences())
+        : this("", true, new WindowPreferences(), false, 10)
     {
     }
 }

@@ -6,9 +6,7 @@ using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 發現模組更新對話視窗（原生模態視窗，透過 ModalWindowHost 裝載）
-/// </summary>
+/// <summary>發現模組更新對話視窗（原生模態視窗，透過 ModalWindowHost 裝載）</summary>
 public sealed partial class ModUpdatesDialog : Window
 {
     private readonly IUiService _ui;
@@ -22,9 +20,7 @@ public sealed partial class ModUpdatesDialog : Window
         _ui = ui;
         CandidateItems = new BulkObservableCollection<ModUpdateCandidateItem>(items);
         InitializeComponent();
-        Title = "發現模組更新";
-
-        WindowLayoutHelper.ResizeToDip(this, 800, 540);
+        ModalWindowHost.ConfigureDialogWindow(this, "發現模組更新", 800, 540, Bindings.StopTracking);
     }
 
     public IReadOnlyList<ModUpdateCandidateItem> GetSelectedItems() =>

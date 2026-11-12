@@ -4,9 +4,7 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-/// <summary>
-/// 模組相容性與相依性規劃測試
-/// </summary>
+/// <summary>模組相容性與相依性規劃測試</summary>
 public sealed class ModDependencyPlannerTests
 {
     [Fact]
@@ -31,7 +29,6 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "fabric", installedMods);
 
-        Assert.True(report.IsCompatible);
         Assert.Empty(report.HardErrors);
         Assert.Empty(report.MissingRequiredDependencies);
     }
@@ -50,7 +47,7 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "fabric", []);
 
-        Assert.False(report.IsCompatible);
+        Assert.NotEmpty(report.HardErrors);
         Assert.Contains(report.HardErrors, static e => e.Contains("載入器", StringComparison.Ordinal));
     }
 
@@ -69,7 +66,7 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "fabric", []);
 
-        Assert.False(report.IsCompatible);
+        Assert.NotEmpty(report.HardErrors);
         Assert.Contains("cloth-config", report.MissingRequiredDependencies);
     }
 
@@ -93,7 +90,7 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "fabric", installedMods);
 
-        Assert.False(report.IsCompatible);
+        Assert.NotEmpty(report.HardErrors);
         Assert.Contains("optifine", report.IncompatibleInstalled);
     }
 
@@ -196,7 +193,7 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "fabric", [], serverSide: "unsupported");
 
-        Assert.False(report.IsCompatible);
+        Assert.NotEmpty(report.HardErrors);
         Assert.Contains(report.HardErrors, static e => e.Contains("僅支援用戶端", StringComparison.Ordinal));
     }
 
@@ -214,7 +211,6 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "quilt", []);
 
-        Assert.True(report.IsCompatible);
         Assert.Empty(report.HardErrors);
     }
 
@@ -232,7 +228,6 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "neoforge", []);
 
-        Assert.True(report.IsCompatible);
         Assert.Empty(report.HardErrors);
     }
 
@@ -250,7 +245,7 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "paper", []);
 
-        Assert.False(report.IsCompatible);
+        Assert.NotEmpty(report.HardErrors);
         Assert.Contains(report.HardErrors, static e => e.Contains("不支援", StringComparison.Ordinal));
     }
 
@@ -276,7 +271,7 @@ public sealed class ModDependencyPlannerTests
 
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "fabric", installedMods);
 
-        Assert.True(report.IsCompatible);
+        Assert.Empty(report.HardErrors);
         Assert.Empty(report.MissingRequiredDependencies);
     }
 
@@ -311,30 +306,5 @@ public sealed class ModDependencyPlannerTests
 
         var plan = Assert.Single(result);
         Assert.Equal("ver-release", plan.TargetVersion.VersionId);
-    }
-
-    private sealed class StubModrinthClient : Core.Ports.IModrinthClient
-    {
-        public Dictionary<string, IReadOnlyList<OnlineModVersion>> Versions { get; } = new(StringComparer.OrdinalIgnoreCase);
-
-        public Dictionary<string, string> Titles { get; } = new(StringComparer.OrdinalIgnoreCase);
-
-        public Task<IReadOnlyList<OnlineModVersion>> GetProjectVersionsAsync(string projectIdOrSlug, string? loader = null, string? minecraftVersion = null, CancellationToken cancellationToken = default)
-        {
-            if (Versions.TryGetValue(projectIdOrSlug, out var list))
-            {
-                return Task.FromResult(list);
-            }
-            return Task.FromResult<IReadOnlyList<OnlineModVersion>>([]);
-        }
-
-        public Task<IReadOnlyList<OnlineModInfo>> SearchModsAsync(string query, string? loader = null, string? minecraftVersion = null, int limit = 20, int offset = 0, string index = "relevance", CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<OnlineModInfo>>([]);
-
-        public Task<IReadOnlyDictionary<string, ModrinthVersionLookupResult>> LookupVersionsByHashesAsync(IReadOnlyList<string> hashes, string algorithm = "sha512", CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyDictionary<string, ModrinthVersionLookupResult>>(new Dictionary<string, ModrinthVersionLookupResult>());
-
-        public Task<IReadOnlyDictionary<string, string>> GetProjectTitlesAsync(IReadOnlyCollection<string> projectIdsOrSlugs, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyDictionary<string, string>>(Titles.Where(t => projectIdsOrSlugs.Contains(t.Key, StringComparer.OrdinalIgnoreCase)).ToDictionary(StringComparer.OrdinalIgnoreCase));
     }
 }

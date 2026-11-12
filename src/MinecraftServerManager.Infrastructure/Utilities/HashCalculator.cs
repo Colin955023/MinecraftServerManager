@@ -1,29 +1,18 @@
 using System.Buffers;
-using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.Infrastructure.Utilities;
 
-public sealed class HashCalculator
+public static class HashCalculator
 {
     public const long DefaultMaxBytes = 512L * 1024 * 1024;
 
-    private const int MaxCacheEntries = 1024;
-    private static readonly HashCalculator SharedInstance = new();
-    private readonly ConcurrentDictionary<CacheKey, string> cache = new();
-
-    public static HashCalculator Shared => SharedInstance;
-
-    /// <summary>
-    /// 十六進位雜湊字元集合（大小寫皆可）
-    /// </summary>
+    /// <summary>十六進位雜湊字元集合（大小寫皆可）</summary>
     private static readonly SearchValues<char> HexDigits = SearchValues.Create("0123456789abcdefABCDEF");
 
-    /// <summary>
-    /// 雜湊演算法名稱的唯一解析入口：支援 sha1／sha256／sha512（不分大小寫），並回傳對應十六進位摘要長度。
-    /// </summary>
+    /// <summary>雜湊演算法名稱的唯一解析入口：支援 sha1／sha256／sha512（不分大小寫），並回傳對應十六進位摘要長度。</summary>
     [SuppressMessage(
         "Security",
         "CA5350",
@@ -57,9 +46,7 @@ public sealed class HashCalculator
         return false;
     }
 
-    /// <summary>
-    /// 判斷文字是否為指定演算法長度之十六進位摘要
-    /// </summary>
+    /// <summary>判斷文字是否為指定演算法長度之十六進位摘要</summary>
     public static bool IsHexDigest(ReadOnlySpan<char> value, int expectedHexLength) =>
         expectedHexLength > 0 && value.Length == expectedHexLength && !value.ContainsAnyExcept(HexDigits);
 
@@ -79,10 +66,9 @@ public sealed class HashCalculator
         return Convert.ToHexStringLower(hash[..bytesWritten]);
     }
 
-    public async Task<string> ComputeFileHashAsync(
+    public static async Task<string> ComputeFileHashAsync(
         string filePath,
         string algorithm = "sha256",
-        bool useCache = true,
         long maxBytes = DefaultMaxBytes,
         CancellationToken cancellationToken = default)
     {
@@ -98,43 +84,16 @@ public sealed class HashCalculator
 
         try
         {
-            FileSystemMetadata metadata = SafeFileSystem.GetFileMetadata(filePath);
-            if (metadata.Length > maxBytes)
+            using var stream = SafeFileSystem.OpenRead(
+                filePath,
+                FileShare.Read,
+                FileOptions.SequentialScan | FileOptions.Asynchronous);
+            if (stream.Length > maxBytes)
             {
                 return string.Empty;
             }
 
-            var key = new CacheKey(
-                metadata.FullPath,
-                algName.Name!,
-                metadata.Length,
-                metadata.LastWriteTimeUtc.Ticks,
-                maxBytes);
-            if (useCache && cache.TryGetValue(key, out string? cached))
-            {
-                return cached;
-            }
-
-            using var stream = SafeFileSystem.OpenRead(
-                metadata.FullPath,
-                FileShare.Read,
-                FileOptions.SequentialScan | FileOptions.Asynchronous);
-            string digest = await HashStreamAsync(stream, algName, cancellationToken).ConfigureAwait(false);
-            if (useCache)
-            {
-                if (cache.Count >= MaxCacheEntries)
-                {
-                    using var enumerator = cache.GetEnumerator();
-                    if (enumerator.MoveNext())
-                    {
-                        cache.TryRemove(enumerator.Current.Key, out _);
-                    }
-                }
-
-                cache[key] = digest;
-            }
-
-            return digest;
+            return await HashStreamAsync(stream, algName, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -148,6 +107,4 @@ public sealed class HashCalculator
         Justification = "SHA-1 僅保留給既有檔案雜湊相容性，不作為新的安全簽章或密碼用途")]
     private static async Task<string> HashStreamAsync(Stream stream, HashAlgorithmName algorithm, CancellationToken cancellationToken) =>
         Convert.ToHexStringLower(await CryptographicOperations.HashDataAsync(algorithm, stream, cancellationToken).ConfigureAwait(false));
-
-    private readonly record struct CacheKey(string Path, string Algorithm, long Length, long LastWriteTicks, long MaxBytes);
 }

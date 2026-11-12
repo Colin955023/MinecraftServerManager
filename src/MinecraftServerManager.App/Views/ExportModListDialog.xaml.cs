@@ -14,9 +14,7 @@ public sealed partial class ExportModListDialog : ContentDialog
         InitializeComponent();
     }
 
-    /// <summary>
-    /// 使用者選取的匯出格式
-    /// </summary>
+    /// <summary>使用者選取的匯出格式</summary>
     public ModListExportFormat SelectedFormat
     {
         get

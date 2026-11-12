@@ -8,10 +8,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Loaders;
 
-/// <summary>
-/// Minecraft 官方與 PaperMC 版本中繼資料的唯一共用入口：
-/// 版本快取檔名、遠端端點、版本快取讀寫、Manifest 抓取與解析，以及 Java major 需求抓取。
-/// </summary>
+/// <summary>Minecraft 官方與 PaperMC 版本中繼資料、快取與 Java major 需求共用入口</summary>
 internal static class MojangVersionCatalog
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(MojangVersionCatalog));
@@ -22,12 +19,10 @@ internal static class MojangVersionCatalog
     public const string ManifestFallbackUrl = "https://piston-meta.mojang.com/mc/game/version_manifest.json";
     public const string PaperProjectUrl = "https://fill.papermc.io/v3/projects/paper";
 
-    /// <summary>
-    /// Minecraft 伺服器可執行之最低 Java major（Mojang Launcher 規範之 jre-legacy）
-    /// </summary>
     public const int MinimumJavaMajor = 8;
 
     private static readonly string[] ManifestUrls = [ManifestV2Url, ManifestFallbackUrl];
+    private static readonly Lock CacheLock = new();
 
     public static Uri PaperVersionUri(string minecraftVersion) =>
         new($"{PaperProjectUrl}/versions/{Uri.EscapeDataString(minecraftVersion.Trim())}");
@@ -41,9 +36,7 @@ internal static class MojangVersionCatalog
         return new($"{PaperProjectUrl}/versions/{Uri.EscapeDataString(minecraftVersion.Trim())}/builds/{segment}");
     }
 
-    /// <summary>
-    /// 取得 Paper build 的下載描述：優先 <c>server:application</c>，否則取第一個含 <c>url</c> 的項目
-    /// </summary>
+    /// <summary>取得 Paper build 的下載描述：優先 <c>server:application</c>，否則取第一個含 <c>url</c> 的項目</summary>
     public static bool TryGetPaperDownload(JsonElement build, out JsonElement download)
     {
         download = default;
@@ -76,46 +69,67 @@ internal static class MojangVersionCatalog
     public static string GetPaperVersionsCachePath(string cacheDirectory) =>
         Path.Combine(cacheDirectory, PaperVersionsCacheFileName);
 
-    /// <summary>
-    /// 讀取版本快取；檔案不存在或格式錯誤時回傳空清單
-    /// </summary>
+    /// <summary>讀取版本快取；檔案不存在或格式錯誤時回傳空清單</summary>
     public static List<LoaderVersion> LoadCachedVersions(string cachePath)
     {
-        try
+        lock (CacheLock)
         {
-            if (!SafeFileSystem.FileExists(cachePath))
+            try
             {
+                if (!SafeFileSystem.FileExists(cachePath))
+                {
+                    return [];
+                }
+
+                return JsonCodec.ReadFile<List<LoaderVersion>>(cachePath) ?? [];
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Logger.Warning(ex, "讀取版本快取失敗: {Path}", cachePath);
                 return [];
             }
-
-            string json = SafeFileSystem.ReadAllText(cachePath);
-            return JsonCodec.Deserialize<List<LoaderVersion>>(json) ?? [];
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning("讀取版本快取失敗: {Path}, 原因: {Message}", cachePath, ex.Message);
-            return [];
         }
     }
 
-    /// <summary>
-    /// 以原子寫入方式儲存版本快取
-    /// </summary>
+    /// <summary>以原子寫入方式儲存版本快取</summary>
     public static void SaveCachedVersions(string cachePath, IReadOnlyList<LoaderVersion> versions)
     {
-        try
+        lock (CacheLock)
         {
-            AtomicFileWriter.WriteJson(cachePath, versions, indented: true);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning("寫入版本快取失敗: {Path}, 原因: {Message}", cachePath, ex.Message);
+            try
+            {
+                AtomicFileWriter.WriteJson(cachePath, versions, indented: true);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Logger.Warning(ex, "寫入版本快取失敗: {Path}", cachePath);
+            }
         }
     }
 
     /// <summary>
-    /// 自本機版本快取取得所有具官方 package URL 之正式版本（版本 → URL）
+    /// 在同一把鎖內「讀取最新快取 → 套用變更 → 原子寫回」，避免多個服務各自持舊快照寫回而互相覆蓋。
+    /// <paramref name="update"/> 回傳 null 代表無變更（不寫檔）；回傳套用後的清單。
     /// </summary>
+    public static IReadOnlyList<LoaderVersion> UpdateCachedVersions(
+        string cachePath,
+        Func<List<LoaderVersion>, IReadOnlyList<LoaderVersion>?> update)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+        lock (CacheLock)
+        {
+            var current = LoadCachedVersions(cachePath);
+            if (update(current) is not { } updated)
+            {
+                return current;
+            }
+
+            SaveCachedVersions(cachePath, updated);
+            return updated;
+        }
+    }
+
+    /// <summary>自本機版本快取取得所有具官方 package URL 之正式版本（版本 → URL）</summary>
     public static Dictionary<string, string> GetCachedReleasePackageUrls(string cacheDirectory)
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -130,9 +144,7 @@ internal static class MojangVersionCatalog
         return result;
     }
 
-    /// <summary>
-    /// 自本機版本快取查詢指定版本之官方 package URL
-    /// </summary>
+    /// <summary>自本機版本快取查詢指定版本之官方 package URL</summary>
     public static string? TryGetCachedPackageUrl(string cacheDirectory, string minecraftVersion)
     {
         foreach (var version in LoadCachedVersions(GetVersionsCachePath(cacheDirectory)))
@@ -147,9 +159,7 @@ internal static class MojangVersionCatalog
         return null;
     }
 
-    /// <summary>
-    /// 依序嘗試 Manifest V2 與後備網址取得官方版本清單並解析；兩者皆失敗時回傳 null
-    /// </summary>
+    /// <summary>依序嘗試 Manifest V2 與後備網址取得官方版本清單並解析；兩者皆失敗時回傳 null</summary>
     public static async Task<List<LoaderVersion>?> FetchManifestAsync(IHttpPort httpPort, CancellationToken cancellationToken)
     {
         foreach (string url in ManifestUrls)
@@ -167,16 +177,14 @@ internal static class MojangVersionCatalog
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.Warning("抓取 Mojang Manifest 失敗 ({Url}): {Error}", url, ex.Message);
+                Logger.Warning(ex, "抓取 Mojang Manifest 失敗 ({Url})", url);
             }
         }
 
         return null;
     }
 
-    /// <summary>
-    /// 解析官方 Manifest：正式版僅保留具官方 server.jar 者並標記 Stable，其餘標記為非穩定版
-    /// </summary>
+    /// <summary>解析官方 Manifest：正式版僅保留具官方 server.jar 者並標記 Stable，其餘標記為非穩定版</summary>
     public static List<LoaderVersion> ParseManifest(JsonDocument doc)
     {
         if (doc.RootElement.ValueKind != JsonValueKind.Object
@@ -214,9 +222,7 @@ internal static class MojangVersionCatalog
         return [.. list.OrderByDescending(static v => VersionValue.ParseOrZero(v.Version))];
     }
 
-    /// <summary>
-    /// 官方 server.jar 自 1.2.5 起提供下載
-    /// </summary>
+    /// <summary>官方 server.jar 自 1.2.5 起提供下載</summary>
     public static bool HasOfficialServerJar(string versionId)
     {
         if (!VersionValue.TryParse(versionId, out var v))
@@ -227,9 +233,7 @@ internal static class MojangVersionCatalog
         return v.Major > 1 || (v.Major == 1 && (v.Minor > 2 || (v.Minor == 2 && v.Patch >= 5)));
     }
 
-    /// <summary>
-    /// 自 Mojang version package JSON 取得官方 Java major 需求
-    /// </summary>
+    /// <summary>自 Mojang version package JSON 取得官方 Java major 需求</summary>
     public static async Task<int?> FetchOfficialJavaMajorAsync(IHttpPort httpPort, string packageUrl, CancellationToken cancellationToken)
     {
         try
@@ -247,14 +251,12 @@ internal static class MojangVersionCatalog
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning("抓取版本 package JSON 失敗 ({Url}): {Error}", packageUrl, ex.Message);
+            Logger.Warning(ex, "抓取版本 package JSON 失敗 ({Url})", packageUrl);
             return null;
         }
     }
 
-    /// <summary>
-    /// 自 PaperMC API 取得指定 Minecraft 版本之最低 Java major（下限為 Java 8）
-    /// </summary>
+    /// <summary>自 PaperMC API 取得指定 Minecraft 版本之最低 Java major（下限為 Java 8）</summary>
     public static async Task<int?> FetchPaperJavaMajorAsync(IHttpPort httpPort, string minecraftVersion, CancellationToken cancellationToken)
     {
         try
@@ -277,15 +279,13 @@ internal static class MojangVersionCatalog
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning("從 Paper API 取得 Java 最低版本失敗: {Error}", ex.Message);
+            Logger.Warning(ex, "從 Paper API 取得 Java 最低版本失敗");
         }
 
         return null;
     }
 
-    /// <summary>
-    /// 解析 Minecraft version package JSON 中的 javaVersion.majorVersion 或 java_version.major
-    /// </summary>
+    /// <summary>解析 Minecraft version package JSON 中的 javaVersion.majorVersion 或 java_version.major</summary>
     public static int? ParseJavaMajorFromVersionJson(JsonElement root)
     {
         if (root.ValueKind != JsonValueKind.Object)

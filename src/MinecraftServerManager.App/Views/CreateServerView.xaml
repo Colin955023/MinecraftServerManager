@@ -41,9 +41,7 @@
       </Grid>
 
       <!-- EULA 條款提示 -->
-      <Border Background="{ThemeResource CardBrush}"
-        BorderBrush="{ThemeResource BorderBrush}"
-        BorderThickness="1"
+      <Border Style="{StaticResource CardBorderStyle}"
         CornerRadius="8"
         Padding="14,10"
         Margin="0,0,0,18">
@@ -52,8 +50,8 @@
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
-          <controls:ColorIcon Grid.Column="0"
-            Source="{StaticResource IconWarning}"
+          <ContentPresenter Grid.Column="0"
+            ContentTemplate="{StaticResource IconWarning}"
             Width="20"
             Height="20"
             Margin="0,0,12,0"
@@ -162,7 +160,7 @@
           Padding="0"
           Margin="0,6,0,6"
           ToolTipService.ToolTip="重新載入載入器版本">
-          <controls:ColorIcon Source="{StaticResource IconRefresh}"
+          <ContentPresenter ContentTemplate="{StaticResource IconRefresh}"
             Width="16"
             Height="16" />
         </Button>
@@ -189,7 +187,7 @@
           Padding="0"
           Margin="0,6,0,6"
           ToolTipService.ToolTip="重新載入 Minecraft 版本">
-          <controls:ColorIcon Source="{StaticResource IconRefresh}"
+          <ContentPresenter ContentTemplate="{StaticResource IconRefresh}"
             Width="16"
             Height="16" />
         </Button>

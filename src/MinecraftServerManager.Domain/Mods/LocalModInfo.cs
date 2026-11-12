@@ -60,4 +60,8 @@ public sealed record LocalModInfo
         HashAlgorithm = hashAlgorithm ?? string.Empty;
         Dependencies = [.. dependencies ?? []];
     }
+
+    /// <summary>回傳補上平台專案識別碼的副本（供以官方專案識別碼比對相依使用）</summary>
+    public LocalModInfo WithPlatformId(string platformId) =>
+        new(Id, Name, Filename, Version, MinecraftVersion, LoaderType, Description, Author, Platform, platformId, PlatformSlug, Status, FilePath, FileSize, FileMtime, CurrentHash, HashAlgorithm, Dependencies);
 }

@@ -3,9 +3,7 @@ using Microsoft.UI.Xaml;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 伺服器列表欄位寬度管理：提供表頭與清單列強型別雙向同步與動態寬度調整
-/// </summary>
+/// <summary>伺服器清單欄位寬度管理：提供表頭與清單列強型別雙向同步與動態寬度調整</summary>
 public sealed partial class ServerListColumns : ObservableObject
 {
     public static ServerListColumns Current { get; } = new();
@@ -28,9 +26,7 @@ public sealed partial class ServerListColumns : ObservableObject
     [ObservableProperty] public partial GridLength PathWidth { get; set; } = new(1, GridUnitType.Star);
 }
 
-/// <summary>
-/// 本地模組列表欄位寬度管理
-/// </summary>
+/// <summary>本地模組清單欄位寬度管理</summary>
 public sealed partial class LocalModListColumns : ObservableObject
 {
     public static LocalModListColumns Current { get; } = new();
@@ -55,9 +51,7 @@ public sealed partial class LocalModListColumns : ObservableObject
     [ObservableProperty] public partial GridLength DescriptionWidth { get; set; } = new(1, GridUnitType.Star);
 }
 
-/// <summary>
-/// 線上模組瀏覽列表欄位寬度管理
-/// </summary>
+/// <summary>線上模組瀏覽清單欄位寬度管理</summary>
 public sealed partial class OnlineModListColumns : ObservableObject
 {
     public static OnlineModListColumns Current { get; } = new();
@@ -74,9 +68,7 @@ public sealed partial class OnlineModListColumns : ObservableObject
     [ObservableProperty] public partial GridLength DescriptionWidth { get; set; } = new(1, GridUnitType.Star);
 }
 
-/// <summary>
-/// 本機 Java 執行環境列表欄位寬度管理
-/// </summary>
+/// <summary>本機 Java 執行環境清單欄位寬度管理</summary>
 public sealed partial class JavaListColumns : ObservableObject
 {
     public static JavaListColumns Current { get; } = new();
@@ -91,9 +83,7 @@ public sealed partial class JavaListColumns : ObservableObject
     [ObservableProperty] public partial GridLength PathWidth { get; set; } = new(1, GridUnitType.Star);
 }
 
-/// <summary>
-/// 備份還原列表欄位寬度管理
-/// </summary>
+/// <summary>備份還原清單欄位寬度管理</summary>
 public sealed partial class BackupListColumns : ObservableObject
 {
     public static BackupListColumns Current { get; } = new();
@@ -106,9 +96,7 @@ public sealed partial class BackupListColumns : ObservableObject
     [ObservableProperty] public partial GridLength CreatedWidth { get; set; } = new(1, GridUnitType.Star);
 }
 
-/// <summary>
-/// 模組版本選擇列表欄位寬度管理
-/// </summary>
+/// <summary>模組版本選擇清單欄位寬度管理</summary>
 public sealed partial class ModVersionListColumns : ObservableObject
 {
     public static ModVersionListColumns Current { get; } = new();
@@ -125,9 +113,7 @@ public sealed partial class ModVersionListColumns : ObservableObject
     [ObservableProperty] public partial GridLength FileNameWidth { get; set; } = new(1, GridUnitType.Star);
 }
 
-/// <summary>
-/// 待安裝模組清單欄位寬度管理
-/// </summary>
+/// <summary>待安裝模組清單欄位寬度管理</summary>
 public sealed partial class ModQueueListColumns : ObservableObject
 {
     public static ModQueueListColumns Current { get; } = new();
@@ -144,9 +130,7 @@ public sealed partial class ModQueueListColumns : ObservableObject
     [ObservableProperty] public partial GridLength ReasonWidth { get; set; } = new(1, GridUnitType.Star);
 }
 
-/// <summary>
-/// 發現模組更新列表欄位寬度管理
-/// </summary>
+/// <summary>發現模組更新清單欄位寬度管理</summary>
 public sealed partial class ModUpdatesListColumns : ObservableObject
 {
     public static ModUpdatesListColumns Current { get; } = new();
@@ -165,9 +149,7 @@ public sealed partial class ModUpdatesListColumns : ObservableObject
     [ObservableProperty] public partial GridLength FileNameWidth { get; set; } = new(1, GridUnitType.Star);
 }
 
-/// <summary>
-/// 管理員名單 (ops.json) 欄位寬度管理
-/// </summary>
+/// <summary>管理員名單 (ops.json) 欄位寬度管理</summary>
 public sealed partial class OperatorListColumns : ObservableObject
 {
     public static OperatorListColumns Current { get; } = new();
@@ -184,9 +166,7 @@ public sealed partial class OperatorListColumns : ObservableObject
     [ObservableProperty] public partial GridLength UuidWidth { get; set; } = new(1, GridUnitType.Star);
 }
 
-/// <summary>
-/// 白名單 (whitelist.json) 欄位寬度管理
-/// </summary>
+/// <summary>白名單 (whitelist.json) 欄位寬度管理</summary>
 public sealed partial class WhitelistListColumns : ObservableObject
 {
     public static WhitelistListColumns Current { get; } = new();
@@ -199,9 +179,7 @@ public sealed partial class WhitelistListColumns : ObservableObject
     [ObservableProperty] public partial GridLength ActionWidth { get; set; } = new(DefaultActionWidth);
 }
 
-/// <summary>
-/// 封鎖玩家名單 (banned-players.json) 欄位寬度管理
-/// </summary>
+/// <summary>封鎖玩家名單 (banned-players.json) 欄位寬度管理</summary>
 public sealed partial class BannedPlayerListColumns : ObservableObject
 {
     public static BannedPlayerListColumns Current { get; } = new();
@@ -218,9 +196,7 @@ public sealed partial class BannedPlayerListColumns : ObservableObject
     [ObservableProperty] public partial GridLength ActionWidth { get; set; } = new(DefaultActionWidth);
 }
 
-/// <summary>
-/// 封鎖 IP 名單 (banned-ips.json) 欄位寬度管理
-/// </summary>
+/// <summary>封鎖 IP 名單 (banned-ips.json) 欄位寬度管理</summary>
 public sealed partial class BannedIpListColumns : ObservableObject
 {
     public static BannedIpListColumns Current { get; } = new();

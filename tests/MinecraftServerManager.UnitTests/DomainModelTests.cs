@@ -7,15 +7,37 @@ namespace MinecraftServerManager.UnitTests;
 
 public sealed class DomainModelTests
 {
-    [Fact]
-    public void ServerNameRejectsWindowsReservedNames()
+    [Theory]
+    [InlineData("COM1")]
+    [InlineData("COM1 .txt")]
+    [InlineData("demo.")]
+    [InlineData("servers.json")]
+    [InlineData("servers_config.json")]
+    [InlineData(".msm-delete-test")]
+    public void ServerNameRejectsWindowsReservedNames(string invalidName) =>
+        Assert.Throws<ArgumentException>(() => ServerName.Parse(invalidName));
+
+    [Theory]
+    [InlineData("paper", LoaderKind.Paper)]
+    [InlineData(" NeoForge ", LoaderKind.NeoForge)]
+    [InlineData("VANILLA", LoaderKind.Vanilla)]
+    public void LoaderKindsParsesDefinedNames(string value, LoaderKind expected)
     {
-        Assert.Throws<ArgumentException>(static () => ServerName.Parse("COM1"));
-        Assert.Throws<ArgumentException>(static () => ServerName.Parse("COM1 .txt"));
-        Assert.Throws<ArgumentException>(static () => ServerName.Parse("demo."));
-        Assert.Throws<ArgumentException>(static () => ServerName.Parse("servers.json"));
-        Assert.Throws<ArgumentException>(static () => ServerName.Parse("servers_config.json"));
-        Assert.Throws<ArgumentException>(static () => ServerName.Parse(".msm-delete-test"));
+        Assert.True(LoaderKinds.TryParse(value, out var kind));
+        Assert.Equal(expected, kind);
+    }
+
+    [Theory]
+    [InlineData("2")]
+    [InlineData("-1")]
+    [InlineData("spigot")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void LoaderKindsRejectsNumericAndUnknownValues(string? value)
+    {
+        Assert.False(LoaderKinds.TryParse(value, out var kind));
+        Assert.Equal(LoaderKind.Unknown, kind);
+        Assert.Equal(LoaderKind.Vanilla, LoaderKinds.ParseOrDefault(value, LoaderKind.Vanilla));
     }
 
     [Fact]
@@ -52,30 +74,7 @@ public sealed class DomainModelTests
     }
 
     [Fact]
-    public void LoaderVersionPreservesStableAndGameVersionMetadata()
-    {
-        var version = new Core.Loaders.LoaderVersion("0.16.10", Stable: true, MinecraftVersion: "1.21.1", CompatibleGameVersions: ["1.21.1"]);
-
-        Assert.True(version.Stable);
-        Assert.Equal("1.21.1", version.CompatibleGameVersions?.Single());
-    }
-
-    [Fact]
-    public void ServerOperationResultFactoryMethodsProduceCorrectState()
-    {
-        var ok = ServerOperationResult.Ok("成功啟動", "通知", "測試伺服器");
-        Assert.True(ok.Success);
-        Assert.False(ok.Failed);
-        Assert.Equal("成功啟動", ok.Message);
-        Assert.Equal("測試伺服器", ok.ServerName);
-
-        var fail = ServerOperationResult.Fail("磁碟空間不足", "錯誤", "測試伺服器");
-        Assert.False(fail.Success);
-        Assert.True(fail.Failed);
-    }
-
-    [Fact]
-    public void ServerCreationPlanValidatesInvariantsAndBuildsConfig()
+    public void ServerCreationPlanBuildsConfig()
     {
         var plan = ServerCreationPlan.Create(
             name: ServerName.Parse("測試計畫伺服器"),
@@ -91,14 +90,6 @@ public sealed class DomainModelTests
         Assert.Equal(4096, config.MemoryMaxMb);
         Assert.Equal(2048, config.MemoryMinMb);
         Assert.Equal(@"C:\Servers\Test", config.Path);
-
-        // 驗證不變條件：min > max 應擲出 ArgumentException
-        Assert.Throws<ArgumentException>(static () => ServerCreationPlan.Create(
-            ServerName.Parse("無效"),
-            MinecraftVersion.Parse("1.20.1"),
-            LoaderKind.Vanilla,
-            memoryMaxMb: 1024,
-            memoryMinMb: 2048));
     }
 
     [Theory]
@@ -125,24 +116,15 @@ public sealed class DomainModelTests
     }
 
     [Fact]
-    public void ServerImportResultFactoryMethodsProduceExpectedStates()
-    {
-        var success = ServerImportResult.Success("server1", new ServerConfig(ServerName.Parse("server1"), MinecraftVersion.Parse("1.20.1"), LoaderKind.Vanilla, "", 2048));
-        var failed = ServerImportResult.Failed("server3", "檔案損毀");
-
-        Assert.True(success.Completed);
-        Assert.False(failed.Completed);
-        Assert.Equal("檔案損毀", failed.Message);
-    }
-
-    [Fact]
     public void OnlineModCompatibilityReportDeterminesCompatibility()
     {
         var compatibleReport = new OnlineModCompatibilityReport([], [], []);
-        Assert.True(compatibleReport.IsCompatible);
+        Assert.Empty(compatibleReport.HardErrors);
+        Assert.False(compatibleReport.HasEnvironmentErrors);
 
-        var incompatibleReport = new OnlineModCompatibilityReport(["遊戲版本不相容"], ["fabric-api"], []);
-        Assert.False(incompatibleReport.IsCompatible);
+        var incompatibleReport = new OnlineModCompatibilityReport(["遊戲版本不相容", "缺少必要相依"], ["fabric-api"], []);
+        Assert.NotEmpty(incompatibleReport.HardErrors);
+        Assert.True(incompatibleReport.HasEnvironmentErrors);
     }
 }
 

@@ -10,9 +10,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 建立伺服器頁面 ViewModel
-/// </summary>
+/// <summary>建立伺服器頁面 ViewModel</summary>
 public sealed partial class CreateServerViewModel : PageViewModel
 {
     private readonly IUiService _ui;
@@ -22,7 +20,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
     private readonly IJavaRuntimeDetector _javaDetector;
     private readonly IMinecraftJavaRequirementService _javaRequirementService;
     private readonly IJavaInstaller _javaInstaller;
-    private readonly IServerRuntime _serverRuntime;
+    private readonly IServerRuntimeHost _runtimeHost;
     private readonly IServerLaunchPlanner _launchPlanner;
     private readonly ILocalFileSystem _fileSystem;
     private readonly IServerManager _serverManager;
@@ -97,7 +95,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
         Action<string, string?> navigateCallback,
         IMinecraftJavaRequirementService javaRequirementService,
         IJavaInstaller javaInstaller,
-        IServerRuntime serverRuntime,
+        IServerRuntimeHost runtimeHost,
         IServerLaunchPlanner launchPlanner)
         : base("建立新伺服器")
     {
@@ -110,14 +108,14 @@ public sealed partial class CreateServerViewModel : PageViewModel
         ArgumentNullException.ThrowIfNull(navigateCallback);
         ArgumentNullException.ThrowIfNull(javaRequirementService);
         ArgumentNullException.ThrowIfNull(javaInstaller);
-        ArgumentNullException.ThrowIfNull(serverRuntime);
+        ArgumentNullException.ThrowIfNull(runtimeHost);
         ArgumentNullException.ThrowIfNull(launchPlanner);
 
         _ui = uiService;
         _javaDetector = javaDetector;
         _javaRequirementService = javaRequirementService;
         _javaInstaller = javaInstaller;
-        _serverRuntime = serverRuntime;
+        _runtimeHost = runtimeHost;
         _launchPlanner = launchPlanner;
         _fileSystem = fileSystem;
         _serverManager = serverManager;
@@ -179,7 +177,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
         }
         catch (Exception ex)
         {
-            Logger.Warning("切換載入器 {Loader} 更新版本清單失敗: {Message}", loaderName, ex.Message);
+            Logger.Warning(ex, "切換載入器 {Loader} 更新版本清單失敗", loaderName);
         }
     }
 
@@ -196,9 +194,6 @@ public sealed partial class CreateServerViewModel : PageViewModel
         }
     }
 
-    /// <summary>
-    /// 套用 Minecraft 版本清單；<paramref name="keepUserSelection"/> 為 true 時，使用者手動選取且仍在清單內的版本會被保留
-    /// </summary>
     private void ApplyMinecraftVersions(IEnumerable<string> versions, bool keepUserSelection)
     {
         AvailableMinecraftVersions.ReplaceAll(versions);
@@ -272,7 +267,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
         }
         catch (Exception ex)
         {
-            Logger.Warning(ex, "更新建議 JVM 參數摘要失敗: {Message}", ex.Message);
+            Logger.Warning(ex, "更新建議 JVM 參數摘要失敗");
         }
     }
 
@@ -342,7 +337,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
         }
         catch (Exception ex)
         {
-            Logger.Warning(ex, "載入已安裝版本清單失敗: {Message}", ex.Message);
+            Logger.Warning(ex, "載入已安裝版本清單失敗");
         }
 
         await RefreshLoaderVersionsAsync().ConfigureAwait(true);
@@ -354,7 +349,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.Warning("背景預載 Java 需求失敗，沿用既有快取: {Message}", ex.Message);
+                Logger.Warning(ex, "背景預載 Java 需求失敗，沿用既有快取");
             }
         }), "背景預載 Java 需求", Logger);
         _ui.RunOnUi(() =>
@@ -378,11 +373,21 @@ public sealed partial class CreateServerViewModel : PageViewModel
             return;
         }
 
+        // 切換載入器或版本會重疊觸發多次查詢；只套用仍符合目前選取的結果，避免較慢的舊查詢覆蓋新結果
+        string requestedLoader = SelectedLoader;
+        string requestedMinecraftVersion = SelectedMinecraftVersion;
+
         try
         {
-            var versions = await _loaderCatalog.GetLoaderVersionsAsync(loaderKind, SelectedMinecraftVersion).ConfigureAwait(false);
+            var versions = await _loaderCatalog.GetLoaderVersionsAsync(loaderKind, requestedMinecraftVersion).ConfigureAwait(false);
             _ui.RunOnUi(() =>
             {
+                if (!string.Equals(requestedLoader, SelectedLoader, StringComparison.Ordinal) ||
+                    !string.Equals(requestedMinecraftVersion, SelectedMinecraftVersion, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
                 if (versions.Count > 0)
                 {
                     LoaderVersions.ReplaceAll(versions.Select(static v => v.Version));
@@ -403,7 +408,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
         }
         catch (Exception ex)
         {
-            Logger.Warning(ex, "重新整理模組載入器版本失敗: {Message}", ex.Message);
+            Logger.Warning(ex, "重新整理模組載入器版本失敗");
             _ui.RunOnUi(UpdateLoaderStateSync);
         }
     }
@@ -457,7 +462,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
             {
                 ApplyMinecraftVersions(versions.Select(static v => v.Version), keepUserSelection: false);
 
-                _javaRequirementService.ReloadCache();
+                await Task.Run(_javaRequirementService.ReloadCache).ConfigureAwait(true);
                 await UpdateJvmArgsSummaryAsync(SelectedMinecraftVersion).ConfigureAwait(true);
                 Logger.Information("已手動向網路重新整理 {Loader} 的 Minecraft 版本清單，共 {Count} 個版本", SelectedLoader, versions.Count);
                 await RefreshLoaderVersionsAsync().ConfigureAwait(true);
@@ -465,7 +470,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
         }
         catch (Exception ex)
         {
-            Logger.Warning(ex, "重新整理版本清單失敗: {Message}", ex.Message);
+            Logger.Warning(ex, "重新整理版本清單失敗");
         }
         finally
         {
@@ -485,18 +490,19 @@ public sealed partial class CreateServerViewModel : PageViewModel
             {
                 try
                 {
-                    var versions = await _loaderCatalog.GetPaperMinecraftVersionsAsync(forceReload: true).ConfigureAwait(false);
+                    // 命令由 UI 執行緒觸發，續延維持於 UI 執行緒以安全更新繫結屬性（JvmArgsSummary 等）
+                    var versions = await _loaderCatalog.GetPaperMinecraftVersionsAsync(forceReload: true).ConfigureAwait(true);
                     if (versions.Count > 0)
                     {
-                        _ui.RunOnUi(() => ApplyMinecraftVersions(versions.Select(static v => v.Version), keepUserSelection: false));
+                        ApplyMinecraftVersions(versions.Select(static v => v.Version), keepUserSelection: false);
                     }
-                    _javaRequirementService.ReloadCache();
+                    await Task.Run(_javaRequirementService.ReloadCache).ConfigureAwait(true);
                     await UpdateJvmArgsSummaryAsync(SelectedMinecraftVersion).ConfigureAwait(true);
                     Logger.Information("已手動向網路重新整理 PaperMC 版本清單，共 {Count} 個版本", versions.Count);
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warning(ex, "重新整理 PaperMC 版本清單失敗: {Message}", ex.Message);
+                    Logger.Warning(ex, "重新整理 PaperMC 版本清單失敗");
                 }
             }
             else
@@ -519,7 +525,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
     [RelayCommand]
     public async Task ConfigureJvmArgsAsync()
     {
-        int maxMem = int.TryParse(MaxMemoryMb.Trim(), out int m) ? m : ServerDefaults.DefaultMemoryMaxMb;
+        int maxMem = ParsedMaxMemoryMb;
         int? javaMajor = _javaRequirementService.GetCachedJavaMajor(SelectedMinecraftVersion);
         var vm = new JvmArgsViewModel(javaMajor, maxMem, SelectedLoader, _customJvmArgs);
         if (await _ui.ShowJvmArgsAsync(vm) == true)
@@ -528,8 +534,12 @@ public sealed partial class CreateServerViewModel : PageViewModel
             _customJvmArgs = [.. finalArgs];
             JvmArgsSummary = finalArgs.Count > 0
                 ? $"已套用 {finalArgs.Count} 個 JVM 參數"
-                : "無使用自訂 JVM 參數";
+                : "未使用自訂 JVM 參數";
             Logger.Information("JVM 參數已設定，共 {Count} 個參數", finalArgs.Count);
+            if (vm.RejectedArgs.Count > 0)
+            {
+                _ui.Notify($"下列 JVM 參數可執行外部命令，已排除：{string.Join("、", vm.RejectedArgs)}", NotificationType.Warning);
+            }
         }
     }
 
@@ -603,7 +613,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
                     if (matched is not null)
                     {
                         effectiveJavaPath = matched.ExecutablePath;
-                        Logger.Information("建立伺服器已自動切換使用符合之 Java {Major}：{Path}（不覆寫表單欄位）", matched.MajorVersion, effectiveJavaPath);
+                        Logger.Information("建立伺服器已自動切換使用符合之 Java {Major}: {Path}（不覆寫表單欄位）", matched.MajorVersion, effectiveJavaPath);
                     }
                     else
                     {
@@ -621,8 +631,8 @@ public sealed partial class CreateServerViewModel : PageViewModel
                 return;
             }
 
-            int minMem = int.TryParse(MinMemoryMb.Trim(), out int min) ? min : ServerDefaults.DefaultMemoryMinMb;
-            int maxMem = int.TryParse(MaxMemoryMb.Trim(), out int max) ? max : ServerDefaults.DefaultMemoryMaxMb;
+            int minMem = ParsedMinMemoryMb;
+            int maxMem = ParsedMaxMemoryMb;
 
             string loaderVer = SelectedLoaderVersion;
             if (loaderVer is "無" or "無可用版本")
@@ -654,7 +664,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
                 Logger.Information("伺服器檔案與腳本已建立完成: {Name}，路徑: {Path}，即將執行初次啟動初始化", created.Config.Name.Value, created.Config.Path);
 
                 bool initSuccess;
-                using (var initVm = new ServerInitializationViewModel(_serverRuntime, _launchPlanner, created.Config, effectiveJavaPath, _ui))
+                using (var initVm = new ServerInitializationViewModel(_runtimeHost.GetRuntime(created.Config.Name.Value), _launchPlanner, created.Config, effectiveJavaPath, _ui))
                 {
                     initSuccess = await _ui.ShowServerInitializationAsync(initVm);
                 }
@@ -685,7 +695,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "建立伺服器時發生例外: {Message}", ex.Message);
+            Logger.Error(ex, "建立伺服器時發生例外");
             await _ui.ShowErrorAsync($"建立伺服器時發生錯誤：\n{ex.Message}", "建立伺服器失敗");
         }
         finally
@@ -694,16 +704,14 @@ public sealed partial class CreateServerViewModel : PageViewModel
         }
     }
 
-    /// <summary>
-    /// 依載入器與版本產生的預設伺服器名稱（使用者未手動編輯時同步）
-    /// </summary>
     private string DefaultServerName => string.IsNullOrWhiteSpace(SelectedMinecraftVersion) ? SelectedLoader : $"{SelectedLoader} {SelectedMinecraftVersion}";
 
     private bool IsPaperSelected => LoaderKinds.ParseOrDefault(SelectedLoader) == LoaderKind.Paper;
 
-    /// <summary>
-    /// 依 Java 主版本提示系統建議 GC（未知或 21 以上採 ZGC）
-    /// </summary>
+    private int ParsedMinMemoryMb => int.TryParse(MinMemoryMb.AsSpan().Trim(), out int min) ? min : ServerDefaults.DefaultMemoryMinMb;
+
+    private int ParsedMaxMemoryMb => int.TryParse(MaxMemoryMb.AsSpan().Trim(), out int max) ? max : ServerDefaults.DefaultMemoryMaxMb;
+
     private static string RecommendedJvmSummary(int? javaMajor) =>
         javaMajor is null or >= 21 ? "使用系統建議 JVM 參數 (ZGC)" : "使用系統建議 JVM 參數 (G1GC)";
 

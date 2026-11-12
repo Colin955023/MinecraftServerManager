@@ -6,9 +6,7 @@ using Windows.UI.ViewManagement;
 
 namespace MinecraftServerManager.App.Services;
 
-/// <summary>
-/// 應用程式強調色彩管理服務：支援 Windows 系統強調色與自訂色彩動態覆蓋
-/// </summary>
+/// <summary>應用程式強調色彩管理服務：支援 Windows 系統強調色與自訂色彩動態覆蓋</summary>
 public static class AccentColorService
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AccentColorService));
@@ -31,24 +29,18 @@ public static class AccentColorService
         }
         catch (Exception ex)
         {
-            Logger.Warning("註冊系統色彩變更事件失敗: {Message}", ex.Message);
+            Logger.Warning(ex, "註冊系統色彩變更事件失敗");
         }
     }
 
-    /// <summary>
-    /// 設定 UI 執行緒派送委派（由 WinUiService 提供），供系統強調色變更時回到 UI 執行緒套用
-    /// </summary>
+    /// <summary>設定 UI 執行緒派送委派（由 WinUiService 提供），供系統強調色變更時回到 UI 執行緒套用</summary>
     public static void SetUiDispatcher(Action<Action> postToUi) =>
         s_postToUi = postToUi ?? throw new ArgumentNullException(nameof(postToUi));
 
-    /// <summary>
-    /// 當強調色彩變更時觸發
-    /// </summary>
+    /// <summary>當強調色彩變更時觸發</summary>
     public static event Action? AccentColorChanged;
 
-    /// <summary>
-    /// 取得目前 Windows 系統的強調色彩
-    /// </summary>
+    /// <summary>取得目前 Windows 系統的強調色彩</summary>
     public static Color GetSystemAccentColor()
     {
         try
@@ -57,14 +49,12 @@ public static class AccentColorService
         }
         catch (Exception ex)
         {
-            Logger.Warning("取得 Windows 系統強調色失敗，使用預設值: {Message}", ex.Message);
+            Logger.Warning(ex, "取得 Windows 系統強調色失敗，使用預設值");
             return Color.FromArgb(255, 79, 111, 216);
         }
     }
 
-    /// <summary>
-    /// 取得 Windows 系統強調色及其原生明暗色階（AccentLight1 / AccentDark1），失敗時回退計算值
-    /// </summary>
+    /// <summary>取得 Windows 系統強調色及其原生明暗色階（AccentLight1 / AccentDark1），失敗時改用計算值</summary>
     private static (Color Accent, Color Hover, Color Pressed) GetSystemAccentShades()
     {
         Color accent = GetSystemAccentColor();
@@ -74,14 +64,12 @@ public static class AccentColorService
         }
         catch (Exception ex)
         {
-            Logger.Warning("取得 Windows 系統強調色階失敗，改用計算值: {Message}", ex.Message);
+            Logger.Warning(ex, "取得 Windows 系統強調色階失敗，改用計算值");
             return (accent, CalculateHoverColor(accent), CalculatePressedColor(accent));
         }
     }
 
-    /// <summary>
-    /// 套用強調色彩（若 customHex 為空則使用系統色彩與系統原生色階）
-    /// </summary>
+    /// <summary>套用強調色彩（若 customHex 為空則使用系統色彩與系統原生色階）</summary>
     public static void ApplyAccentColor(string? customHex)
     {
         try
@@ -114,11 +102,11 @@ public static class AccentColorService
         catch (System.Runtime.InteropServices.COMException ex)
         {
             // 單元測試或無 WinUI 3 Application 執行個體環境下略過
-            Logger.Warning("套用強調色彩略過（WinUI 資源不可用）: {Message}", ex.Message);
+            Logger.Warning(ex, "套用強調色彩略過（WinUI 資源不可用）");
         }
         catch (Exception ex)
         {
-            Logger.Warning("套用強調色彩失敗: {Message}", ex.Message);
+            Logger.Warning(ex, "套用強調色彩失敗");
         }
     }
 

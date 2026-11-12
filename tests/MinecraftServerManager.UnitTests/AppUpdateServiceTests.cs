@@ -7,31 +7,17 @@ namespace MinecraftServerManager.UnitTests;
 
 public sealed partial class AppUpdateServiceTests : IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AppUpdateServiceTests));
+    private readonly TempDirectory _testDirTemp = new("msm_update_test_");
     private readonly string _testDir;
 
     public AppUpdateServiceTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "msm_update_test_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testDir);
+        _testDir = _testDirTemp.FullName;
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testDir))
-            {
-                Directory.Delete(_testDir, recursive: true);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
-        }
-    }
+    public void Dispose() => _testDirTemp.Dispose();
 
-    /// <summary>建立模擬發布檔下載的 HTTP 替身：校驗檔以文字回應、檔案內容寫入目標並比對雜湊</summary>
+    /// <summary>建立模擬發布檔下載的 HTTP 替身：雜湊檔以文字回應、檔案內容寫入目標並比對雜湊</summary>
     private static StubHttpPort CreateHttpPort(string? checksumResponse, byte[]? fileBytes, Exception? checksumException = null) =>
         new()
         {

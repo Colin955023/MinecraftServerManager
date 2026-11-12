@@ -7,26 +7,15 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-/// <summary>
-/// 資料遺失與安全性修正的回歸測試：損毀檔案須保留備份、批次檔參數須加引號、記憶體單位須防溢位、尾端讀取須有界
-/// </summary>
+/// <summary>資料遺失與安全性修正的回歸測試：損毀檔案須保留備份、批次檔參數須加引號、記憶體單位須防溢位、尾端讀取須有界</summary>
 public sealed class DataSafetyRegressionTests : IDisposable
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "msm-safety-" + Guid.NewGuid().ToString("N"));
+    private readonly TempDirectory _temp = new("msm-safety-");
+    private readonly string _root;
 
-    public DataSafetyRegressionTests() => Directory.CreateDirectory(_root);
+    public DataSafetyRegressionTests() => _root = _temp.FullName;
 
-    public void Dispose()
-    {
-        try
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // 測試暫存目錄清理失敗不影響結果
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 
     [Fact]
     public void SettingsManager_CorruptFile_IsPreservedAsBadBeforeDefaultsAreWritten()

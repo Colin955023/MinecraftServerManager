@@ -12,9 +12,7 @@ using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 伺服器即時監控視窗 ViewModel
-/// </summary>
+/// <summary>伺服器即時監控視窗 ViewModel</summary>
 public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
 {
     private readonly IUiService _ui;
@@ -35,18 +33,19 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
     private bool _serverReadyNotified;
     private int _logSessionId;
 
-    /// <summary>
-    /// 取得目前監控之伺服器名稱
-    /// </summary>
+    /// <summary>取得目前監控之伺服器名稱</summary>
     public string ServerName => _serverName;
 
-    [GeneratedRegex(@"(?i)There are\s+(\d+)(?:\s*(?:of a max(?: of)?|/)\s*(\d+))?\s+players online:?\s*(.*)$")]
+    // 日誌前綴僅由方括號群組組成（如 "[12:00:00] [Server thread/INFO]:"），聊天內容無法偽造
+    private const string LogPrefixPattern = @"^\s*(?:\[[^\]]*\]\s*)+:\s*";
+
+    [GeneratedRegex(LogPrefixPattern + @"There are\s+(\d+)(?:\s*(?:of a max(?: of)?|/)\s*(\d+))?\s+players online:?\s*(.*)$", RegexOptions.IgnoreCase)]
     private static partial Regex PlayerListRegex();
 
-    [GeneratedRegex(@":\s*(\w+)\s+joined the game", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(LogPrefixPattern + @"(\S+) joined the game\s*$", RegexOptions.IgnoreCase)]
     private static partial Regex PlayerJoinRegex();
 
-    [GeneratedRegex(@":\s*(\w+)\s+left the game", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(LogPrefixPattern + @"(\S+) left the game\s*$", RegexOptions.IgnoreCase)]
     private static partial Regex PlayerLeaveRegex();
 
     [ObservableProperty]
@@ -69,8 +68,7 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
     [ObservableProperty]
     public partial string MemoryUsageText { get; set; } = "-";
 
-    [ObservableProperty]
-    public partial string MinecraftVersionText { get; set; } = "-";
+    public string MinecraftVersionText { get; } = "-";
 
     [ObservableProperty]
     public partial string UptimeText { get; set; } = "00:00:00";
@@ -81,15 +79,12 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
 
     public BulkObservableCollection<string> OnlinePlayers { get; } = [];
 
-    /// <summary>
-    /// 是否無線上玩家
-    /// </summary>
+    /// <summary>是否無線上玩家</summary>
     public bool HasNoOnlinePlayers => OnlinePlayers.Count == 0;
 
-    /// <summary>
-    /// 伺服器啟動委派
-    /// </summary>
+    /// <summary>伺服器啟動委派</summary>
     private readonly Func<Task> _startRequestHandler;
+    private readonly ServerStopCoordinator _stopCoordinator;
 
     public ServerMonitorViewModel(
         IServerRuntime serverRuntime,
@@ -99,8 +94,11 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
         IUiService uiService,
         string serverPath,
         string mcVersion,
+        ServerStopCoordinator stopCoordinator,
         Func<Task> startRequestHandler)
     {
+        ArgumentNullException.ThrowIfNull(stopCoordinator);
+        _stopCoordinator = stopCoordinator;
         ArgumentNullException.ThrowIfNull(startRequestHandler);
         ArgumentNullException.ThrowIfNull(serverRuntime);
         ArgumentNullException.ThrowIfNull(logReader);
@@ -132,15 +130,28 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
         _serverRuntime.ServerReady += OnServerReady;
 
         _flushTimer = _ui.CreateUiTimer(TimeSpan.FromMilliseconds(100), OnFlushTimerTick);
-        _flushTimer.StartTimer();
-
         _statsTimer = _ui.CreateUiTimer(TimeSpan.FromSeconds(1), OnStatsTimerTick);
+        if (IsServerRunning)
+        {
+            StartTimers();
+        }
+    }
+
+    private bool _disposed;
+
+    /// <summary>啟動畫面更新計時器；視窗關閉（已處置）後不可再啟動，否則計時器會無人停止而持續執行</summary>
+    private void StartTimers()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _flushTimer.StartTimer();
         _statsTimer.StartTimer();
     }
 
-    /// <summary>
-    /// 於背景執行緒讀取 latest.log 尾端內容，回到 UI 執行緒後合併至主控台（保留載入期間已收到的即時輸出）
-    /// </summary>
+    /// <summary>於背景執行緒讀取 latest.log 尾端內容，回到 UI 執行緒後合併至主控台（保留載入期間已收到的即時輸出）</summary>
     private async Task LoadLatestLogHistoryAsync()
     {
         if (string.IsNullOrWhiteSpace(_serverPath))
@@ -184,9 +195,7 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>
-    /// 複製線上玩家名稱至系統剪貼簿
-    /// </summary>
+    /// <summary>複製線上玩家名稱至系統剪貼簿</summary>
     public void CopyPlayerName(string? playerName)
     {
         if (string.IsNullOrWhiteSpace(playerName))
@@ -198,11 +207,11 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
         {
             _ui.CopyToClipboard(playerName.Trim());
             AddLogLine($"[系統] 已複製玩家名稱「{playerName.Trim()}」至剪貼簿");
-            Logger.Information("已複製玩家名稱至剪貼簿: {PlayerName}", playerName);
+            Logger.Information("已複製玩家名稱至剪貼簿");
         }
         catch (Exception ex)
         {
-            Logger.Warning("複製玩家名稱至剪貼簿失敗：{Message}", ex.Message);
+            Logger.Warning(ex, "複製玩家名稱至剪貼簿失敗");
         }
     }
 
@@ -221,14 +230,23 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Warning("複製紀錄失敗：{Message}", ex.Message);
+            Logger.Warning(ex, "複製紀錄失敗");
         }
     }
 
     [RelayCommand]
     public void RefreshState()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         IsServerRunning = _serverRuntime.IsRunning;
+        if (IsServerRunning)
+        {
+            StartTimers();
+        }
         Logger.Information("手動重新整理監控視窗狀態");
     }
 
@@ -242,10 +260,56 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
 
         string cmd = CommandText.Trim();
         CommandText = string.Empty;
+        _draftText = string.Empty;
+        if (_commandHistory.Count == 0 || _commandHistory[^1] != cmd)
+        {
+            _commandHistory.Add(cmd);
+        }
+
+        _historyIndex = _commandHistory.Count;
 
         AddLogLine($"> {cmd}");
-        Logger.Information("主控台傳送伺服器指令: {Command}", cmd);
         await _serverRuntime.SendCommandAsync(cmd).ConfigureAwait(false);
+    }
+
+    private readonly List<string> _commandHistory = [];
+    private int _historyIndex = -1;
+    private string _draftText = string.Empty;
+
+    /// <summary>以方向鍵上下瀏覽本次開啟期間傳送過的指令；離開歷史時還原尚未送出的草稿。無歷史時回傳 null</summary>
+    public string? NavigateHistory(bool previous)
+    {
+        if (_commandHistory.Count == 0)
+        {
+            return null;
+        }
+
+        if (previous)
+        {
+            if (_historyIndex == -1 || _historyIndex == _commandHistory.Count)
+            {
+                _draftText = CommandText;
+                _historyIndex = _commandHistory.Count - 1;
+            }
+            else if (_historyIndex > 0)
+            {
+                _historyIndex--;
+            }
+
+            CommandText = _commandHistory[_historyIndex];
+        }
+        else if (_historyIndex >= 0 && _historyIndex < _commandHistory.Count - 1)
+        {
+            _historyIndex++;
+            CommandText = _commandHistory[_historyIndex];
+        }
+        else if (_historyIndex == _commandHistory.Count - 1)
+        {
+            _historyIndex = _commandHistory.Count;
+            CommandText = _draftText;
+        }
+
+        return CommandText;
     }
 
     [RelayCommand(CanExecute = nameof(CanStartServer))]
@@ -274,7 +338,7 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
 
         Logger.Information("主控台請求平順停止伺服器");
         AddLogLine(">>> 傳送 stop 指令停止伺服器...");
-        await _serverRuntime.StopAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+        await _stopCoordinator.StopAsync(_serverName).ConfigureAwait(false);
     }
 
     [RelayCommand]
@@ -303,11 +367,13 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
         string cleaned = ModHelpers.StripColorAndFormattingCodes(rawLine).TrimEnd('\r', '\n');
         ProcessPlayerEvents(cleaned);
         _logBuffer.Post(cleaned);
+        if (!IsServerRunning)
+        {
+            _ui.RunOnUi(OnFlushTimerTick);
+        }
     }
 
-    /// <summary>
-    /// 先以字串包含判斷排除絕大多數無關行，僅對可能符合的行執行正規表示式
-    /// </summary>
+    /// <summary>先以字串包含判斷排除絕大多數無關行，僅對可能符合的行執行正規表示式</summary>
     private void ProcessPlayerEvents(string line)
     {
         if (line.Contains("players online", StringComparison.OrdinalIgnoreCase)
@@ -323,7 +389,6 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
                 OnlinePlayersText = $"{current} / {max}";
                 string[] parsedPlayers = playersRaw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 OnlinePlayers.ReplaceAll(parsedPlayers);
-                OnPropertyChanged(nameof(HasNoOnlinePlayers));
             });
         }
 
@@ -336,7 +401,6 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
                 if (!OnlinePlayers.Contains(player))
                 {
                     OnlinePlayers.Add(player);
-                    OnPropertyChanged(nameof(HasNoOnlinePlayers));
                 }
             });
         }
@@ -348,7 +412,6 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
             _ui.RunOnUi(() =>
             {
                 OnlinePlayers.Remove(player);
-                OnPropertyChanged(nameof(HasNoOnlinePlayers));
             });
         }
     }
@@ -357,10 +420,17 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
     {
         _ui.RunOnUi(() =>
         {
+            // 事件已派送至 UI 佇列後視窗才關閉時，不再更新已處置的畫面狀態
+            if (_disposed)
+            {
+                return;
+            }
+
             ClearLogs();
             IsServerRunning = true;
             _startTimestamp = Stopwatch.GetTimestamp();
             _serverReadyNotified = false;
+            StartTimers();
             AddLogLine("[系統] 伺服器行程已啟動...");
             Logger.Information("主控台已接收伺服器啟動事件");
         });
@@ -372,7 +442,7 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
         {
             if (IsServerRunning)
             {
-                AddLogLine("[系統] 伺服器已就緒完成載入！");
+                AddLogLine("[系統] 伺服器已就緒，完成載入！");
                 Logger.Information("主控台已接收伺服器就緒事件");
 
                 if (!_serverReadyNotified)
@@ -398,13 +468,11 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Warning("顯示伺服器就緒通知失敗: {Message}", ex.Message);
+            Logger.Warning(ex, "顯示伺服器就緒通知失敗");
         }
     }
 
-    /// <summary>
-    /// 經由 server.properties 存取服務讀取 server-ip 與 server-port，未設定或讀取失敗時使用預設值
-    /// </summary>
+    /// <summary>經由 server.properties 存取服務讀取 server-ip 與 server-port，未設定或讀取失敗時使用預設值</summary>
     private async Task<(string ServerIp, string ServerPort)> ReadServerAddressAsync()
     {
         string serverPort = ServerDefaults.DefaultPort;
@@ -424,7 +492,7 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning("讀取 server.properties 位址資訊失敗，降級採用預設連接埠：{Message}", ex.Message);
+            Logger.Warning(ex, "讀取 server.properties 位址資訊失敗，降級採用預設連接埠");
         }
 
         return (serverIp, serverPort);
@@ -441,16 +509,32 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
             UptimeText = "00:00:00";
             _startTimestamp = null;
             AddLogLine($"[系統] 伺服器行程已結束，結束代碼：{exitCode}");
+            OnFlushTimerTick();
+            _flushTimer.StopTimer();
+            _statsTimer.StopTimer();
             Logger.Information("伺服器監控已捕捉伺服器結束事件，結束代碼: {ExitCode}", exitCode);
         });
     }
 
     private void OnFlushTimerTick() => _logBuffer.FlushTo(Logs, DisplayedLogsHighWatermark, DisplayedLogsLowWatermark);
 
-    private void AddLogLine(string line) => _logBuffer.Post(line);
+    private void AddLogLine(string line)
+    {
+        _logBuffer.Post(line);
+        if (!IsServerRunning)
+        {
+            OnFlushTimerTick();
+        }
+    }
 
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
         _flushTimer.StopTimer();
         _statsTimer.StopTimer();
         _serverRuntime.OutputLineReceived -= OnOutputLineReceived;

@@ -2,9 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
-/// <summary>
-/// Forge／NeoForge <c>mods.toml</c> 的輕量欄位讀取（僅擷取模組掃描所需欄位，不實作完整 TOML）
-/// </summary>
+/// <summary>Forge／NeoForge <c>mods.toml</c> 的輕量欄位讀取（僅擷取模組掃描所需欄位，不實作完整 TOML）</summary>
 internal static partial class ForgeTomlReader
 {
     internal static string? ExtractMinecraftDependency(string content)

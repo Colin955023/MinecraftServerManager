@@ -7,9 +7,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 匯入伺服器對話方塊 ViewModel
-/// </summary>
+/// <summary>匯入伺服器對話方塊 ViewModel</summary>
 public sealed partial class ImportServerViewModel(IServerManager serverManager,
     IUiService uiService) : ObservableObject
 {
@@ -24,13 +22,12 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
     public partial string ServerName { get; set; } = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsCopyMode))]
+    [NotifyPropertyChangedFor(nameof(IsMoveMode))]
     public partial ImportTransferMode TransferMode { get; set; } = ImportTransferMode.Copy;
 
     [ObservableProperty]
     public partial string StatusMessage { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial bool IsBusy { get; set; }
 
     public bool IsCopyMode
     {
@@ -58,12 +55,6 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
 
     public string? ImportedServerName { get; private set; }
 
-    partial void OnTransferModeChanged(ImportTransferMode value)
-    {
-        OnPropertyChanged(nameof(IsCopyMode));
-        OnPropertyChanged(nameof(IsMoveMode));
-    }
-
     [RelayCommand]
     public async Task BrowseZipAsync()
     {
@@ -84,9 +75,7 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
         }
     }
 
-    /// <summary>
-    /// 驗證輸入欄位是否合法有效
-    /// </summary>
+    /// <summary>驗證輸入欄位是否合法有效</summary>
     public bool ValidateInputs()
     {
         if (string.IsNullOrWhiteSpace(SourcePath))
@@ -105,9 +94,7 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
         return true;
     }
 
-    /// <summary>
-    /// 執行伺服器匯入核心流程並顯示獨立進度視窗
-    /// </summary>
+    /// <summary>執行伺服器匯入核心流程並顯示獨立進度視窗</summary>
     public async Task<bool> ExecuteImportAsync()
     {
         if (!ValidateInputs())
@@ -130,7 +117,6 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
             }
         }
 
-        IsBusy = true;
         StatusMessage = string.Empty;
 
         try
@@ -164,14 +150,10 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "匯入伺服器異常: {Message}", ex.Message);
-            StatusMessage = $"匯入異常：{ex.Message}";
-            await _ui.ShowErrorAsync($"匯入伺服器時發生錯誤：\n{ex.Message}", "匯入伺服器異常").ConfigureAwait(true);
+            Logger.Error(ex, "匯入伺服器失敗");
+            StatusMessage = $"匯入失敗：{ex.Message}";
+            await _ui.ShowErrorAsync($"匯入伺服器時發生錯誤：\n{ex.Message}", "匯入伺服器失敗").ConfigureAwait(true);
             return false;
-        }
-        finally
-        {
-            IsBusy = false;
         }
     }
 }

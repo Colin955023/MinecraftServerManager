@@ -5,9 +5,7 @@ using MinecraftServerManager.Core.Ports;
 
 namespace MinecraftServerManager.Infrastructure.Java;
 
-/// <summary>
-/// 透過 Windows winget 套件管理員自動安裝 Java
-/// </summary>
+/// <summary>透過 Windows winget 套件管理員自動安裝 Java</summary>
 public sealed class JavaWingetInstaller(IProcessRunner processRunner) : IJavaInstaller
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(JavaWingetInstaller));
@@ -48,7 +46,7 @@ public sealed class JavaWingetInstaller(IProcessRunner processRunner) : IJavaIns
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning("偵測 winget 可用性失敗: {0}", ex.Message);
+            Logger.Warning(ex, "偵測 winget 可用性失敗");
             return false;
         }
     }
@@ -61,7 +59,7 @@ public sealed class JavaWingetInstaller(IProcessRunner processRunner) : IJavaIns
 
         if (!await IsWingetAvailableAsync(cancellationToken).ConfigureAwait(false))
         {
-            throw new JavaInstallException("無法呼叫 winget 工具，請確認系統已安裝「應用程式安裝員 (App Installer)」");
+            throw new JavaInstallException("無法呼叫 winget 工具，請確認系統已安裝「應用程式安裝程式 (App Installer)」");
         }
 
         string packageId = ResolvePackageId(majorVersion);
@@ -87,19 +85,13 @@ public sealed class JavaWingetInstaller(IProcessRunner processRunner) : IJavaIns
                         ? message
                         : $"結束代碼: {hexCode}";
 
-                    throw new JavaInstallException(
-                        $"透過 winget 安裝 {packageId} 失敗：{reason} ({hexCode})",
-                        result.ExitCode);
+                    throw new JavaInstallException($"透過 winget 安裝 {packageId} 失敗：{reason} ({hexCode})");
                 }
 
                 return result;
             }
         }
-        catch (JavaInstallException)
-        {
-            throw;
-        }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not JavaInstallException)
         {
             throw new JavaInstallException($"透過 winget 安裝 {packageId} 發生例外：{ex.Message}", ex);
         }

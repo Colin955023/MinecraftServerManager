@@ -9,20 +9,16 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-/// <summary>
-/// 模組頁子 ViewModel 與共用狀態測試
-/// </summary>
+/// <summary>模組頁子 ViewModel 與共用狀態測試</summary>
 public sealed class ModsChildViewModelTests
 {
     private static ServerConfig CreateServer(string name = "FabricServer") =>
         new(ServerName.Parse(name), MinecraftVersion.Parse("1.21.4"), LoaderKind.Fabric, "0.16.0", 2048, path: Path.Combine(Path.GetTempPath(), name));
 
-    private static LocalModsViewModel CreateLocal(ModsContext context, List<(string Message, NotificationType Type)>? notifications = null, IModManager? modManager = null) =>
-        new(context, new ModFileService(), new ModListExporter(), new NotificationCaptureUiService((m, e) => notifications?.Add((m, e))), modManager ?? NoOp.Create<IModManager>(), NoOp.Create<IExternalLauncher>());
+    private static LocalModsViewModel CreateLocal(ModsContext context, ManualUiService? ui = null, IModManager? modManager = null) =>
+        new(context, new ModFileService(), new ModListExporter(), ui ?? new ManualUiService(), modManager ?? NoOp.Create<IModManager>(), NoOp.Create<IExternalLauncher>());
 
-    /// <summary>
-    /// 以假模組管理員載入指定模組至本地清單
-    /// </summary>
+    /// <summary>以假模組管理員載入指定模組至本地清單</summary>
     private static async Task<LocalModsViewModel> CreateLoadedLocalAsync(params LocalModInfo[] mods)
     {
         var context = new ModsContext();
@@ -56,7 +52,7 @@ public sealed class ModsChildViewModelTests
     public async Task LocalMods_LoadDeduplicatesByFileNameAndMapsFields()
     {
         var local = await CreateLoadedLocalAsync(
-            new LocalModInfo("a", "Sodium", "sodium.jar", "0.6.0", "1.21.4", "fabric", fileSize: 2048, platform: ModPlatform.Modrinth),
+            new LocalModInfo("a", "Sodium", "sodium.jar", "0.6.0", "1.21.4", "fabric", fileSize: 2048, platform: ModPlatform.Local),
             new LocalModInfo("a2", "Sodium Copy", "SODIUM.jar", "0.6.0", "1.21.4", "fabric"),
             new LocalModInfo("b", "Lithium", "lithium.jar", "", "1.21.4", "fabric", status: ModStatus.Disabled));
 
@@ -84,20 +80,26 @@ public sealed class ModsChildViewModelTests
     }
 
     [Fact]
-    public async Task LocalMods_SelectAllUpdatesActionStates()
+    public async Task LocalMods_SelectionUpdatesActionStates()
     {
         var local = await CreateLoadedLocalAsync(
             new LocalModInfo("a", "A", "a.jar", "1", "1.21.4", "fabric"),
             new LocalModInfo("b", "B", "b.jar", "1", "1.21.4", "fabric"));
 
-        local.ToggleSelectAll();
-        Assert.True(local.CanBatchToggle);
+        local.SetSelectedMods([local.LocalMods[0]]);
+        Assert.False(local.CanBatchToggle);
         Assert.True(local.CanCheckUpdates);
         Assert.True(local.DeleteSelectedModCommand.CanExecute(null));
+        Assert.Single(local.GetCheckedMods());
+
+        local.SetSelectedMods(local.LocalMods);
+        Assert.True(local.CanBatchToggle);
+        Assert.True(local.CanCheckUpdates);
         Assert.Equal(2, local.GetCheckedMods().Count);
 
-        local.ToggleSelectAll();
+        local.SetSelectedMods([]);
         Assert.False(local.CanBatchToggle);
+        Assert.False(local.CanCheckUpdates);
         Assert.False(local.DeleteSelectedModCommand.CanExecute(null));
     }
 
@@ -122,13 +124,13 @@ public sealed class ModsChildViewModelTests
     [Fact]
     public async Task LocalMods_ExportWithoutServerNotifiesError()
     {
-        var notifications = new List<(string Message, NotificationType Type)>();
-        var local = CreateLocal(new ModsContext(), notifications);
+        var ui = new ManualUiService();
+        var local = CreateLocal(new ModsContext(), ui);
 
         await local.ExportModListCommand.ExecuteAsync(null);
 
-        Assert.Single(notifications);
-        Assert.Equal(NotificationType.Warning, notifications[0].Type);
+        Assert.Single(ui.Notifications);
+        Assert.Equal(NotificationType.Warning, ui.Notifications[0].Type);
     }
 
     [Fact]
@@ -176,26 +178,141 @@ public sealed class ModsChildViewModelTests
     [Fact]
     public async Task InstallQueue_InstallWithoutServerNotifies()
     {
-        var notifications = new List<(string Message, NotificationType Type)>();
-        var queue = new ModInstallQueueViewModel(new ModsContext(), new ModDependencyPlanner(), new ModFileService(), new NotificationCaptureUiService((m, e) => notifications.Add((m, e))), NoOp.Create<IModManager>(), NoOp.Create<IModrinthClient>());
+        var ui = new ManualUiService();
+        var queue = new ModInstallQueueViewModel(new ModsContext(), new ModDependencyPlanner(), new ModFileService(), ui, NoOp.Create<IModManager>(), NoOp.Create<IModrinthClient>());
 
         await queue.InstallQueuedModsAsync();
         queue.InstallQueue.Add(new ModInstallQueueItem { FileName = "a.jar" });
         await queue.InstallQueuedModsAsync();
 
-        Assert.Equal(["安裝清單目前沒有項目", "請先選擇伺服器"], notifications.Select(static n => n.Message));
+        Assert.Equal(["安裝清單目前沒有項目", "請先選擇伺服器"], ui.Notifications.Select(static n => n.Message));
     }
 
     [Fact]
     public async Task ModUpdates_RequireTargetsAndServer()
     {
-        var notifications = new List<(string Message, NotificationType Type)>();
-        var updates = new ModUpdateViewModel(new ModsContext(), new ModDependencyPlanner(), new ModFileService(), new NotificationCaptureUiService((m, e) => notifications.Add((m, e))), NoOp.Create<IModManager>(), NoOp.Create<IModrinthClient>());
+        var ui = new ManualUiService();
+        var updates = new ModUpdateViewModel(new ModsContext(), new ModDependencyPlanner(), new ModFileService(), ui, NoOp.Create<IModManager>(), NoOp.Create<IModrinthClient>());
 
         await updates.CheckModUpdatesAsync([]);
         await updates.CheckModUpdatesAsync([new LocalModRowItem { Name = "A" }]);
 
-        Assert.Equal(["請先選取要檢查更新的模組", "請先選擇伺服器以檢查更新"], notifications.Select(static n => n.Message));
+        Assert.Equal(["請先選取要檢查更新的模組", "請先選擇伺服器以檢查更新"], ui.Notifications.Select(static n => n.Message));
+    }
+
+    private static OnlineModVersion UpdateVersion(string id, string number, string project, params OnlineModDependency[] dependencies) =>
+        new(id, number, $"{project} {number}", ["1.21.4"], ["fabric"], "release", "2026-01-01T00:00:00Z",
+            [new ModFile($"{project}-{number}.jar", $"https://cdn.modrinth.com/data/{project}/{number}.jar", true, 1000, new Dictionary<string, string> { ["sha512"] = $"hash-{project}-{number}" })],
+            dependencies, project);
+
+    private static async Task<(ManualUiService Ui, StubModrinthClient Modrinth)> RunUpdateCheckAsync(
+        IReadOnlyList<LocalModInfo> installed,
+        Dictionary<string, IReadOnlyList<OnlineModVersion>> projects,
+        Dictionary<string, string>? projectIdsByHash = null)
+    {
+        var context = new ModsContext();
+        context.SetServer(CreateServer());
+        var ui = new ManualUiService();
+        var modrinth = new StubModrinthClient();
+        foreach (var (k, v) in projects)
+        {
+            modrinth.Versions[k] = v;
+            modrinth.Titles[k] = k;
+        }
+
+        if (projectIdsByHash is not null)
+        {
+            foreach (var (hash, projectId) in projectIdsByHash)
+            {
+                modrinth.HashLookups[hash] = new ModrinthVersionLookupResult("sha512", projectId, UpdateVersion("lookup", "0", projectId));
+                modrinth.Titles[projectId] = projectId;
+            }
+        }
+
+        var updates = new ModUpdateViewModel(context, new ModDependencyPlanner(), new ModFileService(), ui, new FakeModManager(installed), modrinth);
+
+        await updates.CheckModUpdatesAsync([new LocalModRowItem { Id = "sodium", Name = "Sodium", Version = "1.0.0", CurrentHash = "old", HashAlgorithm = "sha512" }]);
+        return (ui, modrinth);
+    }
+
+    private static readonly LocalModInfo InstalledSodium = new("sodium", "Sodium", "sodium-1.0.0.jar", "1.0.0", "1.21.4", "fabric");
+
+    [Fact]
+    public async Task ModUpdates_MissingRequiredDependencyIsAddedToUpdateList()
+    {
+        var (ui, _) = await RunUpdateCheckAsync(
+            [InstalledSodium],
+            new()
+            {
+                ["sodium"] = [UpdateVersion("v2", "2.0.0", "sodium", new OnlineModDependency("dep-lib", ModDependencyType.Required))],
+                ["dep-lib"] = [UpdateVersion("d1", "1.0.0", "dep-lib")],
+            });
+
+        Assert.Equal(2, ui.ShownModUpdateCandidates.Count);
+        Assert.Contains(ui.ShownModUpdateCandidates, static c => c.LocalMod is not null && c.ModName == "Sodium" && c.NewVersion == "2.0.0");
+        Assert.Contains(ui.ShownModUpdateCandidates, static c => c.LocalMod is null && c.CurrentVersion == "未安裝" && c.ModName.Contains("Sodium 需要", StringComparison.Ordinal));
+        Assert.DoesNotContain(ui.Notifications, static n => n.Type == NotificationType.Warning);
+    }
+
+    [Fact]
+    public async Task ModUpdates_UnresolvableRequiredDependencyBlocksUpdateAndReports()
+    {
+        var (ui, _) = await RunUpdateCheckAsync(
+            [InstalledSodium],
+            new()
+            {
+                ["sodium"] = [UpdateVersion("v2", "2.0.0", "sodium", new OnlineModDependency("dep-lib", ModDependencyType.Required))],
+                ["dep-lib"] = [],
+            });
+
+        Assert.Empty(ui.ShownModUpdateCandidates);
+        Assert.Contains(ui.Notifications, static n => n.Type == NotificationType.Warning && n.Message.Contains("找不到相容版本", StringComparison.Ordinal) && n.Message.Contains("Sodium", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ModUpdates_ConflictWithInstalledModBlocksUpdateAndReports()
+    {
+        var (ui, _) = await RunUpdateCheckAsync(
+            [InstalledSodium, new LocalModInfo("bad-mod", "Bad Mod", "bad.jar", "1.0.0", "1.21.4", "fabric")],
+            new()
+            {
+                ["sodium"] = [UpdateVersion("v2", "2.0.0", "sodium", new OnlineModDependency("bad-mod", ModDependencyType.Incompatible))],
+            });
+
+        Assert.Empty(ui.ShownModUpdateCandidates);
+        Assert.Contains(ui.Notifications, static n => n.Type == NotificationType.Warning && n.Message.Contains("衝突", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ModUpdates_InstalledDependencyIsTreatedAsSatisfiedWithoutUpgrade()
+    {
+        var (ui, modrinth) = await RunUpdateCheckAsync(
+            [InstalledSodium, new LocalModInfo("dep-lib", "Dep Lib", "dep-lib-0.5.0.jar", "0.5.0", "1.21.4", "fabric")],
+            new()
+            {
+                ["sodium"] = [UpdateVersion("v2", "2.0.0", "sodium", new OnlineModDependency("dep-lib", ModDependencyType.Required))],
+                ["dep-lib"] = [UpdateVersion("d1", "1.0.0", "dep-lib")],
+            });
+
+        Assert.Single(ui.ShownModUpdateCandidates);
+        Assert.DoesNotContain("dep-lib", modrinth.RequestedProjects);
+    }
+
+    [Fact]
+    public async Task ModUpdates_InstalledDependencyMatchedByHashProjectIdIsNotReinstalled()
+    {
+        var (ui, modrinth) = await RunUpdateCheckAsync(
+            [InstalledSodium, new LocalModInfo("ConfigLib", "Config Lib", "configlib-1.18.jar", "1.1.8", "1.21.4", "fabric", currentHash: "dep-hash", hashAlgorithm: "sha512")],
+            new()
+            {
+                ["sodium"] = [UpdateVersion("v2", "2.0.0", "sodium", new OnlineModDependency("P1abc2Def", ModDependencyType.Required))],
+                ["P1abc2Def"] = [UpdateVersion("d1", "1.1.26", "P1abc2Def")],
+            },
+            new() { ["dep-hash"] = "P1abc2Def" });
+
+        Assert.Single(ui.ShownModUpdateCandidates);
+        Assert.DoesNotContain("P1abc2Def", modrinth.RequestedProjects);
+        Assert.DoesNotContain(ui.Notifications, static n => n.Type == NotificationType.Warning);
     }
 
     private sealed class FakeModManager(IReadOnlyList<LocalModInfo> mods) : IModManager

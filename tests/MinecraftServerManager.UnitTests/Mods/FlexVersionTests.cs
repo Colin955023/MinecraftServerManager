@@ -6,13 +6,13 @@ namespace MinecraftServerManager.UnitTests.Mods;
 public sealed class FlexVersionTests
 {
     [Theory]
-    // 實務案例 1：Fabric API 當前 0.102.0+1.21 vs 線上前版 0.101.2+1.21
+    // 實務案例 1：Fabric API 目前 0.102.0+1.21 vs 線上前版 0.101.2+1.21
     [InlineData("0.102.0+1.21", "0.101.2+1.21", 1)]
-    // 實務案例 2：Jade 當前 15.1.5+fabric vs 線上前版 15.1.4+fabric
+    // 實務案例 2：Jade 目前 15.1.5+fabric vs 線上前版 15.1.4+fabric
     [InlineData("15.1.5+fabric", "15.1.4+fabric", 1)]
-    // 實務案例 3：FerriteCore 當前 7.0.0 vs 線上 7.0.0-fabric (正式版優於預發布版)
+    // 實務案例 3：FerriteCore 目前 7.0.0 vs 線上 7.0.0-fabric (正式版優於預發布版)
     [InlineData("7.0.0", "7.0.0-fabric", 1)]
-    // 實務案例 4：Lithium 當前 0.13.1 vs 線上新版 mc1.21.1-0.15.2-fabric
+    // 實務案例 4：Lithium 目前 0.13.1 vs 線上新版 mc1.21.1-0.15.2-fabric
     [InlineData("mc1.21.1-0.15.2-fabric", "0.13.1", 1)]
     // 忽略建置中繼資料 (+ 號後忽略)
     [InlineData("1.0.0+fabric", "1.0.0+forge", 0)]

@@ -14,15 +14,14 @@ using Windows.UI;
 
 namespace MinecraftServerManager.App;
 
-/// <summary>
-/// 應用程式主視窗 (WinUI 3 原生視窗)
-/// </summary>
+/// <summary>應用程式主視窗 (WinUI 3 原生視窗)</summary>
 public sealed partial class MainWindow : Window, IAsyncDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(MainWindow));
 
     private AppCompositionRoot? _compositionRoot;
     private MainViewModel? _viewModel;
+    private RectInt32? _restoredBounds;
     private bool _shutdownInProgress;
     private bool _shutdownCompleted;
     private WinUiService? _uiService;
@@ -44,9 +43,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         RootGrid.Loaded += MainWindow_Loaded;
     }
 
-    /// <summary>
-    /// 初始化主視窗之組合根與 ViewModel 繫結
-    /// </summary>
+    /// <summary>初始化主視窗之組合根與 ViewModel 繫結</summary>
     public void InitializeViewModel(AppCompositionRoot compositionRoot, WinUiService uiService)
     {
         _uiService = uiService ?? throw new ArgumentNullException(nameof(uiService));
@@ -62,11 +59,23 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         UpdateCurrentPage(_viewModel.CurrentPage);
 
         RestoreWindowPosition();
+        PushWindowMetrics();
+        AppWindow.Changed += OnAppWindowChanged;
 
         _ = ViewModelBase.RunSafeAsync(() => _viewModel.CheckForUpdateOnStartupAsync(), "啟動檢查更新", Logger);
     }
 
-    private void MainWindow_Loaded(object sender, RoutedEventArgs e) => Logger.Information("主視窗 UI 已載入完成");
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        Logger.Information("主視窗 UI 已載入完成");
+
+        // 對話框需要主視窗內容的 XamlRoot，須待 UI 載入完成後才能顯示
+        RootGrid.Loaded -= MainWindow_Loaded;
+        if (_viewModel is not null)
+        {
+            _ = ViewModelBase.RunSafeAsync(() => _viewModel.CheckOrphanedServersOnStartupAsync(), "檢查遺留伺服器行程", Logger);
+        }
+    }
 
     private void ApplyThemeMode(string mode)
     {
@@ -80,7 +89,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         RootGrid.RequestedTheme = targetTheme;
         _uiService!.CurrentTheme = targetTheme;
         TitleBarThemeHelper.ApplyTitleBarTheme(AppWindow, targetTheme);
-        Logger.Information("主視窗套用主題模式: {0} ({1})", mode, targetTheme);
+        Logger.Information("主視窗套用主題模式: {Mode} ({TargetTheme})", mode, targetTheme);
     }
 
     private void UpdateCurrentPage(PageViewModel? page)
@@ -124,14 +133,12 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
     {
         DispatcherQueue.TryEnqueue(() =>
         {
-            ShowNotification($"已偵測到新版本 v{result.LatestVersion}，請至「關於與設定」查看詳細更新資訊。", "發現新版本", NotificationType.Info, durationSeconds: 5);
+            ShowNotification($"已偵測到新版本 v{result.LatestVersion}，請至「關於與設定」檢視詳細更新資訊。", "發現新版本", NotificationType.Info, durationSeconds: 5);
         });
     }
 
 
-    /// <summary>
-    /// 以 InfoBar 顯示資訊、成功與警告通知（錯誤由 WinUiService 以對話方塊顯示）
-    /// </summary>
+    /// <summary>以 InfoBar 顯示資訊、成功與警告通知（錯誤由 WinUiService 以對話方塊顯示）</summary>
     public void ShowNotification(string message, string? title = null, NotificationType type = NotificationType.Info, int? durationSeconds = null) =>
         ShowInfoBar(
             title ?? NotificationPresentation.GetDefaultTitle(type),
@@ -150,15 +157,13 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Logger.Warning("取得通知筆刷「{Key}」異常: {Message}", key, ex.Message);
+            Logger.Warning(ex, "取得通知筆刷「{Key}」失敗", key);
         }
 
         return new SolidColorBrush(fallbackColor);
     }
 
-    /// <summary>
-    /// 於右上角以 WinUI 原生 InfoBar 顯示浮動通知：滑鼠停留時暫停自動關閉，最多同時顯示 4 則
-    /// </summary>
+    /// <summary>於右上角以 WinUI 原生 InfoBar 顯示浮動通知：滑鼠停留時暫停自動關閉，最多同時顯示 4 則</summary>
     private void ShowInfoBar(string title, string message, NotificationType type, int durationSeconds)
     {
         bool isLight = RootGrid.ActualTheme == ElementTheme.Light;
@@ -261,10 +266,44 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
             CenterWindow(workArea, targetWidth, targetHeight);
         }
 
+        // 最大化前先記下還原後的視窗範圍，供關閉時儲存（最大化時的外框尺寸不可當作還原尺寸）
+        _restoredBounds = new RectInt32(AppWindow.Position.X, AppWindow.Position.Y, AppWindow.Size.Width, AppWindow.Size.Height);
+
         if (winSettings.Maximized && AppWindow.Presenter is OverlappedPresenter presenter)
         {
             presenter.Maximize();
         }
+    }
+
+    private void OnAppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        if (args.DidSizeChange || args.DidPositionChange)
+        {
+            if (AppWindow.Presenter is not OverlappedPresenter { State: not OverlappedPresenterState.Restored })
+            {
+                _restoredBounds = new RectInt32(AppWindow.Position.X, AppWindow.Position.Y, AppWindow.Size.Width, AppWindow.Size.Height);
+            }
+
+            // 大小或位置（可能換到不同縮放的螢幕）改變時同步「關於與設定」顯示的即時尺寸
+            PushWindowMetrics();
+        }
+    }
+
+    private void PushWindowMetrics()
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        double scale = WindowLayoutHelper.GetScale(this);
+        var screen = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).OuterBounds;
+        _viewModel.UpdateWindowMetrics(new WindowMetrics(
+            (int)Math.Round(AppWindow.Size.Width / scale),
+            (int)Math.Round(AppWindow.Size.Height / scale),
+            screen.Width,
+            screen.Height,
+            scale));
     }
 
     private void CenterWindow(RectInt32 workArea, int width, int height) =>
@@ -279,13 +318,18 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
 
         double scale = WindowLayoutHelper.GetScale(this);
 
-        bool isMax = AppWindow.Presenter is OverlappedPresenter presenter &&
-                     presenter.State == OverlappedPresenterState.Maximized;
+        var state = (AppWindow.Presenter as OverlappedPresenter)?.State;
+        bool isMax = state == OverlappedPresenterState.Maximized;
 
-        int width = (int)(AppWindow.Size.Width / scale);
-        int height = (int)(AppWindow.Size.Height / scale);
-        int x = (int)(AppWindow.Position.X / scale);
-        int y = (int)(AppWindow.Position.Y / scale);
+        // 最大化或最小化時改存先前記錄的還原範圍，避免下次還原時視窗變成近乎全螢幕或位於螢幕外
+        RectInt32 bounds = state is OverlappedPresenterState.Maximized or OverlappedPresenterState.Minimized && _restoredBounds is { } restored
+            ? restored
+            : new RectInt32(AppWindow.Position.X, AppWindow.Position.Y, AppWindow.Size.Width, AppWindow.Size.Height);
+
+        int width = (int)(bounds.Width / scale);
+        int height = (int)(bounds.Height / scale);
+        int x = (int)(bounds.X / scale);
+        int y = (int)(bounds.Y / scale);
 
         _viewModel.Settings.SetMainWindowSettings(width, height, x, y, isMax);
     }
@@ -332,15 +376,14 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         }
 
         _shutdownInProgress = true;
-        Logger.Information("主視窗正在關閉（等待執行中伺服器停止），儲存視窗位置與大小");
-        SaveWindowPosition();
-        UnregisterWindowEvents();
-
+        Logger.Information("主視窗關閉請求：伺服器執行中，先確認並平順停止所有伺服器");
         _ = ViewModelBase.RunSafeAsync(ShutdownAndCloseAsync, "關閉應用程式與伺服器資源", Logger);
     }
 
     private void UnregisterWindowEvents()
     {
+        AppWindow.Closing -= MainWindow_AppWindowClosing;
+        AppWindow.Changed -= OnAppWindowChanged;
         if (_viewModel is not null)
         {
             _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
@@ -353,18 +396,36 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
 
     private async Task ShutdownAndCloseAsync()
     {
+        bool proceed = false;
         try
         {
+            proceed = _compositionRoot is null || await _compositionRoot.StopAllServersForShutdownAsync().ConfigureAwait(true);
+            if (!proceed)
+            {
+                Logger.Information("使用者取消關閉應用程式");
+                _shutdownInProgress = false;
+                return;
+            }
+
+            SaveWindowPosition();
+            UnregisterWindowEvents();
             await DisposeAsync().ConfigureAwait(true);
         }
         catch (Exception ex)
         {
-            Logger.Warning("關閉應用程式資源時發生例外: {0}", ex.Message);
+            Logger.Warning(ex, "關閉應用程式資源時發生例外");
         }
         finally
         {
-            _shutdownCompleted = true;
-            DispatcherQueue.TryEnqueue(Close);
+            if (proceed)
+            {
+                _shutdownCompleted = true;
+                DispatcherQueue.TryEnqueue(Close);
+            }
+            else
+            {
+                _shutdownInProgress = false;
+            }
         }
     }
 
@@ -376,7 +437,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Logger.Warning("非同步釋放視窗資源時發生例外: {0}", ex.Message);
+            Logger.Warning(ex, "非同步釋放視窗資源時發生例外");
         }
     }
 

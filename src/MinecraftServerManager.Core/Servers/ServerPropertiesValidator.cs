@@ -4,16 +4,12 @@ using System.Net;
 
 namespace MinecraftServerManager.Core.Servers;
 
-/// <summary>
-/// 提供 Minecraft server.properties 設定項目數值合法性驗證
-/// </summary>
+/// <summary>提供 Minecraft server.properties 設定項目數值合法性驗證</summary>
 public static class ServerPropertiesValidator
 {
     private static readonly SearchValues<char> IpLiteralChars = SearchValues.Create("0123456789.");
 
-    /// <summary>
-    /// 驗證單一設定屬性值是否合法
-    /// </summary>
+    /// <summary>驗證單一設定屬性值是否合法</summary>
     /// <param name="key">設定屬性索引鍵</param>
     /// <param name="value">欲驗證之數值</param>
     /// <param name="defaultValue">該屬性之預設值（用於推導型別）</param>
@@ -26,7 +22,7 @@ public static class ServerPropertiesValidator
 
         return key.ToLowerInvariant() switch
         {
-            "server-ip" => Check(val.Length == 0 || IsValidHostOrIp(val), "請填入有效的 IP 位址（如 127.0.0.1）或留空以綁定所有網路介面"),
+            "server-ip" => Check(val.Length == 0 || IsValidHostOrIp(val), "請填入有效的 IP 位址（如 127.0.0.1）或留空以繫結所有網路介面"),
             "management-server-host" => Check(val.Length == 0 || IsValidHostOrIp(val), "請填入有效的主機名稱或 IP 位址"),
             "server-port" or "query.port" or "rcon.port" => IntInRange(val, 1, 65534, $"連接埠 {key} 必須在 1 到 65534 之間"),
             "management-server-port" => IntInRange(val, 0, 65535, "管理端連接埠必須介於 0 到 65535 之間（0 為隨機指派）"),
@@ -40,9 +36,7 @@ public static class ServerPropertiesValidator
         };
     }
 
-    /// <summary>
-    /// 未列舉之屬性依布林清單或預設值推導型別驗證
-    /// </summary>
+    /// <summary>未列舉之屬性依布林清單或預設值推導型別驗證</summary>
     private static (bool, string?) ValidateByDefaultType(string key, string val, string defaultValue)
     {
         if (ServerPropertiesMetadata.BooleanKeys.Contains(key) || bool.TryParse(defaultValue, out _))

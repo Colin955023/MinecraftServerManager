@@ -8,9 +8,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>
-/// 舊版 server.properties 自動遷移服務
-/// </summary>
+/// <summary>舊版 server.properties 自動遷移服務</summary>
 public static class ServerPropertiesMigrationService
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerPropertiesMigrationService));
@@ -39,9 +37,7 @@ public static class ServerPropertiesMigrationService
         ["announce-player-achievements"] = "自 1.12 起移除，已改為遊戲規則 announceAdvancements"
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// 分析現有屬性字典並產生遷移計畫
-    /// </summary>
+    /// <summary>分析現有屬性字典並產生遷移計畫</summary>
     public static ServerPropertiesMigrationPlan PlanMigration(
         IReadOnlyDictionary<string, string> properties,
         string? minecraftVersion = null)
@@ -108,9 +104,7 @@ public static class ServerPropertiesMigrationService
             MigratedProperties: newProps);
     }
 
-    /// <summary>
-    /// 將遷移計畫套用並寫入指定伺服器目錄下的 server.properties
-    /// </summary>
+    /// <summary>將遷移計畫套用並寫入指定伺服器目錄下的 server.properties</summary>
     public static bool ApplyMigrationToDirectory(
         string directoryPath,
         ServerPropertiesMigrationPlan plan,
@@ -135,11 +129,11 @@ public static class ServerPropertiesMigrationService
             try
             {
                 SafeFileSystem.CopyFile(propsPath, backupPath, overwrite: true);
-                Logger.Information("已建立 server.properties 備份：{BackupPath}", backupPath);
+                Logger.Information("已建立 server.properties 備份: {BackupPath}", backupPath);
             }
             catch (Exception ex)
             {
-                Logger.Warning("建立 server.properties.backup 失敗：{Message}", ex.Message);
+                Logger.Warning(ex, "建立 server.properties.backup 失敗");
             }
         }
 

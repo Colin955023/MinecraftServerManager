@@ -3,7 +3,8 @@
     Minecraft Server Manager 共用 PowerShell 函式庫
 #>
 
-function Initialize-ScriptEnvironment {
+function Initialize-ScriptEnvironment
+{
     <#
     .SYNOPSIS
         統一設定 UTF-8 主控台編碼、停用 MSBuild 節點重用，並將錯誤偏好設為 Stop（作用於呼叫端腳本範圍）。
@@ -21,32 +22,37 @@ function Initialize-ScriptEnvironment {
     Set-Variable -Name ErrorActionPreference -Value "Stop" -Scope 1
 }
 
-function Get-ProjectVersion {
+function Get-ProjectVersion
+{
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $false)]
         [string]$RepoRoot
     )
 
-    if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+    if ([string]::IsNullOrWhiteSpace($RepoRoot))
+    {
         $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
     }
 
     $propsPath = Join-Path $RepoRoot "Directory.Build.props"
-    if (-not (Test-Path -LiteralPath $propsPath)) {
+    if (-not (Test-Path -LiteralPath $propsPath))
+    {
         throw "找不到版本定義檔案 Directory.Build.props ($propsPath)"
     }
 
     [xml]$propsXml = Get-Content -Raw -Encoding UTF8 $propsPath
     $versionNode = $propsXml.SelectSingleNode("//Version")
-    if ($null -eq $versionNode -or [string]::IsNullOrWhiteSpace($versionNode.InnerText)) {
+    if ($null -eq $versionNode -or [string]::IsNullOrWhiteSpace($versionNode.InnerText))
+    {
         throw "無法從 Directory.Build.props 解析 Version 節點"
     }
 
     return $versionNode.InnerText.Trim()
 }
 
-function Write-Sha256File {
+function Write-Sha256File
+{
     <#
     .SYNOPSIS
         產生 sha256sum 相容格式（小寫雜湊、兩個空白、檔名、LF 結尾、UTF-8 無 BOM）的 <檔名>.sha256。
@@ -58,7 +64,8 @@ function Write-Sha256File {
     )
 
     $fullPath = [System.IO.Path]::GetFullPath($LiteralPath)
-    if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf))
+    {
         throw "找不到要計算雜湊的檔案：$fullPath"
     }
 
@@ -72,7 +79,62 @@ function Write-Sha256File {
     return $shaPath
 }
 
-function Get-ReleaseAssetNames {
+function Invoke-SmokeTest
+{
+    <#
+    .SYNOPSIS
+        以暫存的 MSM_USER_DATA_DIR 執行主程式 --smoke-test，逾時即終止並於失敗時擲出例外；結束後清理暫存。
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ExePath,
+
+        [int]$TimeoutSeconds = 30
+    )
+
+    $fullExePath = [System.IO.Path]::GetFullPath($ExePath)
+    if (-not (Test-Path -LiteralPath $fullExePath -PathType Leaf))
+    {
+        throw "找不到煙霧測試的執行檔：$fullExePath"
+    }
+
+    $smokeDataDir = Join-Path ([System.IO.Path]::GetTempPath()) ("msm_smoke_" + [Guid]::NewGuid().ToString("N"))
+    $psi = [System.Diagnostics.ProcessStartInfo]::new($fullExePath, "--smoke-test")
+    $psi.EnvironmentVariables["MSM_USER_DATA_DIR"] = $smokeDataDir
+    $psi.UseShellExecute = $false
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    try
+    {
+        if (-not $proc.WaitForExit($TimeoutSeconds * 1000))
+        {
+            $proc.Kill($true)
+            throw "煙霧測試逾時（$TimeoutSeconds 秒）"
+        }
+        if ($proc.ExitCode -ne 0)
+        {
+            throw "煙霧測試失敗，結束代碼：$($proc.ExitCode)"
+        }
+    }
+    finally
+    {
+        $proc.Dispose()
+        if (Test-Path -LiteralPath $smokeDataDir)
+        {
+            try
+            {
+                Remove-Item -LiteralPath $smokeDataDir -Recurse -Force
+            }
+            catch
+            {
+                Write-Warning "無法清理煙霧測試暫存目錄 ${smokeDataDir}：$($_.Exception.Message)"
+            }
+        }
+    }
+}
+
+function Get-ReleaseAssetNames
+{
     <#
     .SYNOPSIS
         GitHub Release 必要資產清單（發布與發布後驗證共用的單一事實來源）。

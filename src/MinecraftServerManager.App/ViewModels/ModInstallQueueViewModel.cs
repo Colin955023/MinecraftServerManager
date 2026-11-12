@@ -13,9 +13,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 待安裝模組佇列項目
-/// </summary>
+/// <summary>待安裝模組佇列項目</summary>
 public sealed class ModInstallQueueItem
 {
     public string ProjectId { get; set; } = string.Empty;
@@ -34,7 +32,7 @@ public sealed class ModInstallQueueItem
 
     public string? ExpectedHash { get; set; }
 
-    public string HashAlgorithm { get; set; } = "sha512";
+    public string HashAlgorithm { get; set; } = ModHelpers.PreferredHashAlgorithm;
 
     public IReadOnlyList<string> Dependencies { get; set; } = (string[])[];
 
@@ -49,54 +47,25 @@ public sealed class ModInstallQueueItem
     public string Reason { get; set; } = "全新安裝";
 }
 
-/// <summary>
-/// 模組頁：版本挑選、安裝佇列、相依解析與批次安裝
-/// </summary>
-public sealed partial class ModInstallQueueViewModel : ViewModelBase
+/// <summary>模組頁：版本挑選、安裝佇列、相依解析與批次安裝</summary>
+public sealed partial class ModInstallQueueViewModel(
+    ModsContext context,
+    IModDependencyPlanner dependencyPlanner,
+    IModFileService modFileService,
+    IUiService uiService,
+    IModManager modManager,
+    IModrinthClient modrinthClient)
+    : ModQueueWorkflowViewModelBase(context, dependencyPlanner, modFileService, uiService, modManager, modrinthClient)
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModInstallQueueViewModel));
-
-    private readonly IUiService _ui;
-    private readonly ModsContext _context;
-    private readonly IModManager _modManager;
-    private readonly IModrinthClient _modrinthClient;
-    private readonly IModDependencyPlanner _dependencyPlanner;
-    private readonly IModFileService _modFileService;
 
     [ObservableProperty]
     public partial string InstallQueueHint { get; set; } = "安裝清單：0 個項目";
 
-    /// <summary>
-    /// 待安裝模組佇列。
-    /// </summary>
+    /// <summary>待安裝模組佇列。</summary>
     public BulkObservableCollection<ModInstallQueueItem> InstallQueue { get; } = [];
 
-    public ModInstallQueueViewModel(
-        ModsContext context,
-        IModDependencyPlanner dependencyPlanner,
-        IModFileService modFileService,
-        IUiService uiService,
-        IModManager modManager,
-        IModrinthClient modrinthClient)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(dependencyPlanner);
-        ArgumentNullException.ThrowIfNull(modFileService);
-        ArgumentNullException.ThrowIfNull(uiService);
-        ArgumentNullException.ThrowIfNull(modManager);
-        ArgumentNullException.ThrowIfNull(modrinthClient);
-
-        _ui = uiService;
-        _context = context;
-        _dependencyPlanner = dependencyPlanner;
-        _modFileService = modFileService;
-        _modManager = modManager;
-        _modrinthClient = modrinthClient;
-    }
-
-    /// <summary>
-    /// 彈出版本選擇對話方塊，將選定版本與必要相依模組加入安裝清單
-    /// </summary>
+    /// <summary>彈出版本選擇對話方塊，將選定版本與必要相依模組加入安裝清單</summary>
     public async Task PickVersionAndQueueAsync(OnlineModRowItem? mod)
     {
         if (mod is null)
@@ -214,19 +183,13 @@ public sealed partial class ModInstallQueueViewModel : ViewModelBase
 
             _ui.Notify($"已將 {toAdd.Count} 個相依模組加入安裝清單", NotificationType.Success);
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning(ex, "檢查相依模組時發生異常: {Message}", ex.Message);
+            Logger.Warning(ex, "檢查相依模組時發生例外");
         }
     }
 
-    /// <summary>
-    /// 組合相依模組規劃確認訊息（依全新安裝與更新升級分段）
-    /// </summary>
+    /// <summary>組合相依模組規劃確認訊息（依全新安裝與更新升級分段）</summary>
     public static string BuildDependencyPrompt(string modTitle, IReadOnlyList<ModDependencyPlanItem> plans)
     {
         ArgumentNullException.ThrowIfNull(plans);
@@ -350,7 +313,7 @@ public sealed partial class ModInstallQueueViewModel : ViewModelBase
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
-                        Logger.Warning("刪除舊版本模組檔案「{Old}」失敗: {Message}", item.OldFileName, ex.Message);
+                        Logger.Warning(ex, "刪除舊版本模組檔案「{Old}」失敗", item.OldFileName);
                     }
                 }
 
@@ -358,17 +321,15 @@ public sealed partial class ModInstallQueueViewModel : ViewModelBase
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.Error(ex, "安裝模組「{Title}」異常: {Message}", item.Title, ex.Message);
-                _ui.Notify($"安裝「{item.Title}」異常：{ex.Message}", NotificationType.Error);
+                Logger.Error(ex, "安裝模組「{Title}」失敗", item.Title);
+                _ui.Notify($"安裝「{item.Title}」失敗：{ex.Message}", NotificationType.Error);
             }
         }, cancellationToken).ConfigureAwait(true);
 
         return [.. succeededItems];
     }
 
-    /// <summary>
-    /// 檢視待安裝佇列清單視窗
-    /// </summary>
+    /// <summary>檢視待安裝佇列清單視窗</summary>
     [RelayCommand]
     public async Task ViewInstallQueueAsync()
     {
@@ -381,9 +342,7 @@ public sealed partial class ModInstallQueueViewModel : ViewModelBase
         }
     }
 
-    /// <summary>
-    /// 清空安裝清單。
-    /// </summary>
+    /// <summary>清空安裝清單。</summary>
     [RelayCommand]
     public void ClearInstallQueue()
     {
@@ -391,9 +350,7 @@ public sealed partial class ModInstallQueueViewModel : ViewModelBase
         UpdateInstallQueueHint();
     }
 
-    /// <summary>
-    /// 依佇列內容更新提示文字
-    /// </summary>
+    /// <summary>依佇列內容更新提示文字</summary>
     public void UpdateInstallQueueHint()
     {
         if (InstallQueue.Count == 0)

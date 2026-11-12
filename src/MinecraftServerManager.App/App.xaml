@@ -196,6 +196,17 @@
                                         Value="True" />
                         </Style>
 
+                        <!-- 共用卡片外框：卡片底色、邊框色與 1px 邊框；圓角與內距由各處指定 -->
+                        <Style x:Key="CardBorderStyle"
+                                TargetType="Border">
+                                <Setter Property="Background"
+                                        Value="{ThemeResource CardBrush}" />
+                                <Setter Property="BorderBrush"
+                                        Value="{ThemeResource BorderBrush}" />
+                                <Setter Property="BorderThickness"
+                                        Value="1" />
+                        </Style>
+
                         <!-- 共用多欄表格列樣式：零內距、拉伸對齊並帶底部水平分隔線 -->
                         <Style x:Key="TableListViewItemStyle"
                                 TargetType="ListViewItem">

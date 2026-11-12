@@ -5,34 +5,18 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-/// <summary>
-/// 模組管理外觀服務測試
-/// </summary>
+/// <summary>模組管理外觀服務測試</summary>
 public sealed partial class ModManagerTests : IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModManagerTests));
+    private readonly TempDirectory _testDirTemp = new("msm_test_modmgr_");
     private readonly string _testDir;
 
     public ModManagerTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "msm_test_modmgr_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testDir);
+        _testDir = _testDirTemp.FullName;
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testDir))
-            {
-                Directory.Delete(_testDir, recursive: true);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
-        }
-    }
+    public void Dispose() => _testDirTemp.Dispose();
 
     [Fact]
     public async Task ExportModListAsyncTextFormatShouldIncludeModDetails()
@@ -47,7 +31,7 @@ public sealed partial class ModManagerTests : IDisposable
         await exporter.ExportAsync(rows, ModListExportFormat.Text, filePath);
         string text = await File.ReadAllTextAsync(filePath);
 
-        Assert.Contains("# 模組列表", text, StringComparison.Ordinal);
+        Assert.Contains("# 模組清單", text, StringComparison.Ordinal);
         Assert.Contains("Test Mod", text, StringComparison.Ordinal);
         Assert.Contains("DevTeam", text, StringComparison.Ordinal);
     }
@@ -168,6 +152,6 @@ public sealed partial class ModManagerTests : IDisposable
             string? hashAlgorithm = null,
             IProgress<int>? progress = null,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult(ModFileOperationResult.Success(fileName, "安裝成功"));
+            Task.FromResult(ModFileOperationResult.Success("安裝成功"));
     }
 }

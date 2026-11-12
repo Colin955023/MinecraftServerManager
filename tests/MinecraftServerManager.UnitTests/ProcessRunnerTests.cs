@@ -58,36 +58,27 @@ public sealed class ProcessRunnerTests
     [Fact]
     public async Task StartsBatchScriptWithSpacesAndCapturesOutput()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "msm test batch " + Guid.NewGuid().ToString("N"));
+        using var tempDirTemp = new TempDirectory("msm test batch ");
+        string tempDir = Path.Combine(tempDirTemp.FullName, "root");
         Directory.CreateDirectory(tempDir);
-        try
-        {
-            string batPath = Path.Combine(tempDir, "script with space.bat");
-            File.WriteAllText(batPath, "@echo off\r\necho BATCH_OUTPUT_%1\r\n");
+        string batPath = Path.Combine(tempDir, "script with space.bat");
+        File.WriteAllText(batPath, "@echo off\r\necho BATCH_OUTPUT_%1\r\n");
 
-            var runner = new ProcessRunner();
-            var output = new List<ProcessOutput>();
+        var runner = new ProcessRunner();
+        var output = new List<ProcessOutput>();
 
-            await using var process = await runner.StartAsync(new ProcessStartSpec(
-                batPath,
-                ["TEST_ARG"],
-                WorkingDirectory: tempDir));
-            process.OutputReceived += output.Add;
+        await using var process = await runner.StartAsync(new ProcessStartSpec(
+            batPath,
+            ["TEST_ARG"],
+            WorkingDirectory: tempDir));
+        process.OutputReceived += output.Add;
 
-            var result = await process.WaitForExitAsync();
+        var result = await process.WaitForExitAsync();
 
-            Assert.True(process.Pid > 0);
-            Assert.Equal(0, result.ExitCode);
-            Assert.False(result.WasForceStopped);
-            Assert.Contains(output, static item => item.Text.Contains("BATCH_OUTPUT_TEST_ARG", StringComparison.Ordinal));
-        }
-        finally
-        {
-            if (Directory.Exists(tempDir))
-            {
-                Directory.Delete(tempDir, recursive: true);
-            }
-        }
+        Assert.True(process.Pid > 0);
+        Assert.Equal(0, result.ExitCode);
+        Assert.False(result.WasForceStopped);
+        Assert.Contains(output, static item => item.Text.Contains("BATCH_OUTPUT_TEST_ARG", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -96,40 +87,27 @@ public sealed class ProcessRunnerTests
     [InlineData("safe", "run.bat", "a|b")]
     public async Task RejectsBatchScriptWithCmdMetaCharacters(string folderName, string scriptName, string argument)
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "msm-meta-" + Guid.NewGuid().ToString("N"), folderName);
+        using var tempDirTemp = new TempDirectory("msm-meta-");
+        string tempDir = Path.Combine(tempDirTemp.FullName, folderName);
         Directory.CreateDirectory(tempDir);
-        try
-        {
-            string batPath = Path.Combine(tempDir, scriptName);
-            File.WriteAllText(batPath, "@echo off\r\n");
 
-            await Assert.ThrowsAsync<ArgumentException>(() => new ProcessRunner().StartAsync(
-                new ProcessStartSpec(batPath, [argument], WorkingDirectory: tempDir)));
-        }
-        finally
-        {
-            Directory.Delete(Path.GetDirectoryName(tempDir)!, recursive: true);
-        }
+        string batPath = Path.Combine(tempDir, scriptName);
+        File.WriteAllText(batPath, "@echo off\r\n");
+
+        await Assert.ThrowsAsync<ArgumentException>(() => new ProcessRunner().StartAsync(
+            new ProcessStartSpec(batPath, [argument], WorkingDirectory: tempDir)));
     }
 
     [Fact]
     public void OpenFile_RejectsDangerousExtensionsBeforeShellExecution()
     {
-        string tempFile = Path.Combine(Path.GetTempPath(), $"reject-{Guid.NewGuid():N}.exe");
+        using var tempDirTemp = new TempDirectory("msm-reject-");
+        string tempFile = Path.Combine(tempDirTemp.FullName, "reject.exe");
         File.WriteAllText(tempFile, "dummy");
-        try
-        {
-            var runner = new ProcessRunner();
-            bool opened = runner.OpenFile(tempFile);
-            Assert.False(opened);
-        }
-        finally
-        {
-            if (File.Exists(tempFile))
-            {
-                File.Delete(tempFile);
-            }
-        }
+
+        var runner = new ProcessRunner();
+        bool opened = runner.OpenFile(tempFile);
+        Assert.False(opened);
     }
 
     [Fact]
@@ -143,7 +121,7 @@ public sealed class ProcessRunnerTests
     [Fact]
     public void SanitizeOutputLine_PreservesPureText_StripsAnsiAndControlChars()
     {
-        // 1. 純淨字串應直接返回相同參照（0 配置）
+        // 1. 純淨字串應直接傳回相同參照（0 配置）
         const string pure = "[Server] Done in 5.2s! For help, type \"help\"";
         string result = ProcessRunner.SanitizeOutputLine(pure);
         Assert.Same(pure, result);
@@ -160,5 +138,14 @@ public sealed class ProcessRunnerTests
         string longLine = new('A', 10000);
         string truncated = ProcessRunner.SanitizeOutputLine(longLine);
         Assert.Equal(8192, truncated.Length);
+    }
+
+    [Fact]
+    public void GetStartTimeUtc_ReturnsValueForCurrentProcessAndNullForMissingPid()
+    {
+        var runner = new ProcessRunner();
+
+        Assert.NotNull(runner.GetStartTimeUtc(Environment.ProcessId));
+        Assert.Null(runner.GetStartTimeUtc(int.MaxValue));
     }
 }

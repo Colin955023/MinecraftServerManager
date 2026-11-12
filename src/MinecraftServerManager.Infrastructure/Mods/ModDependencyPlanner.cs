@@ -7,16 +7,12 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
-/// <summary>
-/// 模組版本相容性與相依性關係分析規劃實作
-/// </summary>
+/// <summary>模組版本相容性與相依性關係分析規劃實作</summary>
 public sealed class ModDependencyPlanner : IModDependencyPlanner
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModDependencyPlanner));
 
-    /// <summary>
-    /// 常見核心相依庫之 Modrinth Project ID 與本地 Mod ID / Slug 別名對映表
-    /// </summary>
+    /// <summary>常見核心相依庫之 Modrinth Project ID 與本地 Mod ID / Slug 別名對映表</summary>
     private static readonly FrozenDictionary<string, string> KnownModProjectAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
         ["P7dR8mAc"] = "fabric-api",
@@ -34,9 +30,7 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         ["8BmcYKbN"] = "geckolib"
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// 外掛類型伺服器載入器集合（不支援常規 Forge/Fabric Mod）
-    /// </summary>
+    /// <summary>外掛類型伺服器載入器集合（不支援一般 Forge/Fabric Mod）</summary>
     private static readonly FrozenSet<string> PluginServerLoaders = new[]
     {
         "paper", "spigot", "purpur", "bukkit", "velocity", "bungeecord", "waterfall"
@@ -133,6 +127,7 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         IReadOnlyList<LocalModInfo> installedMods,
         int maxDepth = 5,
         int maxItems = 20,
+        bool upgradeInstalled = true,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(modrinthClient);
@@ -178,6 +173,12 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
             }
 
             visited.Add(normalizedKey);
+            if (!upgradeInstalled && FindMatchingInstalledMod(targetKey, currentDep.FileName, installedMods) is not null)
+            {
+                // 已安裝即視為滿足，不查詢也不升級（僅補齊缺少的必要相依）
+                continue;
+            }
+
             if (KnownModProjectAliases.TryGetValue(targetKey, out string? alias))
             {
                 visited.Add(ModHelpers.NormalizeIdentifier(alias));
@@ -268,16 +269,14 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 string name = await ResolveProjectNameAsync(modrinthClient, targetKey, cancellationToken).ConfigureAwait(false);
-                Logger.Warning("查詢相依模組「{Name}」失敗: {Message}", name, ex.Message);
+                Logger.Warning(ex, "查詢相依模組「{Name}」失敗", name);
             }
         }
 
         return resolvedPlans;
     }
 
-    /// <summary>
-    /// 取得專案名稱供日誌與提示使用；查詢失敗時退回專案代碼
-    /// </summary>
+    /// <summary>取得專案名稱供日誌與提示使用；查詢失敗時退回專案代碼</summary>
     private static async Task<string> ResolveProjectNameAsync(IModrinthClient modrinthClient, string projectKey, CancellationToken cancellationToken)
     {
         var titles = await modrinthClient.GetProjectTitlesAsync([projectKey], cancellationToken).ConfigureAwait(false);
@@ -323,38 +322,30 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         return installedIdentifiers;
     }
 
-    private static bool IsModMatched(string? idToMatch, string? fileName, HashSet<string> installedIdentifiers)
+    /// <summary>待比對模組的正規化鍵：專案識別碼、其已知別名與檔名主幹（皆已正規化，缺少時為 null）</summary>
+    private readonly record struct ModMatchKey(string? NormalizedId, string? NormalizedAlias, string? FileStem)
     {
-        if (!string.IsNullOrEmpty(idToMatch))
+        public static ModMatchKey Create(string? idToMatch, string? fileName)
         {
-            string normId = ModHelpers.NormalizeIdentifier(idToMatch);
-            if (installedIdentifiers.Contains(normId))
-            {
-                return true;
-            }
-
-            if (KnownModProjectAliases.TryGetValue(idToMatch, out string? alias) &&
-                installedIdentifiers.Contains(ModHelpers.NormalizeIdentifier(alias)))
-            {
-                return true;
-            }
+            string? normalizedAlias = !string.IsNullOrEmpty(idToMatch) && KnownModProjectAliases.TryGetValue(idToMatch, out string? alias)
+                ? ModHelpers.NormalizeIdentifier(alias)
+                : null;
+            return new ModMatchKey(
+                !string.IsNullOrEmpty(idToMatch) ? ModHelpers.NormalizeIdentifier(idToMatch) : null,
+                normalizedAlias,
+                !string.IsNullOrEmpty(fileName) ? ModHelpers.NormalizeIdentifier(ModHelpers.ModFilenameStem(fileName)) : null);
         }
-
-        if (!string.IsNullOrEmpty(fileName))
-        {
-            string stem = ModHelpers.NormalizeIdentifier(ModHelpers.ModFilenameStem(fileName));
-            if (installedIdentifiers.Contains(stem))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
-    /// <summary>
-    /// 比對識別碼（不分大小寫、忽略前後空白）；<paramref name="normalized"/> 為已正規化的目標識別碼
-    /// </summary>
+    private static bool IsModMatched(string? idToMatch, string? fileName, HashSet<string> installedIdentifiers)
+    {
+        var key = ModMatchKey.Create(idToMatch, fileName);
+        return (key.NormalizedId is not null && installedIdentifiers.Contains(key.NormalizedId)) ||
+            (key.NormalizedAlias is not null && installedIdentifiers.Contains(key.NormalizedAlias)) ||
+            (key.FileStem is not null && installedIdentifiers.Contains(key.FileStem));
+    }
+
+    /// <summary>比對識別碼（不分大小寫、忽略前後空白）；<paramref name="normalized"/> 為已正規化的目標識別碼</summary>
     private static bool IdMatches(string? candidate, string normalized) =>
         !string.IsNullOrWhiteSpace(candidate) && candidate.AsSpan().Trim().Equals(normalized, StringComparison.OrdinalIgnoreCase);
 
@@ -365,14 +356,7 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
             return null;
         }
 
-        string? normId = !string.IsNullOrEmpty(idToMatch) ? ModHelpers.NormalizeIdentifier(idToMatch) : null;
-        string? aliasNorm = null;
-        if (!string.IsNullOrEmpty(idToMatch) && KnownModProjectAliases.TryGetValue(idToMatch, out string? alias))
-        {
-            aliasNorm = ModHelpers.NormalizeIdentifier(alias);
-        }
-
-        string? fileStem = !string.IsNullOrEmpty(fileName) ? ModHelpers.NormalizeIdentifier(ModHelpers.ModFilenameStem(fileName)) : null;
+        (string? normId, string? aliasNorm, string? fileStem) = ModMatchKey.Create(idToMatch, fileName);
 
         foreach (var mod in installedMods)
         {

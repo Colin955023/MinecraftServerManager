@@ -6,9 +6,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>
-/// 伺服器啟動目標（JAR、腳本或引數檔）解析輔助工具
-/// </summary>
+/// <summary>伺服器啟動目標（JAR、腳本或引數檔）解析輔助工具</summary>
 internal static partial class ServerLaunchTargetResolver
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerLaunchTargetResolver));
@@ -25,9 +23,7 @@ internal static partial class ServerLaunchTargetResolver
     [GeneratedRegex(@"(?i)@([^\s""]+win_args\.txt)")]
     private static partial Regex WinArgsRegex();
 
-    /// <summary>
-    /// 解析指定伺服器目錄之最佳啟動目標檔名或引數檔標記（如 @args.txt、server.jar、run.bat 等）
-    /// </summary>
+    /// <summary>解析指定伺服器目錄之最佳啟動目標檔名或引數檔標記（如 @args.txt、server.jar、run.bat 等）</summary>
     public static string ResolveLaunchTarget(string serverDirectory, LoaderKind loader = LoaderKind.Unknown)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
@@ -50,7 +46,7 @@ internal static partial class ServerLaunchTargetResolver
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.Warning("解析 run.bat 啟動參數異常: {0}", ex.Message);
+                Logger.Warning(ex, "解析 run.bat 啟動參數失敗");
             }
         }
 
@@ -105,7 +101,7 @@ internal static partial class ServerLaunchTargetResolver
             return anyJar;
         }
 
-        // 7. 回退至 run.bat 或預設 server.jar
+        // 7. 改用 run.bat 或預設 server.jar
         if (SafeFileSystem.FileExists(runBat))
         {
             return "run.bat";

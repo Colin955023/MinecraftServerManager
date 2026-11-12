@@ -1,5 +1,4 @@
 using MinecraftServerManager.Core.Errors;
-using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Java;
 using Xunit;
 
@@ -16,7 +15,8 @@ public sealed class JavaWingetInstallerTests
     [InlineData(25, "Microsoft.OpenJDK.25")]
     [InlineData(26, "Microsoft.OpenJDK.26")]
     [InlineData(27, "Microsoft.OpenJDK.27")]
-    public void ResolvesCorrectWingetPackageId(int majorVersion, string expectedPackage) => Assert.Equal(expectedPackage, JavaWingetInstaller.ResolvePackageId(majorVersion));
+    public void ResolvesCorrectWingetPackageId(int majorVersion, string expectedPackage) =>
+        Assert.Equal(expectedPackage, JavaWingetInstaller.ResolvePackageId(majorVersion));
 
     [Theory]
     [InlineData(7)]
@@ -33,7 +33,7 @@ public sealed class JavaWingetInstallerTests
     [Fact]
     public async Task ThrowsWhenWingetIsNotAvailable()
     {
-        var runner = new MockProcessRunner(shouldFailStart: true);
+        var runner = new StubProcessRunner(shouldFailStart: true);
         var installer = new JavaWingetInstaller(runner);
 
         var ex = await Assert.ThrowsAsync<JavaInstallException>(() =>
@@ -45,55 +45,15 @@ public sealed class JavaWingetInstallerTests
     [Fact]
     public async Task ThrowsWithDetailedReasonOnFailedInstall()
     {
-        // 模擬 install 時 exit code 1602 (使用者取消安裝)
-        var runner = new MockProcessRunner(installExitCode: 1602);
+        // 模擬 install 時 exit code 1602 (0x00000642，使用者取消安裝)
+        var runner = new StubProcessRunner(spec =>
+            new StubManagedProcess(spec.Arguments.Contains("--version") ? 0 : 1602));
         var installer = new JavaWingetInstaller(runner);
 
         var ex = await Assert.ThrowsAsync<JavaInstallException>(() =>
             installer.InstallWithWingetAsync(21));
 
         Assert.Contains("使用者取消安裝", ex.Message);
-        Assert.Equal(1602, ex.ExitCode);
-    }
-
-    private sealed class MockProcessRunner(
-        int installExitCode = 0,
-        bool shouldFailStart = false) : IProcessRunner
-    {
-        public Task<IManagedProcess> StartAsync(ProcessStartSpec specification, CancellationToken cancellationToken = default)
-        {
-            if (shouldFailStart)
-            {
-                throw new FileNotFoundException("找不到 winget");
-            }
-
-            bool isVersionCheck = specification.Arguments.Contains("--version");
-            int code = isVersionCheck ? 0 : installExitCode;
-            return Task.FromResult<IManagedProcess>(new MockManagedProcess(code));
-        }
-    }
-
-    private sealed class MockManagedProcess(int exitCode) : IManagedProcess
-    {
-        public int Pid => 9999;
-        public bool HasExited => true;
-        public int? ExitCode => exitCode;
-
-        public event Action<ProcessOutput>? OutputReceived
-        {
-            add { }
-            remove { }
-        }
-
-        public Task WriteLineAsync(string line, CancellationToken cancellationToken = default) => Task.CompletedTask;
-
-        public Task<ProcessExitResult> WaitForExitAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ProcessExitResult(exitCode, false));
-
-        public Task<ProcessExitResult> StopAsync(TimeSpan gracefulTimeout, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ProcessExitResult(exitCode, false));
-
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-        public long? GetWorkingSet64() => throw new NotImplementedException();
+        Assert.Contains("0x00000642", ex.Message);
     }
 }

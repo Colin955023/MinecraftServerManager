@@ -4,9 +4,7 @@ using Windows.Foundation;
 
 namespace MinecraftServerManager.App.Controls;
 
-/// <summary>
-/// 自動折行面板，依照可用寬度將子元素水平排列並依序換行
-/// </summary>
+/// <summary>自動折行面板，依照可用寬度將子元素水平排列並依序換行</summary>
 public sealed partial class WrapPanel : Panel
 {
     public static readonly DependencyProperty ItemSpacingProperty =
@@ -66,9 +64,9 @@ public sealed partial class WrapPanel : Panel
                 curLineHeight = 0;
             }
 
+            maxWidth = Math.Max(maxWidth, curLineX + sz.Width);
             curLineX += sz.Width + itemSpacing;
             curLineHeight = Math.Max(curLineHeight, sz.Height);
-            maxWidth = Math.Max(maxWidth, curLineX);
         }
 
         return new Size(maxWidth, curLineY + curLineHeight);

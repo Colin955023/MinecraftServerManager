@@ -5,14 +5,15 @@ using MinecraftServerManager.Infrastructure.Settings;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 主視窗 ViewModel 之不可變相依集合，集中管理組合根所提供的共用服務實例
-/// </summary>
-public sealed record MainViewModelDependencies(
+/// <summary>頁面組裝所需之服務集合，僅供組合根與 <see cref="PageViewModelFactory"/> 使用</summary>
+public sealed record PageServices(
     SettingsManager SettingsManager,
     IServerManager ServerManager,
     IServerBackupService BackupService,
-    IServerRuntime ServerRuntime,
+    IServerRuntimeHost RuntimeHost,
+    ServerStopCoordinator StopCoordinator,
+    ServerStartPreflight StartPreflight,
+    IRunningServerRegistry RunningServerRegistry,
     IServerInspector ServerInspector,
     IServerLaunchPlanner LaunchPlanner,
     IServerPropertiesStore PropertiesStore,

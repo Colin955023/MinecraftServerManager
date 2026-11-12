@@ -1,13 +1,11 @@
 using Microsoft.UI.Xaml;
 using MinecraftServerManager.App.Controls;
-using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.App.Services;
+using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 模組版本選擇對話方塊（原生模態視窗，透過 ModalWindowHost 裝載）
-/// </summary>
+/// <summary>模組版本選擇對話方塊（原生模態視窗，透過 ModalWindowHost 裝載）</summary>
 public sealed partial class ModVersionPickerDialog : Window
 {
     public ModVersionPickerViewModel ViewModel { get; }
@@ -17,14 +15,12 @@ public sealed partial class ModVersionPickerDialog : Window
     {
         ViewModel = viewModel;
         InitializeComponent();
-        Title = "選擇模組版本";
-
-        WindowLayoutHelper.ResizeToDip(this, 820, 560);
+        ModalWindowHost.ConfigureDialogWindow(this, "選擇模組版本", 820, 560, Bindings.StopTracking);
 
         ViewModel.RequestClose += success =>
         {
             DialogResult = success;
-            Close();
+            ModalWindowHost.CloseDeferred(this);
         };
     }
 

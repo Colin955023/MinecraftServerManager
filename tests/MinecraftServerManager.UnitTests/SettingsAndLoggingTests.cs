@@ -7,76 +7,57 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-[Collection("EnvironmentVariableCollection")]
 public sealed partial class SettingsAndLoggingTests
 {
     [Fact]
     public void SettingsRoundTripPreservesTypedValues()
     {
-        string userData = CreateTemporaryDirectory();
-        try
-        {
-            var settings = new SettingsManager(userData);
-            settings.SetServersRoot(Path.Combine(userData, "servers"));
-            settings.SetAutoUpdateEnabled(false);
-            settings.SetThemeMode("dark");
-            settings.SetMainWindowSettings(1600, 900, 10, 20, maximized: true);
+        using var userDataTemp = new TempDirectory("msm-settings-");
+        string userData = userDataTemp.FullName;
+        var settings = new SettingsManager(userData);
+        settings.SetServersRoot(Path.Combine(userData, "servers"));
+        settings.SetAutoUpdateEnabled(false);
+        settings.SetThemeMode("dark");
+        settings.SetMainWindowSettings(1600, 900, 10, 20, maximized: true);
 
-            var reloaded = new SettingsManager(userData);
+        var reloaded = new SettingsManager(userData);
 
-            string expectedRoot = Path.Combine(Path.GetFullPath(userData), "servers");
-            Assert.Equal(expectedRoot, reloaded.GetServersRoot());
-            Assert.Equal(expectedRoot, reloaded.GetValidatedServersRootPath(create: true));
-            Assert.False(reloaded.IsAutoUpdateEnabled());
-            Assert.Equal("dark", reloaded.GetThemeMode());
-            Assert.Equal(new MainWindowSettings(1600, 900, 10, 20, true), reloaded.GetMainWindowSettings());
-        }
-        finally
-        {
-            Directory.Delete(userData, recursive: true);
-        }
+        string expectedRoot = Path.Combine(Path.GetFullPath(userData), "servers");
+        Assert.Equal(expectedRoot, reloaded.GetServersRoot());
+        Assert.Equal(expectedRoot, reloaded.GetValidatedServersRootPath(create: true));
+        Assert.False(reloaded.IsAutoUpdateEnabled());
+        Assert.Equal("dark", reloaded.GetThemeMode());
+        Assert.Equal(new MainWindowSettings(1600, 900, 10, 20, true), reloaded.GetMainWindowSettings());
     }
 
     [Fact]
     public void SettingsNormalizeInvalidThemeAndCreateServersRoot()
     {
-        string userData = CreateTemporaryDirectory();
-        try
-        {
-            var settings = new SettingsManager(userData);
-            settings.SetThemeMode("unknown");
-            settings.SetServersRoot(userData);
+        using var userDataTemp = new TempDirectory("msm-settings-");
+        string userData = userDataTemp.FullName;
+        var settings = new SettingsManager(userData);
+        settings.SetThemeMode("unknown");
+        settings.SetServersRoot(userData);
 
-            Assert.Equal("system", settings.GetThemeMode());
-            string expectedRoot = Path.Combine(Path.GetFullPath(userData), "servers");
-            Assert.Equal(expectedRoot, settings.GetServersRoot());
-            string serversRoot = settings.GetValidatedServersRootPath(create: true);
+        Assert.Equal("system", settings.GetThemeMode());
+        string expectedRoot = Path.Combine(Path.GetFullPath(userData), "servers");
+        Assert.Equal(expectedRoot, settings.GetServersRoot());
+        string serversRoot = settings.GetValidatedServersRootPath(create: true);
 
-            Assert.True(Directory.Exists(serversRoot));
-            Assert.Equal(expectedRoot, serversRoot);
-        }
-        finally
-        {
-            Directory.Delete(userData, recursive: true);
-        }
+        Assert.True(Directory.Exists(serversRoot));
+        Assert.Equal(expectedRoot, serversRoot);
     }
 
     [Fact]
     public void SettingsRequireConfiguredServersRoot()
     {
-        string userData = CreateTemporaryDirectory();
-        try
-        {
-            var settings = new SettingsManager(userData);
+        using var userDataTemp = new TempDirectory("msm-settings-");
+        string userData = userDataTemp.FullName;
+        var settings = new SettingsManager(userData);
 
-            var exception = Assert.Throws<ConfigurationException>(() => settings.GetValidatedServersRootPath());
+        var exception = Assert.Throws<ConfigurationException>(() => settings.GetValidatedServersRootPath());
 
-            Assert.Equal("尚未設定伺服器主資料夾", exception.Message);
-        }
-        finally
-        {
-            Directory.Delete(userData, recursive: true);
-        }
+        Assert.Equal("尚未設定伺服器主資料夾", exception.Message);
     }
 
     [Fact]
@@ -90,13 +71,6 @@ public sealed partial class SettingsAndLoggingTests
         Assert.Equal(LogLevel.Information, logger.Level);
         Assert.Equal("已載入 3 筆設定", logger.Message);
         Assert.Equal(3, logger.Arguments![0]);
-    }
-
-    private static string CreateTemporaryDirectory()
-    {
-        string path = Path.Combine(Path.GetTempPath(), "msm-settings-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(path);
-        return path;
     }
 
     private sealed class CapturingLogger : ILogger
@@ -128,5 +102,51 @@ public sealed partial class SettingsAndLoggingTests
                     .ToArray()
                 : null;
         }
+    }
+
+    [Fact]
+    public void BackupSettings_DefaultsAndRoundTrip()
+    {
+        using var temp = new TempDirectory("msm-settings-backup-");
+        var settings = new SettingsManager(temp.FullName);
+
+        Assert.False(settings.IsAutoBackupBeforeStartEnabled());
+        Assert.Equal(10, settings.GetBackupRetentionCount());
+
+        settings.SetAutoBackupBeforeStartEnabled(true);
+        settings.SetBackupRetentionCount(25);
+
+        var reloaded = new SettingsManager(temp.FullName);
+        Assert.True(reloaded.IsAutoBackupBeforeStartEnabled());
+        Assert.Equal(25, reloaded.GetBackupRetentionCount());
+    }
+
+    [Fact]
+    public void BackupSettings_OldSettingsFileWithoutNewFields_UsesDefaults()
+    {
+        using var temp = new TempDirectory("msm-settings-backup-old-");
+        File.WriteAllText(Path.Combine(temp.FullName, "user_settings.json"), "{\"auto_update_enabled\":false}");
+
+        var settings = new SettingsManager(temp.FullName);
+
+        Assert.False(settings.IsAutoUpdateEnabled());
+        Assert.False(settings.IsAutoBackupBeforeStartEnabled());
+        Assert.Equal(10, settings.GetBackupRetentionCount());
+    }
+
+    [Theory]
+    [InlineData(0, 10)]
+    [InlineData(-5, 10)]
+    [InlineData(1, 1)]
+    [InlineData(100, 100)]
+    [InlineData(500, 100)]
+    public void BackupRetentionCount_IsClampedToValidRange(int input, int expected)
+    {
+        using var temp = new TempDirectory("msm-settings-backup-clamp-");
+        var settings = new SettingsManager(temp.FullName);
+
+        settings.SetBackupRetentionCount(input);
+
+        Assert.Equal(expected, settings.GetBackupRetentionCount());
     }
 }

@@ -16,8 +16,8 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
     public int Pid => _process?.Pid ?? 0;
     public bool IsRunning => _process is { HasExited: false };
     public bool IsReady { get; private set; }
-    public int? ExitCode => _process?.ExitCode;
-    public string? ActiveServerName { get; private set; }
+    private int? _lastExitCode;
+    public int? ExitCode => _process?.ExitCode ?? _lastExitCode;
     public long? GetWorkingSet64() => _process?.GetWorkingSet64();
 
     public event Action<string>? OutputLineReceived;
@@ -37,6 +37,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         }
 
         IsReady = false;
+        _lastExitCode = null;
         string stableDir = SafeFileSystem.ResolveStableDirectory(plan.WorkingDirectory);
 
         if (plan.IsScript)
@@ -45,7 +46,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 
             if (!SafeFileSystem.IsPathWithin(stableDir, fullScriptPath, strict: false))
             {
-                throw new SafeFileSystemException($"偵測到非法的啟動腳本路徑越界：{plan.JavaExecutable}");
+                throw new SafeFileSystemException($"偵測到非法的啟動腳本路徑超出邊界：{plan.JavaExecutable}");
             }
 
             if (!SafeScriptValidator.ValidateScriptContent(fullScriptPath, stableDir))
@@ -64,8 +65,8 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 
         var started = await processRunner.StartAsync(spec, cancellationToken).ConfigureAwait(false);
         _process = started;
-        ActiveServerName = plan.ServerName ?? Path.GetFileName(stableDir);
-        Logger.Information("伺服器「{Server}」行程已啟動，PID: {Pid}", ActiveServerName, started.Pid);
+        string serverName = plan.ServerName ?? Path.GetFileName(stableDir);
+        Logger.Information("伺服器「{Server}」行程已啟動，PID: {Pid}", serverName, started.Pid);
         started.OutputReceived += OnOutputReceived;
         ServerStarted?.Invoke();
 
@@ -86,13 +87,16 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 
         try
         {
-            Logger.Information("傳送伺服器控制台指令: {Command}", command);
+            // 僅記錄指令名稱，不記錄參數（可能含玩家名稱等個資）
+            var trimmed = command.AsSpan().TrimStart();
+            int space = trimmed.IndexOf(' ');
+            Logger.Information("傳送伺服器主控台指令: {Command}", (space < 0 ? trimmed : trimmed[..space]).ToString());
             await proc.WriteLineAsync(command, cancellationToken).ConfigureAwait(false);
             return true;
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "傳送指令至伺服器標準輸入失敗: {Message}", ex.Message);
+            Logger.Error(ex, "傳送指令至伺服器標準輸入失敗");
             return false;
         }
     }
@@ -112,8 +116,8 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         // 嘗試寫入 stop 讓伺服器正常存檔關閉
         await SendCommandAsync("stop", cancellationToken).ConfigureAwait(false);
 
-        using var timeoutCts = new CancellationTokenSource(gracefulTimeout);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        linked.CancelAfter(gracefulTimeout);
 
         try
         {
@@ -127,6 +131,29 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         }
     }
 
+    public async Task<ProcessExitResult?> WaitForExitAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var proc = _process;
+        if (proc is null || proc.HasExited)
+        {
+            return new ProcessExitResult(ExitCode ?? 0, false);
+        }
+
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        linked.CancelAfter(timeout);
+
+        try
+        {
+            return await proc.WaitForExitAsync(linked.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -135,7 +162,6 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         }
 
         _disposed = true;
-        ActiveServerName = null;
 
         var proc = _process;
         if (proc is not null)
@@ -168,11 +194,15 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             var result = await proc.WaitForExitAsync().ConfigureAwait(false);
             Logger.Information("伺服器監控回報行程 (PID: {Pid}) 已結束，結束代碼: {ExitCode}, 是否被強制終止: {WasForceStopped}", proc.Pid, result.ExitCode, result.WasForceStopped);
             IsReady = false;
+            _lastExitCode = result.ExitCode;
             ServerExited?.Invoke(result.ExitCode);
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "伺服器行程監控異常 (PID: {Pid})", proc.Pid);
+            Logger.Error(ex, "伺服器行程監控失敗 (PID: {Pid})", proc.Pid);
+            IsReady = false;
+            _lastExitCode = proc.ExitCode ?? -1;
+            ServerExited?.Invoke(_lastExitCode.Value);
         }
         finally
         {
@@ -180,9 +210,11 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             if (ReferenceEquals(_process, proc))
             {
                 _process = null;
+                IsReady = false;
             }
-            ActiveServerName = null;
-            IsReady = false;
+
+            // 伺服器自行結束時由此釋放行程控制代碼與輸出管線；DisposeAsync 只處理仍在執行者
+            await proc.DisposeAsync().ConfigureAwait(false);
         }
     }
     private static string ResolveScriptPath(string stableDir, string scriptExecutable) =>

@@ -7,9 +7,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Services;
 
-/// <summary>
-/// 應用程式自動更新下載、安全性驗證與重啟安裝服務實作
-/// </summary>
+/// <summary>應用程式自動更新下載、安全性驗證與重新啟動安裝服務實作</summary>
 public sealed partial class AppUpdateService : IAppUpdateService
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AppUpdateService));
@@ -51,7 +49,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
         if (string.IsNullOrWhiteSpace(update.Sha256ChecksumUrl)
             || !Uri.TryCreate(update.Sha256ChecksumUrl, UriKind.Absolute, out var checksumUri))
         {
-            throw new InvalidDataException("更新資訊缺少有效的 SHA-256 校驗檔網址，已拒絕自動更新。");
+            throw new InvalidDataException("更新資訊缺少有效的 SHA-256 雜湊檔網址，已拒絕自動更新。");
         }
 
         progress?.Report((5, "正在取得安全驗證資訊 (SHA-256)..."));
@@ -59,11 +57,11 @@ public sealed partial class AppUpdateService : IAppUpdateService
         Match match = string.IsNullOrWhiteSpace(checksumText) ? Match.Empty : Sha256Regex().Match(checksumText);
         if (!match.Success)
         {
-            throw new InvalidDataException("無法取得有效的 SHA-256 校驗碼，已拒絕自動更新。");
+            throw new InvalidDataException("無法取得有效的 SHA-256 雜湊值，已拒絕自動更新。");
         }
 
         string expectedSha256 = match.Value.ToLowerInvariant();
-        Logger.Information("成功取得預期 SHA-256 校驗碼: {Hash}", expectedSha256);
+        Logger.Information("成功取得預期 SHA-256 雜湊值: {Hash}", expectedSha256);
 
         string targetDir = _updatesDirectory;
         SafeFileSystem.CreateDirectory(targetDir);
@@ -76,13 +74,13 @@ public sealed partial class AppUpdateService : IAppUpdateService
 
         string targetFilePath = Path.Combine(targetDir, rawFileName);
 
-        // 若本地已存在且符合 SHA-256 與 PE 結構則直接複用
+        // 若本地已存在且符合 SHA-256 與 PE 結構則直接沿用
         if (SafeFileSystem.FileExists(targetFilePath))
         {
-            string existingHash = await HashCalculator.Shared.ComputeFileHashAsync(targetFilePath, "sha256", useCache: false, cancellationToken: cancellationToken).ConfigureAwait(false);
+            string existingHash = await HashCalculator.ComputeFileHashAsync(targetFilePath, "sha256", cancellationToken: cancellationToken).ConfigureAwait(false);
             if (string.Equals(existingHash, expectedSha256, StringComparison.OrdinalIgnoreCase) && PortableExecutableInspector.TryReadMachine(targetFilePath) is not null)
             {
-                Logger.Information("更新檔案已存在且通過 SHA-256 校驗: {Path}", targetFilePath);
+                Logger.Information("更新檔案已存在且通過 SHA-256 驗證: {Path}", targetFilePath);
                 progress?.Report((100, "更新檔案已備妥且驗證通過。"));
                 return targetFilePath;
             }
@@ -110,10 +108,10 @@ public sealed partial class AppUpdateService : IAppUpdateService
         if (!downloadResult.Success)
         {
             SafeFileSystem.TryDeleteFile(targetFilePath);
-            throw new InvalidOperationException($"下載或校驗更新檔案失敗: {downloadResult.Error}");
+            throw new InvalidOperationException($"下載或驗證更新檔案失敗: {downloadResult.Error}");
         }
 
-        progress?.Report((95, "正在執行執行檔格式校驗..."));
+        progress?.Report((95, "正在執行執行檔格式驗證..."));
         if (PortableExecutableInspector.TryReadMachine(targetFilePath) is null)
         {
             SafeFileSystem.TryDeleteFile(targetFilePath);
@@ -166,7 +164,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
                 }
                 catch (Exception rollbackEx)
                 {
-                    Logger.Error("復原舊版執行檔失敗: {Message}", rollbackEx.Message);
+                    Logger.Error(rollbackEx, "復原舊版執行檔失敗");
                 }
 
                 throw new InvalidOperationException($"替換新版執行檔失敗，已嘗試復原: {copyEx.Message}", copyEx);
@@ -186,14 +184,12 @@ public sealed partial class AppUpdateService : IAppUpdateService
         }
         catch (Exception ex) when (ex is not InvalidOperationException and not FileNotFoundException)
         {
-            Logger.Error("套用自動更新失敗: {Message}", ex.Message);
+            Logger.Error(ex, "套用自動更新失敗");
             throw new InvalidOperationException($"套用自動更新發生錯誤: {ex.Message}", ex);
         }
     }
 
-    /// <summary>
-    /// 清理前次更新時留下的 .old 備份檔案
-    /// </summary>
+    /// <summary>清理前次更新時留下的 .old 備份檔案</summary>
     private static void TryCleanupPreviousUpdateBackup()
     {
         try
@@ -211,7 +207,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Logger.Warning("暫時無法清理前次更新備份檔: {Message}", ex.Message);
+            Logger.Warning(ex, "暫時無法清理前次更新備份檔");
         }
     }
 

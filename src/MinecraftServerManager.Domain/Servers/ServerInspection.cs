@@ -1,8 +1,6 @@
 namespace MinecraftServerManager.Domain.Servers;
 
-/// <summary>
-/// 伺服器內容快照與健全度檢查結果
-/// </summary>
+/// <summary>伺服器內容快照與健全度檢查結果</summary>
 public sealed record ServerInspection
 {
     public required string Path { get; init; }

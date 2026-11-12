@@ -1,5 +1,9 @@
 name: "OpenSSF Scorecard 安全性評分"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches:

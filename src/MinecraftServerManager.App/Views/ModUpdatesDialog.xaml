@@ -26,23 +26,12 @@
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Style="{ThemeResource CaptionTextBlockStyle}" />
 
-                <!-- 模組列表 ListView -->
                 <Border Grid.Row="2"
-                        Background="{ThemeResource CardBrush}"
-                        BorderBrush="{ThemeResource BorderBrush}"
-                        BorderThickness="1"
+                        Style="{StaticResource CardBorderStyle}"
                         CornerRadius="8"
                         Padding="12">
-                        <Grid>
-                                <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="*" />
-                                </Grid.RowDefinitions>
-
-                                <Border Grid.Row="0"
-                                        Background="{ThemeResource CardBrush}"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="1">
+                        <controls:TableFrame>
+                                <controls:TableFrame.Header>
                                         <Grid>
                                                 <Grid.ColumnDefinitions>
                                                         <ColumnDefinition
@@ -95,98 +84,59 @@
                                                         SortRequested="OnHeaderSortRequested"
                                                         AutoFitRequested="OnHeaderAutoFitRequested" />
                                         </Grid>
-                                </Border>
+                                </controls:TableFrame.Header>
 
-                                <Border Grid.Row="1"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="1,0,1,1">
-                                        <ListView ItemsSource="{x:Bind CandidateItems, Mode=OneWay}"
-                                                SelectionMode="None"
-                                                ItemContainerStyle="{StaticResource TableListViewItemStyle}">
-                                                <ListView.ItemTemplate>
-                                                        <DataTemplate
-                                                                x:DataType="vm:ModUpdateCandidateItem">
-                                                                <Grid>
-                                                                        <Grid.ColumnDefinitions>
-                                                                                <ColumnDefinition
-                                                                                        Width="{x:Bind views:ModUpdatesListColumns.Current.UpdateWidth, Mode=OneWay}" />
-                                                                                <ColumnDefinition
-                                                                                        Width="{x:Bind views:ModUpdatesListColumns.Current.NameWidth, Mode=OneWay}" />
-                                                                                <ColumnDefinition
-                                                                                        Width="{x:Bind views:ModUpdatesListColumns.Current.CurrentVersionWidth, Mode=OneWay}" />
-                                                                                <ColumnDefinition
-                                                                                        Width="{x:Bind views:ModUpdatesListColumns.Current.NewVersionWidth, Mode=OneWay}" />
-                                                                                <ColumnDefinition
-                                                                                        Width="{x:Bind views:ModUpdatesListColumns.Current.PlatformWidth, Mode=OneWay}" />
-                                                                                <ColumnDefinition
-                                                                                        Width="{x:Bind views:ModUpdatesListColumns.Current.FileNameWidth, Mode=OneWay}" />
-                                                                        </Grid.ColumnDefinitions>
-                                                                        <Border Grid.Column="0"
-                                                                                BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                                BorderThickness="0,0,1,0"
-                                                                                Padding="4,2">
-                                                                                <CheckBox
-                                                                                        IsChecked="{x:Bind IsSelected, Mode=TwoWay}"
-                                                                                        MinWidth="0"
-                                                                                        HorizontalAlignment="Center"
-                                                                                        VerticalAlignment="Center" />
-                                                                        </Border>
-                                                                        <Border Grid.Column="1"
-                                                                                BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                                BorderThickness="0,0,1,0"
-                                                                                Padding="8,6">
-                                                                                <TextBlock
-                                                                                        Text="{x:Bind ModName}"
-                                                                                        TextTrimming="CharacterEllipsis"
-                                                                                        ToolTipService.ToolTip="{x:Bind ModName}"
-                                                                                        VerticalAlignment="Center" />
-                                                                        </Border>
-                                                                        <Border Grid.Column="2"
-                                                                                BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                                BorderThickness="0,0,1,0"
-                                                                                Padding="8,6">
-                                                                                <TextBlock
-                                                                                        Text="{x:Bind CurrentVersion}"
-                                                                                        TextTrimming="CharacterEllipsis"
-                                                                                        ToolTipService.ToolTip="{x:Bind CurrentVersion}"
-                                                                                        VerticalAlignment="Center" />
-                                                                        </Border>
-                                                                        <Border Grid.Column="3"
-                                                                                BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                                BorderThickness="0,0,1,0"
-                                                                                Padding="8,6">
-                                                                                <TextBlock
-                                                                                        Text="{x:Bind NewVersion}"
-                                                                                        TextTrimming="CharacterEllipsis"
-                                                                                        ToolTipService.ToolTip="{x:Bind NewVersion}"
-                                                                                        VerticalAlignment="Center" />
-                                                                        </Border>
-                                                                        <Border Grid.Column="4"
-                                                                                BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                                BorderThickness="0,0,1,0"
-                                                                                Padding="8,6">
-                                                                                <TextBlock
-                                                                                        Text="{x:Bind SourcePlatform}"
-                                                                                        TextTrimming="CharacterEllipsis"
-                                                                                        ToolTipService.ToolTip="{x:Bind SourcePlatform}"
-                                                                                        VerticalAlignment="Center" />
-                                                                        </Border>
-                                                                        <Border Grid.Column="5"
-                                                                                BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                                BorderThickness="0,0,1,0"
-                                                                                Padding="8,6">
-                                                                                <TextBlock
-                                                                                        Text="{x:Bind FileName}"
-                                                                                        TextTrimming="CharacterEllipsis"
-                                                                                        ToolTipService.ToolTip="{x:Bind FileName}"
-                                                                                        VerticalAlignment="Center" />
-                                                                        </Border>
-                                                                </Grid>
-                                                        </DataTemplate>
-                                                </ListView.ItemTemplate>
-                                        </ListView>
-                                </Border>
-                        </Grid>
+                                <ListView ItemsSource="{x:Bind CandidateItems}"
+                                        SelectionMode="None"
+                                        ItemContainerStyle="{StaticResource TableListViewItemStyle}">
+                                        <ListView.ItemTemplate>
+                                                <DataTemplate
+                                                        x:DataType="vm:ModUpdateCandidateItem">
+                                                        <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition
+                                                                                Width="{x:Bind views:ModUpdatesListColumns.Current.UpdateWidth, Mode=OneWay}" />
+                                                                        <ColumnDefinition
+                                                                                Width="{x:Bind views:ModUpdatesListColumns.Current.NameWidth, Mode=OneWay}" />
+                                                                        <ColumnDefinition
+                                                                                Width="{x:Bind views:ModUpdatesListColumns.Current.CurrentVersionWidth, Mode=OneWay}" />
+                                                                        <ColumnDefinition
+                                                                                Width="{x:Bind views:ModUpdatesListColumns.Current.NewVersionWidth, Mode=OneWay}" />
+                                                                        <ColumnDefinition
+                                                                                Width="{x:Bind views:ModUpdatesListColumns.Current.PlatformWidth, Mode=OneWay}" />
+                                                                        <ColumnDefinition
+                                                                                Width="{x:Bind views:ModUpdatesListColumns.Current.FileNameWidth, Mode=OneWay}" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <Border Grid.Column="0"
+                                                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
+                                                                        BorderThickness="0,0,1,0"
+                                                                        Padding="4,2">
+                                                                        <CheckBox
+                                                                                IsChecked="{x:Bind IsSelected, Mode=TwoWay}"
+                                                                                MinWidth="0"
+                                                                                HorizontalAlignment="Center"
+                                                                                VerticalAlignment="Center" />
+                                                                </Border>
+                                                                <controls:TableCell
+                                                                        Grid.Column="1"
+                                                                        Text="{x:Bind ModName}" />
+                                                                <controls:TableCell
+                                                                        Grid.Column="2"
+                                                                        Text="{x:Bind CurrentVersion}" />
+                                                                <controls:TableCell
+                                                                        Grid.Column="3"
+                                                                        Text="{x:Bind NewVersion}" />
+                                                                <controls:TableCell
+                                                                        Grid.Column="4"
+                                                                        Text="{x:Bind SourcePlatform}" />
+                                                                <controls:TableCell
+                                                                        Grid.Column="5"
+                                                                        Text="{x:Bind FileName}" />
+                                                        </Grid>
+                                                </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                </ListView>
+                        </controls:TableFrame>
                 </Border>
 
                 <!-- 底部操作列 -->

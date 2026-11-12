@@ -10,9 +10,7 @@ using MinecraftServerManager.Infrastructure.Servers;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 初始化倒數計時顯示狀態
-/// </summary>
+/// <summary>初始化倒數計時顯示狀態</summary>
 public enum InitializationCountdownState
 {
     None,
@@ -20,21 +18,15 @@ public enum InitializationCountdownState
     Warning,
 }
 
-/// <summary>
-/// 伺服器初次啟動初始化視窗 ViewModel：執行初始化流程、彙整主控台輸出與倒數自動關閉
-/// </summary>
+/// <summary>伺服器初次啟動初始化視窗 ViewModel：執行初始化流程、彙整主控台輸出與倒數自動關閉</summary>
 public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerInitializationViewModel));
 
-    /// <summary>
-    /// 主控台文字長度上限，超過時修剪至 <see cref="TrimmedConsoleChars"/>
-    /// </summary>
+    /// <summary>主控台文字長度上限，超過時修剪至 <see cref="TrimmedConsoleChars"/></summary>
     public const int MaxConsoleChars = 50000;
 
-    /// <summary>
-    /// 主控台修剪後保留字元數
-    /// </summary>
+    /// <summary>主控台修剪後保留字元數</summary>
     public const int TrimmedConsoleChars = 40000;
 
     private const int MaxPendingLines = 5000;
@@ -80,14 +72,10 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
     [ObservableProperty]
     public partial bool IsCompleteEnabled { get; set; }
 
-    /// <summary>
-    /// 初始化是否成功完成
-    /// </summary>
+    /// <summary>初始化是否成功完成</summary>
     public bool IsSuccess { get; private set; }
 
-    /// <summary>
-    /// 要求視窗關閉
-    /// </summary>
+    /// <summary>要求視窗關閉</summary>
     public event Action? CloseRequested;
 
     public ServerInitializationViewModel(
@@ -108,9 +96,7 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
         TitleText = $"正在初始化伺服器「{config.Name.Value}」";
     }
 
-    /// <summary>
-    /// 訂閱伺服器輸出並啟動初始化流程（視窗載入後呼叫）
-    /// </summary>
+    /// <summary>訂閱伺服器輸出並啟動初始化流程（視窗載入後呼叫）</summary>
     public async Task StartAsync()
     {
         try
@@ -141,7 +127,7 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "初次啟動伺服器失敗: {Message}", ex.Message);
+            Logger.Error(ex, "初次啟動伺服器失敗");
             AppendLog($"[錯誤] 伺服器啟動失敗: {ex.Message}\n");
             StatusText = "狀態：啟動伺服器時發生例外錯誤，請檢查輸出";
             EnableClose();
@@ -150,27 +136,21 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
         }
     }
 
-    /// <summary>
-    /// 使用者取消初始化
-    /// </summary>
+    /// <summary>使用者取消初始化</summary>
     public void Cancel()
     {
         IsSuccess = false;
         CloseRequested?.Invoke();
     }
 
-    /// <summary>
-    /// 使用者確認完成初始化
-    /// </summary>
+    /// <summary>使用者確認完成初始化</summary>
     public void Complete()
     {
         IsSuccess = true;
         CloseRequested?.Invoke();
     }
 
-    /// <summary>
-    /// 視窗即將關閉時呼叫；伺服器仍在執行時回傳 true 以攔截關閉，並於平順停止後再次要求關閉
-    /// </summary>
+    /// <summary>視窗即將關閉時呼叫；伺服器仍在執行時回傳 true 以攔截關閉，並於平順停止後再次要求關閉</summary>
     public bool HandleClosing()
     {
         StopTimersAndUnsubscribe();
@@ -196,7 +176,7 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning("關閉視窗時停止伺服器發生例外: {Message}", ex.Message);
+            Logger.Warning(ex, "關閉視窗時停止伺服器發生例外");
         }
         finally
         {
@@ -212,15 +192,13 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
     private void OnServerReady() => _ui.PostToUi(() =>
     {
         FlushPendingLines();
-        StatusText = "狀態：伺服器已就緒！正在平順關閉完成初始化...";
+        StatusText = "狀態：伺服器已就緒！正在平順關閉以完成初始化...";
         AppendLog("\n[系統] 伺服器準備完畢，所有模組載入完成，正在傳送 stop 指令正常關閉...\n");
     });
 
     private void OnServerExited(int exitCode) => _ui.PostToUi(() => HandleServerExited(exitCode));
 
-    /// <summary>
-    /// 依是否已偵測到就緒訊號更新結束狀態並啟動倒數
-    /// </summary>
+    /// <summary>依是否已偵測到就緒訊號更新結束狀態並啟動倒數</summary>
     public void HandleServerExited(int exitCode)
     {
         FlushPendingLines();
@@ -279,9 +257,7 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
 
     private void AppendLog(string text) => ConsoleText = AppendWithLimit(ConsoleText, text);
 
-    /// <summary>
-    /// 附加主控台文字；總長超過上限時僅保留尾端 <see cref="TrimmedConsoleChars"/> 字元
-    /// </summary>
+    /// <summary>附加主控台文字；總長超過上限時僅保留尾端 <see cref="TrimmedConsoleChars"/> 字元</summary>
     public static string AppendWithLimit(string current, string text)
     {
         ArgumentNullException.ThrowIfNull(current);
@@ -294,9 +270,7 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
         return current + text;
     }
 
-    /// <summary>
-    /// 排出待處理輸出（每次最多 500 行）並依關鍵字更新狀態文字
-    /// </summary>
+    /// <summary>排出待處理輸出（每次最多 500 行）並依關鍵字更新狀態文字</summary>
     public void FlushPendingLines()
     {
         _flushBatch.Clear();
@@ -321,9 +295,7 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
         }
     }
 
-    /// <summary>
-    /// 依伺服器輸出關鍵字推斷目前初始化階段，無對應時回傳 null
-    /// </summary>
+    /// <summary>依伺服器輸出關鍵字推斷目前初始化階段，無對應時回傳 null</summary>
     public static string? DetectStatus(string line)
     {
         ArgumentNullException.ThrowIfNull(line);

@@ -3,9 +3,7 @@ using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 刪除伺服器確認 WinUI 3 原生 ContentDialog
-/// </summary>
+/// <summary>刪除伺服器確認 WinUI 3 原生 ContentDialog</summary>
 public sealed partial class ServerDeleteConfirmationDialog : ContentDialog
 {
     private readonly int _backupCount;

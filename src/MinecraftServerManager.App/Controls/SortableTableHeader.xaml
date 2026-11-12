@@ -47,7 +47,7 @@
       PointerEntered="OnSplitterPointerEntered"
       PointerExited="OnSplitterPointerExited"
       DoubleTapped="OnSplitterDoubleTapped"
-      ToolTipService.ToolTip="拖曳可手動調整欄寬；點兩下自動對齊最寬項目">
+      ToolTipService.ToolTip="拖曳可手動調整欄寬；按兩下自動對齊最寬項目">
       <Border Width="1"
         HorizontalAlignment="Right"
         VerticalAlignment="Stretch"

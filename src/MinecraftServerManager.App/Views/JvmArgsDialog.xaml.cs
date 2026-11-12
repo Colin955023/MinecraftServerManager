@@ -3,9 +3,7 @@ using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// JVM 啟動參數設定對話方塊
-/// </summary>
+/// <summary>JVM 啟動參數設定對話方塊</summary>
 public sealed partial class JvmArgsDialog : ContentDialog
 {
     public JvmArgsViewModel ViewModel { get; }

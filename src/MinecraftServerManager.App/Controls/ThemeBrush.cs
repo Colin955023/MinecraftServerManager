@@ -4,9 +4,7 @@ using Microsoft.UI.Xaml.Media;
 
 namespace MinecraftServerManager.App.Controls;
 
-/// <summary>
-/// 依主題資源鍵設定前景筆刷之附加屬性：元素實際主題切換時自動重新套用，確保深淺色主題對比
-/// </summary>
+/// <summary>依主題資源鍵設定前景筆刷之附加屬性：元素實際主題切換時自動重新套用，確保深淺色主題對比</summary>
 public static class ThemeBrush
 {
     public static readonly DependencyProperty ForegroundKeyProperty =
@@ -22,9 +20,7 @@ public static class ThemeBrush
     public static void SetForegroundKey(DependencyObject obj, string? value) =>
         obj.SetValue(ForegroundKeyProperty, value);
 
-    /// <summary>
-    /// 依實際主題自應用程式主題字典解析筆刷；找不到時回退至一般資源
-    /// </summary>
+    /// <summary>依實際主題自應用程式主題字典解析筆刷；找不到時退回一般資源</summary>
     public static Brush? ResolveBrush(string key, ElementTheme theme)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);

@@ -1,4 +1,3 @@
-using System.Text;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Domain.Servers;
@@ -77,8 +76,8 @@ public sealed class ServerPropertiesStore(string serversRoot) : IServerPropertie
                 }
             }
             string revision = HashCalculator.DigestBytes(bytes);
-            // 略過 UTF-8 BOM，避免第一個鍵帶有 ﻿
-            string text = Encoding.UTF8.GetString(bytes.AsSpan(bytes.AsSpan().StartsWith(Encoding.UTF8.Preamble) ? Encoding.UTF8.Preamble.Length : 0));
+            // 略過 UTF-8 BOM，避免第一個鍵帶有 \uFEFF
+            string text = SafeFileSystem.DecodeUtf8WithoutBom(bytes);
             var properties = PropertiesDocumentCodec.Parse(text);
 
             return new ServerPropertiesSnapshot(

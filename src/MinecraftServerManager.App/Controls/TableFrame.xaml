@@ -1,0 +1,26 @@
+<UserControl
+    x:Class="MinecraftServerManager.App.Controls.TableFrame"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Border Grid.Row="0"
+            Background="{ThemeResource CardBrush}"
+            BorderBrush="{ThemeResource DataGridGridLineBrush}"
+            BorderThickness="1">
+            <ContentPresenter Content="{x:Bind Header, Mode=OneWay}"
+                HorizontalContentAlignment="Stretch" />
+        </Border>
+        <Border Grid.Row="1"
+            BorderBrush="{ThemeResource DataGridGridLineBrush}"
+            BorderThickness="1,0,1,1">
+            <ContentPresenter Content="{x:Bind Body, Mode=OneWay}"
+                HorizontalContentAlignment="Stretch"
+                VerticalContentAlignment="Stretch" />
+        </Border>
+    </Grid>
+</UserControl>

@@ -3,16 +3,15 @@ using MinecraftServerManager.Core.Servers;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-/// <summary>
-/// 測試用伺服器執行階段：可手動觸發事件並記錄訂閱數與啟停呼叫
-/// </summary>
+/// <summary>測試用伺服器執行階段：可手動觸發事件並記錄訂閱數與啟停呼叫</summary>
 internal sealed class FakeServerRuntime : IServerRuntime
 {
     public int Pid => 1234;
     public bool IsRunning { get; set; }
     public bool IsReady { get; set; }
     public int? ExitCode { get; set; } = 0;
-    public string? ActiveServerName { get; set; }
+    public List<string> SentCommands { get; } = [];
+    public Queue<ProcessExitResult?> WaitResults { get; } = new();
     public int StartCount { get; private set; }
     public int StopCount { get; private set; }
     public ServerLaunchPlan? LastPlan { get; private set; }
@@ -31,6 +30,7 @@ internal sealed class FakeServerRuntime : IServerRuntime
     public void RaiseOutputLine(string line) => OutputLineReceived?.Invoke(line);
     public void RaiseExited(int exitCode) => ServerExited?.Invoke(exitCode);
     public void RaiseReady() => ServerReady?.Invoke();
+    public void RaiseStarted() => ServerStarted?.Invoke();
 
     public Task StartAsync(ServerLaunchPlan plan, CancellationToken cancellationToken = default)
     {
@@ -42,8 +42,8 @@ internal sealed class FakeServerRuntime : IServerRuntime
 
     public Task<bool> SendCommandAsync(string command, CancellationToken cancellationToken = default)
     {
-        _ = command;
         _ = cancellationToken;
+        SentCommands.Add(command);
         return Task.FromResult(true);
     }
 
@@ -54,6 +54,24 @@ internal sealed class FakeServerRuntime : IServerRuntime
         StopCount++;
         IsRunning = false;
         return Task.FromResult(new ProcessExitResult(0, false));
+    }
+
+    public Task<ProcessExitResult?> WaitForExitAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        _ = timeout;
+        _ = cancellationToken;
+        if (WaitResults.Count > 0)
+        {
+            var next = WaitResults.Dequeue();
+            if (next is not null)
+            {
+                IsRunning = false;
+            }
+
+            return Task.FromResult(next);
+        }
+
+        return Task.FromResult(IsRunning ? null : new ProcessExitResult(ExitCode ?? 0, false));
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

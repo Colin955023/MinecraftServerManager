@@ -13,7 +13,6 @@ public sealed class ServerInitializationWorkflowTests
         public bool IsRunning { get; set; } = true;
         public bool IsReady { get; set; }
         public int? ExitCode => null;
-        public string? ActiveServerName => "TestServer";
         public bool ShouldThrowOnStop { get; set; }
         public int StopCallCount { get; private set; }
 
@@ -40,6 +39,9 @@ public sealed class ServerInitializationWorkflowTests
             IsRunning = false;
             return Task.FromResult(new ProcessExitResult(0, false));
         }
+
+        public Task<ProcessExitResult?> WaitForExitAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
+            Task.FromResult(IsRunning ? null : new ProcessExitResult(0, false));
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

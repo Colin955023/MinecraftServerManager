@@ -9,29 +9,15 @@ namespace MinecraftServerManager.UnitTests;
 
 public sealed partial class MinecraftJavaRequirementServiceTests : IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(MinecraftJavaRequirementServiceTests));
+    private readonly TempDirectory _testTempDirTemp = new("msm_java_req_test_");
     private readonly string _testTempDir;
 
     public MinecraftJavaRequirementServiceTests()
     {
-        _testTempDir = Path.Combine(Path.GetTempPath(), "msm_java_req_test_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testTempDir);
+        _testTempDir = _testTempDirTemp.FullName;
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testTempDir))
-            {
-                Directory.Delete(_testTempDir, recursive: true);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("測試清理暫存資源失敗: {0}", ex.Message);
-        }
-    }
+    public void Dispose() => _testTempDirTemp.Dispose();
 
     [Fact]
     public void ParseJavaMajorFromVersionJson_StandardStructure_ReturnsMajor()

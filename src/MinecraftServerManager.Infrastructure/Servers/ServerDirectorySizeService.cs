@@ -77,13 +77,9 @@ public sealed class ServerDirectorySizeService(
 
                 return totalBytes;
             }
-            catch (OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning("計算伺服器容量失敗 ({Path}): {Message}", normalizedPath, ex.Message);
+                Logger.Warning(ex, "計算伺服器容量失敗 ({Path})", normalizedPath);
                 return -1L;
             }
         }, cancellationToken).ConfigureAwait(false);

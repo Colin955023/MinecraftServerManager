@@ -171,6 +171,6 @@ public sealed class ImportServerViewModelTests
             Task.FromResult(ServerOperationResult.Ok());
 
         public Task<ServerScanReport> ScanAndRegisterAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ServerScanReport(0, 0, 0, []));
+            Task.FromResult(new ServerScanReport(0, 0, 0));
     }
 }

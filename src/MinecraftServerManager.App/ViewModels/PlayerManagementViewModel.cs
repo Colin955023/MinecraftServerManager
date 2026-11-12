@@ -10,9 +10,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 伺服器名單管理（ops.json, whitelist.json, banned-players.json, banned-ips.json）對話方塊 ViewModel
-/// </summary>
+/// <summary>伺服器名單管理（ops.json, whitelist.json, banned-players.json, banned-ips.json）對話方塊 ViewModel</summary>
 public sealed partial class PlayerManagementViewModel(
     string serverName,
     string serverPath,
@@ -125,7 +123,7 @@ public sealed partial class PlayerManagementViewModel(
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "讀取伺服器名單設定失敗: {Message}", ex.Message);
+            Logger.Error(ex, "讀取伺服器名單設定失敗");
             StatusMessage = $"讀取失敗：{ex.Message}";
         }
     }
@@ -310,7 +308,7 @@ public sealed partial class PlayerManagementViewModel(
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "儲存伺服器名單設定失敗: {Message}", ex.Message);
+            Logger.Error(ex, "儲存伺服器名單設定失敗");
             StatusMessage = $"儲存失敗：{ex.Message}";
         }
     }
@@ -324,9 +322,7 @@ public sealed partial class PlayerManagementViewModel(
         }
     }
 
-    /// <summary>
-    /// 檢查是否有尚未儲存之暫存變更；若有則彈出確認詢問對話方塊
-    /// </summary>
+    /// <summary>檢查是否有尚未儲存之暫存變更；若有則彈出確認詢問對話方塊</summary>
     public Task<bool> ConfirmDiscardAsync() =>
         ConfirmDiscardChangesAsync(_ui, HasUnsavedChanges, "有尚未儲存的名單設定變更，確定要捨棄變更並關閉嗎？");
 
@@ -334,9 +330,7 @@ public sealed partial class PlayerManagementViewModel(
         dto.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " " + dto.ToString("zzz", CultureInfo.InvariantCulture).Replace(":", "", StringComparison.Ordinal);
 }
 
-/// <summary>
-/// 管理員名單資料列項目模型
-/// </summary>
+/// <summary>管理員名單資料列項目模型</summary>
 public sealed partial class OperatorRowItem(string name, string uuid, bool isOp, int level, bool bypassesPlayerLimit, Action onChanged) : ObservableObject
 {
     private readonly Action _onChanged = onChanged;

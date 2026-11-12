@@ -5,23 +5,38 @@ using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 具備自主倒數、滑鼠暫停功能的 WinUI 3 原生錯誤對話方塊
-/// </summary>
+/// <summary>具備自主倒數、滑鼠暫停功能的 WinUI 3 原生錯誤對話方塊</summary>
 public sealed partial class NotificationDialog : ContentDialog, INotifyPropertyChanged
 {
-    public event PropertyChangedEventHandler? PropertyChanged;
+    private static readonly PropertyChangedEventArgs ButtonTextChangedArgs = new(nameof(ButtonText));
 
     private readonly IUiTimer _autoCloseTimer;
     private readonly double _totalSeconds;
     private double _elapsedSeconds;
     private bool _isPaused;
     private bool _isClosing;
+    private string _buttonText;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 
     public string DialogTitle { get; }
     public string Message { get; }
     public string IconGlyph { get; }
-    public string ButtonText { get; private set; }
+
+    public string ButtonText
+    {
+        get => _buttonText;
+        private set
+        {
+            if (string.Equals(_buttonText, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _buttonText = value;
+            PropertyChanged?.Invoke(this, ButtonTextChangedArgs);
+        }
+    }
 
     public NotificationDialog(IUiService ui, string title, string message)
     {
@@ -32,7 +47,7 @@ public sealed partial class NotificationDialog : ContentDialog, INotifyPropertyC
         Message = message;
         IconGlyph = "❌";
         _totalSeconds = 10.0;
-        ButtonText = $"確定 ({(int)_totalSeconds}s)";
+        _buttonText = $"確定 ({(int)_totalSeconds}s)";
 
         _autoCloseTimer = ui.CreateUiTimer(TimeSpan.FromMilliseconds(100), AutoCloseTimer_Tick);
         // 倒數僅於實際顯示期間進行：排隊等待或被巢狀對話框暫時隱藏時不計時，重新顯示後續算
@@ -90,7 +105,6 @@ public sealed partial class NotificationDialog : ContentDialog, INotifyPropertyC
         int ceilSeconds = (int)Math.Ceiling(remaining);
 
         ButtonText = _isPaused ? "確定 (已暫停)" : $"確定 ({ceilSeconds}s)";
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ButtonText)));
 
         double percent = Math.Clamp(remaining / _totalSeconds * 100.0, 0, 100);
         CountdownProgress.Value = percent;

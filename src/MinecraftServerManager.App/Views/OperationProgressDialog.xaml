@@ -33,7 +33,7 @@
       Foreground="{ThemeResource MutedTextBrush}"
       Margin="0,0,0,16" />
 
-    <!-- 進度條 -->
+    <!-- 進度列 -->
     <ProgressBar Grid.Row="1"
       Height="8"
       Minimum="0"

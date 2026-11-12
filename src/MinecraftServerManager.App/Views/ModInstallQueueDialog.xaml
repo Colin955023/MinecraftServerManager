@@ -15,34 +15,21 @@
                         <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <!-- 標題 -->
                 <TextBlock Grid.Row="0"
                         Text="📋 待安裝模組清單"
                         Style="{ThemeResource TitleTextBlockStyle}" />
 
-                <!-- 說明 -->
                 <TextBlock Grid.Row="1"
                         Text="目前已排入安裝佇列的模組與相依項目如下："
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Style="{ThemeResource CaptionTextBlockStyle}" />
 
-                <!-- 清單 ListView -->
                 <Border Grid.Row="2"
-                        Background="{ThemeResource CardBrush}"
-                        BorderBrush="{ThemeResource BorderBrush}"
-                        BorderThickness="1"
+                        Style="{StaticResource CardBorderStyle}"
                         CornerRadius="8"
                         Padding="12">
-                        <Grid>
-                                <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="*" />
-                                </Grid.RowDefinitions>
-
-                                <Border Grid.Row="0"
-                                        Background="{ThemeResource CardBrush}"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="1">
+                        <controls:TableFrame>
+                                <controls:TableFrame.Header>
                                         <Grid>
                                                 <Grid.ColumnDefinitions>
                                                         <ColumnDefinition
@@ -87,12 +74,9 @@
                                                         SortRequested="OnHeaderSortRequested"
                                                         AutoFitRequested="OnHeaderAutoFitRequested" />
                                         </Grid>
-                                </Border>
-
-                                <Border Grid.Row="1"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="1,0,1,1">
-                                        <ListView ItemsSource="{x:Bind Queue, Mode=OneWay}"
+                                </controls:TableFrame.Header>
+                                <controls:TableFrame.Body>
+                                        <ListView ItemsSource="{x:Bind Queue}"
                                                 SelectionMode="None"
                                                 ItemContainerStyle="{StaticResource TableListViewItemStyle}">
                                                 <ListView.ItemTemplate>
@@ -111,65 +95,29 @@
                                                                                 <ColumnDefinition
                                                                                         Width="{x:Bind views:ModQueueListColumns.Current.ReasonWidth, Mode=OneWay}" />
                                                                         </Grid.ColumnDefinitions>
-                                                                        <Border Grid.Column="0"
-                                                                                BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                                BorderThickness="0,0,1,0"
-                                                                                Padding="8,6">
-                                                                                <TextBlock
-                                                                                        Text="{x:Bind ActionText}"
-                                                                                        TextTrimming="CharacterEllipsis"
-                                                                                        ToolTipService.ToolTip="{x:Bind ActionText}"
-                                                                                        VerticalAlignment="Center" />
-                                                                        </Border>
-                                                                        <Border Grid.Column="1"
-                                                                                BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                                BorderThickness="0,0,1,0"
-                                                                                Padding="8,6">
-                                                                                <TextBlock
-                                                                                        Text="{x:Bind Title}"
-                                                                                        TextTrimming="CharacterEllipsis"
-                                                                                        ToolTipService.ToolTip="{x:Bind Title}"
-                                                                                        VerticalAlignment="Center" />
-                                                                        </Border>
-                                                                        <Border Grid.Column="2"
-                                                                                BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                                BorderThickness="0,0,1,0"
-                                                                                Padding="8,6">
-                                                                                <TextBlock
-                                                                                        Text="{x:Bind VersionDisplay}"
-                                                                                        TextTrimming="CharacterEllipsis"
-                                                                                        ToolTipService.ToolTip="{x:Bind VersionDisplay}"
-                                                                                        VerticalAlignment="Center" />
-                                                                        </Border>
-                                                                        <Border Grid.Column="3"
-                                                                                BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                                BorderThickness="0,0,1,0"
-                                                                                Padding="8,6">
-                                                                                <TextBlock
-                                                                                        Text="{x:Bind FileName}"
-                                                                                        TextTrimming="CharacterEllipsis"
-                                                                                        ToolTipService.ToolTip="{x:Bind FileName}"
-                                                                                        VerticalAlignment="Center" />
-                                                                        </Border>
-                                                                        <Border Grid.Column="4"
-                                                                                BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                                BorderThickness="0,0,1,0"
-                                                                                Padding="8,6">
-                                                                                <TextBlock
-                                                                                        Text="{x:Bind Reason}"
-                                                                                        TextTrimming="CharacterEllipsis"
-                                                                                        ToolTipService.ToolTip="{x:Bind Reason}"
-                                                                                        VerticalAlignment="Center" />
-                                                                        </Border>
+                                                                        <controls:TableCell
+                                                                                Grid.Column="0"
+                                                                                Text="{x:Bind ActionText}" />
+                                                                        <controls:TableCell
+                                                                                Grid.Column="1"
+                                                                                Text="{x:Bind Title}" />
+                                                                        <controls:TableCell
+                                                                                Grid.Column="2"
+                                                                                Text="{x:Bind VersionDisplay}" />
+                                                                        <controls:TableCell
+                                                                                Grid.Column="3"
+                                                                                Text="{x:Bind FileName}" />
+                                                                        <controls:TableCell
+                                                                                Grid.Column="4"
+                                                                                Text="{x:Bind Reason}" />
                                                                 </Grid>
                                                         </DataTemplate>
                                                 </ListView.ItemTemplate>
                                         </ListView>
-                                </Border>
-                        </Grid>
+                                </controls:TableFrame.Body>
+                        </controls:TableFrame>
                 </Border>
 
-                <!-- 底部按鈕 -->
                 <Grid Grid.Row="3">
                         <Button Content="清空清單"
                                 Click="ClearQueue_Click"

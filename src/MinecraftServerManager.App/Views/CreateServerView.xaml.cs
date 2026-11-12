@@ -3,9 +3,7 @@ using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 建立新伺服器分頁 View
-/// </summary>
+/// <summary>建立新伺服器分頁 View</summary>
 public sealed partial class CreateServerView : UserControl
 {
     public CreateServerViewModel ViewModel { get; }

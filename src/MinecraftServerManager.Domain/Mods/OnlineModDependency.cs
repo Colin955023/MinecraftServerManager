@@ -1,8 +1,6 @@
 namespace MinecraftServerManager.Domain.Mods;
 
-/// <summary>
-/// 線上模組版本宣告之相依性
-/// </summary>
+/// <summary>線上模組版本宣告之相依性</summary>
 public sealed record OnlineModDependency(
     string? VersionId,
     string? ProjectId,

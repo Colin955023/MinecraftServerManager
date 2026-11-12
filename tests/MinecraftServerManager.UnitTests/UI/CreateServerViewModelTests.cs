@@ -17,7 +17,7 @@ public sealed class CreateServerViewModelTests
             static (_, _) => { },
             NoOp.Create<Core.Ports.IMinecraftJavaRequirementService>(),
             NoOp.Create<Core.Ports.IJavaInstaller>(),
-            NoOp.Create<Core.Ports.IServerRuntime>(),
+            NoOp.Create<Core.Ports.IServerRuntimeHost>(),
             NoOp.Create<Core.Servers.IServerLaunchPlanner>());
 
     [Fact]

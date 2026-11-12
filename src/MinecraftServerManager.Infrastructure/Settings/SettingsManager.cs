@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using MinecraftServerManager.Core.Errors;
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
@@ -45,11 +46,7 @@ public sealed class SettingsManager
             string resolved = Path.GetFullPath(path.Trim());
             return Path.TrimEndingDirectorySeparator(resolved);
         }
-        catch (ArgumentException)
-        {
-            return string.Empty;
-        }
-        catch (NotSupportedException)
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
         {
             return string.Empty;
         }
@@ -146,6 +143,26 @@ public sealed class SettingsManager
 
     public void SetAutoUpdateEnabled(bool enabled) => Update(settings => settings with { AutoUpdateEnabled = enabled });
 
+    public bool IsAutoBackupBeforeStartEnabled()
+    {
+        lock (_syncRoot)
+        {
+            return _settings.AutoBackupBeforeStart;
+        }
+    }
+
+    public void SetAutoBackupBeforeStartEnabled(bool enabled) => Update(settings => settings with { AutoBackupBeforeStart = enabled });
+
+    public int GetBackupRetentionCount()
+    {
+        lock (_syncRoot)
+        {
+            return _settings.BackupRetentionCount;
+        }
+    }
+
+    public void SetBackupRetentionCount(int count) => Update(settings => settings with { BackupRetentionCount = count });
+
     public WindowPreferences GetWindowPreferences()
     {
         lock (_syncRoot)
@@ -193,7 +210,7 @@ public sealed class SettingsManager
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Logger.Warning(ex, "讀取設定檔失敗：{Path}", _settingsPath);
+            Logger.Warning(ex, "讀取設定檔失敗: {Path}", _settingsPath);
         }
 
         UserSettings? loaded = bytes is null ? null : JsonCodec.Deserialize<UserSettings>(bytes);
@@ -228,7 +245,7 @@ public sealed class SettingsManager
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning(ex, "無法備份損毀的設定檔：{Path}", _settingsPath);
+            Logger.Warning(ex, "無法備份損毀的設定檔: {Path}", _settingsPath);
         }
     }
 
@@ -241,7 +258,7 @@ public sealed class SettingsManager
         catch (IOException ex)
         {
             // 寫入失敗不應使啟動失敗；使用記憶體中的預設值繼續
-            Logger.Warning(ex, "無法寫入預設設定檔：{Path}", _settingsPath);
+            Logger.Warning(ex, "無法寫入預設設定檔: {Path}", _settingsPath);
         }
     }
 
@@ -271,8 +288,14 @@ public sealed class SettingsManager
         {
             ServersRoot = NormalizeExactServersRootPath(settings.ServersRoot).Trim(),
             WindowPreferences = NormalizeWindowPreferences(settings.WindowPreferences),
+            BackupRetentionCount = NormalizeBackupRetentionCount(settings.BackupRetentionCount),
         };
     }
+
+    private static int NormalizeBackupRetentionCount(int count) =>
+        count < ServerDefaults.MinBackupRetentionCount
+            ? ServerDefaults.DefaultBackupRetentionCount
+            : Math.Min(count, ServerDefaults.MaxBackupRetentionCount);
 
     private static string NormalizeThemeMode(string? mode)
     {
