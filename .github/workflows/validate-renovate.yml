@@ -24,4 +24,4 @@ jobs:
 
       - name: Validate renovate.json
         run: |
-          npx --yes --package renovate@44.181.1 -- renovate-config-validator ./.github/renovate.json --strict
+          npx --yes --package renovate@44.223.1 -- renovate-config-validator ./.github/renovate.json --strict
