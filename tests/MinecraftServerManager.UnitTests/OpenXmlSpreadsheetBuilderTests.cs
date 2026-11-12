@@ -33,12 +33,11 @@ public sealed class OpenXmlSpreadsheetBuilderTests
     }
 
     [Fact]
-    public void SanitizeXmlText_RemovesControlCharacters()
+    public void SanitizeXmlText_RemovesControlCharactersAndKeepsEmoji()
     {
         string raw = "Hello\x00\x01\x08World\t\r\nEnd\x1F";
-        string sanitized = OpenXmlSpreadsheetBuilder.SanitizeXmlText(raw);
-
-        Assert.Equal("HelloWorld\t\r\nEnd", sanitized);
+        Assert.Equal("HelloWorld\t\r\nEnd", OpenXmlSpreadsheetBuilder.SanitizeXmlText(raw));
+        Assert.Equal("Mod 🎮 名稱尾", OpenXmlSpreadsheetBuilder.SanitizeXmlText("Mod 🎮 名稱\u0001\uD800尾"));
     }
 
     [Fact]
@@ -76,5 +75,18 @@ public sealed class OpenXmlSpreadsheetBuilderTests
         Assert.Contains("Fabric API", sheetContent);
         Assert.Contains("Sodium", sheetContent);
         Assert.Contains("0.92.0", sheetContent);
+    }
+
+    [Fact]
+    public void BuildWorkbook_EscapesSpecialCharactersIntoWellFormedXml()
+    {
+        var rows = new List<IReadOnlyList<string>> { new[] { "A&B <C> \"D\" 'E'", "😀" } };
+
+        using var archive = new ZipArchive(new MemoryStream(OpenXmlSpreadsheetBuilder.BuildWorkbook("S", rows)), ZipArchiveMode.Read);
+        using var sheetStream = archive.GetEntry("xl/worksheets/sheet1.xml")!.Open();
+        var document = System.Xml.Linq.XDocument.Load(sheetStream);
+
+        string[] texts = [.. document.Descendants().Where(static e => e.Name.LocalName == "t").Select(static e => e.Value)];
+        Assert.Equal(["A&B <C> \"D\" 'E'", "😀"], texts);
     }
 }

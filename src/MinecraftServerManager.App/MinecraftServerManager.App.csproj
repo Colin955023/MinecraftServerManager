@@ -1,51 +1,103 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <UseWPF>true</UseWPF>
+    <AssemblyName>MinecraftServerManager</AssemblyName>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <ApplicationIcon>$(RepoRoot)assets\icon.ico</ApplicationIcon>
     <Product>Minecraft Server Manager</Product>
     <Company>Colin955023</Company>
     <Copyright>GPL-3.0 License</Copyright>
-    <SatelliteResourceLanguages>zh-Hant;en</SatelliteResourceLanguages>
-  </PropertyGroup>
-  <ItemGroup>
-    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-      <_Parameter1>DistributionMode</_Parameter1>
-      <_Parameter2 Condition="'$(SelfContained)' == 'true'">self-contained</_Parameter2>
-      <_Parameter2 Condition="'$(SelfContained)' != 'true'">framework-dependent</_Parameter2>
-    </AssemblyAttribute>
-  </ItemGroup>
-  <PropertyGroup>
+    <SatelliteResourceLanguages>zh-TW</SatelliteResourceLanguages>
+    <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <CsWinRTAotWarningLevel>2</CsWinRTAotWarningLevel>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <PublishSingleFile>true</PublishSingleFile>
-    <PublishReadyToRun>false</PublishReadyToRun>
-    <PublishTrimmed>false</PublishTrimmed>
-    <DebugType>None</DebugType>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>full</TrimMode>
+    <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
-    <PublishDocumentationFiles>false</PublishDocumentationFiles>
-    <AllowedReferenceRelatedFileExtensions>none</AllowedReferenceRelatedFileExtensions>
     <UseSharedCompilation>false</UseSharedCompilation>
     <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
     <MetricsSupport>false</MetricsSupport>
-    <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
-    <EnableUnsafeUTF7Encoding>false</EnableUnsafeUTF7Encoding>
-    <StartupHookSupport>false</StartupHookSupport>
-    <CustomResourceTypesSupport>false</CustomResourceTypesSupport>
     <XmlResolverIsNetworkingEnabledByDefault>false</XmlResolverIsNetworkingEnabledByDefault>
     <DebuggerSupport>false</DebuggerSupport>
     <EventSourceSupport>false</EventSourceSupport>
-    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(SelfContained)' == 'true'">
-    <DefineConstants>$(DefineConstants);SELF_CONTAINED</DefineConstants>
+    <MvvmToolkitEnableINotifyPropertyChangingSupport>false</MvvmToolkitEnableINotifyPropertyChangingSupport>
   </PropertyGroup>
   <ItemGroup>
-    <Resource Include="$(RepoRoot)assets\icon.ico" Link="assets\icon.ico" />
-  </ItemGroup>
-  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.DWrite" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" />
+    <PackageReference Include="Microsoft.Windows.CsWinRT" />
     <PackageReference Include="CommunityToolkit.Mvvm" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\MinecraftServerManager.Core\MinecraftServerManager.Core.csproj" />
-    <ProjectReference Include="..\MinecraftServerManager.Infrastructure\MinecraftServerManager.Infrastructure.csproj" />
+    <ProjectReference
+      Include="..\MinecraftServerManager.Infrastructure\MinecraftServerManager.Infrastructure.csproj" />
   </ItemGroup>
+  <!-- 消除 WinUI 3 XAML 編譯器於 MarkupCompilePass1、MarkupCompilePass2 與
+  IncludeGeneratedXamlCompileItemsForDesignTime 重複將 .g.i.cs / .g.cs 加入 @(Compile) 導致 Roslyn
+  MSBuildWorkspace 警告 -->
+  <Target Name="DeduplicateXamlGeneratedCompileItems"
+    BeforeTargets="CoreCompile"
+    DependsOnTargets="DesignTimeMarkupCompilation;IncludeGeneratedXamlCompileItemsForDesignTime">
+    <RemoveDuplicates Inputs="@(Compile->'%(FullPath)')">
+      <Output TaskParameter="Filtered" ItemName="_FilteredCompile" />
+    </RemoveDuplicates>
+    <ItemGroup>
+      <Compile Remove="@(Compile)" />
+      <Compile Include="@(_FilteredCompile)" />
+      <_FilteredCompile Remove="@(_FilteredCompile)" />
+    </ItemGroup>
+  </Target>
+  <!-- 發布單一檔案前精簡移除多餘語系 MUI 資源 -->
+  <Target Name="FilterUnusedMuiFiles"
+    AfterTargets="AddMicrosoftWindowsAppSDKPayloadFilesFromComponents">
+    <ItemGroup>
+      <None Remove="@(None)"
+        Condition="'%(None.Extension)' == '.mui' and
+                   '%(None.Link)' != '' and
+                   !$([System.String]::Copy('%(None.Link)').StartsWith('zh-TW'))" />
+    </ItemGroup>
+  </Target>
+  <!-- 發布單一檔案前精簡移除未使用的 WebView2 原生元件與多餘語系 MUI 資源 -->
+  <Target Name="PruneUnusedSingleFilePayload" BeforeTargets="_ComputeFilesToBundle">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(Filename)%(Extension)' == 'WebView2Loader.dll' or
+                   '%(Filename)%(Extension)' == 'Microsoft.Web.WebView2.Core.dll'" />
+      <!-- 程式未使用 Bootstrap 初始化（自包含）、背景工作、推播通知、AppInstance.Restart 與 MapControl，其原生檔案不會被載入 -->
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(Filename)%(Extension)' == 'Microsoft.WindowsAppRuntime.Bootstrap.dll' or
+                   '%(Filename)%(Extension)' == 'Microsoft.Windows.ApplicationModel.Background.UniversalBGTask.dll' or
+                   '%(Filename)%(Extension)' == 'PushNotificationsLongRunningTask.ProxyStub.dll' or
+                   '%(Filename)%(Extension)' == 'RestartAgent.exe' or
+                   '%(Filename)%(Extension)' == 'map.html' or
+                   '%(Filename)%(Extension)' == 'Microsoft.UI.Xaml.Controls.pri' or
+                   '%(Filename)%(Extension)' == 'packages.lock.json' or
+                   '%(Filename)%(Extension)' == 'app.manifest'" />
+      <!-- 實測走訪主要畫面與對話框皆未載入：Phone（Pivot／選擇器／導覽轉場）、設計階段專用 Designer、系統 DWrite 已足夠的 DWriteCore -->
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(Filename)%(Extension)' == 'Microsoft.UI.Xaml.Phone.dll' or
+                   '%(Filename)%(Extension)' == 'Microsoft.UI.Xaml.Phone.dll.mui' or
+                   '%(Filename)%(Extension)' == 'Microsoft.UI.Designer.dll' or
+                   '%(Filename)%(Extension)' == 'DWriteCore.dll'" />
+      <!-- WinRT 型別中繼資料已由 CsWinRT 投影編入組件、XAML 已編譯為 .pri 內的 XBF，執行期不讀 .winmd 與散放
+      .xaml（實測畫面與載入模組與未裁剪版相同） -->
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(Extension)' == '.winmd' or '%(Extension)' == '.xaml'" />
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(Extension)' == '.mui' and
+                   '%(RelativePath)' != '' and
+                   !$([System.String]::Copy('%(RelativePath)').StartsWith('zh-TW'))" />
+    </ItemGroup>
+  </Target>
 </Project>

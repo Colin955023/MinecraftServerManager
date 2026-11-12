@@ -1,81 +1,99 @@
-using System.Windows.Controls;
-using System.Windows.Input;
+using System.Diagnostics.CodeAnalysis;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using MinecraftServerManager.App.Controls;
 using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-public partial class ModsView : UserControl
+/// <summary>模組管理與線上探索分頁 View</summary>
+public sealed partial class ModsView : UserControl
 {
-    public ModsView()
+    public ModsViewModel ViewModel { get; }
+
+    public ModsView(ModsViewModel viewModel)
     {
+        ArgumentNullException.ThrowIfNull(viewModel);
+        ViewModel = viewModel;
         InitializeComponent();
     }
 
-    private void LocalModsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "WinUI 3 x:Bind requires instance method")]
+    public Visibility GetLocalTabVisibility(int index) => index == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "WinUI 3 x:Bind requires instance method")]
+    public Visibility GetOnlineTabVisibility(int index) => index == 1 ? Visibility.Visible : Visibility.Collapsed;
+
+    private void OnLocalModsSelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        ViewModel.Local.SetSelectedMods(LocalModsListView.SelectedItems.OfType<LocalModRowItem>());
+
+    private void OnSelectAllLocalModsClicked(object sender, RoutedEventArgs e)
     {
-        if (DataContext is ModsViewModel vm && sender is DataGrid grid)
+        if (LocalModsListView.SelectedItems.Count == ViewModel.Local.LocalMods.Count && LocalModsListView.SelectedItems.Count > 0)
         {
-            foreach (var item in e.RemovedItems.OfType<LocalModRowItem>())
-            {
-                item.IsSelected = false;
-            }
-            foreach (var item in e.AddedItems.OfType<LocalModRowItem>())
-            {
-                item.IsSelected = true;
-            }
-            vm.UpdateSelectionState(grid.SelectedItems.Count);
+            LocalModsListView.SelectedItems.Clear();
+        }
+        else
+        {
+            LocalModsListView.SelectAll();
         }
     }
 
-    private void OnlineModsGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    private void OnLocalSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.Local.LocalMods.SortBy(TableSortKeys.LocalMods, e);
+
+    private void OnLocalAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.Local.LocalMods, TableSortKeys.LocalMods);
+
+    private void OnOnlineSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.Online.OnlineMods.SortBy(TableSortKeys.OnlineMods, e);
+
+    private void OnOnlineAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.Online.OnlineMods, TableSortKeys.OnlineMods);
+
+    private void OnOnlineModsDoubleTapped(object sender, Microsoft.UI.Xaml.Input.DoubleTappedRoutedEventArgs e)
     {
-        if (DataContext is ModsViewModel vm && sender is DataGrid grid && grid.SelectedItem is OnlineModRowItem item)
+        if (ViewModel.PickOnlineModVersionCommand.CanExecute(null))
         {
-            _ = ViewModelBase.RunSafeAsync(() => vm.PickOnlineModVersionAsync(item), "選取線上模組版本");
+            ViewModel.PickOnlineModVersionCommand.Execute(null);
         }
     }
 
-    private void OnViewPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    private void OnlineSearchBox_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
-        if (e.OriginalSource is System.Windows.DependencyObject dep)
+        if (e.Key == Windows.System.VirtualKey.Enter && ViewModel.Online.SearchOnlineModsCommand.CanExecute(null))
         {
-            if (FindVisualParent<Button>(dep) != null ||
-                FindVisualParent<DataGridRow>(dep) != null ||
-                FindVisualParent<System.Windows.Controls.Primitives.ScrollBar>(dep) != null ||
-                FindVisualParent<System.Windows.Controls.Primitives.Thumb>(dep) != null ||
-                FindVisualParent<TextBox>(dep) != null ||
-                FindVisualParent<ComboBox>(dep) != null ||
-                FindVisualParent<TabItem>(dep) != null)
-            {
-                return;
-            }
-        }
-
-        if (DataContext is ModsViewModel vm)
-        {
-            vm.SelectedLocalMod = null;
-            vm.SelectedOnlineMod = null;
-            LocalModsGrid.SelectedItems.Clear();
-            foreach (var item in vm.LocalMods)
-            {
-                item.IsSelected = false;
-            }
-            vm.UpdateSelectionState(0);
+            ViewModel.Online.SearchOnlineModsCommand.Execute(null);
+            e.Handled = true;
         }
     }
 
-    private static T? FindVisualParent<T>(System.Windows.DependencyObject? child) where T : System.Windows.DependencyObject
+    private void OnCopyLocalModInfoClicked(object sender, RoutedEventArgs e)
     {
-        while (child != null)
+        if (ViewModel.Local.SelectedLocalMod is not null && ViewModel.Local.CopyModInfoCommand.CanExecute(ViewModel.Local.SelectedLocalMod))
         {
-            if (child is T parent)
-            {
-                return parent;
-            }
-
-            child = System.Windows.Media.VisualTreeHelper.GetParent(child);
+            ViewModel.Local.CopyModInfoCommand.Execute(ViewModel.Local.SelectedLocalMod);
         }
-        return null;
+    }
+
+    private void OnShowInFolderClicked(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.Local.SelectedLocalMod is not null && ViewModel.Local.ShowInFolderCommand.CanExecute(ViewModel.Local.SelectedLocalMod))
+        {
+            ViewModel.Local.ShowInFolderCommand.Execute(ViewModel.Local.SelectedLocalMod);
+        }
+    }
+
+    private void OnModToggleClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: LocalModRowItem item } && ViewModel.Local.ToggleModCommand.CanExecute(item))
+        {
+            ViewModel.Local.ToggleModCommand.Execute(item);
+        }
+    }
+
+    private void OnTabSelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
+    {
+        int index = sender.Items.IndexOf(sender.SelectedItem);
+        if (index >= 0)
+        {
+            ViewModel.SelectedTabIndex = index;
+        }
     }
 }
-

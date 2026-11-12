@@ -1,19 +1,18 @@
-﻿$env:DOTNET_CLI_FORCE_UTF8_ENCODING = "1"
-$env:MSBUILDDISABLENODEREUSE = "1"
-$env:DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER = "1"
-[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+﻿$commonScript = Join-Path $PSScriptRoot "lib\Common.ps1"
+if (-not (Test-Path -LiteralPath $commonScript))
+{
+    throw "C# 門禁失敗：找不到共用函式庫 $commonScript"
+}
+. $commonScript
+Initialize-ScriptEnvironment
 
-$solutionPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\MinecraftServerManager.sln"))
+$solutionPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\MinecraftServerManager.slnx"))
 $solutionDir = Split-Path -Parent $solutionPath
 
 $isCiEnvironment = ($env:CI -eq 'true' -or $env:GITHUB_ACTIONS -eq 'true')
 
-# 動態偵測環境 CPU 核心數並保留 1 核給系統
-$maxCpuCount = [Math]::Max(1, [Environment]::ProcessorCount - 1)
-
-function Invoke-DotnetStep {
+function Invoke-DotnetStep
+{
     param(
         [Parameter(Mandatory = $true)]
         [string]$Name,
@@ -22,145 +21,190 @@ function Invoke-DotnetStep {
     )
 
     Write-Host "=== $Name ==="
-    $extraArgs = @()
-    if ($Arguments.Count -gt 0 -and $Arguments[0] -in @("restore", "build")) {
-        $extraArgs += @("-m:$maxCpuCount", "-p:UseSharedCompilation=false", "-nodereuse:false")
-    }
-    & dotnet @Arguments @extraArgs
-    if ($LASTEXITCODE -ne 0) {
+    & dotnet @Arguments
+    if ($LASTEXITCODE -ne 0)
+    {
         throw "C# 門禁失敗：$Name"
     }
 }
 
-function Test-SecretsAndPrivacy {
+function Test-SecretsAndPrivacy
+{
     Write-Host "=== 隱私與機密資訊檢查 (Gitleaks) ==="
 
     # CI 環境由 gitleaks/gitleaks-action 負責機密掃描，腳本不重複執行
-    if ($isCiEnvironment) {
-        Write-Host "CI 環境偵測到，Gitleaks 檢查已由 GitHub Action 步驟負責，腳本跳過"
+    if ($isCiEnvironment)
+    {
+        Write-Host "偵測到 CI 環境，Gitleaks 檢查已由 GitHub Action 步驟負責，腳本跳過"
         return
     }
 
     $gitleaksCmd = Get-Command gitleaks -ErrorAction SilentlyContinue
-    if ($null -eq $gitleaksCmd) {
-        $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
-
-        if ($null -eq $wingetCmd) {
-            Write-Warning "未偵測到 winget 套件管理器，無法自動安裝 Gitleaks，請手動安裝以啟用隱私防護"
-            return
-        }
-
-        $shouldInstall = $false
-        if ([Environment]::UserInteractive) {
-            $choice = Read-Host "未偵測到 gitleaks 命令，是否透過 winget 安裝 Gitleaks？(Y/N)"
-            if ($choice -match '^[Yy]') {
-                $shouldInstall = $true
-            }
-        }
-
-        if ($shouldInstall) {
-            Write-Host "正在透過 winget 安裝 Gitleaks..."
-            & winget install --id Gitleaks.Gitleaks -e --accept-source-agreements --accept-package-agreements
-        } else {
-            Write-Warning "已跳過 Gitleaks 安裝，無法執行機密與隱私安全檢查"
-            return
-        }
-
-        # 重新整理環境變數 Path 並重新偵測
-        $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
-        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-        $env:Path = "$machinePath;$userPath"
-        $gitleaksCmd = Get-Command gitleaks -ErrorAction SilentlyContinue
-        if ($null -eq $gitleaksCmd) {
-            Write-Warning "安裝完成但目前工作階段仍未找到 gitleaks 命令，請確認 Path 設定"
-            return
-        }
+    if ($null -eq $gitleaksCmd)
+    {
+        Write-Warning "未偵測到 gitleaks 命令，請安裝 Gitleaks 以啟用隱私防護"
+        return
     }
 
     Write-Host "偵測到 Gitleaks："
     & gitleaks version
-    & gitleaks detect --no-git --source $solutionDir --verbose
-    if ($LASTEXITCODE -ne 0) {
+    & gitleaks dir $solutionDir --redact --verbose
+    if ($LASTEXITCODE -ne 0)
+    {
         throw "C# 門禁失敗：Gitleaks 偵測到敏感機密或私鑰外洩"
     }
 }
 
-$commonScript = Join-Path $PSScriptRoot "lib\Common.ps1"
-if (-not (Test-Path -LiteralPath $commonScript)) {
-    throw "C# 門禁失敗：找不到共用函式庫 $commonScript"
-}
-. $commonScript
-
-function Test-VersionConsistency {
+function Test-VersionConsistency
+{
     Write-Host "=== 版本定義單一事實來源檢查 (Directory.Build.props) ==="
     $version = Get-ProjectVersion -RepoRoot $solutionDir
     Write-Host "專案版本 (Directory.Build.props): $version"
 
     $appProjectPath = Join-Path $solutionDir "src\MinecraftServerManager.App\MinecraftServerManager.App.csproj"
-    if (Test-Path -LiteralPath $appProjectPath) {
+    if (Test-Path -LiteralPath $appProjectPath)
+    {
         [xml]$appProject = Get-Content -Raw -Encoding UTF8 $appProjectPath
         $versionNode = $appProject.SelectSingleNode("//Version")
-        if ($null -ne $versionNode) {
-            throw "C# 門禁失敗：App.csproj 不得硬編碼重複定義 <Version>，版本應統一由 Directory.Build.props 管理"
+        if ($null -ne $versionNode)
+        {
+            throw "C# 門禁失敗：App.csproj 不得重複定義 <Version>，版本應統一由 Directory.Build.props 管理"
         }
     }
 }
 
-function Test-ScriptEncoding {
+function Test-ScriptEncoding
+{
     Write-Host "=== 腳本編碼檢查 (UTF-8 with BOM) ==="
     $scriptsDir = Join-Path $solutionDir "scripts"
     $ps1Files = Get-ChildItem -LiteralPath $scriptsDir -Filter "*.ps1" -Recurse -File
-    foreach ($file in $ps1Files) {
-        $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
-        if ($bytes.Length -lt 3 -or $bytes[0] -ne 0xEF -or $bytes[1] -ne 0xBB -or $bytes[2] -ne 0xBF) {
+    foreach ($file in $ps1Files)
+    {
+        $buffer = [byte[]]::new(3); $fs = [System.IO.File]::OpenRead($file.FullName); try { $read = $fs.Read($buffer, 0, 3) } finally { $fs.Dispose() }
+        if ($read -lt 3 -or $buffer[0] -ne 0xEF -or $buffer[1] -ne 0xBB -or $buffer[2] -ne 0xBF)
+        {
             throw "C# 門禁失敗：腳本 $($file.Name) 未以 UTF-8 with BOM (0xEF, 0xBB, 0xBF) 格式儲存"
         }
     }
 }
 
-# 0. 腳本編碼檢查（UTF-8 with BOM）
 Test-ScriptEncoding
-
-# 1. 版本定義一致性檢查（AppInfo.cs vs App.csproj）
 Test-VersionConsistency
-
-# 2. 隱私與機密安全檢查（Gitleaks）
 Test-SecretsAndPrivacy
-
-# 3. 還原套件
 Invoke-DotnetStep "還原套件" @("restore", $solutionPath)
 
-# 4. 程式碼排版與格式檢查（本機單次自動修復並檢驗，CI 強制無變更檢驗）
-if ($isCiEnvironment) {
+if ($isCiEnvironment)
+{
     Invoke-DotnetStep "格式檢查" @("format", $solutionPath, "--verify-no-changes", "--no-restore")
-} else {
+}
+else
+{
     Invoke-DotnetStep "格式檢查與自動修復" @("format", $solutionPath, "--no-restore")
 }
 
-# 5. Release 建置（包含 Roslyn Analyzers、未使用定義檢驗、程式碼品質強制檢查，前置已完整還原故免重複評估套件）
-Invoke-DotnetStep "Release 建置（品質與未使用定義檢驗）" @("build", $solutionPath, "-c", "Release", "--no-restore")
+Invoke-DotnetStep "Release 建置（品質與未使用定義檢驗）" @(
+    "build", $solutionPath, "-c", "Release", "--no-restore"
+)
 
-# 6. 單元測試與整合測試
-$minimumExpectedTests = 515
+# 期望測試數量由原始碼動態計算：每個 [Fact] 與每筆 [InlineData] 各算一項，避免手動維護數字
+function Get-ExpectedTestCount
+{
+    $testsDir = Join-Path $solutionDir "tests"
+    $count = 0
+    foreach ($file in Get-ChildItem -LiteralPath $testsDir -Filter "*.cs" -Recurse -File)
+    {
+        if ($file.FullName -match '[\\/](obj|bin)[\\/]') { continue }
+        $count += @(Select-String -LiteralPath $file.FullName -Pattern '^\s*\[(?:Fact|InlineData)\b').Count
+    }
+    return $count
+}
+
+$minimumExpectedTests = Get-ExpectedTestCount
+if ($minimumExpectedTests -le 0)
+{
+    throw "C# 門禁失敗：未在 tests 目錄偵測到任何 [Fact] 或 [InlineData] 測試"
+}
+Write-Host "預期測試數量（[Fact] + [InlineData]）：$minimumExpectedTests"
+$testResultsDir = Join-Path $solutionDir "TestResults"
 $testArguments = @(
     "test", $solutionPath, "-c", "Release", "--no-build",
-    "--minimum-expected-tests", $minimumExpectedTests
+    "--minimum-expected-tests", $minimumExpectedTests,
+    "--results-directory", $testResultsDir,
+    "--", "--coverage", "--coverage-output-format", "cobertura"
 )
-if ($isCiEnvironment) {
-    $testArguments += @(
-        "--results-directory", (Join-Path $solutionDir "TestResults"),
-        "--", "--report-trx"
-    )
+if ($isCiEnvironment)
+{
+    $testArguments += "--report-trx"
 }
 
-try {
-    Invoke-DotnetStep "測試" $testArguments
+# 彙總 cobertura 報告的行與分支涵蓋率（僅輸出數字，不設門檻）
+# 各測試專案的報告涵蓋同一份原始碼，故依「檔案＋行號」取聯集（同行取最高命中），並排除原始碼產生器輸出（obj）與測試碼
+function Write-CoverageSummary
+{
+    param([string]$ResultsDirectory)
+
+    $reports = @()
+    if (Test-Path -LiteralPath $ResultsDirectory)
+    {
+        $reports = @(Get-ChildItem -LiteralPath $ResultsDirectory -Filter "*.cobertura.xml" -Recurse -File)
+    }
+
+    if ($reports.Count -eq 0)
+    {
+        Write-Warning "未找到涵蓋率報告（*.cobertura.xml），略過涵蓋率彙總"
+        return
+    }
+
+    $lines = @{}
+    $branches = @{}
+    foreach ($report in $reports)
+    {
+        $xml = [xml](Get-Content -LiteralPath $report.FullName -Raw -Encoding UTF8)
+        foreach ($class in $xml.SelectNodes("//class"))
+        {
+            $file = $class.GetAttribute("filename")
+            if ($file -match '[\\/](obj|tests)[\\/]') { continue }
+            foreach ($line in $class.SelectNodes("lines/line | methods/method/lines/line"))
+            {
+                $key = "$file|$($line.GetAttribute('number'))"
+                $hits = [int]$line.GetAttribute("hits")
+                if (-not $lines.ContainsKey($key) -or $lines[$key] -lt $hits) { $lines[$key] = $hits }
+                $condition = $line.GetAttribute("condition-coverage")
+                if ($condition -match '\((\d+)/(\d+)\)')
+                {
+                    $covered = [int]$Matches[1]; $total = [int]$Matches[2]
+                    if (-not $branches.ContainsKey($key) -or $branches[$key].Covered -lt $covered) { $branches[$key] = @{ Covered = $covered; Total = $total } }
+                }
+            }
+        }
+    }
+
+    $linesValid = $lines.Count
+    $linesCovered = @($lines.Values | Where-Object { $_ -gt 0 }).Count
+    $branchesValid = ($branches.Values | ForEach-Object { $_.Total } | Measure-Object -Sum).Sum
+    $branchesCovered = ($branches.Values | ForEach-Object { $_.Covered } | Measure-Object -Sum).Sum
+    $linePercent = if ($linesValid -gt 0) { 100.0 * $linesCovered / $linesValid } else { 0.0 }
+    $branchPercent = if ($branchesValid -gt 0) { 100.0 * $branchesCovered / $branchesValid } else { 0.0 }
+    Write-Host ("涵蓋率：行 {0:N1}%（{1}／{2}），分支 {3:N1}%（{4}／{5}）" -f $linePercent, $linesCovered, $linesValid, $branchPercent, $branchesCovered, $branchesValid)
 }
-finally {
-    # 7. 清理測試產生的暫存目錄
-    $testResultsDir = Join-Path $solutionDir "TestResults"
-    if (-not $isCiEnvironment -and (Test-Path $testResultsDir)) {
-        Remove-Item -Path $testResultsDir -Recurse -Force -ErrorAction SilentlyContinue
+
+try
+{
+    Invoke-DotnetStep "測試" $testArguments
+    Write-CoverageSummary -ResultsDirectory $testResultsDir
+}
+finally
+{
+    if (-not $isCiEnvironment -and (Test-Path $testResultsDir))
+    {
+        try
+        {
+            Remove-Item -LiteralPath $testResultsDir -Recurse -Force
+        }
+        catch
+        {
+            Write-Warning "無法清理測試結果目錄 ${testResultsDir}：$($_.Exception.Message)"
+        }
     }
 }
 

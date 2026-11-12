@@ -1,10 +1,9 @@
 using System.Collections.Frozen;
+using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Core.Servers;
 
-/// <summary>
-/// Minecraft server.properties 屬性說明、分類與預設值中繼資料
-/// </summary>
+/// <summary>Minecraft server.properties 屬性說明、分類與預設值中繼資料</summary>
 public static class ServerPropertiesMetadata
 {
     private static readonly FrozenDictionary<string, string> DescriptionsMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -14,7 +13,7 @@ public static class ServerPropertiesMetadata
         ["allow-flight"] = "是否允許玩家在生存模式下飛行 (false/true) 若設為 true，安裝了飛行模組的玩家可以飛行",
         ["allow-nether"] = "是否允許玩家進入地獄 (下界) (true/false) false - 玩家將無法通過地獄傳送門",
         ["broadcast-console-to-ops"] = "是否向所有線上 OP 送出所執行指令的輸出 (true/false)",
-        ["broadcast-rcon-to-ops"] = "是否向所有線上 OP 送出通過 RCON 執行的指令的輸出 (true/false)",
+        ["broadcast-rcon-to-ops"] = "是否向所有線上 OP 送出透過 RCON 執行的指令的輸出 (true/false)",
         ["bug-report-link"] = "伺服器回報錯誤的 URL 顯示於中斷連線畫面",
         ["chat-spam-threshold-seconds"] = "伺服器踢出聊天訊息傳送過於頻繁之玩家的時間門檻值 (秒，0 為不限制)",
         ["command-spam-threshold-seconds"] = "伺服器踢出指令傳送過於頻繁之玩家的時間門檻值 (秒，0 為不限制)",
@@ -25,9 +24,9 @@ public static class ServerPropertiesMetadata
         ["enable-jmx-monitoring"] = "是否啟用 JMX 監控 (false/true)",
         ["enable-legacy-status"] = "是否啟用 1.7 之前的舊版伺服器狀態與 ping 回應協定 (true/false)",
         ["enable-query"] = "是否允許使用 GameSpy4 協定的伺服器監聽器 (false/true)",
-        ["enable-rcon"] = "是否允許遠端存取伺服器控制台 (false/true)",
+        ["enable-rcon"] = "是否允許遠端存取伺服器主控台 (false/true)",
         ["enable-status"] = "使伺服器在伺服器清單中顯示為線上 (true/false)",
-        ["enforce-secure-profile"] = "要求玩家必須具有 Mojang 簽名的公鑰才能進入伺服器 (true/false)",
+        ["enforce-secure-profile"] = "要求玩家必須具有 Mojang 簽章的公開金鑰才能進入伺服器 (true/false)",
         ["enforce-whitelist"] = "在伺服器上強制執行白名單 (false/true)",
         ["entity-broadcast-range-percentage"] = "實體廣播範圍百分比 (10-1000)",
         ["force-gamemode"] = "是否強制玩家加入時為預設遊戲模式 (false/true)",
@@ -143,7 +142,7 @@ public static class ServerPropertiesMetadata
         ["player-idle-timeout"] = "0",
         ["prevent-proxy-connections"] = "false",
         ["pvp"] = "true",
-        ["query.port"] = "25565",
+        ["query.port"] = ServerDefaults.DefaultPort,
         ["rate-limit"] = "0",
         ["rcon.password"] = "",
         ["rcon.port"] = "25575",
@@ -154,7 +153,7 @@ public static class ServerPropertiesMetadata
         ["resource-pack-prompt"] = "",
         ["resource-pack-sha1"] = "",
         ["server-ip"] = "",
-        ["server-port"] = "25565",
+        ["server-port"] = ServerDefaults.DefaultPort,
         ["simulation-distance"] = "10",
         ["spawn-monsters"] = "true",
         ["spawn-protection"] = "16",
@@ -261,8 +260,6 @@ public static class ServerPropertiesMetadata
 
     public static readonly IReadOnlyDictionary<string, string> Descriptions = DescriptionsMap;
     public static readonly IReadOnlyDictionary<string, string> DefaultProperties = DefaultsMap;
-    public static readonly IReadOnlyDictionary<string, string> Categories = CategoriesDict;
-    public static readonly IReadOnlyDictionary<string, string[]> Options = OptionsDict;
 
     public static readonly FrozenSet<string> BooleanKeys = new[]
     {

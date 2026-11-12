@@ -3,8 +3,10 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class ServerBackupServiceTests : IDisposable
+public sealed partial class ServerBackupServiceTests : IDisposable
 {
+    private readonly TempDirectory _root = new("msm-backup-tests-");
+    private readonly TempDirectory _external = new("msm-backup-ext-");
     private readonly string _testRoot;
     private readonly string _serverDir;
     private readonly string _externalBackupsDir;
@@ -12,37 +14,21 @@ public sealed class ServerBackupServiceTests : IDisposable
 
     public ServerBackupServiceTests()
     {
-        _testRoot = Path.Combine(Path.GetTempPath(), "msm-backup-tests-" + Guid.NewGuid().ToString("N"));
+        _testRoot = _root.FullName;
         _serverDir = Path.Combine(_testRoot, "TestServer");
-        _externalBackupsDir = Path.Combine(Path.GetTempPath(), "msm-backup-ext-" + Guid.NewGuid().ToString("N"));
+        _externalBackupsDir = _external.FullName;
         Directory.CreateDirectory(_serverDir);
-        Directory.CreateDirectory(_externalBackupsDir);
 
         File.WriteAllText(Path.Combine(_serverDir, "server.properties"), "motd=Initial Server");
         File.WriteAllText(Path.Combine(_serverDir, "world.txt"), "world-data");
 
-        _backupService = new ServerBackupService(_testRoot);
+        _backupService = new ServerBackupService(_testRoot, static () => 10);
     }
 
     public void Dispose()
     {
-        try
-        {
-            if (Directory.Exists(_testRoot))
-            {
-                Directory.Delete(_testRoot, recursive: true);
-            }
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
-
-        try
-        {
-            if (Directory.Exists(_externalBackupsDir))
-            {
-                Directory.Delete(_externalBackupsDir, recursive: true);
-            }
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+        _root.Dispose();
+        _external.Dispose();
     }
 
     [Fact]
@@ -102,37 +88,24 @@ public sealed class ServerBackupServiceTests : IDisposable
     [Fact]
     public async Task SupportsExternalBackupDirectoryForListRestoreAndDelete()
     {
-        string extraDir = Path.Combine(Path.GetTempPath(), "msm-extra-backups-" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: extraDir);
-            Assert.True(File.Exists(backup.FullPath));
-            Assert.StartsWith(Path.GetFullPath(extraDir), backup.FullPath, StringComparison.OrdinalIgnoreCase);
+        using var extra = new TempDirectory("msm-extra-backups-");
+        string extraDir = Path.Combine(extra.FullName, "backups");
+        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: extraDir);
+        Assert.True(File.Exists(backup.FullPath));
+        Assert.StartsWith(Path.GetFullPath(extraDir), backup.FullPath, StringComparison.OrdinalIgnoreCase);
 
-            var listed = await _backupService.ListBackupsAsync("TestServer", extraDir);
-            var item = Assert.Single(listed);
-            Assert.Equal(backup.FileName, item.FileName);
+        var listed = await _backupService.ListBackupsAsync("TestServer", extraDir);
+        var item = Assert.Single(listed);
+        Assert.Equal(backup.FileName, item.FileName);
 
-            File.WriteAllText(Path.Combine(_serverDir, "server.properties"), "motd=Modified Content");
-            bool restored = await _backupService.RestoreBackupAsync("TestServer", backup.FileName, extraDir);
-            Assert.True(restored);
-            Assert.Equal("motd=Initial Server", File.ReadAllText(Path.Combine(_serverDir, "server.properties")));
+        File.WriteAllText(Path.Combine(_serverDir, "server.properties"), "motd=Modified Content");
+        bool restored = await _backupService.RestoreBackupAsync("TestServer", backup.FileName, extraDir);
+        Assert.True(restored);
+        Assert.Equal("motd=Initial Server", File.ReadAllText(Path.Combine(_serverDir, "server.properties")));
 
-            bool deleted = await _backupService.DeleteBackupAsync("TestServer", backup.FileName, extraDir);
-            Assert.True(deleted);
-            Assert.False(File.Exists(backup.FullPath));
-        }
-        finally
-        {
-            try
-            {
-                if (Directory.Exists(extraDir))
-                {
-                    Directory.Delete(extraDir, recursive: true);
-                }
-            }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
-        }
+        bool deleted = await _backupService.DeleteBackupAsync("TestServer", backup.FileName, extraDir);
+        Assert.True(deleted);
+        Assert.False(File.Exists(backup.FullPath));
     }
 
     [Fact]
@@ -164,9 +137,34 @@ public sealed class ServerBackupServiceTests : IDisposable
         Assert.True(File.Exists(Path.Combine(crashDir, "crash-2026-09-24.txt")));
         Assert.Equal("Live crash traceback", File.ReadAllText(Path.Combine(crashDir, "crash-2026-09-24.txt")));
 
-        // 驗證現場記錄檔被保留
-        bool hasLog = File.Exists(Path.Combine(logsDir, "latest.log")) || File.Exists(Path.Combine(logsDir, "latest.log.pre-restore"));
-        Assert.True(hasLog);
+        // 備份建立於無 logs 時，現場記錄檔應原位保留（不產生 .pre-restore）
+        Assert.Equal("Live latest log before disaster", File.ReadAllText(Path.Combine(logsDir, "latest.log")));
+        Assert.False(File.Exists(Path.Combine(logsDir, "latest.log.pre-restore")));
+        Assert.Equal("world-data", File.ReadAllText(Path.Combine(_serverDir, "world.txt")));
+    }
+
+    [Fact]
+    public async Task RestoresBackup_WhenBackupContainsLatestLog_KeepsBothAsPreRestore()
+    {
+        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir);
+
+        // 備份本身預設不含 logs；手動加入 logs/latest.log 模擬舊版備份，使其與現場記錄檔衝突
+        string backupPath = Path.Combine(_externalBackupsDir, backup.FileName);
+        using (var zipStream = new FileStream(backupPath, FileMode.Open, FileAccess.ReadWrite))
+        using (var archive = new System.IO.Compression.ZipArchive(zipStream, System.IO.Compression.ZipArchiveMode.Update))
+        using (var writer = new StreamWriter(archive.CreateEntry("logs/latest.log").Open()))
+        {
+            writer.Write("Log inside backup");
+        }
+
+        string logsDir = Path.Combine(_serverDir, "logs");
+        Directory.CreateDirectory(logsDir);
+        File.WriteAllText(Path.Combine(logsDir, "latest.log"), "Live latest log before disaster");
+
+        Assert.True(await _backupService.RestoreBackupAsync("TestServer", backup.FileName, _externalBackupsDir));
+
+        Assert.Equal("Log inside backup", File.ReadAllText(Path.Combine(logsDir, "latest.log")));
+        Assert.Equal("Live latest log before disaster", File.ReadAllText(Path.Combine(logsDir, "latest.log.pre-restore")));
     }
 
     [Fact]
@@ -218,5 +216,54 @@ public sealed class ServerBackupServiceTests : IDisposable
         Assert.DoesNotContain(entryNames, static n => n.StartsWith("logs/", StringComparison.OrdinalIgnoreCase) || n.StartsWith("logs\\", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(entryNames, static n => n.StartsWith("crash-reports/", StringComparison.OrdinalIgnoreCase) || n.StartsWith("crash-reports\\", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(entryNames, static n => n.StartsWith("backups/", StringComparison.OrdinalIgnoreCase) || n.StartsWith("backups\\", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task CreateBackupAsync_KeepsNestedFoldersNamedLikeExcludedDirectories()
+    {
+        string pluginBackups = Path.Combine(_serverDir, "plugins", "CoreProtect", "backups");
+        string configLogs = Path.Combine(_serverDir, "config", "mod", "logs");
+        Directory.CreateDirectory(pluginBackups);
+        Directory.CreateDirectory(configLogs);
+        File.WriteAllText(Path.Combine(pluginBackups, "data.db"), "plugin data");
+        File.WriteAllText(Path.Combine(configLogs, "settings.json"), "{}");
+
+        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir);
+
+        using var archive = Infrastructure.FileSystem.SafeZipArchive.OpenRead(Path.Combine(_externalBackupsDir, backup.FileName));
+        var entryNames = archive.Entries.Select(static e => e.FullName.Replace('\\', '/')).ToList();
+        Assert.Contains("plugins/CoreProtect/backups/data.db", entryNames, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("config/mod/logs/settings.json", entryNames, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("a", "backup-a-20260101-120000.zip", true)]
+    [InlineData("a", "backup-a-20260101-120000-1a2b3c.zip", true)]
+    [InlineData("a", "a-20260101-120000.zip", true)]
+    [InlineData("a", "backup-a.zip", true)]
+    [InlineData("a", "a.zip", true)]
+    [InlineData("A", "backup-a-20260101-120000.zip", true)]
+    [InlineData("a", "backup-a-b-20260101-120000.zip", false)]
+    [InlineData("a", "a-b-20260101-120000.zip", false)]
+    [InlineData("a", "backup-ab.zip", false)]
+    public void IsBackupFileFor_MatchesOnlyTimestampedOwnBackups(string serverName, string fileName, bool expected) => Assert.Equal(expected, ServerBackupService.IsBackupFileFor(serverName, fileName));
+
+    [Fact]
+    public async Task RetentionCountIsReadDynamicallyFromProvider()
+    {
+        int retention = 3;
+        var service = new ServerBackupService(_testRoot, () => retention);
+
+        for (int i = 0; i < 4; i++)
+        {
+            await service.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir);
+        }
+
+        Assert.Equal(3, (await service.ListBackupsAsync("TestServer", _externalBackupsDir)).Count);
+
+        retention = 1;
+        await service.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir);
+
+        Assert.Single(await service.ListBackupsAsync("TestServer", _externalBackupsDir));
     }
 }

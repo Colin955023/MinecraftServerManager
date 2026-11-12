@@ -1,18 +1,17 @@
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Infrastructure.Utilities;
 using System.Globalization;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>
-/// 伺服器備份與交易式還原服務
-/// </summary>
-public sealed class ServerBackupService(string serversRoot, int maxRetentionCount = 10) : IServerBackupService
+/// <summary>伺服器備份與交易式還原服務</summary>
+public sealed class ServerBackupService(string serversRoot, Func<int> retentionCountProvider) : IServerBackupService
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerBackupService");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerBackupService));
     private readonly string _resolvedServersRoot = SafeFileSystem.ResolveStableDirectory(serversRoot);
-    private readonly int _maxRetentionCount = Math.Max(1, maxRetentionCount);
 
     public Task<IReadOnlyList<ServerBackupInfo>> ListBackupsAsync(
         string serverName,
@@ -35,28 +34,143 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
 
         var list = new List<ServerBackupInfo>();
         var entries = SafeFileSystem.ListBoundedDirectory(backupsDir, rejectReparse: false);
-        string prefix = $"backup-{serverName}-";
         foreach (var entry in entries)
         {
             if (!entry.IsDirectory && entry.FullPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
             {
                 string fn = Path.GetFileName(entry.FullPath);
-                if (fn.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
-                    fn.StartsWith($"{serverName}-", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(fn, $"backup-{serverName}.zip", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(fn, $"{serverName}.zip", StringComparison.OrdinalIgnoreCase))
+                if (IsBackupFileFor(serverName, fn))
                 {
-                    FileSystemMetadata fileInfo = SafeFileSystem.GetFileMetadata(entry.FullPath);
                     list.Add(new ServerBackupInfo(
                         FileName: fn,
                         FullPath: entry.FullPath,
-                        SizeBytes: fileInfo.Length,
-                        CreatedAt: fileInfo.CreationTimeUtc));
+                        SizeBytes: entry.Length,
+                        CreatedAt: entry.CreationTimeUtc));
                 }
             }
         }
 
         return Task.FromResult<IReadOnlyList<ServerBackupInfo>>([.. list.OrderByDescending(static b => b.CreatedAt)]);
+    }
+
+    public ServerBackupSummary GetBackupSummary(string serverName, string? backupDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverName);
+        if (string.IsNullOrWhiteSpace(backupDirectory))
+        {
+            return new ServerBackupSummary(ServerBackupSummaryStatus.NotConfigured);
+        }
+
+        try
+        {
+            if (!SafeFileSystem.DirectoryExists(backupDirectory))
+            {
+                return new ServerBackupSummary(ServerBackupSummaryStatus.DirectoryMissing);
+            }
+
+            int count = 0;
+            DateTime? latestUtc = null;
+            foreach (var entry in SafeFileSystem.ListBoundedDirectory(backupDirectory))
+            {
+                if (entry.IsDirectory
+                    || !entry.FullPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+                    || !IsBackupFileFor(serverName, Path.GetFileName(entry.FullPath)))
+                {
+                    continue;
+                }
+
+                count++;
+                if (latestUtc is null || entry.LastWriteTimeUtc > latestUtc)
+                {
+                    latestUtc = entry.LastWriteTimeUtc;
+                }
+            }
+
+            return count > 0
+                ? new ServerBackupSummary(ServerBackupSummaryStatus.HasBackups, count, latestUtc?.ToLocalTime())
+                : new ServerBackupSummary(ServerBackupSummaryStatus.NoBackups);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Warning(ex, "讀取備份清單失敗 ({Path})", backupDirectory);
+            return new ServerBackupSummary(ServerBackupSummaryStatus.ReadFailed);
+        }
+    }
+
+    public string? ValidateBackupDestination(string destinationPath)
+    {
+        if (string.IsNullOrWhiteSpace(destinationPath))
+        {
+            return "未指定備份路徑";
+        }
+
+        try
+        {
+            string targetDir = SafeFileSystem.FileExists(destinationPath) || destinationPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+                ? (Path.GetDirectoryName(destinationPath) ?? destinationPath)
+                : destinationPath;
+
+            return IsInsideServersRoot(targetDir)
+                ? "備份路徑不得位於伺服器存放目錄或其子目錄內，請重新選擇其他外部資料夾。"
+                : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Warning(ex, "路徑邊界解析失敗");
+            return $"路徑解析失敗：{ex.Message}";
+        }
+    }
+
+    public string PrepareBackupFilePath(string serverName, string destinationDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationDirectory);
+
+        SafeFileSystem.CreateDirectory(destinationDirectory);
+        string timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+        return Path.Combine(destinationDirectory, $"backup-{serverName}-{timestamp}.zip");
+    }
+
+    private const string BackupPrefix = "backup-";
+    private const string ZipExtension = ".zip";
+
+    /// <summary>
+    /// 判斷檔名是否為指定伺服器的備份壓縮檔；
+    /// 名稱後須接 <c>yyyyMMdd-HHmmss</c> 時間戳記，避免伺服器 <c>a</c> 誤認 <c>a-b</c> 的備份
+    /// </summary>
+    internal static bool IsBackupFileFor(string serverName, string fileName)
+    {
+        ReadOnlySpan<char> file = fileName;
+        ReadOnlySpan<char> name = serverName;
+        return MatchesBackupName(file, BackupPrefix, name) || MatchesBackupName(file, default, name);
+    }
+
+    private static bool MatchesBackupName(ReadOnlySpan<char> fileName, ReadOnlySpan<char> prefix, ReadOnlySpan<char> serverName)
+    {
+        if (!fileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> rest = fileName[prefix.Length..];
+        if (!rest.StartsWith(serverName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        rest = rest[serverName.Length..];
+        if (rest.Equals(ZipExtension, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // 時間戳記格式：-yyyyMMdd-HHmmss
+        const int stampLength = 1 + 8 + 1 + 6;
+        return rest.Length >= stampLength
+            && rest[0] == '-'
+            && rest.Slice(1, 8).ContainsAnyExceptInRange('0', '9') is false
+            && rest[9] == '-'
+            && rest.Slice(10, 6).ContainsAnyExceptInRange('0', '9') is false;
     }
 
     public async Task<ServerBackupInfo> CreateBackupAsync(
@@ -80,9 +194,7 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
             throw new InvalidOperationException("未指定備份目標路徑。備份必須存放於伺服器目錄以外之外部資料夾。");
         }
 
-        string normalizedDest = Path.GetFullPath(destinationPath);
-        string normalizedServersRoot = Path.GetFullPath(_resolvedServersRoot);
-        if (SafeFileSystem.IsPathWithin(normalizedServersRoot, normalizedDest, strict: false))
+        if (IsInsideServersRoot(destinationPath))
         {
             throw new InvalidOperationException("備份路徑不得位於伺服器根目錄 (servers/) 或其子目錄內，請選擇其他儲存位置");
         }
@@ -111,9 +223,6 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
             backupFilePath = Path.Combine(backupDirectory, backupFileName);
         }
 
-        string legacyBackupsDir = Path.Combine(serverDir, "backups");
-        string legacyBackupsPrefix = Path.TrimEndingDirectorySeparator(Path.GetFullPath(legacyBackupsDir)) + Path.DirectorySeparatorChar;
-
         await Task.Run(() =>
         {
             List<FileSystemEntry> filesToBackup;
@@ -122,36 +231,19 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
                 var entries = SafeFileSystem.EnumerateBoundedTree(
                     serverDir,
                     rejectReparse: true,
-                    pruneDirectory: static (fullPath, name) =>
-                        name.Equals("logs", StringComparison.OrdinalIgnoreCase) ||
-                        name.Equals("crash-reports", StringComparison.OrdinalIgnoreCase) ||
-                        name.Equals("backups", StringComparison.OrdinalIgnoreCase));
+                    // 僅略過伺服器根目錄下的 logs、crash-reports 與舊版 backups，巢狀同名資料夾（如外掛備份）照常備份
+                    pruneDirectory: (fullPath, name) =>
+                        string.Equals(Path.GetDirectoryName(fullPath), serverDir, StringComparison.OrdinalIgnoreCase) &&
+                        (name.Equals("logs", StringComparison.OrdinalIgnoreCase) ||
+                         name.Equals("crash-reports", StringComparison.OrdinalIgnoreCase) ||
+                         name.Equals("backups", StringComparison.OrdinalIgnoreCase)));
 
-                filesToBackup = entries
-                    .Where(static e => !e.IsDirectory)
-                    .Where(e =>
-                    {
-                        string filePath = e.FullPath;
-                        ReadOnlySpan<char> rel = Path.GetRelativePath(serverDir, filePath);
-                        int sepIdx = rel.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                        ReadOnlySpan<char> firstSegment = sepIdx >= 0 ? rel[..sepIdx] : rel;
-
-                        if (firstSegment.Equals("logs", StringComparison.OrdinalIgnoreCase) ||
-                            firstSegment.Equals("crash-reports", StringComparison.OrdinalIgnoreCase))
-                        {
-                            return false;
-                        }
-
-                        bool isUnderBackups = filePath.StartsWith(legacyBackupsPrefix, StringComparison.OrdinalIgnoreCase) ||
-                                              filePath.Equals(legacyBackupsDir, StringComparison.OrdinalIgnoreCase);
-
-                        return !isUnderBackups &&
-                               !filePath.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) &&
-                               !filePath.EndsWith(".lock", StringComparison.OrdinalIgnoreCase);
-                    })
-                    .ToList();
+                filesToBackup = [.. entries
+                    .Where(static e => !e.IsDirectory &&
+                        !e.FullPath.EndsWith(AtomicFileWriter.TempFileExtension, StringComparison.OrdinalIgnoreCase) &&
+                        !e.FullPath.EndsWith(".lock", StringComparison.OrdinalIgnoreCase))];
             }
-            catch (SafeFileSystemException ex) when (ex.Message.Contains("安全上限", StringComparison.OrdinalIgnoreCase))
+            catch (SafeFileSystemException ex) when (ex.IsLimitExceeded)
             {
                 throw new InvalidOperationException($"伺服器檔案數量或大小超過安全備份上限（安全上限：{SafeFileSystem.DefaultMaxEntries} 個項目或 128 GB）。請清理地圖快取或暫存檔案後重試。", ex);
             }
@@ -227,10 +319,11 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
             return false;
         }
 
-        string stagingDir = Path.Combine(_resolvedServersRoot, $".restore-staging-{Guid.NewGuid():N}");
-        string rollbackDir = Path.Combine(_resolvedServersRoot, $".restore-rollback-{Guid.NewGuid():N}");
-        string preservedLogsDir = Path.Combine(_resolvedServersRoot, $".restore-preserved-logs-{Guid.NewGuid():N}");
+        string stagingDir = Path.Combine(_resolvedServersRoot, $"{ServerDefaults.InternalPrefix}restore-staging-{Guid.NewGuid():N}");
+        string rollbackDir = Path.Combine(_resolvedServersRoot, $"{ServerDefaults.InternalPrefix}restore-rollback-{Guid.NewGuid():N}");
+        string preservedLogsDir = Path.Combine(_resolvedServersRoot, $"{ServerDefaults.InternalPrefix}restore-preserved-logs-{Guid.NewGuid():N}");
         bool hasPreservedLogs = false;
+        bool snapshotCompleted = false;
 
         progress?.Report(new ServerBackupProgressReport(5, "正在暫存現場診斷記錄檔...", 0, 0));
 
@@ -242,51 +335,38 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
                 if (SafeFileSystem.DirectoryExists(serverDir))
                 {
                     SafeFileSystem.RemoveReadOnlyAttributesRecursive(serverDir);
-                    PreserveLiveDiagnostics(serverDir, preservedLogsDir);
-                    hasPreservedLogs = SafeFileSystem.DirectoryExists(preservedLogsDir) && SafeFileSystem.EnumerateFileSystemEntries(preservedLogsDir).Any();
+                    PreserveLiveDiagnostics(serverDir, preservedLogsDir, cancellationToken);
+                    hasPreservedLogs = SafeFileSystem.DirectoryExists(preservedLogsDir) && !SafeFileSystem.IsDirectoryEmpty(preservedLogsDir);
                 }
 
-                // 階段一：在暫存 staging 目錄解壓並校驗完整性
+                // 階段一：在暫存 staging 目錄解壓縮並驗證完整性
                 SafeFileSystem.CreateDirectory(stagingDir);
                 progress?.Report(new ServerBackupProgressReport(10, "正在解壓縮備份檔案...", 0, 0));
                 SafeZipArchive.Extract(backupFilePath, stagingDir, (extracted, total) =>
                 {
                     int pct = total > 0 ? (int)(10 + (extracted * 50 / total)) : 35;
                     progress?.Report(new ServerBackupProgressReport(Math.Clamp(pct, 10, 60), $"正在解壓縮檔案 ({Math.Clamp(pct, 10, 60)}%)...", extracted, total));
-                });
+                }, cancellationToken);
                 SafeFileSystem.RemoveReadOnlyAttributesRecursive(stagingDir);
 
                 // 階段二：建立既有伺服器檔案之 rollback 快照
                 progress?.Report(new ServerBackupProgressReport(65, "正在建立伺服器現況快照...", 0, 0));
                 SafeFileSystem.CreateDirectory(rollbackDir);
-                var currentEntries = SafeFileSystem.ListBoundedDirectory(serverDir, rejectReparse: false);
                 string legacyBackupsDir = Path.Combine(serverDir, "backups");
-                foreach (var entry in currentEntries)
-                {
+                SafeFileSystem.MoveChildren(
+                    serverDir,
+                    rollbackDir,
                     // 保留歷史 backups 目錄不移動
-                    if (string.Equals(entry.FullPath, legacyBackupsDir, StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    string relName = Path.GetFileName(entry.FullPath);
-                    string targetRollback = Path.Combine(rollbackDir, relName);
-
-                    SafeFileSystem.ClearReadOnlyAttribute(entry.FullPath);
-                    SafeFileSystem.MovePath(entry.FullPath, targetRollback);
-                }
+                    skip: entry => string.Equals(entry.FullPath, legacyBackupsDir, StringComparison.OrdinalIgnoreCase),
+                    beforeMove: (entry, _) => SafeFileSystem.ClearReadOnlyAttribute(entry.FullPath));
+                snapshotCompleted = true;
 
                 // 階段三：將 staging 中的還原內容搬移至伺服器目錄
                 progress?.Report(new ServerBackupProgressReport(80, "正在還原備份檔案至伺服器目錄...", 0, 0));
-                var stagingEntries = SafeFileSystem.ListBoundedDirectory(stagingDir, rejectReparse: false);
-                foreach (var sEntry in stagingEntries)
-                {
-                    string relName = Path.GetFileName(sEntry.FullPath);
-                    string targetLive = Path.Combine(serverDir, relName);
-
-                    SafeFileSystem.ClearReadOnlyAttribute(sEntry.FullPath);
-                    SafeFileSystem.MovePath(sEntry.FullPath, targetLive);
-                }
+                SafeFileSystem.MoveChildren(
+                    stagingDir,
+                    serverDir,
+                    beforeMove: (entry, _) => SafeFileSystem.ClearReadOnlyAttribute(entry.FullPath));
 
                 // 階段四：將現場保留之診斷記錄檔安全合併移回伺服器目錄
                 if (hasPreservedLogs)
@@ -304,41 +384,74 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
                 progress?.Report(new ServerBackupProgressReport(100, "備份還原完成！", 0, 0));
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
-                // 發生異常時自動執行交易復原
+                Logger.Error(ex, "還原備份失敗，執行交易復原");
+                // 發生例外時自動執行交易復原
+                bool rollbackSucceeded = false;
                 try
                 {
                     if (SafeFileSystem.DirectoryExists(rollbackDir))
                     {
-                        var rollbackEntries = SafeFileSystem.ListBoundedDirectory(rollbackDir, rejectReparse: false);
-                        foreach (var rbEntry in rollbackEntries)
+                        if (snapshotCompleted)
                         {
-                            string relName = Path.GetFileName(rbEntry.FullPath);
-                            string targetLive = Path.Combine(serverDir, relName);
-
-                            if (SafeFileSystem.FileExists(targetLive))
+                            // 快照完成後伺服器目錄內只剩 backups 與已搬入的還原內容；先清掉後者，避免復原後新舊檔案混雜
+                            string keptBackupsDir = Path.Combine(serverDir, "backups");
+                            foreach (var leftover in SafeFileSystem.ListBoundedDirectory(serverDir, rejectReparse: false))
                             {
-                                SafeFileSystem.DeleteFile(targetLive);
-                            }
-                            else if (SafeFileSystem.DirectoryExists(targetLive))
-                            {
-                                SafeFileSystem.DeleteDirectory(targetLive, recursive: true);
-                            }
+                                if (string.Equals(leftover.FullPath, keptBackupsDir, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    continue;
+                                }
 
-                            SafeFileSystem.MovePath(rbEntry.FullPath, targetLive);
+                                if (leftover.IsDirectory)
+                                {
+                                    SafeFileSystem.DeleteDirectory(leftover.FullPath, recursive: true);
+                                }
+                                else
+                                {
+                                    SafeFileSystem.DeleteFile(leftover.FullPath);
+                                }
+                            }
                         }
+
+                        SafeFileSystem.MoveChildren(
+                            rollbackDir,
+                            serverDir,
+                            beforeMove: (_, targetLive) =>
+                            {
+                                if (SafeFileSystem.FileExists(targetLive))
+                                {
+                                    SafeFileSystem.DeleteFile(targetLive);
+                                }
+                                else if (SafeFileSystem.DirectoryExists(targetLive))
+                                {
+                                    SafeFileSystem.DeleteDirectory(targetLive, recursive: true);
+                                }
+                            });
                     }
+
+                    rollbackSucceeded = true;
                 }
                 catch (Exception rbEx) when (rbEx is not OperationCanceledException)
                 {
-                    Logger.Error(rbEx, "還原失敗後嘗試復原現場檔案時發生錯誤");
+                    Logger.Error(rbEx, "還原失敗後嘗試復原現場檔案時發生錯誤，保留快照目錄供人工復原: {RollbackDir}", rollbackDir);
                 }
                 finally
                 {
-                    CleanDirectorySafe(rollbackDir);
+                    // 復原未完成時快照內仍有原始檔案，不可刪除
+                    if (rollbackSucceeded)
+                    {
+                        CleanDirectorySafe(rollbackDir);
+                    }
+
                     CleanDirectorySafe(stagingDir);
                     CleanDirectorySafe(preservedLogsDir);
+                }
+
+                if (ex is OperationCanceledException)
+                {
+                    throw;
                 }
 
                 return false;
@@ -379,12 +492,13 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
         CancellationToken cancellationToken)
     {
         var existing = await ListBackupsAsync(serverName, backupDirectory, cancellationToken).ConfigureAwait(false);
-        if (existing.Count <= _maxRetentionCount)
+        int maxRetentionCount = Math.Max(1, retentionCountProvider());
+        if (existing.Count <= maxRetentionCount)
         {
             return;
         }
 
-        var toRemove = existing.Skip(_maxRetentionCount).ToList();
+        var toRemove = existing.Skip(maxRetentionCount).ToList();
         foreach (var backup in toRemove)
         {
             await DeleteBackupAsync(serverName, backup.FileName, backupDirectory, cancellationToken).ConfigureAwait(false);
@@ -397,15 +511,17 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
     private string ResolveExternalBackupDirectory(string backupDirectory)
     {
         string resolved = SafeFileSystem.ResolveStableDirectory(backupDirectory, create: true);
-        string normalizedRoot = Path.GetFullPath(_resolvedServersRoot);
-        string normalizedBackup = Path.GetFullPath(resolved);
-        if (SafeFileSystem.IsPathWithin(normalizedRoot, normalizedBackup, strict: false))
+        if (IsInsideServersRoot(resolved))
         {
             throw new InvalidOperationException("備份資料夾不得位於伺服器根目錄 (servers/) 或其子目錄內");
         }
 
         return resolved;
     }
+
+    /// <summary>路徑是否位於伺服器存放目錄或其子目錄內（備份不得存放於此）</summary>
+    private bool IsInsideServersRoot(string path) =>
+        SafeFileSystem.IsPathWithin(Path.GetFullPath(_resolvedServersRoot), Path.GetFullPath(path), strict: false);
 
     private static void CleanDirectorySafe(string dirPath)
     {
@@ -418,22 +534,22 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning("安全清理目錄失敗: {0}", ex.Message);
+            Logger.Warning(ex, "安全清理目錄失敗");
         }
     }
 
-    private static void PreserveLiveDiagnostics(string serverDir, string destinationDir)
+    private static void PreserveLiveDiagnostics(string serverDir, string destinationDir, CancellationToken cancellationToken = default)
     {
         string liveLogs = Path.Combine(serverDir, "logs");
         string liveCrash = Path.Combine(serverDir, "crash-reports");
 
         if (SafeFileSystem.DirectoryExists(liveLogs))
         {
-            SafeFileSystem.CopyDirectoryTreeSafe(liveLogs, Path.Combine(destinationDir, "logs"));
+            SafeFileSystem.CopyDirectoryTreeSafe(liveLogs, Path.Combine(destinationDir, "logs"), cancellationToken);
         }
         if (SafeFileSystem.DirectoryExists(liveCrash))
         {
-            SafeFileSystem.CopyDirectoryTreeSafe(liveCrash, Path.Combine(destinationDir, "crash-reports"));
+            SafeFileSystem.CopyDirectoryTreeSafe(liveCrash, Path.Combine(destinationDir, "crash-reports"), cancellationToken);
         }
     }
 

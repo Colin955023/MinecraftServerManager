@@ -1,12 +1,36 @@
-using System.Windows;
-using System.Windows.Markup;
-using System.Xml;
+using System.Collections.Frozen;
+using System.Xml.Linq;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
 public sealed class ColorIconsResourceTests
 {
+    private static readonly XNamespace XamlNs = "http://schemas.microsoft.com/winfx/2006/xaml";
+    private static readonly FrozenSet<string> DefinedResourceKeys = LoadResourceKeys();
+
+    private static FrozenSet<string> LoadResourceKeys()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            string path = Path.Combine(dir.FullName, "src", "MinecraftServerManager.App", "Resources", "ColorIcons.xaml");
+            if (File.Exists(path))
+            {
+                var doc = XDocument.Load(path);
+                return doc.Descendants()
+                    .Select(e => (string?)e.Attribute(XamlNs + "Key"))
+                    .Where(static k => !string.IsNullOrEmpty(k))
+                    .Select(static k => k!)
+                    .ToFrozenSet(StringComparer.Ordinal);
+            }
+
+            dir = dir.Parent;
+        }
+
+        throw new FileNotFoundException("找不到 ColorIcons.xaml");
+    }
+
     [Theory]
     [InlineData("IconCreateServer")]
     [InlineData("IconManageServer")]
@@ -23,32 +47,8 @@ public sealed class ColorIconsResourceTests
     [InlineData("IconSearch")]
     [InlineData("IconRefresh")]
     [InlineData("IconWarning")]
-    [InlineData("IconGlobe")]
     [InlineData("IconCheck")]
     [InlineData("IconUserGroup")]
-    public void ColorIconsShouldContainAllRequiredKeys(string resourceKey)
-    {
-        // 尋找 ColorIcons.xaml 相對路徑
-        string basePath = AppContext.BaseDirectory;
-        string? candidate = null;
-        var dir = new DirectoryInfo(basePath);
-        while (dir is not null)
-        {
-            string path = Path.Combine(dir.FullName, "src", "MinecraftServerManager.App", "Resources", "ColorIcons.xaml");
-            if (File.Exists(path))
-            {
-                candidate = path;
-                break;
-            }
-            dir = dir.Parent;
-        }
-
-        Assert.True(candidate is not null && File.Exists(candidate), "找不到 ColorIcons.xaml");
-
-        using var fileStream = File.OpenRead(candidate);
-        using var xmlReader = XmlReader.Create(fileStream);
-        var resourceDictionary = (ResourceDictionary)XamlReader.Load(xmlReader);
-
-        Assert.True(resourceDictionary.Contains(resourceKey), $"ColorIcons.xaml 遺漏圖示資源: {resourceKey}");
-    }
+    public void ColorIconsShouldContainAllRequiredKeys(string resourceKey) =>
+        Assert.Contains(resourceKey, (IReadOnlySet<string>)DefinedResourceKeys);
 }

@@ -4,27 +4,17 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class ServerPropertiesTests : IDisposable
+public sealed partial class ServerPropertiesTests : IDisposable
 {
+    private readonly TempDirectory _testRootTemp = new("msm-props-tests-");
     private readonly string _testRoot;
 
     public ServerPropertiesTests()
     {
-        _testRoot = Path.Combine(Path.GetTempPath(), "msm-props-tests-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testRoot);
+        _testRoot = _testRootTemp.FullName;
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testRoot))
-            {
-                Directory.Delete(_testRoot, recursive: true);
-            }
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
-    }
+    public void Dispose() => _testRootTemp.Dispose();
 
     [Fact]
     public void CodecParsesBasicAndEscapedProperties()
@@ -54,7 +44,8 @@ server-port=25565
 ";
         var parsed = PropertiesDocumentCodec.Parse(raw);
 
-        Assert.Equal("Line 1      Line 2", parsed["motd"]);
+        // Java Properties 規則：延續行的前導空白不屬於值
+        Assert.Equal("Line 1 Line 2", parsed["motd"]);
         Assert.Equal("25565", parsed["server-port"]);
     }
 
@@ -87,7 +78,7 @@ server-port=25565
 
         Assert.Equal(ServerPropertiesReadStatus.Missing, snapshot.Status);
         Assert.True(snapshot.Readable);
-        Assert.Equal("25565", snapshot.GetProperty("server-port"));
+        Assert.Equal("25565", snapshot.Properties["server-port"]);
     }
 
     [Fact]
@@ -105,8 +96,8 @@ server-port=25565
             initial.Revision);
 
         Assert.True(update1.Success);
-        Assert.Equal("25570", update1.Snapshot.GetProperty("server-port"));
-        Assert.Equal("hard", update1.Snapshot.GetProperty("difficulty"));
+        Assert.Equal("25570", update1.Snapshot.Properties["server-port"]);
+        Assert.Equal("hard", update1.Snapshot.Properties["difficulty"]);
 
         // 使用舊 revision 嘗試更新，預期發生衝突
         var conflict = await store.UpdateAsync(

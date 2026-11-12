@@ -14,15 +14,17 @@ public sealed class RestoreBackupViewModelTests
             new ServerBackupInfo("backup_2026.zip", "/backups/backup_2026.zip", 1024 * 1024, DateTimeOffset.UtcNow)
         ]);
 
-        var vm = new RestoreBackupViewModel(backupService, "TestServer", "/backups", uiService: NoOpUiService.Instance);
+        var vm = new RestoreBackupViewModel(backupService, "TestServer", NoOpUiService.Instance, "/backups", static () => false);
         await vm.RefreshBackupsAsync();
 
         var item = Assert.Single(vm.Backups);
         Assert.Equal("backup_2026.zip", item.FileName);
     }
 
-    [Fact]
-    public async Task RestoreAsync_WhenServerRunning_BlocksRestore()
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task RestoreAsync_HonorsServerRunningState(bool isRunning, bool expectedRestored)
     {
         var backupService = new FakeBackupService([
             new ServerBackupInfo("backup_2026.zip", "/backups/backup_2026.zip", 1024 * 1024, DateTimeOffset.UtcNow)
@@ -31,39 +33,20 @@ public sealed class RestoreBackupViewModelTests
         var vm = new RestoreBackupViewModel(
             backupService,
             "TestServer",
+            NoOpUiService.Instance,
             "/backups",
-            isServerRunningCheck: static () => true,
-            uiService: NoOpUiService.Instance);
+            isServerRunningCheck: () => isRunning);
 
         await vm.RefreshBackupsAsync();
         vm.SelectedBackup = vm.Backups[0];
 
         await vm.RestoreAsync();
 
-        Assert.False(backupService.RestoreCalled);
-        Assert.Contains("伺服器正在執行中", vm.StatusMessage);
-    }
-
-    [Fact]
-    public async Task RestoreAsync_WhenServerStopped_ExecutesRestore()
-    {
-        var backupService = new FakeBackupService([
-            new ServerBackupInfo("backup_2026.zip", "/backups/backup_2026.zip", 1024 * 1024, DateTimeOffset.UtcNow)
-        ]);
-
-        var vm = new RestoreBackupViewModel(
-            backupService,
-            "TestServer",
-            "/backups",
-            isServerRunningCheck: static () => false,
-            uiService: NoOpUiService.Instance);
-
-        await vm.RefreshBackupsAsync();
-        vm.SelectedBackup = vm.Backups[0];
-
-        await vm.RestoreAsync();
-
-        Assert.True(backupService.RestoreCalled);
+        Assert.Equal(expectedRestored, backupService.RestoreCalled);
+        if (isRunning)
+        {
+            Assert.Contains("伺服器正在執行中", vm.StatusMessage);
+        }
     }
 
     private sealed class FakeBackupService(IReadOnlyList<ServerBackupInfo> backups) : IServerBackupService
@@ -101,5 +84,13 @@ public sealed class RestoreBackupViewModelTests
             string? backupDirectory = null,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(true);
+
+        public ServerBackupSummary GetBackupSummary(string serverName, string? backupDirectory) =>
+            new(ServerBackupSummaryStatus.HasBackups, backups.Count);
+
+        public string? ValidateBackupDestination(string destinationPath) => null;
+
+        public string PrepareBackupFilePath(string serverName, string destinationDirectory) =>
+            Path.Combine(destinationDirectory, $"backup-{serverName}.zip");
     }
 }

@@ -1,22 +1,26 @@
-using System.Windows;
-using System.Windows.Input;
+using Microsoft.UI.Xaml;
+using MinecraftServerManager.App.Controls;
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-public partial class ManageJavaDialog : Window
+/// <summary>管理 Java 環境視窗（原生模態視窗，透過 ModalWindowHost 裝載）</summary>
+public sealed partial class ManageJavaDialog : Window
 {
-    private readonly ManageJavaViewModel _viewModel;
+    public ManageJavaViewModel ViewModel { get; }
+    public bool? DialogResult { get; private set; }
 
     public ManageJavaDialog(ManageJavaViewModel viewModel)
     {
+        ViewModel = viewModel;
         InitializeComponent();
-        _viewModel = viewModel;
-        DataContext = _viewModel;
-        _viewModel.RequestClose += () =>
+        ModalWindowHost.ConfigureDialogWindow(this, "管理 Java 環境", 820, 620, Bindings.StopTracking);
+
+        ViewModel.RequestClose += () =>
         {
             DialogResult = true;
-            Close();
+            ModalWindowHost.CloseDeferred(this);
         };
     }
 
@@ -26,11 +30,15 @@ public partial class ManageJavaDialog : Window
         Close();
     }
 
-    private void DataGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    private void ListView_DoubleTapped(object sender, Microsoft.UI.Xaml.Input.DoubleTappedRoutedEventArgs e)
     {
-        if (_viewModel.SelectedJava is not null)
+        if (ViewModel.ApplyCommand.CanExecute(null))
         {
-            _viewModel.Apply();
+            ViewModel.ApplyCommand.Execute(null);
         }
     }
+
+    private void OnHeaderSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.InstalledJavas.SortBy(TableSortKeys.Javas, e);
+
+    private void OnHeaderAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.InstalledJavas, TableSortKeys.Javas);
 }

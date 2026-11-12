@@ -3,29 +3,39 @@ using System.Text;
 using Microsoft.Extensions.Logging;
 using MinecraftServerManager.Infrastructure.FileSystem;
 
+using MinecraftServerManager.Infrastructure.Utilities;
+
 namespace MinecraftServerManager.Infrastructure.Logging;
 
-/// <summary>
-/// 提供單檔上限 10 MiB 輪替與最多 10 檔保留之檔案記錄器提供者
-/// </summary>
-public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExternalScope
+/// <summary>提供單檔上限 10 MiB 輪替與最多 10 檔保留之檔案記錄器提供者</summary>
+public sealed class RotatingFileLoggerProvider : ILoggerProvider
 {
     private readonly RotatingFileLoggerOptions _options;
     private readonly Lock _syncRoot = new();
     private readonly ConcurrentDictionary<string, RotatingFileLogger> _loggers = new(StringComparer.OrdinalIgnoreCase);
-    private IExternalScopeProvider? _scopeProvider;
     private StreamWriter? _writer;
     private string _currentFilePath = string.Empty;
     private long _currentFileBytes;
     private bool _isDisposed;
 
-    public RotatingFileLoggerProvider(RotatingFileLoggerOptions? options = null)
+    public RotatingFileLoggerProvider(RotatingFileLoggerOptions options)
     {
-        _options = options ?? new RotatingFileLoggerOptions();
+        ArgumentNullException.ThrowIfNull(options);
+        _options = options;
         InitializeWriter();
     }
 
-    public void SetScopeProvider(IExternalScopeProvider scopeProvider) => _scopeProvider = scopeProvider;
+    /// <summary>目前寫入中的記錄檔完整路徑；初始化失敗時為空字串</summary>
+    internal string CurrentFilePath
+    {
+        get
+        {
+            lock (_syncRoot)
+            {
+                return _currentFilePath;
+            }
+        }
+    }
 
     public ILogger CreateLogger(string categoryName)
     {
@@ -48,9 +58,9 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
                 _writer?.Flush();
                 _writer?.Dispose();
             }
-            catch
+            catch (Exception)
             {
-                // 忽略關閉時的 I/O 錯誤
+                // 日誌器無法記錄自身的關閉失敗
             }
             finally
             {
@@ -68,7 +78,7 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
             return;
         }
 
-        string component = ResolveComponent(categoryName);
+        string component = string.IsNullOrWhiteSpace(categoryName) ? "Global" : categoryName;
         string timestamp = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
         string levelString = FormatLogLevel(logLevel);
         string maskedMessage = LogDataMasker.Mask(message);
@@ -89,18 +99,6 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
         }
 
         string logLine = sb.ToString();
-
-        if (_options.OutputToConsole)
-        {
-            try
-            {
-                Console.Error.WriteLine(logLine);
-            }
-            catch
-            {
-                // 忽略主控台輸出例外
-            }
-        }
 
         lock (_syncRoot)
         {
@@ -125,9 +123,9 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
                     DoRollover();
                 }
             }
-            catch
+            catch (Exception)
             {
-                // 檔案寫入失敗時不造成宿主行程閃退
+                // 日誌器無法記錄自身的寫入失敗
             }
         }
     }
@@ -143,10 +141,9 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
                 {
                     logDir = SafeFileSystem.ResolveStableDirectory(_options.LogDirectory, create: true);
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    Console.Error.WriteLine($"[RotatingFileLoggerProvider] 無法於預設目錄建立記錄檔 ({ex.Message})，嘗試切換至暫存目錄備援");
-                    string fallbackDir = Path.Combine(Path.GetTempPath(), "MinecraftServerManager", "Logs");
+                    string fallbackDir = Path.Combine(RuntimePaths.GetTempDir(), "MinecraftServerManager", "Logs");
                     SafeFileSystem.CreateDirectory(fallbackDir);
                     logDir = fallbackDir;
                 }
@@ -159,9 +156,9 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
 
                 OpenWriter();
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Console.Error.WriteLine($"[RotatingFileLoggerProvider] 備援記錄檔初始化亦失敗: {ex.Message}");
+                // 日誌器無法記錄自身的初始化失敗；放棄寫入器，後續記錄將被忽略
                 _writer = null;
             }
         }
@@ -224,12 +221,15 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
             PruneLogs(logDir, _options.MaxArchiveFiles);
             OpenWriter();
         }
-        catch
+        catch (Exception)
         {
-            // 輪替失敗時嘗試重新開啟原檔繼續記錄
+            // 輪替失敗時仍嘗試重新開啟寫入器，確保後續記錄不中斷
             OpenWriter();
         }
     }
+
+    private static bool IsLogFileName(string fileName) =>
+        fileName.EndsWith(".log", StringComparison.OrdinalIgnoreCase) || fileName.Contains(".log.", StringComparison.OrdinalIgnoreCase);
 
     public static void PruneLogs(string logDir, int keep)
     {
@@ -241,8 +241,7 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
         try
         {
             var files = SafeFileSystem.ListBoundedDirectory(logDir)
-                .Where(static entry => !entry.IsDirectory &&
-                    (entry.FullPath.EndsWith(".log", StringComparison.OrdinalIgnoreCase) || entry.FullPath.Contains(".log.", StringComparison.OrdinalIgnoreCase)))
+                .Where(static entry => !entry.IsDirectory && IsLogFileName(Path.GetFileName(entry.FullPath)))
                 .OrderBy(static entry => entry.LastWriteTimeUtc)
                 .ToList();
 
@@ -252,48 +251,14 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
                 SafeFileSystem.DeleteWithin(logDir, files[i].FullPath);
             }
         }
-        catch
+        catch (Exception)
         {
-            // 清理失敗不中斷主流程
+            // 日誌器無法記錄自身的清理失敗；保留舊檔不影響後續寫入
         }
-    }
-
-    private string ResolveComponent(string fallbackCategory)
-    {
-        string component = string.Empty;
-
-        _scopeProvider?.ForEachScope((scope, _) =>
-        {
-            if (scope is IReadOnlyDictionary<string, object?> dict &&
-                dict.TryGetValue("component", out object? value) &&
-                value is not null)
-            {
-                component = value.ToString() ?? string.Empty;
-            }
-            else if (scope is IEnumerable<KeyValuePair<string, object?>> pairs)
-            {
-                foreach (var pair in pairs)
-                {
-                    if (string.Equals(pair.Key, "component", StringComparison.OrdinalIgnoreCase) && pair.Value is not null)
-                    {
-                        component = pair.Value.ToString() ?? string.Empty;
-                    }
-                }
-            }
-        }, state: (object?)null);
-
-        if (!string.IsNullOrWhiteSpace(component))
-        {
-            return component;
-        }
-
-        return string.IsNullOrWhiteSpace(fallbackCategory) ? "Global" : fallbackCategory;
     }
 
     private static string FormatLogLevel(LogLevel level) => level switch
     {
-        LogLevel.Trace => "TRACE   ",
-        LogLevel.Debug => "DEBUG   ",
         LogLevel.Information => "INFO    ",
         LogLevel.Warning => "WARNING ",
         LogLevel.Error => "ERROR   ",
@@ -303,7 +268,7 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
 
     private sealed class RotatingFileLogger(RotatingFileLoggerProvider provider, string categoryName) : ILogger
     {
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => provider._scopeProvider?.Push(state) ?? NullScope.Instance;
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
         public bool IsEnabled(LogLevel logLevel) => provider.IsEnabled(logLevel);
 
@@ -321,15 +286,6 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
 
             string message = formatter(state, exception);
             provider.WriteLog(categoryName, logLevel, message, exception);
-        }
-    }
-
-    private sealed class NullScope : IDisposable
-    {
-        public static NullScope Instance { get; } = new();
-
-        public void Dispose()
-        {
         }
     }
 }

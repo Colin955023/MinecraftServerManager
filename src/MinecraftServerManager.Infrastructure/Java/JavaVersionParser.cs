@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text.RegularExpressions;
 
 namespace MinecraftServerManager.Infrastructure.Java;
@@ -9,6 +10,9 @@ public readonly record struct JavaVersionDetails(
 
 public static partial class JavaVersionParser
 {
+    private static readonly SearchValues<string> Bit32Markers = SearchValues.Create(["32-Bit", "x86_32"], StringComparison.OrdinalIgnoreCase);
+    private static readonly SearchValues<string> Bit64Markers = SearchValues.Create(["64-Bit", "x86_64", "amd64", "aarch64"], StringComparison.OrdinalIgnoreCase);
+
     public static JavaVersionDetails? ParseDetails(string output)
     {
         ArgumentNullException.ThrowIfNull(output);
@@ -29,13 +33,8 @@ public static partial class JavaVersionParser
             effectiveMajor = legacyMajor;
         }
 
-        bool is64Bit = !output.Contains("32-Bit", StringComparison.OrdinalIgnoreCase) &&
-                      !output.Contains("x86_32", StringComparison.OrdinalIgnoreCase) &&
-                      (output.Contains("64-Bit", StringComparison.OrdinalIgnoreCase) ||
-                       output.Contains("x86_64", StringComparison.OrdinalIgnoreCase) ||
-                       output.Contains("amd64", StringComparison.OrdinalIgnoreCase) ||
-                       output.Contains("aarch64", StringComparison.OrdinalIgnoreCase) ||
-                       Environment.Is64BitOperatingSystem);
+        ReadOnlySpan<char> span = output.AsSpan();
+        bool is64Bit = !span.ContainsAny(Bit32Markers) && span.ContainsAny(Bit64Markers);
 
         string? vendor = DetectVendor(output);
 

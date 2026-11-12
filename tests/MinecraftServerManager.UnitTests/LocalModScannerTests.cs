@@ -6,32 +6,21 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-/// <summary>
-/// 本地模組檔案掃描與詮釋資料解析測試
-/// </summary>
-public sealed class LocalModScannerTests : IDisposable
+/// <summary>本地模組檔案掃描與詮釋資料解析測試</summary>
+public sealed partial class LocalModScannerTests : IDisposable
 {
+    private readonly TempDirectory _testDirTemp = new("msm_test_scanner_");
     private readonly string _testDir;
     private readonly string _modsDir;
 
     public LocalModScannerTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "msm_test_scanner_" + Guid.NewGuid().ToString("N"));
+        _testDir = _testDirTemp.FullName;
         _modsDir = Path.Combine(_testDir, "mods");
         Directory.CreateDirectory(_modsDir);
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testDir))
-            {
-                Directory.Delete(_testDir, recursive: true);
-            }
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
-    }
+    public void Dispose() => _testDirTemp.Dispose();
 
     [Fact]
     public async Task ScanModsWithFabricModJsonShouldExtractMetadataCorrectly()
@@ -51,9 +40,7 @@ public sealed class LocalModScannerTests : IDisposable
             }
         }
         """);
-
-        var persistence = new ModIndexPersistence(_testDir);
-        var scanner = new LocalModScanner(persistence);
+        var scanner = new LocalModScanner();
         var mods = await scanner.ScanModsAsync(_modsDir);
 
         var mod = Assert.Single(mods);
@@ -80,9 +67,7 @@ public sealed class LocalModScannerTests : IDisposable
         authors="ForgeDev"
         description="A test mod for Forge"
         """);
-
-        var persistence = new ModIndexPersistence(_testDir);
-        var scanner = new LocalModScanner(persistence);
+        var scanner = new LocalModScanner();
         var mods = await scanner.ScanModsAsync(_modsDir);
 
         var mod = Assert.Single(mods);
@@ -100,9 +85,7 @@ public sealed class LocalModScannerTests : IDisposable
     {
         string jarPath = Path.Combine(_modsDir, "jei-1.20.1-forge-15.2.0.27.jar");
         CreateZipWithEntry(jarPath, "META-INF/MANIFEST.MF", "Manifest-Version: 1.0\r\n");
-
-        var persistence = new ModIndexPersistence(_testDir);
-        var scanner = new LocalModScanner(persistence);
+        var scanner = new LocalModScanner();
         var mods = await scanner.ScanModsAsync(_modsDir);
 
         var mod = Assert.Single(mods);
@@ -137,9 +120,7 @@ public sealed class LocalModScannerTests : IDisposable
         ordering="NONE"
         side="BOTH"
         """);
-
-        var persistence = new ModIndexPersistence(_testDir);
-        var scanner = new LocalModScanner(persistence);
+        var scanner = new LocalModScanner();
         var mods = await scanner.ScanModsAsync(_modsDir);
 
         var mod = Assert.Single(mods);
@@ -164,12 +145,11 @@ public sealed class LocalModScannerTests : IDisposable
             }
 
             var nestedEntry = archive.CreateEntry("META-INF/jarjar/nested-mod.jar");
-            using (var nestedStream = nestedEntry.Open())
-            using (var nestedArchive = new ZipArchive(nestedStream, ZipArchiveMode.Create, leaveOpen: true))
-            {
-                var fabricEntry = nestedArchive.CreateEntry("fabric.mod.json");
-                using var fabricWriter = new StreamWriter(fabricEntry.Open(), Encoding.UTF8);
-                fabricWriter.Write("""
+            using var nestedStream = nestedEntry.Open();
+            using var nestedArchive = new ZipArchive(nestedStream, ZipArchiveMode.Create, leaveOpen: true);
+            var fabricEntry = nestedArchive.CreateEntry("fabric.mod.json");
+            using var fabricWriter = new StreamWriter(fabricEntry.Open(), Encoding.UTF8);
+            fabricWriter.Write("""
                 {
                     "schemaVersion": 1,
                     "id": "nested_mod",
@@ -180,11 +160,8 @@ public sealed class LocalModScannerTests : IDisposable
                     }
                 }
                 """);
-            }
         }
-
-        var persistence = new ModIndexPersistence(_testDir);
-        var scanner = new LocalModScanner(persistence);
+        var scanner = new LocalModScanner();
         var mods = await scanner.ScanModsAsync(_modsDir);
 
         var mod = Assert.Single(mods);
@@ -208,7 +185,7 @@ public sealed class LocalModScannerTests : IDisposable
         """);
 
         FileInfo fileInfo = new(jarPath);
-        ModIndexPersistence persistence = new(_testDir);
+        ModIndexPersistence persistence = new(_modsDir);
         Dictionary<string, string> legacyMeta = new(StringComparer.OrdinalIgnoreCase)
         {
             ["id"] = "legacy-mod",
@@ -220,12 +197,12 @@ public sealed class LocalModScannerTests : IDisposable
         persistence.CacheMetadata(Path.GetFileName(jarPath), legacyMeta, fileInfo.Length, fileInfo.LastWriteTimeUtc.Ticks);
         persistence.Flush();
 
-        LocalModScanner scanner = new(persistence);
+        LocalModScanner scanner = new();
         IReadOnlyList<LocalModInfo> mods = await scanner.ScanModsAsync(_modsDir);
 
         LocalModInfo mod = Assert.Single(mods);
         Assert.Equal("legacy-mod", mod.Id);
-        // 邊界回退依然產出一致的 "未知" 顯示，不致拋出例外且能正常運作
+        // 邊界後備依然產出一致的 "未知" 顯示，不致擲出例外且能正常運作
         Assert.Equal("未知", mod.Version);
         Assert.Equal("未知", mod.MinecraftVersion);
         Assert.Equal("未知", mod.LoaderType);

@@ -4,60 +4,24 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-public sealed class MainViewModelTests : IDisposable
+public sealed partial class MainViewModelTests : IDisposable
 {
+    private readonly TempDirectory _testDirTemp = new("msm_test_");
     private readonly string _testDir;
 
     public MainViewModelTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "msm_test_" + Guid.NewGuid().ToString("N"));
+        _testDir = _testDirTemp.FullName;
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testDir))
-            {
-                Directory.Delete(_testDir, recursive: true);
-            }
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
-    }
+    public void Dispose() => _testDirTemp.Dispose();
 
-    private MainViewModel CreateIsolatedViewModel(string themeMode = "dark", IUiService? uiService = null)
+    private MainViewModel CreateIsolatedViewModel(string themeMode = "dark", IUiService? uiService = null, Core.Ports.IRunningServerRegistry? registry = null)
     {
         var settings = new Infrastructure.Settings.SettingsManager(_testDir);
         settings.SetThemeMode(themeMode);
-        var dirSize = new Infrastructure.Servers.ServerDirectorySizeService();
-        var inspector = new Infrastructure.Servers.ServerInspector(dirSize);
-        var manager = new Infrastructure.Servers.ServerManager(_testDir, inspector);
-        var backup = new Infrastructure.Servers.ServerBackupService(_testDir);
-        var runner = new Infrastructure.Process.ProcessRunner();
-        var runtime = new Infrastructure.Servers.ServerRuntime(runner);
-        var launchPlanner = new Infrastructure.Servers.ServerLaunchPlanner();
-        var propsStore = new Infrastructure.Servers.ServerPropertiesStore(_testDir);
-        var playerConfig = new Infrastructure.Servers.ServerPlayerConfigStore();
-        var integrity = new Infrastructure.Servers.ServerIntegrityService();
-        var depPlanner = new Infrastructure.Mods.ModDependencyPlanner();
-        var exporter = new Infrastructure.Mods.ModListExporter();
-
-        var deps = new MainViewModelDependencies(
-            SettingsManager: settings,
-            ServerManager: manager,
-            BackupService: backup,
-            ServerRuntime: runtime,
-            ServerInspector: inspector,
-            LaunchPlanner: launchPlanner,
-            PropertiesStore: propsStore,
-            PlayerConfigStore: playerConfig,
-            DirectorySizeService: dirSize,
-            IntegrityService: integrity,
-            DependencyPlanner: depPlanner,
-            ModListExporter: exporter,
-            UiService: uiService);
-
-        return new MainViewModel(deps);
+        var deps = TestDependencies.Create(_testDir, uiService, settings: settings, runningServerRegistry: registry);
+        return TestDependencies.CreateMainViewModel(deps);
     }
 
     [Fact]
@@ -67,11 +31,8 @@ public sealed class MainViewModelTests : IDisposable
 
         // 預設呈現建立新伺服器頁面
         Assert.NotNull(vm.CurrentPage);
-        Assert.Equal("create", vm.CurrentPage.Key);
-        Assert.Equal("建立新伺服器", vm.PageTitle);
-        Assert.False(string.IsNullOrWhiteSpace(vm.PageSubtitle));
-        Assert.False(vm.IsNotificationVisible);
-        Assert.False(vm.IsLightTheme);
+        Assert.IsType<CreateServerViewModel>(vm.CurrentPage);
+        Assert.Equal("建立新伺服器", vm.CurrentPage.Title);
     }
 
     [Theory]
@@ -83,83 +44,90 @@ public sealed class MainViewModelTests : IDisposable
     {
         var vm = CreateIsolatedViewModel();
 
-        vm.NavigateCommand.Execute(key);
+        vm.Navigate(key);
 
         Assert.IsType(expectedType, vm.CurrentPage);
-        Assert.Equal(key, vm.CurrentPage.Key);
-        Assert.Equal(expectedTitle, vm.PageTitle);
+        Assert.Equal(expectedTitle, vm.CurrentPage.Title);
     }
 
     [Fact]
     public void NavigateShouldShowErrorNotificationWhenKeyIsInvalid()
     {
-        var vm = CreateIsolatedViewModel();
+        var ui = new ManualUiService();
+        var vm = CreateIsolatedViewModel(uiService: ui);
         var initialPage = vm.CurrentPage;
 
-        vm.NavigateCommand.Execute("nonexistent_page");
+        vm.Navigate("nonexistent_page");
 
         Assert.Same(initialPage, vm.CurrentPage);
-        Assert.True(vm.IsNotificationVisible);
-        Assert.True(vm.IsNotificationError);
-        Assert.Contains("找不到頁面", vm.NotificationMessage);
+        Assert.Equal(NotificationType.Error, ui.LastNotification?.Type);
+        Assert.Contains("找不到頁面", ui.LastNotification?.Message);
     }
 
     [Fact]
     public void ActionCommandsShouldTriggerNotifications()
     {
-        var vm = CreateIsolatedViewModel(uiService: new ConfirmingImportUiService());
+        var ui = new ManualUiService { ImportServerResult = true };
+        var vm = CreateIsolatedViewModel(uiService: ui);
 
         vm.ImportServerCommand.Execute(null);
-        Assert.True(vm.IsNotificationVisible);
-        Assert.Contains("匯入", vm.NotificationMessage);
+        Assert.Contains("匯入", ui.LastNotification?.Message);
+    }
 
-        vm.OpenServersFolderCommand.Execute(null);
-        Assert.True(vm.IsNotificationVisible);
+    private sealed class OrphanRegistry(params Core.Ports.TrackedServerProcess[] orphans) : Core.Ports.IRunningServerRegistry
+    {
+        public List<Core.Ports.TrackedServerProcess> Terminated { get; } = [];
+
+        public void Record(string serverName, int pid) { }
+
+        public void Remove(string serverName) { }
+
+        public Task<IReadOnlyList<Core.Ports.TrackedServerProcess>> FindOrphansAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Core.Ports.TrackedServerProcess>>(orphans);
+
+        public Task<bool> TerminateAsync(Core.Ports.TrackedServerProcess process, CancellationToken cancellationToken = default)
+        {
+            Terminated.Add(process);
+            return Task.FromResult(true);
+        }
     }
 
     [Fact]
-    public void DismissNotificationShouldHideNotificationBanner()
+    public async Task CheckOrphanedServers_WhenNone_DoesNotAsk()
     {
-        var vm = CreateIsolatedViewModel();
-        vm.ShowNotification("測試通知", isError: false);
-        Assert.True(vm.IsNotificationVisible);
+        var ui = new ManualUiService();
+        var vm = CreateIsolatedViewModel(uiService: ui, registry: new OrphanRegistry());
 
-        vm.DismissNotificationCommand.Execute(null);
+        await vm.CheckOrphanedServersOnStartupAsync();
 
-        Assert.False(vm.IsNotificationVisible);
-        Assert.Empty(vm.NotificationMessage);
+        Assert.Empty(ui.ChoiceMessages);
     }
 
     [Fact]
-    public void ToggleThemeShouldInvertThemeState()
+    public async Task CheckOrphanedServers_WhenUserChoosesTerminate_TerminatesAll()
     {
-        var vm = CreateIsolatedViewModel();
-        Assert.False(vm.IsLightTheme);
+        var ui = new ManualUiService();
+        ui.ChoiceResults.Enqueue(true);
+        var registry = new OrphanRegistry(new Core.Ports.TrackedServerProcess("A", 100, 1), new Core.Ports.TrackedServerProcess("B", 200, 2));
+        var vm = CreateIsolatedViewModel(uiService: ui, registry: registry);
 
-        vm.ToggleThemeCommand.Execute(null);
-        Assert.True(vm.IsLightTheme);
-        Assert.True(vm.IsNotificationVisible);
+        await vm.CheckOrphanedServersOnStartupAsync();
 
-        vm.ToggleThemeCommand.Execute(null);
-        Assert.False(vm.IsLightTheme);
+        Assert.Equal(2, registry.Terminated.Count);
+        Assert.Contains("PID 100", ui.ChoiceMessages[0].Message, StringComparison.Ordinal);
+        Assert.Contains(ui.Notifications, static n => n.Type == NotificationType.Success);
     }
 
     [Fact]
-    public void ToggleThemeShouldInvertThemeStateFromLight()
+    public async Task CheckOrphanedServers_WhenUserDefers_DoesNotTerminate()
     {
-        var vm = CreateIsolatedViewModel(themeMode: "light");
-        Assert.True(vm.IsLightTheme);
+        var ui = new ManualUiService();
+        ui.ChoiceResults.Enqueue(false);
+        var registry = new OrphanRegistry(new Core.Ports.TrackedServerProcess("A", 100, 1));
+        var vm = CreateIsolatedViewModel(uiService: ui, registry: registry);
 
-        vm.ToggleThemeCommand.Execute(null);
-        Assert.False(vm.IsLightTheme);
-        Assert.True(vm.IsNotificationVisible);
+        await vm.CheckOrphanedServersOnStartupAsync();
 
-        vm.ToggleThemeCommand.Execute(null);
-        Assert.True(vm.IsLightTheme);
-    }
-
-    private sealed class ConfirmingImportUiService : NoOpUiService
-    {
-        public override bool? ShowImportServer(ImportServerViewModel viewModel) => true;
+        Assert.Empty(registry.Terminated);
     }
 }

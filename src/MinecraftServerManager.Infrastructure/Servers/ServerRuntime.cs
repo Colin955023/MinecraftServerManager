@@ -1,4 +1,3 @@
-using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
@@ -8,16 +7,17 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 
 public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerRuntime");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerRuntime));
 
-    private IManagedProcess? _process;
+    // MonitorExitAsync 於背景執行緒將其設為 null，讀取端一律先取區域快照
+    private volatile IManagedProcess? _process;
     private bool _disposed;
 
     public int Pid => _process?.Pid ?? 0;
-    public bool IsRunning => _process is not null && !_process.HasExited;
+    public bool IsRunning => _process is { HasExited: false };
     public bool IsReady { get; private set; }
-    public int? ExitCode => _process?.ExitCode;
-    public string? ActiveServerName { get; private set; }
+    private int? _lastExitCode;
+    public int? ExitCode => _process?.ExitCode ?? _lastExitCode;
     public long? GetWorkingSet64() => _process?.GetWorkingSet64();
 
     public event Action<string>? OutputLineReceived;
@@ -37,6 +37,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         }
 
         IsReady = false;
+        _lastExitCode = null;
         string stableDir = SafeFileSystem.ResolveStableDirectory(plan.WorkingDirectory);
 
         if (plan.IsScript)
@@ -45,7 +46,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 
             if (!SafeFileSystem.IsPathWithin(stableDir, fullScriptPath, strict: false))
             {
-                throw new SafeFileSystemException($"偵測到非法的啟動腳本路徑越界：{plan.JavaExecutable}");
+                throw new SafeFileSystemException($"偵測到非法的啟動腳本路徑超出邊界：{plan.JavaExecutable}");
             }
 
             if (!SafeScriptValidator.ValidateScriptContent(fullScriptPath, stableDir))
@@ -62,81 +63,14 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             WorkingDirectory: stableDir,
             Environment: plan.Environment);
 
-        _process = await processRunner.StartAsync(spec, cancellationToken).ConfigureAwait(false);
-        ActiveServerName = plan.ServerName ?? Path.GetFileName(stableDir);
-        Logger.Information("伺服器「{Server}」行程已啟動，PID: {Pid}", ActiveServerName, _process.Pid);
-        _process.OutputReceived += OnOutputReceived;
+        var started = await processRunner.StartAsync(spec, cancellationToken).ConfigureAwait(false);
+        _process = started;
+        string serverName = plan.ServerName ?? Path.GetFileName(stableDir);
+        Logger.Information("伺服器「{Server}」行程已啟動，PID: {Pid}", serverName, started.Pid);
+        started.OutputReceived += OnOutputReceived;
         ServerStarted?.Invoke();
 
-        _ = MonitorExitAsync(_process);
-    }
-
-    public async Task StartAsync(
-        string javaExecutablePath,
-        string serverDirectory,
-        string executableName,
-        int memoryMaxMb,
-        int? memoryMinMb = null,
-        IReadOnlyList<string>? customJvmArgs = null,
-        CancellationToken cancellationToken = default)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
-        ArgumentException.ThrowIfNullOrWhiteSpace(executableName);
-
-        string stableDir = SafeFileSystem.ResolveStableDirectory(serverDirectory);
-        bool isScript = executableName.EndsWith(".bat", StringComparison.OrdinalIgnoreCase);
-
-        ServerLaunchPlan plan;
-        if (isScript)
-        {
-            string fullScriptPath = ResolveScriptPath(stableDir, executableName);
-
-            IReadOnlyDictionary<string, string?>? env = null;
-            if (!string.IsNullOrWhiteSpace(javaExecutablePath) && !string.Equals(javaExecutablePath.Trim(), "java", StringComparison.OrdinalIgnoreCase))
-            {
-                env = ServerLaunchPlanner.BuildJavaEnvironment(javaExecutablePath.Trim());
-            }
-
-            plan = new ServerLaunchPlan(
-                JavaExecutable: fullScriptPath,
-                WorkingDirectory: stableDir,
-                Arguments: [],
-                Loader: LoaderKind.Unknown,
-                MinMemoryMb: memoryMinMb ?? ServerDefaults.DefaultMemoryMinMb,
-                MaxMemoryMb: memoryMaxMb,
-                IsScript: true,
-                ServerName: Path.GetFileName(stableDir),
-                Environment: env);
-        }
-        else
-        {
-            var args = new List<string>();
-            int min = memoryMinMb ?? (memoryMaxMb > ServerDefaults.DefaultMemoryMinMb ? ServerDefaults.DefaultMemoryMinMb : memoryMaxMb);
-            args.Add($"-Xms{min}M");
-            args.Add($"-Xmx{memoryMaxMb}M");
-
-            if (customJvmArgs is not null)
-            {
-                args.AddRange(customJvmArgs);
-            }
-
-            args.Add("-jar");
-            args.Add(executableName);
-            args.Add("nogui");
-
-            plan = new ServerLaunchPlan(
-                JavaExecutable: javaExecutablePath,
-                WorkingDirectory: stableDir,
-                Arguments: args,
-                Loader: LoaderKind.Unknown,
-                MinMemoryMb: min,
-                MaxMemoryMb: memoryMaxMb,
-                IsScript: false,
-                ServerName: Path.GetFileName(stableDir));
-        }
-
-        await StartAsync(plan, cancellationToken).ConfigureAwait(false);
+        _ = MonitorExitAsync(started);
     }
 
     public async Task<bool> SendCommandAsync(string command, CancellationToken cancellationToken = default)
@@ -144,7 +78,8 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(command);
 
-        if (!IsRunning || _process is null)
+        var proc = _process;
+        if (proc is not { HasExited: false })
         {
             Logger.Warning("傳送指令失敗，伺服器未在執行狀態");
             return false;
@@ -152,13 +87,16 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 
         try
         {
-            Logger.Information("傳送伺服器控制台指令: {Command}", command);
-            await _process.WriteLineAsync(command, cancellationToken).ConfigureAwait(false);
+            // 僅記錄指令名稱，不記錄參數（可能含玩家名稱等個資）
+            var trimmed = command.AsSpan().TrimStart();
+            int space = trimmed.IndexOf(' ');
+            Logger.Information("傳送伺服器主控台指令: {Command}", (space < 0 ? trimmed : trimmed[..space]).ToString());
+            await proc.WriteLineAsync(command, cancellationToken).ConfigureAwait(false);
             return true;
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "傳送指令至伺服器標準輸入失敗: {Message}", ex.Message);
+            Logger.Error(ex, "傳送指令至伺服器標準輸入失敗");
             return false;
         }
     }
@@ -178,8 +116,8 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         // 嘗試寫入 stop 讓伺服器正常存檔關閉
         await SendCommandAsync("stop", cancellationToken).ConfigureAwait(false);
 
-        using var timeoutCts = new CancellationTokenSource(gracefulTimeout);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        linked.CancelAfter(gracefulTimeout);
 
         try
         {
@@ -193,6 +131,29 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         }
     }
 
+    public async Task<ProcessExitResult?> WaitForExitAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var proc = _process;
+        if (proc is null || proc.HasExited)
+        {
+            return new ProcessExitResult(ExitCode ?? 0, false);
+        }
+
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        linked.CancelAfter(timeout);
+
+        try
+        {
+            return await proc.WaitForExitAsync(linked.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -201,13 +162,13 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         }
 
         _disposed = true;
-        ActiveServerName = null;
 
-        if (_process is not null)
+        var proc = _process;
+        if (proc is not null)
         {
-            Logger.Information("處置伺服器行程資源 (PID: {Pid})", _process.Pid);
-            _process.OutputReceived -= OnOutputReceived;
-            await _process.DisposeAsync().ConfigureAwait(false);
+            Logger.Information("處置伺服器行程資源 (PID: {Pid})", proc.Pid);
+            proc.OutputReceived -= OnOutputReceived;
+            await proc.DisposeAsync().ConfigureAwait(false);
             _process = null;
         }
         IsReady = false;
@@ -233,11 +194,15 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             var result = await proc.WaitForExitAsync().ConfigureAwait(false);
             Logger.Information("伺服器監控回報行程 (PID: {Pid}) 已結束，結束代碼: {ExitCode}, 是否被強制終止: {WasForceStopped}", proc.Pid, result.ExitCode, result.WasForceStopped);
             IsReady = false;
+            _lastExitCode = result.ExitCode;
             ServerExited?.Invoke(result.ExitCode);
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "伺服器行程監控異常 (PID: {Pid})", proc.Pid);
+            Logger.Error(ex, "伺服器行程監控失敗 (PID: {Pid})", proc.Pid);
+            IsReady = false;
+            _lastExitCode = proc.ExitCode ?? -1;
+            ServerExited?.Invoke(_lastExitCode.Value);
         }
         finally
         {
@@ -245,16 +210,13 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             if (ReferenceEquals(_process, proc))
             {
                 _process = null;
+                IsReady = false;
             }
-            ActiveServerName = null;
-            IsReady = false;
+
+            // 伺服器自行結束時由此釋放行程控制代碼與輸出管線；DisposeAsync 只處理仍在執行者
+            await proc.DisposeAsync().ConfigureAwait(false);
         }
     }
-    private static string ResolveScriptPath(string stableDir, string scriptExecutable)
-    {
-        string scriptPath = Path.IsPathRooted(scriptExecutable)
-            ? scriptExecutable
-            : Path.Combine(stableDir, scriptExecutable);
-        return Path.GetFullPath(scriptPath);
-    }
+    private static string ResolveScriptPath(string stableDir, string scriptExecutable) =>
+        Path.GetFullPath(scriptExecutable, stableDir);
 }

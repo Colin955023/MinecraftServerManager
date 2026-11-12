@@ -5,32 +5,23 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class LoaderInstallerServiceTests : IDisposable
+public sealed partial class LoaderInstallerServiceTests : IDisposable
 {
+    private readonly TempDirectory _testRootTemp = new("msm-installer-tests-");
     private readonly string _testRoot;
     private readonly string _cacheDir;
     private readonly string _serverDir;
 
     public LoaderInstallerServiceTests()
     {
-        _testRoot = Path.Combine(Path.GetTempPath(), "msm-installer-tests-" + Guid.NewGuid().ToString("N"));
+        _testRoot = _testRootTemp.FullName;
         _cacheDir = Path.Combine(_testRoot, "cache");
         _serverDir = Path.Combine(_testRoot, "server");
         Directory.CreateDirectory(_cacheDir);
         Directory.CreateDirectory(_serverDir);
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testRoot))
-            {
-                Directory.Delete(_testRoot, recursive: true);
-            }
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
-    }
+    public void Dispose() => _testRootTemp.Dispose();
 
     [Fact]
     public async Task InstallLoaderPaperDownloadsServerJarSuccessfully()
@@ -49,8 +40,8 @@ public sealed class LoaderInstallerServiceTests : IDisposable
         }
         """;
 
-        var http = new MockInstallerHttpPort(paperBuildJson: paperBuildJson);
-        var runner = new MockInstallerProcessRunner(0);
+        var http = CreateHttpPort(paperBuildJson: paperBuildJson);
+        var runner = new StubProcessRunner(0);
         var service = new LoaderInstallerService(http, runner, _cacheDir);
 
         string target = await service.InstallLoaderAsync(
@@ -64,14 +55,38 @@ public sealed class LoaderInstallerServiceTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_serverDir, "paper-1.20.4-497.jar")));
     }
 
+    [Theory]
+    [InlineData("../../evil.jar", "evil.jar")]
+    [InlineData("payload.exe", "paper.jar")]
+    public async Task InstallLoaderPaperSanitizesApiFileName(string apiName, string expectedJar)
+    {
+        string paperBuildJson = $$"""
+        {
+            "downloads": {
+                "server:application": {
+                    "name": "{{apiName}}",
+                    "url": "https://fill-data.papermc.io/v3/projects/paper/versions/1.20.4/builds/497/download",
+                    "checksums": { "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" }
+                }
+            }
+        }
+        """;
+
+        var service = new LoaderInstallerService(CreateHttpPort(paperBuildJson: paperBuildJson), new StubProcessRunner(0), _cacheDir);
+
+        string target = await service.InstallLoaderAsync(LoaderKind.Paper, "1.20.4", "497", _serverDir, "java.exe");
+
+        Assert.Equal(expectedJar, target);
+        Assert.True(File.Exists(Path.Combine(_serverDir, expectedJar)));
+    }
+
     [Fact]
     public async Task InstallLoaderFabricBuildsCorrectArgsAndDetectsTarget()
     {
         await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy vanilla");
-        var http = new MockInstallerHttpPort("", "");
-        var runner = new MockInstallerProcessRunner(0, onRun: () =>
+        var http = CreateHttpPort("", "");
+        var runner = new StubProcessRunner(0, onStart: _ =>
         {
-            // 模擬 installer 產出檔案
             File.WriteAllText(Path.Combine(_serverDir, "fabric-server-launch.jar"), "dummy launch");
         });
 
@@ -86,7 +101,7 @@ public sealed class LoaderInstallerServiceTests : IDisposable
 
         Assert.Equal("fabric-server-launch.jar", target);
 
-        var spec = runner.LastSpec;
+        var spec = runner.LastSpecification;
         Assert.NotNull(spec);
         Assert.Contains("server", spec.Arguments);
         Assert.Contains("-mcversion", spec.Arguments);
@@ -122,8 +137,8 @@ public sealed class LoaderInstallerServiceTests : IDisposable
         }
         """;
 
-        var http = new MockInstallerHttpPort(manifestJson, metaJson);
-        var runner = new MockInstallerProcessRunner(0, onRun: () =>
+        var http = CreateHttpPort(manifestJson, metaJson);
+        var runner = new StubProcessRunner(0, onStart: _ =>
         {
             File.WriteAllText(Path.Combine(_serverDir, "fabric-server-launch.jar"), "dummy launch");
         });
@@ -144,8 +159,8 @@ public sealed class LoaderInstallerServiceTests : IDisposable
     [Fact]
     public async Task InstallLoaderForgeDetectsRunBatWhenCreated()
     {
-        var http = new MockInstallerHttpPort("", "");
-        var runner = new MockInstallerProcessRunner(0, onRun: () =>
+        var http = CreateHttpPort("", "");
+        var runner = new StubProcessRunner(0, onStart: _ =>
         {
             File.WriteAllText(Path.Combine(_serverDir, "run.bat"), "@echo off\n");
         });
@@ -161,7 +176,7 @@ public sealed class LoaderInstallerServiceTests : IDisposable
 
         Assert.Equal("run.bat", target);
 
-        var spec = runner.LastSpec;
+        var spec = runner.LastSpecification;
         Assert.NotNull(spec);
         Assert.Contains("--installServer", spec.Arguments);
     }
@@ -170,8 +185,8 @@ public sealed class LoaderInstallerServiceTests : IDisposable
     public async Task InstallLoaderThrowsWhenProcessExitCodeIsNotZero()
     {
         await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy vanilla");
-        var http = new MockInstallerHttpPort("", "");
-        var runner = new MockInstallerProcessRunner(1);
+        var http = CreateHttpPort("", "");
+        var runner = new StubProcessRunner(1);
 
         var service = new LoaderInstallerService(http, runner, _cacheDir);
 
@@ -191,13 +206,10 @@ public sealed class LoaderInstallerServiceTests : IDisposable
     {
         await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy vanilla");
         string expectedHexSha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-        var http = new MockInstallerHttpPort("", "")
-        {
-            CustomGetText = uri => uri.AbsoluteUri.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase)
-                ? expectedHexSha256
-                : null,
-        };
-        var runner = new MockInstallerProcessRunner(0, onRun: () =>
+        var http = CreateHttpPort(customGetText: uri => uri.AbsoluteUri.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase)
+            ? expectedHexSha256
+            : null);
+        var runner = new StubProcessRunner(0, onStart: _ =>
         {
             File.WriteAllText(Path.Combine(_serverDir, "fabric-server-launch.jar"), "dummy launch");
         });
@@ -216,89 +228,32 @@ public sealed class LoaderInstallerServiceTests : IDisposable
         Assert.Equal("sha256", http.LastDownloadExpectedAlgorithm);
     }
 
-    private sealed class MockInstallerHttpPort(
+    /// <summary>建立安裝器用 HTTP 替身：依網址回應 manifest／meta／Paper 建置 JSON，下載一律寫入固定內容</summary>
+    private static StubHttpPort CreateHttpPort(
         string manifestJson = "",
         string metaJson = "",
-        string paperBuildJson = "") : IHttpPort
-    {
-        public Func<Uri, string?>? CustomGetText { get; init; }
-        public string? LastDownloadExpectedHash { get; private set; }
-        public string? LastDownloadExpectedAlgorithm { get; private set; }
-
-        public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default)
+        string paperBuildJson = "",
+        Func<Uri, string?>? customGetText = null) =>
+        new()
         {
-            if (CustomGetText?.Invoke(uri) is string custom)
+            TextHandler = uri =>
             {
-                return Task.FromResult<string?>(custom);
-            }
-            if (uri.AbsoluteUri.Contains("papermc.io", StringComparison.OrdinalIgnoreCase))
+                if (customGetText?.Invoke(uri) is string custom)
+                {
+                    return custom;
+                }
+
+                if (uri.AbsoluteUri.Contains("papermc.io", StringComparison.OrdinalIgnoreCase))
+                {
+                    return paperBuildJson;
+                }
+
+                return uri.AbsoluteUri.Contains("version_manifest", StringComparison.OrdinalIgnoreCase) ? manifestJson : metaJson;
+            },
+            DownloadHandler = request =>
             {
-                return Task.FromResult<string?>(paperBuildJson);
-            }
-            if (uri.AbsoluteUri.Contains("version_manifest", StringComparison.OrdinalIgnoreCase))
-            {
-                return Task.FromResult<string?>(manifestJson);
-            }
-            return Task.FromResult<string?>(metaJson);
-        }
-
-        public Task<HttpJsonResponse<T>> GetJsonAsync<T>(Uri uri, CancellationToken cancellationToken = default) =>
-            throw new NotImplementedException();
-
-        public Task<HttpResult> DownloadAsync(
-            Uri uri,
-            string targetPath,
-            IProgress<HttpProgress>? progress = null,
-            string? expectedHash = null,
-            string expectedHashAlgorithm = "sha256",
-            CancellationToken cancellationToken = default)
-        {
-            LastDownloadExpectedHash = expectedHash;
-            LastDownloadExpectedAlgorithm = expectedHashAlgorithm;
-            File.WriteAllText(targetPath, "dummy downloaded content");
-            return Task.FromResult(new HttpResult(true));
-        }
-
-        public Task<string?> PostJsonAsync(
-            Uri uri,
-            string jsonPayload,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult<string?>(null);
-    }
-
-    private sealed class MockInstallerProcessRunner(int exitCode, Action? onRun = null) : IProcessRunner
-    {
-        public ProcessStartSpec? LastSpec { get; private set; }
-
-        public Task<IManagedProcess> StartAsync(ProcessStartSpec specification, CancellationToken cancellationToken = default)
-        {
-            LastSpec = specification;
-            onRun?.Invoke();
-            return Task.FromResult<IManagedProcess>(new MockInstallerProcess(exitCode));
-        }
-    }
-
-    private sealed class MockInstallerProcess(int exitCode) : IManagedProcess
-    {
-        public int Pid => 999;
-        public bool HasExited => true;
-        public int? ExitCode => exitCode;
-
-        public event Action<ProcessOutput>? OutputReceived
-        {
-            add { }
-            remove { }
-        }
-
-        public Task WriteLineAsync(string line, CancellationToken cancellationToken = default) => Task.CompletedTask;
-
-        public Task<ProcessExitResult> WaitForExitAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ProcessExitResult(exitCode, false));
-
-        public Task<ProcessExitResult> StopAsync(TimeSpan gracefulTimeout, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ProcessExitResult(exitCode, false));
-
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-        public long? GetWorkingSet64() => throw new NotImplementedException();
-    }
+                File.WriteAllText(request.TargetPath, "dummy downloaded content");
+                return Task.FromResult(new HttpResult(true));
+            },
+        };
 }

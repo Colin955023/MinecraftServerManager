@@ -1,71 +1,23 @@
-<Window x:Class="MinecraftServerManager.App.Views.ServerDeleteConfirmationDialog"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="確認刪除伺服器"
-        Width="500"
-        SizeToContent="Height"
-        ResizeMode="NoResize"
-        WindowStartupLocation="CenterScreen"
-        Background="{DynamicResource WindowBrush}"
-       >
-  <Grid Margin="24">
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
-    </Grid.RowDefinitions>
+<ContentDialog x:Class="MinecraftServerManager.App.Views.ServerDeleteConfirmationDialog"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  mc:Ignorable="d"
+  Title="確認刪除伺服器"
+  PrimaryButtonText="{x:Bind PrimaryText, Mode=OneTime}"
+  SecondaryButtonText="{x:Bind SecondaryText, Mode=OneTime}"
+  PrimaryButtonStyle="{StaticResource DangerButtonStyle}"
+  CloseButtonText="取消"
+  DefaultButton="Close"
+  PrimaryButtonClick="Dialog_PrimaryButtonClick"
+  SecondaryButtonClick="Dialog_SecondaryButtonClick">
 
-    <!-- 標題 -->
-    <StackPanel Grid.Row="0" Margin="0,0,0,16">
-      <TextBlock Text="🗑️ 確認刪除伺服器"
-                 FontSize="18"
-                 FontWeight="Bold"
-                 Foreground="{DynamicResource DangerBrush}" />
-    </StackPanel>
-
-    <!-- 內容提示 -->
-    <TextBlock Grid.Row="1"
-               x:Name="MessageText"
-               FontSize="13"
-               TextWrapping="Wrap"
-               LineHeight="20"
-               Foreground="{DynamicResource TextBrush}"
-               Margin="0,0,0,24" />
-
-    <!-- 按鈕區：有備份時（是/否/取消） -->
-    <StackPanel Grid.Row="2"
-                x:Name="WithBackupsButtons"
-                Orientation="Horizontal"
-                HorizontalAlignment="Right"
-                Visibility="Collapsed">
-      <Button Content="是"
-              Click="OnYesClicked"
-              Padding="20,6"
-              Margin="0,0,10,0"
-              Style="{DynamicResource DangerButtonStyle}" />
-      <Button Content="否"
-              Click="OnNoClicked"
-              Padding="20,6"
-              Margin="0,0,10,0" />
-      <Button Content="取消"
-              Click="OnCancelClicked"
-              Padding="20,6" />
-    </StackPanel>
-
-    <!-- 按鈕區：無備份時（確定刪除/取消） -->
-    <StackPanel Grid.Row="2"
-                x:Name="NoBackupsButtons"
-                Orientation="Horizontal"
-                HorizontalAlignment="Right"
-                Visibility="Collapsed">
-      <Button Content="確定刪除"
-              Click="OnConfirmClicked"
-              Padding="14,6"
-              Margin="0,0,10,0"
-              Style="{DynamicResource DangerButtonStyle}" />
-      <Button Content="取消"
-              Click="OnCancelClicked"
-              Padding="14,6" />
-    </StackPanel>
-  </Grid>
-</Window>
+  <StackPanel Margin="0,12,0,0">
+    <TextBlock Text="{x:Bind Message, Mode=OneTime}"
+      TextWrapping="Wrap"
+      FontSize="14"
+      LineHeight="22"
+      Foreground="{ThemeResource TextBrush}" />
+  </StackPanel>
+</ContentDialog>

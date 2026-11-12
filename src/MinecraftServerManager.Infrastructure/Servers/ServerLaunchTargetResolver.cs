@@ -1,16 +1,15 @@
 using System.Text.RegularExpressions;
+using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>
-/// 伺服器啟動目標（JAR、腳本或引數檔）解析輔助工具
-/// </summary>
+/// <summary>伺服器啟動目標（JAR、腳本或引數檔）解析輔助工具</summary>
 internal static partial class ServerLaunchTargetResolver
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerLaunchTargetResolver");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerLaunchTargetResolver));
 
     internal static readonly string[] PreferredLaunchJars =
     [
@@ -24,9 +23,7 @@ internal static partial class ServerLaunchTargetResolver
     [GeneratedRegex(@"(?i)@([^\s""]+win_args\.txt)")]
     private static partial Regex WinArgsRegex();
 
-    /// <summary>
-    /// 解析指定伺服器目錄之最佳啟動目標檔名或引數檔標記（如 @args.txt、server.jar、run.bat 等）
-    /// </summary>
+    /// <summary>解析指定伺服器目錄之最佳啟動目標檔名或引數檔標記（如 @args.txt、server.jar、run.bat 等）</summary>
     public static string ResolveLaunchTarget(string serverDirectory, LoaderKind loader = LoaderKind.Unknown)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
@@ -49,7 +46,7 @@ internal static partial class ServerLaunchTargetResolver
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.Warning("解析 run.bat 啟動參數異常: {0}", ex.Message);
+                Logger.Warning(ex, "解析 run.bat 啟動參數失敗");
             }
         }
 
@@ -62,7 +59,7 @@ internal static partial class ServerLaunchTargetResolver
 
         // 3. 若指定了載入器，優先依照載入器特徵尋找目標 JAR
         var jarFiles = SafeFileSystem.ListBoundedDirectory(stableDir, rejectReparse: false)
-            .Where(static e => !e.IsDirectory && e.FullPath.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
+            .Where(static e => !e.IsDirectory && ModHelpers.IsJarFileName(e.FullPath))
             .Select(static e => Path.GetFileName(e.FullPath))
             .ToList();
 
@@ -104,7 +101,7 @@ internal static partial class ServerLaunchTargetResolver
             return anyJar;
         }
 
-        // 7. 回退至 run.bat 或預設 server.jar
+        // 7. 改用 run.bat 或預設 server.jar
         if (SafeFileSystem.FileExists(runBat))
         {
             return "run.bat";
@@ -113,25 +110,23 @@ internal static partial class ServerLaunchTargetResolver
         return "server.jar";
     }
 
+    private static readonly (string Group, string Artifact)[] LibraryWinArgsCandidates =
+    [
+        ("minecraftforge", "forge"),
+        ("neoforged", "neoforge")
+    ];
+
     internal static string? FindLibraryWinArgs(string directory)
     {
-        string forgeLib = Path.Combine(directory, "libraries", "net", "minecraftforge", "forge");
-        if (SafeFileSystem.DirectoryExists(forgeLib))
+        foreach (var (group, artifact) in LibraryWinArgsCandidates)
         {
-            foreach (string sub in SafeFileSystem.EnumerateDirectories(forgeLib))
+            string libDir = Path.Combine(directory, "libraries", "net", group, artifact);
+            if (!SafeFileSystem.DirectoryExists(libDir))
             {
-                string winArgs = Path.Combine(sub, "win_args.txt");
-                if (SafeFileSystem.FileExists(winArgs))
-                {
-                    return "@" + Path.GetRelativePath(directory, winArgs).Replace('\\', '/');
-                }
+                continue;
             }
-        }
 
-        string neoLib = Path.Combine(directory, "libraries", "net", "neoforged", "neoforge");
-        if (SafeFileSystem.DirectoryExists(neoLib))
-        {
-            foreach (string sub in SafeFileSystem.EnumerateDirectories(neoLib))
+            foreach (string sub in SafeFileSystem.EnumerateDirectories(libDir))
             {
                 string winArgs = Path.Combine(sub, "win_args.txt");
                 if (SafeFileSystem.FileExists(winArgs))

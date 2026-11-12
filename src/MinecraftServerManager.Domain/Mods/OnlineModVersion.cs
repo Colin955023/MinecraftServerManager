@@ -10,11 +10,8 @@ public sealed record OnlineModVersion
     public IReadOnlyList<string> Loaders { get; }
     public string VersionType { get; }
     public string DatePublished { get; }
-    public string Changelog { get; }
     public IReadOnlyList<ModFile> Files { get; }
     public IReadOnlyList<OnlineModDependency> Dependencies { get; }
-
-    public string Id => VersionId;
 
     public OnlineModVersion(
         string versionId,
@@ -24,7 +21,6 @@ public sealed record OnlineModVersion
         IEnumerable<string>? loaders = null,
         string versionType = "",
         string datePublished = "",
-        string changelog = "",
         IEnumerable<ModFile>? files = null,
         IEnumerable<OnlineModDependency>? dependencies = null,
         string projectId = "")
@@ -37,7 +33,6 @@ public sealed record OnlineModVersion
         Loaders = [.. loaders ?? []];
         VersionType = versionType ?? string.Empty;
         DatePublished = datePublished ?? string.Empty;
-        Changelog = changelog ?? string.Empty;
         Files = [.. files ?? []];
         Dependencies = [.. dependencies ?? []];
     }

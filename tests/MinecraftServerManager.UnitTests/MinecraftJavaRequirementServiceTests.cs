@@ -1,31 +1,23 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Java;
+using MinecraftServerManager.Infrastructure.Loaders;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class MinecraftJavaRequirementServiceTests : IDisposable
+public sealed partial class MinecraftJavaRequirementServiceTests : IDisposable
 {
+    private readonly TempDirectory _testTempDirTemp = new("msm_java_req_test_");
     private readonly string _testTempDir;
 
     public MinecraftJavaRequirementServiceTests()
     {
-        _testTempDir = Path.Combine(Path.GetTempPath(), "msm_java_req_test_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testTempDir);
+        _testTempDir = _testTempDirTemp.FullName;
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testTempDir))
-            {
-                Directory.Delete(_testTempDir, recursive: true);
-            }
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
-    }
+    public void Dispose() => _testTempDirTemp.Dispose();
 
     [Fact]
     public void ParseJavaMajorFromVersionJson_StandardStructure_ReturnsMajor()
@@ -40,7 +32,7 @@ public sealed class MinecraftJavaRequirementServiceTests : IDisposable
         }
         """;
 
-        int? major = MinecraftJavaRequirementService.ParseJavaMajorFromVersionJson(json);
+        int? major = ParseMajor(json);
         Assert.Equal(21, major);
     }
 
@@ -57,39 +49,21 @@ public sealed class MinecraftJavaRequirementServiceTests : IDisposable
         }
         """;
 
-        int? major = MinecraftJavaRequirementService.ParseJavaMajorFromVersionJson(json);
+        int? major = ParseMajor(json);
         Assert.Equal(16, major);
     }
 
     [Fact]
     public void ParseJavaMajorFromVersionJson_InvalidOrMissing_ReturnsNull()
     {
-        Assert.Null(MinecraftJavaRequirementService.ParseJavaMajorFromVersionJson(string.Empty));
-        Assert.Null(MinecraftJavaRequirementService.ParseJavaMajorFromVersionJson("{}"));
-        Assert.Null(MinecraftJavaRequirementService.ParseJavaMajorFromVersionJson("""{"javaVersion": {}}"""));
+        Assert.Null(ParseMajor("{}"));
+        Assert.Null(ParseMajor("""{"javaVersion": {}}"""));
     }
 
-    [Fact]
-    public async Task GetRequiredJavaMajorAsync_WhenCacheFileExists_LoadsAndReturnsWithoutHttp()
+    private static int? ParseMajor(string json)
     {
-        string cacheFile = Path.Combine(_testTempDir, MinecraftJavaRequirementService.RequirementsCacheFileName);
-        var initialCache = new Dictionary<string, int>
-        {
-            ["1.21.4"] = 21,
-            ["1.20.1"] = 17,
-            ["1.12.2"] = 8
-        };
-        await File.WriteAllTextAsync(cacheFile, JsonSerializer.Serialize(initialCache));
-
-        var mockHttp = new MockHttpPort();
-        var service = new MinecraftJavaRequirementService(mockHttp, _testTempDir);
-
-        int major = await service.GetRequiredJavaMajorAsync("1.21.4");
-        Assert.Equal(21, major);
-        Assert.Equal(0, mockHttp.RequestCount); // 完全不發出 HTTP 請求
-
-        int? cached = service.GetCachedJavaMajor("1.20.1");
-        Assert.Equal(17, cached);
+        using var doc = JsonDocument.Parse(json);
+        return MojangVersionCatalog.ParseJavaMajorFromVersionJson(doc.RootElement);
     }
 
     [Fact]
@@ -117,20 +91,19 @@ public sealed class MinecraftJavaRequirementServiceTests : IDisposable
         }
         """;
 
-        var mockHttp = new MockHttpPort();
-        mockHttp.Responses[new Uri(MinecraftJavaRequirementService.ManifestV2Url)] = manifestJson;
-        mockHttp.Responses[new Uri("https://piston-meta.mojang.com/v1/packages/test/1.21.4.json")] = packageJson;
+        Dictionary<Uri, string> responses = [];
+        var mockHttp = new StubHttpPort(uri => responses.GetValueOrDefault(uri));
+        responses[new Uri(MojangVersionCatalog.ManifestV2Url)] = manifestJson;
+        responses[new Uri("https://piston-meta.mojang.com/v1/packages/test/1.21.4.json")] = packageJson;
 
         var service = new MinecraftJavaRequirementService(mockHttp, _testTempDir);
 
         int major = await service.GetRequiredJavaMajorAsync("1.21.4");
         Assert.Equal(21, major);
 
-        // 驗證已寫入版本快取檔案且未建立舊版獨立快取
-        string versionsCache = Path.Combine(_testTempDir, MinecraftJavaRequirementService.VersionsCacheFileName);
-        string reqCache = Path.Combine(_testTempDir, MinecraftJavaRequirementService.RequirementsCacheFileName);
+        // 驗證已寫入版本快取檔案
+        string versionsCache = Path.Combine(_testTempDir, MojangVersionCatalog.VersionsCacheFileName);
         Assert.True(File.Exists(versionsCache));
-        Assert.False(File.Exists(reqCache));
 
         // 第二次呼叫時命中快取，請求數不再增加
         int reqCountBefore = mockHttp.RequestCount;
@@ -148,8 +121,9 @@ public sealed class MinecraftJavaRequirementServiceTests : IDisposable
         }
         """;
 
-        var mockHttp = new MockHttpPort();
-        mockHttp.Responses[new Uri(MinecraftJavaRequirementService.ManifestV2Url)] = manifestJson;
+        Dictionary<Uri, string> responses = [];
+        var mockHttp = new StubHttpPort(uri => responses.GetValueOrDefault(uri));
+        responses[new Uri(MojangVersionCatalog.ManifestV2Url)] = manifestJson;
 
         var service = new MinecraftJavaRequirementService(mockHttp, _testTempDir);
 
@@ -177,10 +151,11 @@ public sealed class MinecraftJavaRequirementServiceTests : IDisposable
         }
         """;
 
-        var mockHttp = new MockHttpPort();
-        mockHttp.Responses[new Uri(MinecraftJavaRequirementService.ManifestV2Url)] = manifestJson;
-        mockHttp.Responses[new Uri("https://example.com/1.21.4.json")] = """{"javaVersion": {"majorVersion": 21}}""";
-        mockHttp.Responses[new Uri("https://example.com/1.16.5.json")] = """{"javaVersion": {"majorVersion": 8}}""";
+        Dictionary<Uri, string> responses = [];
+        var mockHttp = new StubHttpPort(uri => responses.GetValueOrDefault(uri));
+        responses[new Uri(MojangVersionCatalog.ManifestV2Url)] = manifestJson;
+        responses[new Uri("https://example.com/1.21.4.json")] = """{"javaVersion": {"majorVersion": 21}}""";
+        responses[new Uri("https://example.com/1.16.5.json")] = """{"javaVersion": {"majorVersion": 8}}""";
 
         var service = new MinecraftJavaRequirementService(mockHttp, _testTempDir);
         var dict = await service.PreloadAllJavaRequirementsAsync();
@@ -189,10 +164,8 @@ public sealed class MinecraftJavaRequirementServiceTests : IDisposable
         Assert.Equal(21, dict["1.21.4"]);
         Assert.Equal(8, dict["1.16.5"]);
 
-        string versionsCache = Path.Combine(_testTempDir, MinecraftJavaRequirementService.VersionsCacheFileName);
-        string reqCache = Path.Combine(_testTempDir, MinecraftJavaRequirementService.RequirementsCacheFileName);
+        string versionsCache = Path.Combine(_testTempDir, MojangVersionCatalog.VersionsCacheFileName);
         Assert.True(File.Exists(versionsCache));
-        Assert.False(File.Exists(reqCache));
     }
 
     [Fact]
@@ -215,7 +188,8 @@ public sealed class MinecraftJavaRequirementServiceTests : IDisposable
         """;
         await File.WriteAllTextAsync(paperCachePath, paperJson);
 
-        var mockHttp = new MockHttpPort();
+        Dictionary<Uri, string> responses = [];
+        var mockHttp = new StubHttpPort(uri => responses.GetValueOrDefault(uri));
         var service = new MinecraftJavaRequirementService(mockHttp, _testTempDir);
 
         int major21 = await service.GetRequiredJavaMajorAsync("1.21.4", Domain.Servers.LoaderKind.Paper);
@@ -224,39 +198,5 @@ public sealed class MinecraftJavaRequirementServiceTests : IDisposable
         Assert.Equal(21, major21);
         Assert.Equal(17, major17);
         Assert.Equal(0, mockHttp.RequestCount); // 驗證零網路請求，完全命中本地快取
-    }
-
-    private sealed class MockHttpPort : IHttpPort
-    {
-        public Dictionary<Uri, string> Responses { get; } = [];
-        public int RequestCount { get; private set; }
-
-        public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default)
-        {
-            RequestCount++;
-            if (Responses.TryGetValue(uri, out string? response))
-            {
-                return Task.FromResult<string?>(response);
-            }
-            return Task.FromResult<string?>(null);
-        }
-
-        public Task<HttpJsonResponse<T>> GetJsonAsync<T>(Uri uri, CancellationToken cancellationToken = default) =>
-            throw new NotImplementedException();
-
-        public Task<HttpResult> DownloadAsync(
-            Uri uri,
-            string targetPath,
-            IProgress<HttpProgress>? progress = null,
-            string? expectedHash = null,
-            string expectedHashAlgorithm = "sha256",
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new HttpResult(true));
-
-        public Task<string?> PostJsonAsync(
-            Uri uri,
-            string jsonPayload,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult<string?>(null);
     }
 }

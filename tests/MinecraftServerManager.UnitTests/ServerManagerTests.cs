@@ -1,35 +1,25 @@
+using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Domain.ValueObjects;
+using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Servers;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class ServerManagerTests : IDisposable
+public sealed partial class ServerManagerTests : IDisposable
 {
+    private readonly TempDirectory _testRootTemp = new("msm-servermgr-tests-");
     private readonly string _testRoot;
     private readonly ServerManager _manager;
 
     public ServerManagerTests()
     {
-        _testRoot = Path.Combine(Path.GetTempPath(), "msm-servermgr-tests-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testRoot);
-        _manager = new ServerManager(_testRoot, new ServerInspector(new ServerDirectorySizeService()));
+        _testRoot = _testRootTemp.FullName;
+        _manager = TestServerManagers.Create(_testRoot);
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testRoot))
-            {
-                Directory.Delete(_testRoot, recursive: true);
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
+    public void Dispose() => _testRootTemp.Dispose();
 
     [Fact]
     public async Task CreatesServerWithDefaultFilesAndRegistry()
@@ -128,7 +118,7 @@ public sealed class ServerManagerTests : IDisposable
             memoryMinMb: 8192,
             path: dir);
 
-        ServerManager.UpdateStartScriptMemory(dir, config);
+        StartScriptWriter.UpdateMemory(dir, config);
 
         string updated = File.ReadAllText(batPath);
         Assert.Contains("-Xms8192M", updated);
@@ -152,7 +142,7 @@ public sealed class ServerManagerTests : IDisposable
             memoryMinMb: 4096,
             path: dir);
 
-        ServerManager.UpdateStartScriptMemory(dir, config);
+        StartScriptWriter.UpdateMemory(dir, config);
 
         string updated = File.ReadAllText(batPath);
         Assert.Contains("-Xms4096M -Xmx8192M", updated);
@@ -183,9 +173,9 @@ public sealed class ServerManagerTests : IDisposable
     [Fact]
     public async Task ImportsExistingServerDirectory()
     {
-        string externalDir = Path.Combine(Path.GetTempPath(), "msm-external-server-" + Guid.NewGuid().ToString("N"));
+        using var externalDirTemp = new TempDirectory("msm-external-server-");
+        string externalDir = Path.Combine(externalDirTemp.FullName, "root");
         Directory.CreateDirectory(externalDir);
-
         File.WriteAllText(Path.Combine(externalDir, "server.jar"), "dummy jar");
         File.WriteAllText(Path.Combine(externalDir, "eula.txt"), "eula=true\n");
         File.WriteAllText(Path.Combine(externalDir, "server.properties"), "server-port=25565\n");
@@ -199,6 +189,57 @@ public sealed class ServerManagerTests : IDisposable
         string importedDir = Path.Combine(_testRoot, "ImportedServer");
         Assert.True(Directory.Exists(importedDir));
         Assert.True(File.Exists(Path.Combine(importedDir, "server.jar")));
+        Assert.True(Directory.Exists(externalDir));
+    }
+
+    [Fact]
+    public async Task ImportsExistingServerDirectoryWithMoveModeRemovesSource()
+    {
+        using var externalDirTemp = new TempDirectory("msm-external-move-");
+        string externalDir = Path.Combine(externalDirTemp.FullName, "root");
+        Directory.CreateDirectory(externalDir);
+        File.WriteAllText(Path.Combine(externalDir, "server.jar"), "dummy jar");
+        File.WriteAllText(Path.Combine(externalDir, "eula.txt"), "eula=true\n");
+        File.WriteAllText(Path.Combine(externalDir, "server.properties"), "server-port=25565\n");
+
+        var importResult = await _manager.ImportServerAsync(externalDir, "MovedServer", ImportTransferMode.Move);
+
+        Assert.True(importResult.Completed);
+        string importedDir = Path.Combine(_testRoot, "MovedServer");
+        Assert.True(Directory.Exists(importedDir));
+        Assert.True(File.Exists(Path.Combine(importedDir, "server.jar")));
+        Assert.False(Directory.Exists(externalDir));
+    }
+
+    [Fact]
+    public async Task ServersRootRelocator_ValidatesAndRelocatesAllContent()
+    {
+        var plan = ServerCreationPlan.Create(
+            name: ServerName.Parse("RelocateSrv"),
+            minecraftVersion: MinecraftVersion.Parse("1.20.4"),
+            loaderType: LoaderKind.Vanilla,
+            memoryMaxMb: 2048);
+        var created = await _manager.CreateServerAsync(plan);
+        Assert.True(created.Completed);
+
+        string subDir = Path.Combine(_testRoot, "sub");
+        string serversRoot = Path.Combine(_testRoot, "servers");
+        Assert.Equal(RelocationPathCheckResult.SameAsCurrent, ServersRootRelocator.ValidateTargetRoot(serversRoot, _testRoot, out _, out _));
+        Assert.Equal(RelocationPathCheckResult.SubdirectoryOfCurrent, ServersRootRelocator.ValidateTargetRoot(_testRoot, _testRoot, out _, out string forcedNew));
+        Assert.Equal(serversRoot, forcedNew);
+        Assert.Equal(RelocationPathCheckResult.SubdirectoryOfCurrent, ServersRootRelocator.ValidateTargetRoot(_testRoot, subDir, out _, out _));
+
+        using var newRootTemp = new TempDirectory("msm-relocated-root-");
+        string newRoot = Path.Combine(newRootTemp.FullName, "root");
+        Assert.True(ServersRootRelocator.HasStoredContent(_testRoot));
+        Assert.True(ServersRootRelocator.IsTargetDirectoryEmpty(newRoot));
+
+        ServersRootRelocator.RelocateAllContent(_testRoot, newRoot);
+
+        Assert.True(Directory.Exists(Path.Combine(newRoot, "servers", "RelocateSrv")));
+        Assert.True(File.Exists(Path.Combine(newRoot, "servers", "servers.json")));
+        string registryJson = await File.ReadAllTextAsync(Path.Combine(newRoot, "servers", "servers.json"));
+        Assert.Contains(newRoot.Replace("\\", "\\\\", StringComparison.Ordinal), registryJson);
     }
 
     [Fact]
@@ -224,5 +265,34 @@ public sealed class ServerManagerTests : IDisposable
         Assert.Contains("-Xmx4096M", content);
         Assert.Contains("-Dcustom.flag=true", content);
         Assert.Contains("-XX:+UseG1GC", content);
+    }
+
+    [Fact]
+    public async Task GetAllServersAsync_RecoversInterruptedDeletionBeforeListing()
+    {
+        using var tempDir = new TempDirectory("msm-tombstone-manager-");
+        string serverPath = Path.Combine(tempDir.FullName, "Survival2");
+        Directory.CreateDirectory(serverPath);
+        File.WriteAllText(Path.Combine(serverPath, "world.txt"), "data");
+        new ServerRegistryStore(tempDir.FullName).Set("Survival2", new ServerConfig(
+            ServerName.Parse("Survival2"),
+            MinecraftVersion.Parse("1.21.4"),
+            LoaderKind.Vanilla,
+            string.Empty,
+            2048,
+            null,
+            path: serverPath));
+        var registered = new ServerRegistryStore(tempDir.FullName).Find("Survival2");
+        Assert.NotNull(registered);
+
+        // 模擬刪除進行到一半：伺服器目錄已被搬入墓碑，但登錄檔仍保留
+        ServerTombstoneManager.PrepareDeleteTombstone(tempDir.FullName, "Survival2", registered.Path);
+        Assert.False(Directory.Exists(registered.Path));
+
+        var manager = TestServerManagers.Create(tempDir.FullName);
+        var servers = await manager.GetAllServersAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains(servers, static s => s.Name.Value == "Survival2");
+        Assert.True(Directory.Exists(registered.Path));
     }
 }

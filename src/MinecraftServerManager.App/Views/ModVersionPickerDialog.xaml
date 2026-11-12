@@ -1,76 +1,146 @@
 <Window x:Class="MinecraftServerManager.App.Views.ModVersionPickerDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="{Binding WindowTitle}"
-        Width="760"
-        Height="500"
-        MinWidth="640"
-        MinHeight="420"
-        WindowStartupLocation="CenterScreen"
-        Background="{DynamicResource WindowBrush}"
-       >
-  <Grid Margin="24">
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="*" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
-    </Grid.RowDefinitions>
+        xmlns:controls="using:MinecraftServerManager.App.Controls"
+        xmlns:views="using:MinecraftServerManager.App.Views"
+        xmlns:vm="using:MinecraftServerManager.App.ViewModels">
 
-    <StackPanel Grid.Row="0" Margin="0,0,0,16">
-      <TextBlock Text="{Binding ProjectTitle}" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" />
-      <TextBlock Text="選擇要安裝的模組版本（已依伺服器的 Minecraft 版本與載入器篩選）"
-                 Foreground="{DynamicResource MutedTextBrush}" FontSize="12" Margin="0,4,0,0" />
-    </StackPanel>
+        <Grid Background="{ThemeResource WindowBrush}"
+                Padding="20"
+                RowSpacing="12">
+                <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
-    <Border Grid.Row="1"
-            Background="{DynamicResource CardBrush}"
-            BorderBrush="{DynamicResource BorderBrush}"
-            BorderThickness="1"
-            CornerRadius="6"
-            Margin="0,0,0,14">
-      <DataGrid ItemsSource="{Binding Versions}"
-                SelectedItem="{Binding SelectedVersion}"
-                AutoGenerateColumns="False"
-                IsReadOnly="True"
-                SelectionMode="Single"
-                GridLinesVisibility="None"
-                HeadersVisibility="Column"
-                RowHeaderWidth="0"
-                EnableRowVirtualization="True"
-                VirtualizingPanel.VirtualizationMode="Recycling">
-        <DataGrid.Columns>
-          <DataGridTextColumn Header="版本號碼" Binding="{Binding VersionNumber, Mode=OneTime}" Width="180" />
-          <DataGridTextColumn Header="支援 MC" Binding="{Binding GameVersions, Mode=OneTime}" Width="160" />
-          <DataGridTextColumn Header="載入器" Binding="{Binding Loaders, Mode=OneTime}" Width="120" />
-          <DataGridTextColumn Header="發布時間" Binding="{Binding DatePublished, Mode=OneTime}" Width="140" />
-          <DataGridTextColumn Header="檔案" Binding="{Binding FileName, Mode=OneTime}" Width="*" />
-        </DataGrid.Columns>
-      </DataGrid>
-    </Border>
+                <StackPanel Grid.Row="0"
+                        Spacing="4">
+                        <TextBlock Text="{x:Bind ViewModel.ProjectTitle}"
+                                Style="{ThemeResource TitleTextBlockStyle}" />
+                        <TextBlock Text="選擇要安裝的模組版本（已依伺服器的 Minecraft 版本與載入器篩選）"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{ThemeResource CaptionTextBlockStyle}" />
+                </StackPanel>
 
-    <TextBlock Grid.Row="2"
-               Text="{Binding StatusMessage}"
-               Foreground="{DynamicResource MutedTextBrush}"
-               FontSize="12"
-               Margin="0,0,0,12"
-               TextWrapping="Wrap" />
+                <Border Grid.Row="1"
+                        Style="{StaticResource CardBorderStyle}"
+                        CornerRadius="8"
+                        Padding="12">
+                        <controls:TableFrame>
+                                <controls:TableFrame.Header>
+                                        <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition
+                                                                Width="{x:Bind views:ModVersionListColumns.Current.VersionWidth, Mode=OneWay}" />
+                                                        <ColumnDefinition
+                                                                Width="{x:Bind views:ModVersionListColumns.Current.GameVersionWidth, Mode=OneWay}" />
+                                                        <ColumnDefinition
+                                                                Width="{x:Bind views:ModVersionListColumns.Current.LoaderWidth, Mode=OneWay}" />
+                                                        <ColumnDefinition
+                                                                Width="{x:Bind views:ModVersionListColumns.Current.DateWidth, Mode=OneWay}" />
+                                                        <ColumnDefinition
+                                                                Width="{x:Bind views:ModVersionListColumns.Current.FileNameWidth, Mode=OneWay}" />
+                                                </Grid.ColumnDefinitions>
+                                                <controls:SortableTableHeader Grid.Column="0"
+                                                        Text="版本號碼"
+                                                        SortPropertyName="VersionNumber"
+                                                        ColumnWidth="{x:Bind views:ModVersionListColumns.Current.VersionWidth, Mode=TwoWay}"
+                                                        SortRequested="OnHeaderSortRequested"
+                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                <controls:SortableTableHeader Grid.Column="1"
+                                                        Text="支援 MC"
+                                                        SortPropertyName="GameVersions"
+                                                        ColumnWidth="{x:Bind views:ModVersionListColumns.Current.GameVersionWidth, Mode=TwoWay}"
+                                                        SortRequested="OnHeaderSortRequested"
+                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                <controls:SortableTableHeader Grid.Column="2"
+                                                        Text="載入器"
+                                                        SortPropertyName="Loaders"
+                                                        ColumnWidth="{x:Bind views:ModVersionListColumns.Current.LoaderWidth, Mode=TwoWay}"
+                                                        SortRequested="OnHeaderSortRequested"
+                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                <controls:SortableTableHeader Grid.Column="3"
+                                                        Text="發布時間"
+                                                        SortPropertyName="DatePublished"
+                                                        ColumnWidth="{x:Bind views:ModVersionListColumns.Current.DateWidth, Mode=TwoWay}"
+                                                        SortRequested="OnHeaderSortRequested"
+                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                <controls:SortableTableHeader Grid.Column="4"
+                                                        Text="檔案"
+                                                        SortPropertyName="FileName"
+                                                        ColumnWidth="{x:Bind views:ModVersionListColumns.Current.FileNameWidth, Mode=TwoWay}"
+                                                        SortRequested="OnHeaderSortRequested"
+                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                        </Grid>
+                                </controls:TableFrame.Header>
 
-    <Grid Grid.Row="3">
-      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-        <Button Content="取消"
-                Command="{Binding CancelCommand}"
-                Margin="0,0,10,0"
-                Padding="16,6" />
-        <Button Content="加入安裝清單"
-                Command="{Binding QueueCommand}"
-                Margin="0,0,10,0"
-                Padding="16,6" />
-        <Button Content="立即安裝"
-                Command="{Binding InstallCommand}"
-                Style="{DynamicResource PrimaryButtonStyle}"
-                Padding="20,6" />
-      </StackPanel>
-    </Grid>
-  </Grid>
+                                <ListView
+                                        ItemsSource="{x:Bind ViewModel.Versions, Mode=OneWay}"
+                                        SelectedItem="{x:Bind ViewModel.SelectedVersion, Mode=TwoWay}"
+                                        SelectionMode="Single"
+                                        controls:ListSelectionBehavior.ClearOnOutsidePress="True"
+                                        ItemContainerStyle="{StaticResource TableListViewItemStyle}">
+                                        <ListView.ItemTemplate>
+                                                <DataTemplate
+                                                        x:DataType="vm:ModVersionDisplayItem">
+                                                        <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition
+                                                                                Width="{x:Bind views:ModVersionListColumns.Current.VersionWidth, Mode=OneWay}" />
+                                                                        <ColumnDefinition
+                                                                                Width="{x:Bind views:ModVersionListColumns.Current.GameVersionWidth, Mode=OneWay}" />
+                                                                        <ColumnDefinition
+                                                                                Width="{x:Bind views:ModVersionListColumns.Current.LoaderWidth, Mode=OneWay}" />
+                                                                        <ColumnDefinition
+                                                                                Width="{x:Bind views:ModVersionListColumns.Current.DateWidth, Mode=OneWay}" />
+                                                                        <ColumnDefinition
+                                                                                Width="{x:Bind views:ModVersionListColumns.Current.FileNameWidth, Mode=OneWay}" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <controls:TableCell
+                                                                        Grid.Column="0"
+                                                                        Text="{x:Bind VersionNumber}" />
+                                                                <controls:TableCell
+                                                                        Grid.Column="1"
+                                                                        Text="{x:Bind GameVersions}" />
+                                                                <controls:TableCell
+                                                                        Grid.Column="2"
+                                                                        Text="{x:Bind Loaders}" />
+                                                                <controls:TableCell
+                                                                        Grid.Column="3"
+                                                                        Text="{x:Bind DatePublished}" />
+                                                                <controls:TableCell
+                                                                        Grid.Column="4"
+                                                                        Text="{x:Bind FileName}" />
+                                                        </Grid>
+                                                </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                </ListView>
+                        </controls:TableFrame>
+                </Border>
+
+                <!-- 狀態訊息 -->
+                <TextBlock Grid.Row="2"
+                        Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{ThemeResource CaptionTextBlockStyle}" />
+
+                <!-- 底部按鈕 -->
+                <StackPanel Grid.Row="3"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Spacing="10">
+                        <Button Content="取消"
+                                Command="{x:Bind ViewModel.CancelCommand}"
+                                MinWidth="80" />
+                        <Button Content="加入安裝清單"
+                                Command="{x:Bind ViewModel.QueueCommand}"
+                                MinWidth="110" />
+                        <Button Content="立即安裝"
+                                Command="{x:Bind ViewModel.InstallCommand}"
+                                Style="{ThemeResource AccentButtonStyle}"
+                                MinWidth="100" />
+                </StackPanel>
+        </Grid>
 </Window>

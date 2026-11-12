@@ -1,121 +1,158 @@
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-public sealed class ManageServerViewModelTests
+public sealed class ManageServerViewModelTests : IDisposable
 {
-    private static ManageServerViewModel CreateTestViewModel(Core.Ports.IExternalLauncher? launcher = null)
-    {
-        string root = Path.Combine(Path.GetTempPath(), "msm-manage-test-" + Guid.NewGuid().ToString("N"));
-        var settings = new Infrastructure.Settings.SettingsManager(root);
-        var dirSize = new Infrastructure.Servers.ServerDirectorySizeService();
-        var inspector = new Infrastructure.Servers.ServerInspector(dirSize);
-        var manager = new Infrastructure.Servers.ServerManager(root, inspector);
-        var backupService = new Infrastructure.Servers.ServerBackupService(root);
-        var processRunner = new Infrastructure.Process.ProcessRunner();
-        var runtime = new Infrastructure.Servers.ServerRuntime(processRunner);
-        var launchPlanner = new Infrastructure.Servers.ServerLaunchPlanner();
-        var propertiesStore = new Infrastructure.Servers.ServerPropertiesStore(root);
-        var playerConfigStore = new Infrastructure.Servers.ServerPlayerConfigStore();
-        var integrityService = new Infrastructure.Servers.ServerIntegrityService();
+    private readonly List<TempDirectory> _tempDirectories = [];
 
-        return new ManageServerViewModel(
-            settingsManager: settings,
-            serverManager: manager,
-            backupService: backupService,
-            serverRuntime: runtime,
-            serverInspector: inspector,
-            launchPlanner: launchPlanner,
-            propertiesStore: propertiesStore,
-            playerConfigStore: playerConfigStore,
-            directorySizeService: dirSize,
-            integrityService: integrityService,
-            launcher: launcher);
+    public void Dispose()
+    {
+        foreach (TempDirectory directory in _tempDirectories)
+        {
+            directory.Dispose();
+        }
+    }
+
+    private TempDirectory CreateTemp(string prefix)
+    {
+        var directory = new TempDirectory(prefix);
+        _tempDirectories.Add(directory);
+        return directory;
+    }
+
+    private ManageServerViewModel CreateTestViewModel(
+        Core.Ports.IExternalLauncher? launcher = null,
+        IUiService? uiService = null,
+        string? customRoot = null)
+    {
+        string root = customRoot ?? CreateTemp("msm-manage-test-").FullName;
+        var settings = new Infrastructure.Settings.SettingsManager(root);
+        settings.SetExactServersRoot(root);
+        var deps = TestDependencies.Create(root, uiService, launcher, settings);
+        return TestDependencies.CreateManagePage(deps);
     }
 
     [Fact]
     public async Task SelectedServerMemory_ShouldUpdateWhenRowMemoryChangesAndRefreshed()
     {
-        string root = Path.Combine(Path.GetTempPath(), "msm-manage-test-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
+        string root = CreateTemp("msm-manage-test-").FullName;
+        var settings = new Infrastructure.Settings.SettingsManager(root);
+        settings.SetExactServersRoot(root);
+        var deps = TestDependencies.Create(root, settings: settings);
+        var manager = deps.ServerManager;
+        var vm = TestDependencies.CreateManagePage(deps);
+
+        var plan = Domain.Servers.ServerCreationPlan.Create(
+            name: Domain.ValueObjects.ServerName.Parse("MemoryServer"),
+            minecraftVersion: Domain.ValueObjects.MinecraftVersion.Parse("1.20.4"),
+            loaderType: Domain.Servers.LoaderKind.Vanilla,
+            memoryMaxMb: 2048,
+            memoryMinMb: 1024);
+
+        var created = await manager.CreateServerAsync(plan);
+        Assert.True(created.Completed);
+
+        await vm.List.RefreshServers();
+        var server = vm.List.Servers.FirstOrDefault(s => s.Name == "MemoryServer");
+        Assert.NotNull(server);
+        vm.List.SelectedServer = server;
+
+        Assert.Equal("1024 MB ~ 2048 MB", vm.List.SelectedServerMemory);
+
+        var updatedConfig = new Domain.Servers.ServerConfig(
+            name: Domain.ValueObjects.ServerName.Parse(server.Name),
+            minecraftVersion: Domain.ValueObjects.MinecraftVersion.Parse(server.Version),
+            loaderType: Domain.Servers.LoaderKind.Vanilla,
+            loaderVersion: "",
+            memoryMaxMb: 20480,
+            memoryMinMb: 10240,
+            path: server.Path);
+        await manager.UpdateServerAsync(updatedConfig);
+
+        await vm.List.RefreshAndSelectServerAsync("MemoryServer");
+
+        Assert.Equal("10240 MB ~ 20480 MB", vm.List.SelectedServerMemory);
+    }
+
+    [Fact]
+    public async Task ChangeServersRoot_WhenSubdirectorySelected_ChangesSettingWithoutMigration()
+    {
+        string root = CreateTemp("msm-change-root-").FullName;
+        string subDir = Path.Combine(root, "SubFolder");
+        Directory.CreateDirectory(subDir);
+        var ui = new ManualUiService { FolderToPick = subDir };
+        var vm = CreateTestViewModel(uiService: ui, customRoot: root);
+
+        await vm.ServersRoot.ChangeServersRootCommand.ExecuteAsync(null);
+
+        Assert.Null(ui.LastErrorMessage);
+        Assert.True(ui.RestartCalled);
+        Assert.Equal(Path.Combine(subDir, "servers"), vm.List.DetectPath);
+    }
+
+    [Fact]
+    public async Task ChangeServersRoot_WhenHasContentAndUserChoosesMigrate_RelocatesAndRestarts()
+    {
+        string oldRoot = CreateTemp("msm-old-root-").FullName;
+        string newRoot = Path.Combine(CreateTemp("msm-new-root-").FullName, "target");
+        string serverDir = Path.Combine(oldRoot, "MyServer");
+        Directory.CreateDirectory(serverDir);
+        await File.WriteAllTextAsync(Path.Combine(serverDir, "server.jar"), "jar");
+
+        var ui = new ManualUiService
         {
-            var settings = new Infrastructure.Settings.SettingsManager(root);
-            var dirSize = new Infrastructure.Servers.ServerDirectorySizeService();
-            var inspector = new Infrastructure.Servers.ServerInspector(dirSize);
-            var manager = new Infrastructure.Servers.ServerManager(root, inspector);
-            var backupService = new Infrastructure.Servers.ServerBackupService(root);
-            var processRunner = new Infrastructure.Process.ProcessRunner();
-            var runtime = new Infrastructure.Servers.ServerRuntime(processRunner);
-            var launchPlanner = new Infrastructure.Servers.ServerLaunchPlanner();
-            var propertiesStore = new Infrastructure.Servers.ServerPropertiesStore(root);
-            var playerConfigStore = new Infrastructure.Servers.ServerPlayerConfigStore();
-            var integrityService = new Infrastructure.Servers.ServerIntegrityService();
+            FolderToPick = newRoot,
+            YesNoCancelDecision = true,
+        };
+        var vm = CreateTestViewModel(uiService: ui, customRoot: oldRoot);
 
-            var vm = new ManageServerViewModel(
-                settingsManager: settings,
-                serverManager: manager,
-                backupService: backupService,
-                serverRuntime: runtime,
-                serverInspector: inspector,
-                launchPlanner: launchPlanner,
-                propertiesStore: propertiesStore,
-                playerConfigStore: playerConfigStore,
-                directorySizeService: dirSize,
-                integrityService: integrityService);
+        await vm.ServersRoot.ChangeServersRootCommand.ExecuteAsync(null);
 
-            var plan = Domain.Servers.ServerCreationPlan.Create(
-                name: Domain.ValueObjects.ServerName.Parse("MemoryServer"),
-                minecraftVersion: Domain.ValueObjects.MinecraftVersion.Parse("1.20.4"),
-                loaderType: Domain.Servers.LoaderKind.Vanilla,
-                memoryMaxMb: 2048,
-                memoryMinMb: 1024);
+        Assert.True(ui.RestartCalled);
+        Assert.Equal(Path.Combine(newRoot, "servers"), vm.List.DetectPath);
+        Assert.True(File.Exists(Path.Combine(newRoot, "servers", "MyServer", "server.jar")));
+    }
 
-            var created = await manager.CreateServerAsync(plan);
-            Assert.True(created.Completed);
+    [Fact]
+    public async Task ChangeServersRoot_WhenRestartFails_ReportsRestartFailureNotMigrationFailure()
+    {
+        string oldRoot = CreateTemp("msm-old-root-").FullName;
+        string newRoot = Path.Combine(CreateTemp("msm-new-root-").FullName, "target");
+        string serverDir = Path.Combine(oldRoot, "MyServer");
+        Directory.CreateDirectory(serverDir);
+        await File.WriteAllTextAsync(Path.Combine(serverDir, "server.jar"), "jar");
 
-            await vm.RefreshServers();
-            var server = vm.Servers.FirstOrDefault(s => s.Name == "MemoryServer");
-            Assert.NotNull(server);
-            vm.SelectedServer = server;
-
-            Assert.Equal("1024 MB ~ 2048 MB", vm.SelectedServerMemory);
-
-            // 模擬伺服器設定修改為 10G ~ 20G
-            var updatedConfig = new Domain.Servers.ServerConfig(
-                name: Domain.ValueObjects.ServerName.Parse(server.Name),
-                minecraftVersion: Domain.ValueObjects.MinecraftVersion.Parse(server.Version),
-                loaderType: Domain.Servers.LoaderKind.Vanilla,
-                loaderVersion: "",
-                memoryMaxMb: 20480,
-                memoryMinMb: 10240,
-                path: server.Path);
-            await manager.UpdateServerAsync(updatedConfig);
-
-            await vm.RefreshAndSelectServerAsync("MemoryServer");
-
-            Assert.Equal("10240 MB ~ 20480 MB", vm.SelectedServerMemory);
-            Assert.Contains("10240 MB ~ 20480 MB", vm.SelectedServerInfo);
-        }
-        finally
+        var ui = new ManualUiService
         {
-            try { Directory.Delete(root, true); } catch { }
-        }
+            FolderToPick = newRoot,
+            YesNoCancelDecision = true,
+            RestartException = new IOException("找不到工作目錄"),
+        };
+        var vm = CreateTestViewModel(uiService: ui, customRoot: oldRoot);
+
+        await vm.ServersRoot.ChangeServersRootCommand.ExecuteAsync(null);
+
+        Assert.NotNull(ui.LastErrorMessage);
+        Assert.Contains("手動重新開啟", ui.LastErrorMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain("已自動復原", ui.LastErrorMessage, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(newRoot, "servers", "MyServer", "server.jar")));
     }
 
     [Fact]
     public void SelectionShouldUpdateActionState()
     {
         var vm = CreateTestViewModel();
-        Assert.False(vm.HasSelectedServer);
-        Assert.False(vm.StartServerCommand.CanExecute(null));
-        Assert.False(vm.StopServerCommand.CanExecute(null));
-        Assert.False(vm.MonitorServerCommand.CanExecute(null));
+        Assert.False(vm.List.HasSelectedServer);
+        Assert.False(vm.Lifecycle.StartServerCommand.CanExecute(null));
+        Assert.False(vm.Lifecycle.StopServerCommand.CanExecute(null));
+        Assert.False(vm.Lifecycle.MonitorServerCommand.CanExecute(null));
         Assert.False(vm.ConfigureServerCommand.CanExecute(null));
         Assert.False(vm.OpenServerFolderCommand.CanExecute(null));
-        Assert.False(vm.BackupServerCommand.CanExecute(null));
-        Assert.False(vm.RestoreBackupCommand.CanExecute(null));
+        Assert.False(vm.Backup.BackupServerCommand.CanExecute(null));
+        Assert.False(vm.Backup.RestoreBackupCommand.CanExecute(null));
         Assert.False(vm.DeleteServerCommand.CanExecute(null));
 
         var server = new ServerRowItem
@@ -126,55 +163,46 @@ public sealed class ManageServerViewModelTests
             Status = "已停止",
             Path = @"C:\servers\Survival"
         };
-        vm.SelectedServer = server;
+        vm.List.SelectedServer = server;
 
-        Assert.True(vm.HasSelectedServer);
-        Assert.Contains("Survival", vm.SelectedServerInfo);
-        Assert.True(vm.StartServerCommand.CanExecute(null));
-        Assert.True(vm.StopServerCommand.CanExecute(null));
-        Assert.True(vm.MonitorServerCommand.CanExecute(null));
+        Assert.True(vm.List.HasSelectedServer);
+        Assert.Equal("Survival", vm.List.SelectedServer?.Name);
+        Assert.True(vm.Lifecycle.StartServerCommand.CanExecute(null));
+        Assert.True(vm.Lifecycle.StopServerCommand.CanExecute(null));
+        Assert.True(vm.Lifecycle.MonitorServerCommand.CanExecute(null));
         Assert.True(vm.ConfigureServerCommand.CanExecute(null));
         Assert.True(vm.OpenServerFolderCommand.CanExecute(null));
-        Assert.True(vm.BackupServerCommand.CanExecute(null));
-        Assert.True(vm.RestoreBackupCommand.CanExecute(null));
+        Assert.True(vm.Backup.BackupServerCommand.CanExecute(null));
+        Assert.True(vm.Backup.RestoreBackupCommand.CanExecute(null));
         Assert.True(vm.DeleteServerCommand.CanExecute(null));
 
-        vm.SelectedServer = null;
-        Assert.False(vm.HasSelectedServer);
-        Assert.False(vm.StartServerCommand.CanExecute(null));
+        vm.List.SelectedServer = null;
+        Assert.False(vm.List.HasSelectedServer);
+        Assert.False(vm.Lifecycle.StartServerCommand.CanExecute(null));
         Assert.False(vm.DeleteServerCommand.CanExecute(null));
     }
 
     [Fact]
     public async Task OpenBackupFolderWithoutBackupPathShouldNotCreateOrOpenServerInternalBackups()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "msm-backup-test-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
-        try
+        string tempDir = CreateTemp("msm-backup-test-").FullName;
+        var fakeLauncher = new RecordingLauncher();
+        var vm = CreateTestViewModel(launcher: fakeLauncher);
+        vm.List.SelectedServer = new ServerRowItem
         {
-            var fakeLauncher = new FakeExternalLauncher();
-            var vm = CreateTestViewModel(launcher: fakeLauncher);
-            vm.SelectedServer = new ServerRowItem
-            {
-                Name = "TestServer",
-                Version = "1.21.4",
-                Loader = "Paper",
-                Status = "已停止",
-                Path = tempDir,
-                BackupPath = string.Empty
-            };
+            Name = "TestServer",
+            Version = "1.21.4",
+            Loader = "Paper",
+            Status = "已停止",
+            Path = tempDir,
+            BackupPath = string.Empty
+        };
 
-            // 執行 OpenBackupFolder，未設定 BackupPath 且在測試中預設不會確認開啟
-            await vm.OpenBackupFolderCommand.ExecuteAsync(null);
+        await vm.Backup.OpenBackupFolderCommand.ExecuteAsync(null);
 
-            string internalBackupDir = Path.Combine(tempDir, "backups");
-            Assert.False(Directory.Exists(internalBackupDir));
-            Assert.DoesNotContain(internalBackupDir, fakeLauncher.OpenedFolders);
-        }
-        finally
-        {
-            try { Directory.Delete(tempDir, true); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
-        }
+        string internalBackupDir = Path.Combine(tempDir, "backups");
+        Assert.False(Directory.Exists(internalBackupDir));
+        Assert.DoesNotContain(internalBackupDir, fakeLauncher.OpenedFolders);
     }
 
     [Fact]
@@ -190,11 +218,11 @@ public sealed class ManageServerViewModelTests
             HasMissingFiles = true,
             Path = @"C:\servers\BrokenServer"
         };
-        vm.SelectedServer = server;
+        vm.List.SelectedServer = server;
 
-        Assert.True(vm.HasSelectedServer);
-        Assert.False(vm.StartServerCommand.CanExecute(null));
-        Assert.False(vm.MonitorServerCommand.CanExecute(null));
+        Assert.True(vm.List.HasSelectedServer);
+        Assert.False(vm.Lifecycle.StartServerCommand.CanExecute(null));
+        Assert.False(vm.Lifecycle.MonitorServerCommand.CanExecute(null));
         Assert.Contains("win_args.txt", server.Status);
     }
 
@@ -208,10 +236,9 @@ public sealed class ManageServerViewModelTests
             MemoryMaxMb = 4096,
             MemoryMinMb = null,
         };
-        vm.SelectedServer = server;
+        vm.List.SelectedServer = server;
 
-        Assert.Equal("4096 MB", vm.SelectedServerMemory);
-        Assert.Contains("記憶體配置：4096 MB", vm.SelectedServerInfo);
+        Assert.Equal("4096 MB", vm.List.SelectedServerMemory);
     }
 
     [Fact]
@@ -224,22 +251,8 @@ public sealed class ManageServerViewModelTests
             MemoryMaxMb = 4096,
             MemoryMinMb = 2048,
         };
-        vm.SelectedServer = server;
+        vm.List.SelectedServer = server;
 
-        Assert.Equal("2048 MB ~ 4096 MB", vm.SelectedServerMemory);
-        Assert.Contains("記憶體配置：2048 MB ~ 4096 MB", vm.SelectedServerInfo);
-    }
-
-    private sealed class FakeExternalLauncher : Core.Ports.IExternalLauncher
-    {
-        public List<string> OpenedFolders { get; } = [];
-        public bool OpenFolder(string folderPath, bool isTrusted = false)
-        {
-            OpenedFolders.Add(folderPath);
-            return true;
-        }
-        public bool ShowInFolder(string filePath, bool isTrusted = false) => !string.IsNullOrEmpty(filePath);
-        public bool OpenFile(string filePath, bool isTrusted = false) => !string.IsNullOrEmpty(filePath);
-        public bool OpenUrl(string url, bool isTrusted = false) => !string.IsNullOrEmpty(url);
+        Assert.Equal("2048 MB ~ 4096 MB", vm.List.SelectedServerMemory);
     }
 }

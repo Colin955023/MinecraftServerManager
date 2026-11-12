@@ -13,7 +13,6 @@ public sealed class ServerInitializationWorkflowTests
         public bool IsRunning { get; set; } = true;
         public bool IsReady { get; set; }
         public int? ExitCode => null;
-        public string? ActiveServerName => "TestServer";
         public bool ShouldThrowOnStop { get; set; }
         public int StopCallCount { get; private set; }
 
@@ -28,15 +27,6 @@ public sealed class ServerInitializationWorkflowTests
 
         public Task StartAsync(ServerLaunchPlan plan, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-        public Task StartAsync(
-            string javaExecutablePath,
-            string serverDirectory,
-            string executableName,
-            int memoryMaxMb,
-            int? memoryMinMb = null,
-            IReadOnlyList<string>? customJvmArgs = null,
-            CancellationToken cancellationToken = default) => Task.CompletedTask;
-
         public Task<bool> SendCommandAsync(string command, CancellationToken cancellationToken = default) => Task.FromResult(true);
 
         public Task<ProcessExitResult> StopAsync(TimeSpan gracefulTimeout, CancellationToken cancellationToken = default)
@@ -50,6 +40,9 @@ public sealed class ServerInitializationWorkflowTests
             return Task.FromResult(new ProcessExitResult(0, false));
         }
 
+        public Task<ProcessExitResult?> WaitForExitAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
+            Task.FromResult(IsRunning ? null : new ProcessExitResult(0, false));
+
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
@@ -57,7 +50,7 @@ public sealed class ServerInitializationWorkflowTests
     public async Task WhenServerReadyFires_MarksReadyDetectedAndCallsStop()
     {
         var fakeRuntime = new FakeServerRuntime();
-        using var workflow = new ServerInitializationWorkflow(fakeRuntime);
+        using var workflow = new ServerInitializationWorkflow(fakeRuntime, new ServerLaunchPlanner());
 
         Assert.False(workflow.ReadyDetected);
 
@@ -76,7 +69,7 @@ public sealed class ServerInitializationWorkflowTests
     public async Task WhenServerReadyFires_AndStopThrows_SwallowsExceptionSafely()
     {
         var fakeRuntime = new FakeServerRuntime { ShouldThrowOnStop = true };
-        using var workflow = new ServerInitializationWorkflow(fakeRuntime);
+        using var workflow = new ServerInitializationWorkflow(fakeRuntime, new ServerLaunchPlanner());
 
         fakeRuntime.TriggerReady();
 
@@ -93,7 +86,7 @@ public sealed class ServerInitializationWorkflowTests
     public void Dispose_UnsubscribesFromEvents()
     {
         var fakeRuntime = new FakeServerRuntime();
-        var workflow = new ServerInitializationWorkflow(fakeRuntime);
+        var workflow = new ServerInitializationWorkflow(fakeRuntime, new ServerLaunchPlanner());
         workflow.Dispose();
 
         fakeRuntime.TriggerReady();

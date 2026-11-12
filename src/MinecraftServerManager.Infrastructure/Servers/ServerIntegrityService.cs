@@ -1,11 +1,13 @@
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
 public sealed class ServerIntegrityService : IServerIntegrityService
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerIntegrityService));
     private static readonly string[] EmptyList = [];
     private static readonly string[] DirectoryNotFoundMissingList = ["伺服器目錄不存在"];
     private static readonly string[] PaperMissingList = ["paper.jar"];
@@ -28,10 +30,19 @@ public sealed class ServerIntegrityService : IServerIntegrityService
                     {
                         bool hasPaper = SafeFileSystem.FileExists(Path.Combine(serverPath, "paper.jar")) ||
                                         SafeFileSystem.FileExists(Path.Combine(serverPath, "server.jar")) ||
-                                        SafeFileSystem.EnumerateFiles(serverPath, "paper*.jar", SearchOption.TopDirectoryOnly).Count > 0;
+                                        SafeFileSystem.HasAnyFile(serverPath, "paper*.jar");
                         return hasPaper
                             ? new ServerIntegrityResult(false, EmptyList)
                             : new ServerIntegrityResult(true, PaperMissingList);
+                    }
+
+                case LoaderKind.Vanilla:
+                    {
+                        bool hasServer = SafeFileSystem.FileExists(Path.Combine(serverPath, "server.jar")) ||
+                                         SafeFileSystem.HasAnyFile(serverPath, "minecraft_server*.jar");
+                        return hasServer
+                            ? new ServerIntegrityResult(false, EmptyList)
+                            : new ServerIntegrityResult(true, ServerJarMissingList);
                     }
 
                 case LoaderKind.Fabric:
@@ -52,11 +63,9 @@ public sealed class ServerIntegrityService : IServerIntegrityService
 
                 case LoaderKind.Quilt:
                     {
-                        bool hasQuiltLaunch = SafeFileSystem.FileExists(Path.Combine(serverPath, "quilt-server-launch.jar")) ||
-                                              SafeFileSystem.FileExists(Path.Combine(serverPath, "server", "quilt-server-launch.jar"));
-                        bool hasVanillaServer = SafeFileSystem.FileExists(Path.Combine(serverPath, "server.jar"));
-
-                        return (hasQuiltLaunch || hasVanillaServer)
+                        bool hasQuilt = SafeFileSystem.FileExists(Path.Combine(serverPath, "quilt-server-launch.jar")) ||
+                                        SafeFileSystem.FileExists(Path.Combine(serverPath, "server.jar"));
+                        return hasQuilt
                             ? new ServerIntegrityResult(false, EmptyList)
                             : new ServerIntegrityResult(true, QuiltMissingList);
                     }
@@ -64,15 +73,15 @@ public sealed class ServerIntegrityService : IServerIntegrityService
                 case LoaderKind.NeoForge:
                     {
                         bool hasRunScript = HasRunScript(serverPath);
-                        string neoLib = Path.Combine(serverPath, "libraries", "net", "neoforged", "neoforge");
-                        bool hasWinArgs = SafeFileSystem.DirectoryExists(neoLib) && SafeFileSystem.EnumerateFiles(neoLib, "*args.txt", SearchOption.AllDirectories).Count > 0;
+                        string neoForgeLib = Path.Combine(serverPath, "libraries", "net", "neoforged", "neoforge");
+                        bool hasNeoForgeArgs = SafeFileSystem.HasAnyFile(neoForgeLib, "*args.txt", SearchOption.AllDirectories);
 
                         var missing = new List<string>(2);
                         if (!hasRunScript)
                         {
                             missing.Add("start_server.bat / run.bat");
                         }
-                        if (!hasWinArgs)
+                        if (!hasNeoForgeArgs)
                         {
                             missing.Add("win_args.txt");
                         }
@@ -84,7 +93,7 @@ public sealed class ServerIntegrityService : IServerIntegrityService
 
                 case LoaderKind.Forge:
                     {
-                        bool hasLegacyForge = SafeFileSystem.EnumerateFiles(serverPath, "forge*.jar", SearchOption.TopDirectoryOnly).Count > 0;
+                        bool hasLegacyForge = SafeFileSystem.HasAnyFile(serverPath, "forge*.jar");
                         if (hasLegacyForge)
                         {
                             return new ServerIntegrityResult(false, EmptyList);
@@ -92,7 +101,7 @@ public sealed class ServerIntegrityService : IServerIntegrityService
 
                         bool hasRunScript = HasRunScript(serverPath);
                         string forgeLib = Path.Combine(serverPath, "libraries", "net", "minecraftforge", "forge");
-                        bool hasForgeArgs = SafeFileSystem.DirectoryExists(forgeLib) && SafeFileSystem.EnumerateFiles(forgeLib, "*args.txt", SearchOption.AllDirectories).Count > 0;
+                        bool hasForgeArgs = SafeFileSystem.HasAnyFile(forgeLib, "*args.txt", SearchOption.AllDirectories);
 
                         var missing = new List<string>(2);
                         if (!hasRunScript)
@@ -113,15 +122,16 @@ public sealed class ServerIntegrityService : IServerIntegrityService
                     {
                         bool hasAnyServer = SafeFileSystem.FileExists(Path.Combine(serverPath, "server.jar")) ||
                                             SafeFileSystem.FileExists(Path.Combine(serverPath, "run.bat")) ||
-                                            SafeFileSystem.EnumerateFiles(serverPath, "*.jar", SearchOption.TopDirectoryOnly).Count > 0;
+                                            SafeFileSystem.HasAnyFile(serverPath, "*.jar", SearchOption.TopDirectoryOnly);
                         return hasAnyServer
                             ? new ServerIntegrityResult(false, EmptyList)
                             : new ServerIntegrityResult(true, ServerJarMissingList);
                     }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Warning(ex, "檢查伺服器完整性時發生非預期例外: {Path}", serverPath);
             return new ServerIntegrityResult(true, UnexpectedErrorMissingList);
         }
     }

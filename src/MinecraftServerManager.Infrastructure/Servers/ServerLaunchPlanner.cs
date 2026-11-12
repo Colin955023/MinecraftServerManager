@@ -5,26 +5,23 @@ using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>
-/// 伺服器啟動規劃器實作
-/// </summary>
+/// <summary>伺服器啟動規劃器實作</summary>
 public sealed class ServerLaunchPlanner : IServerLaunchPlanner
 {
-    public ServerLaunchPlan CreatePlan(ServerConfig config, ServerInspection inspection, string? javaPath = null)
+    public ServerLaunchPlan CreatePlan(ServerConfig config, string launchTarget, string? javaPath = null)
     {
         ArgumentNullException.ThrowIfNull(config);
-        ArgumentNullException.ThrowIfNull(inspection);
 
         string stableDir = SafeFileSystem.ResolveStableDirectory(config.Path);
-        string targetFile = !string.IsNullOrWhiteSpace(inspection.LaunchTarget.Value)
-            ? inspection.LaunchTarget.Value.Trim()
+        string targetFile = !string.IsNullOrWhiteSpace(launchTarget)
+            ? launchTarget.Trim()
             : "server.jar";
 
         // 防範 Path Traversal：僅允許相對於 stableDir 的內部檔案
         string targetFullPath = Path.GetFullPath(Path.Combine(stableDir, targetFile));
         if (!SafeFileSystem.IsPathWithin(stableDir, targetFullPath, strict: false))
         {
-            throw new SafeFileSystemException($"偵測到非法的啟動目標路徑越界：{targetFile}");
+            throw new SafeFileSystemException($"偵測到非法的啟動目標路徑超出邊界：{targetFile}");
         }
 
         bool isScript = targetFile.EndsWith(".bat", StringComparison.OrdinalIgnoreCase);
@@ -38,7 +35,7 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
 
             if (config.LoaderType is LoaderKind.Forge or LoaderKind.NeoForge || SafeFileSystem.FileExists(Path.Combine(stableDir, ServerDefaults.UserJvmArgsFileName)))
             {
-                ServerManager.UpdateForgeUserJvmArgs(stableDir, config);
+                StartScriptWriter.UpdateUserJvmArgs(stableDir, config);
             }
 
             IReadOnlyDictionary<string, string?>? env = null;
@@ -63,7 +60,18 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
             ? javaPath
             : "java";
 
-        int min = config.MemoryMinMb ?? (config.MemoryMaxMb > ServerDefaults.DefaultMemoryMinMb ? ServerDefaults.DefaultMemoryMinMb : config.MemoryMaxMb);
+        // 指定的 Java 路徑須為實體 java 執行檔（拒絕 reparse point 與非 java 檔名）；純檔名僅接受 java 系列名稱並交由 PATH 搜尋
+        if (!string.IsNullOrWhiteSpace(javaPath))
+        {
+            string trimmedJava = javaPath.Trim();
+            bool isBareName = Path.GetFileName(trimmedJava) == trimmedJava;
+            if (isBareName ? !SafeScriptValidator.IsJavaExecutableName(trimmedJava) : !SafeScriptValidator.IsSafeJavaExecutable(trimmedJava))
+            {
+                throw new InvalidOperationException($"指定的 Java 執行檔未通過安全性檢驗：{javaPath}");
+            }
+        }
+
+        int min = MemoryUtils.ResolveEffectiveMinMemoryMb(config.MemoryMinMb, config.MemoryMaxMb);
         var args = new List<string>
         {
             $"-Xms{min}M",
@@ -76,6 +84,11 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
         {
             var recommendedGc = JvmOptionPolicy.RecommendGcArgs(config.MemoryMaxMb, loaderType: config.LoaderType.ToString());
             args.AddRange(recommendedGc);
+        }
+
+        if (customArgs.FirstOrDefault(static arg => JvmOptionPolicy.IsCommandExecutionOption(arg)) is { } blockedArg)
+        {
+            throw new InvalidOperationException($"JVM 參數「{blockedArg}」可執行外部命令，已阻擋啟動");
         }
 
         args.AddRange(customArgs);
@@ -111,9 +124,7 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
             ServerName: config.Name.Value);
     }
 
-    /// <summary>
-    /// 為指定的 Java 執行檔建置注入用的環境變數（設定 JAVA_HOME 並將 java bin 目錄置於 PATH 最前端）
-    /// </summary>
+    /// <summary>為指定的 Java 執行檔建置注入用的環境變數（設定 JAVA_HOME 並將 java bin 目錄置於 PATH 最前端）</summary>
     public static IReadOnlyDictionary<string, string?> BuildJavaEnvironment(string javaExecutablePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(javaExecutablePath);
@@ -134,7 +145,7 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
         string currentPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
         string newPath = string.IsNullOrWhiteSpace(javaBinDir)
             ? currentPath
-            : $"{javaBinDir};{currentPath}";
+            : $"{javaBinDir}{Path.PathSeparator}{currentPath}";
 
         return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {

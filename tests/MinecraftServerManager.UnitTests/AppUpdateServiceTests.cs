@@ -5,98 +5,69 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class AppUpdateServiceTests : IDisposable
+public sealed partial class AppUpdateServiceTests : IDisposable
 {
+    private readonly TempDirectory _testDirTemp = new("msm_update_test_");
     private readonly string _testDir;
 
     public AppUpdateServiceTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "msm_update_test_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testDir);
+        _testDir = _testDirTemp.FullName;
     }
 
-    public void Dispose()
-    {
-        try
+    public void Dispose() => _testDirTemp.Dispose();
+
+    /// <summary>建立模擬發布檔下載的 HTTP 替身：雜湊檔以文字回應、檔案內容寫入目標並比對雜湊</summary>
+    private static StubHttpPort CreateHttpPort(string? checksumResponse, byte[]? fileBytes, Exception? checksumException = null) =>
+        new()
         {
-            if (Directory.Exists(_testDir))
+            TextHandler = _ => checksumException is null ? checksumResponse : throw checksumException,
+            DownloadHandler = request =>
             {
-                Directory.Delete(_testDir, recursive: true);
-            }
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
-    }
-
-    private sealed class FakeDownloadHttpPort : IHttpPort
-    {
-        public string? ChecksumResponse { get; set; }
-        public Exception? ChecksumException { get; set; }
-        public byte[]? FileBytesToDownload { get; set; }
-        public bool DownloadInvoked { get; private set; }
-
-        public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default)
-        {
-            if (ChecksumException is not null)
-            {
-                return Task.FromException<string?>(ChecksumException);
-            }
-
-            return Task.FromResult(ChecksumResponse);
-        }
-
-        public Task<HttpResult> DownloadAsync(
-            Uri uri,
-            string targetPath,
-            IProgress<HttpProgress>? progress = null,
-            string? expectedHash = null,
-            string expectedHashAlgorithm = "sha256",
-            CancellationToken cancellationToken = default)
-        {
-            DownloadInvoked = true;
-            if (FileBytesToDownload is null)
-            {
-                return Task.FromResult(new HttpResult(false, "Download failed"));
-            }
-
-            Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
-            File.WriteAllBytes(targetPath, FileBytesToDownload);
-
-            if (!string.IsNullOrEmpty(expectedHash))
-            {
-                string actualHash = Convert.ToHexStringLower(SHA256.HashData(FileBytesToDownload));
-                if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+                if (fileBytes is null)
                 {
-                    return Task.FromResult(new HttpResult(false, "Hash mismatch"));
+                    return Task.FromResult(new HttpResult(false, "Download failed"));
                 }
-            }
 
-            progress?.Report(new HttpProgress(FileBytesToDownload.Length, FileBytesToDownload.Length));
-            return Task.FromResult(new HttpResult(true, null, FileBytesToDownload.Length));
-        }
+                Directory.CreateDirectory(Path.GetDirectoryName(request.TargetPath)!);
+                File.WriteAllBytes(request.TargetPath, fileBytes);
 
-        public Task<HttpJsonResponse<T>> GetJsonAsync<T>(Uri uri, CancellationToken cancellationToken = default) =>
-            throw new NotImplementedException();
+                if (!string.IsNullOrEmpty(request.ExpectedHash))
+                {
+                    string actualHash = Convert.ToHexStringLower(SHA256.HashData(fileBytes));
+                    if (!string.Equals(actualHash, request.ExpectedHash, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Task.FromResult(new HttpResult(false, "Hash mismatch"));
+                    }
+                }
 
-        public Task<string?> PostJsonAsync(Uri uri, string jsonPayload, CancellationToken cancellationToken = default) =>
-            throw new NotImplementedException();
-    }
+                request.Progress?.Report(new HttpProgress(fileBytes.Length, fileBytes.Length));
+                return Task.FromResult(new HttpResult(true, null, fileBytes.Length));
+            },
+        };
 
     private static byte[] CreateValidPeBytes(int length = 256)
     {
-        byte[] bytes = new byte[Math.Max(length, 128)];
+        // 最小合法 PE32+：DOS 標頭 + PE 簽章 + COFF 標頭 + 選用標頭（供 PEReader 解析）
+        byte[] bytes = new byte[Math.Max(length, 512)];
         bytes[0] = 0x4D; // 'M'
         bytes[1] = 0x5A; // 'Z'
         bytes[0x3C] = 0x40; // e_lfanew
         bytes[0x40] = 0x50; // 'P'
         bytes[0x41] = 0x45; // 'E'
+        bytes[0x44] = 0x64; // Machine = AMD64 (0x8664)
+        bytes[0x45] = 0x86;
+        bytes[0x54] = 0xF0; // SizeOfOptionalHeader = 240
+        bytes[0x58] = 0x0B; // Magic = PE32+ (0x20B)
+        bytes[0x59] = 0x02;
         return bytes;
     }
 
     [Fact]
     public async Task DownloadAndVerifyUpdateAsync_WhenDownloadUrlEmpty_ThrowsInvalidOperationException()
     {
-        var fakeHttp = new FakeDownloadHttpPort();
-        var service = new AppUpdateService(fakeHttp, _testDir);
+        var fakeHttp = CreateHttpPort(null, null);
+        var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
 
         var update = new UpdateCheckResult(
             HasUpdate: true,
@@ -118,13 +89,9 @@ public sealed class AppUpdateServiceTests : IDisposable
         byte[] validPe = CreateValidPeBytes();
         string expectedSha256 = Convert.ToHexStringLower(SHA256.HashData(validPe));
 
-        var fakeHttp = new FakeDownloadHttpPort
-        {
-            ChecksumResponse = $"{expectedSha256}  MinecraftServerManager-2.0.1.exe\n",
-            FileBytesToDownload = validPe,
-        };
+        var fakeHttp = CreateHttpPort($"{expectedSha256}  MinecraftServerManager-2.0.1.exe\n", validPe);
 
-        var service = new AppUpdateService(fakeHttp, _testDir);
+        var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
 
         var update = new UpdateCheckResult(
             HasUpdate: true,
@@ -139,7 +106,7 @@ public sealed class AppUpdateServiceTests : IDisposable
         string resultPath = await service.DownloadAndVerifyUpdateAsync(update);
 
         Assert.True(File.Exists(resultPath));
-        Assert.True(fakeHttp.DownloadInvoked);
+        Assert.True(fakeHttp.DownloadCount > 0);
     }
 
     [Theory]
@@ -149,12 +116,8 @@ public sealed class AppUpdateServiceTests : IDisposable
         string? checksumUrl,
         string? checksumResponse)
     {
-        var fakeHttp = new FakeDownloadHttpPort
-        {
-            ChecksumResponse = checksumResponse,
-            FileBytesToDownload = CreateValidPeBytes(),
-        };
-        var service = new AppUpdateService(fakeHttp, _testDir);
+        var fakeHttp = CreateHttpPort(checksumResponse, CreateValidPeBytes());
+        var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
         var update = new UpdateCheckResult(
             HasUpdate: true,
             CurrentVersion: Core.AppInfo.Version,
@@ -167,19 +130,15 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         await Assert.ThrowsAsync<InvalidDataException>(() => service.DownloadAndVerifyUpdateAsync(update));
 
-        Assert.False(fakeHttp.DownloadInvoked);
+        Assert.Equal(0, fakeHttp.DownloadCount);
         Assert.False(File.Exists(Path.Combine(_testDir, "MinecraftServerManager-2.0.1.exe")));
     }
 
     [Fact]
     public async Task DownloadAndVerifyUpdateAsync_WhenChecksumRequestFails_RejectsDownload()
     {
-        var fakeHttp = new FakeDownloadHttpPort
-        {
-            ChecksumException = new IOException("checksum unavailable"),
-            FileBytesToDownload = CreateValidPeBytes(),
-        };
-        var service = new AppUpdateService(fakeHttp, _testDir);
+        var fakeHttp = CreateHttpPort(null, CreateValidPeBytes(), new IOException("checksum unavailable"));
+        var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
         var update = new UpdateCheckResult(
             HasUpdate: true,
             CurrentVersion: Core.AppInfo.Version,
@@ -192,7 +151,7 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         await Assert.ThrowsAsync<IOException>(() => service.DownloadAndVerifyUpdateAsync(update));
 
-        Assert.False(fakeHttp.DownloadInvoked);
+        Assert.Equal(0, fakeHttp.DownloadCount);
     }
 
     [Fact]
@@ -201,13 +160,9 @@ public sealed class AppUpdateServiceTests : IDisposable
         byte[] validPe = CreateValidPeBytes();
         string fakeSha256 = new('a', 64);
 
-        var fakeHttp = new FakeDownloadHttpPort
-        {
-            ChecksumResponse = fakeSha256,
-            FileBytesToDownload = validPe,
-        };
+        var fakeHttp = CreateHttpPort(fakeSha256, validPe);
 
-        var service = new AppUpdateService(fakeHttp, _testDir);
+        var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
 
         var update = new UpdateCheckResult(
             HasUpdate: true,
@@ -234,13 +189,9 @@ public sealed class AppUpdateServiceTests : IDisposable
         invalidPe[1] = 0x00;
         string sha256 = Convert.ToHexStringLower(SHA256.HashData(invalidPe));
 
-        var fakeHttp = new FakeDownloadHttpPort
-        {
-            ChecksumResponse = sha256,
-            FileBytesToDownload = invalidPe,
-        };
+        var fakeHttp = CreateHttpPort(sha256, invalidPe);
 
-        var service = new AppUpdateService(fakeHttp, _testDir);
+        var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
 
         var update = new UpdateCheckResult(
             HasUpdate: true,
@@ -268,13 +219,9 @@ public sealed class AppUpdateServiceTests : IDisposable
         string targetFile = Path.Combine(_testDir, "MinecraftServerManager-2.0.1.exe");
         File.WriteAllBytes(targetFile, validPe);
 
-        var fakeHttp = new FakeDownloadHttpPort
-        {
-            ChecksumResponse = expectedSha256,
-            FileBytesToDownload = validPe,
-        };
+        var fakeHttp = CreateHttpPort(expectedSha256, validPe);
 
-        var service = new AppUpdateService(fakeHttp, _testDir);
+        var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
 
         var update = new UpdateCheckResult(
             HasUpdate: true,
@@ -289,14 +236,14 @@ public sealed class AppUpdateServiceTests : IDisposable
         string resultPath = await service.DownloadAndVerifyUpdateAsync(update);
 
         Assert.Equal(targetFile, resultPath);
-        Assert.False(fakeHttp.DownloadInvoked);
+        Assert.Equal(0, fakeHttp.DownloadCount);
     }
 
     [Fact]
     public void ApplyUpdateAndRestart_WhenFileDoesNotExist_ThrowsFileNotFoundException()
     {
-        var fakeHttp = new FakeDownloadHttpPort();
-        var service = new AppUpdateService(fakeHttp, _testDir);
+        var fakeHttp = CreateHttpPort(null, null);
+        var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
 
         Assert.Throws<FileNotFoundException>(() =>
             service.ApplyUpdateAndRestart(Path.Combine(_testDir, "non_existent.exe")));
@@ -309,8 +256,8 @@ public sealed class AppUpdateServiceTests : IDisposable
         dosOnly[0] = 0x4D;
         dosOnly[1] = 0x5A;
         string sha256 = Convert.ToHexStringLower(SHA256.HashData(dosOnly));
-        var fakeHttp = new FakeDownloadHttpPort { ChecksumResponse = sha256, FileBytesToDownload = dosOnly };
-        var service = new AppUpdateService(fakeHttp, _testDir);
+        var fakeHttp = CreateHttpPort(sha256, dosOnly);
+        var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
         var update = new UpdateCheckResult(
             HasUpdate: true,
             CurrentVersion: Core.AppInfo.Version,

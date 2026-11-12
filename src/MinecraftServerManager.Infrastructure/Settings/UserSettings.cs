@@ -11,10 +11,11 @@ public sealed record MainWindowSettings(
 
 public sealed record WindowPreferences(
     [property: JsonPropertyName("main_window")] MainWindowSettings MainWindow = null!,
-    [property: JsonPropertyName("theme_mode")] string ThemeMode = "system")
+    [property: JsonPropertyName("theme_mode")] string ThemeMode = "system",
+    [property: JsonPropertyName("custom_accent_color")] string? CustomAccentColor = null)
 {
     public WindowPreferences()
-        : this(new MainWindowSettings(), "system")
+        : this(new MainWindowSettings(), "system", null)
     {
     }
 }
@@ -22,12 +23,12 @@ public sealed record WindowPreferences(
 public sealed record UserSettings(
     [property: JsonPropertyName("servers_root")] string ServersRoot = "",
     [property: JsonPropertyName("auto_update_enabled")] bool AutoUpdateEnabled = true,
-    [property: JsonPropertyName("first_run_completed")] bool FirstRunCompleted = false,
     [property: JsonPropertyName("window_preferences")] WindowPreferences WindowPreferences = null!,
-    [property: JsonPropertyName("ui_scale")] double UiScale = 1.0)
+    [property: JsonPropertyName("auto_backup_before_start")] bool AutoBackupBeforeStart = false,
+    [property: JsonPropertyName("backup_retention_count")] int BackupRetentionCount = 10)
 {
     public UserSettings()
-        : this("", true, false, new WindowPreferences(), 1.0)
+        : this("", true, new WindowPreferences(), false, 10)
     {
     }
 }

@@ -1,16 +1,13 @@
 using MinecraftServerManager.Infrastructure.Logging;
-using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
-/// <summary>
-/// 模組快取索引持久化管理員
-/// </summary>
-public sealed class ModIndexPersistence : IModIndexPersistence
+/// <summary>模組快取索引持久化管理員</summary>
+public sealed class ModIndexPersistence
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ModIndexPersistence");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModIndexPersistence));
     private readonly string _indexFilePath;
     private readonly Lock _lock = new();
     private Dictionary<string, ModCacheEntry> _index = new(StringComparer.OrdinalIgnoreCase);
@@ -29,33 +26,26 @@ public sealed class ModIndexPersistence : IModIndexPersistence
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning("設定快取目錄隱藏屬性失敗: {0}", ex.Message);
+            Logger.Warning(ex, "設定快取目錄隱藏屬性失敗");
         }
 
         _indexFilePath = Path.Combine(cacheDir, "mod_index.json");
         LoadIndex();
     }
 
-    internal ModCacheEntry? GetEntry(string fileName)
+    public IReadOnlyDictionary<string, string>? GetCachedMetadata(string fileName, long fileSizeBytes, long lastWriteTimeUtcTicks)
     {
         lock (_lock)
         {
-            return _index.TryGetValue(fileName, out var entry) ? entry : null;
+            return _index.TryGetValue(fileName, out var entry)
+                && entry.FileSizeBytes == fileSizeBytes
+                && entry.LastWriteTimeUtcTicks == lastWriteTimeUtcTicks
+                    ? entry.Metadata
+                    : null;
         }
     }
 
-    public IReadOnlyDictionary<string, string>? GetCachedMetadata(string fileName)
-    {
-        lock (_lock)
-        {
-            return _index.TryGetValue(fileName, out var entry) ? entry.Metadata : null;
-        }
-    }
-
-    public void CacheMetadata(string fileName, IReadOnlyDictionary<string, string> metadata) =>
-        CacheMetadata(fileName, metadata, 0, 0);
-
-    internal void CacheMetadata(string fileName, IReadOnlyDictionary<string, string> metadata, long fileSizeBytes, long lastWriteTimeUtcTicks)
+    public void CacheMetadata(string fileName, IReadOnlyDictionary<string, string> metadata, long fileSizeBytes, long lastWriteTimeUtcTicks)
     {
         lock (_lock)
         {
@@ -112,30 +102,6 @@ public sealed class ModIndexPersistence : IModIndexPersistence
         }
     }
 
-    public void MarkIssue(string fileName, string reason)
-    {
-        lock (_lock)
-        {
-            if (!_index.TryGetValue(fileName, out var entry))
-            {
-                entry = new ModCacheEntry();
-                _index[fileName] = entry;
-            }
-            entry.Issue = reason;
-            _dirty = true;
-        }
-    }
-
-    public void ClearIndex()
-    {
-        lock (_lock)
-        {
-            _index.Clear();
-            _dirty = true;
-            Flush();
-        }
-    }
-
     public void CleanupStaleEntries(IEnumerable<string> existingFileNames)
     {
         var existingSet = new HashSet<string>(existingFileNames, StringComparer.OrdinalIgnoreCase);
@@ -169,12 +135,12 @@ public sealed class ModIndexPersistence : IModIndexPersistence
                 {
                     return;
                 }
-                AtomicFileWriter.WriteBytes(_indexFilePath, utf8Bytes);
-                _dirty = false;
+                // 寫入失敗時保留 dirty 旗標，下次 Flush 會重試
+                _dirty = !AtomicFileWriter.WriteBytes(_indexFilePath, utf8Bytes);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.Warning(ex, "寫入模組索引檔案失敗: {0}", _indexFilePath);
+                Logger.Warning(ex, "寫入模組索引檔案失敗: {IndexFilePath}", _indexFilePath);
             }
         }
     }
@@ -201,7 +167,7 @@ public sealed class ModIndexPersistence : IModIndexPersistence
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.Warning(ex, "讀取模組索引檔案失敗，重設為空索引: {0}", _indexFilePath);
+                Logger.Warning(ex, "讀取模組索引檔案失敗，重設為空索引: {IndexFilePath}", _indexFilePath);
                 _index = new Dictionary<string, ModCacheEntry>(StringComparer.OrdinalIgnoreCase);
             }
         }
@@ -212,7 +178,6 @@ internal sealed class ModCacheEntry
 {
     public Dictionary<string, string>? Metadata { get; set; }
     public Dictionary<string, string>? Hashes { get; set; }
-    public string? Issue { get; set; }
     public long FileSizeBytes { get; set; }
     public long LastWriteTimeUtcTicks { get; set; }
 }

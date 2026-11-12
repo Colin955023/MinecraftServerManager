@@ -1,63 +1,40 @@
-using System.Windows;
+using Microsoft.UI.Xaml.Controls;
+using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 刪除伺服器確認結果列舉
-/// </summary>
-public enum ServerDeleteDecision
+/// <summary>刪除伺服器確認 WinUI 3 原生 ContentDialog</summary>
+public sealed partial class ServerDeleteConfirmationDialog : ContentDialog
 {
-    Cancel,
-    DeleteServerOnly,
-    DeleteServerAndBackups
-}
+    private readonly int _backupCount;
 
-/// <summary>
-/// 刪除伺服器確認對話方塊
-/// </summary>
-public partial class ServerDeleteConfirmationDialog : Window
-{
     public ServerDeleteDecision Decision { get; private set; } = ServerDeleteDecision.Cancel;
+    public string Message { get; }
+    public string PrimaryText { get; }
+    public string SecondaryText { get; }
 
     public ServerDeleteConfirmationDialog(string serverName, int backupCount)
     {
+        _backupCount = backupCount;
         InitializeComponent();
 
         if (backupCount > 0)
         {
-            MessageText.Text = $"確定要刪除伺服器「{serverName}」嗎？\n\n⚠️ 這將永久刪除伺服器檔案，無法復原！\n\n偵測到此伺服器有 {backupCount} 個外部備份檔案，是否一併刪除？\n（是：連同備份一併刪除 / 否：只刪除伺服器）";
-            WithBackupsButtons.Visibility = Visibility.Visible;
-            NoBackupsButtons.Visibility = Visibility.Collapsed;
+            Message = $"確定要刪除伺服器「{serverName}」嗎？\n\n⚠️ 這將永久刪除伺服器檔案，無法復原！\n\n偵測到此伺服器有 {backupCount} 個外部備份檔案，是否一併刪除？";
+            PrimaryText = "連同備份一併刪除";
+            SecondaryText = "僅刪除伺服器";
         }
         else
         {
-            MessageText.Text = $"確定要刪除伺服器「{serverName}」嗎？\n\n⚠️ 這將永久刪除伺服器檔案，無法復原！";
-            WithBackupsButtons.Visibility = Visibility.Collapsed;
-            NoBackupsButtons.Visibility = Visibility.Visible;
+            Message = $"確定要刪除伺服器「{serverName}」嗎？\n\n⚠️ 這將永久刪除伺服器檔案，無法復原！";
+            PrimaryText = "確定刪除";
+            SecondaryText = string.Empty;
         }
     }
 
-    private void OnYesClicked(object sender, RoutedEventArgs e)
-    {
-        Decision = ServerDeleteDecision.DeleteServerAndBackups;
-        DialogResult = true;
-    }
+    private void Dialog_PrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args) =>
+        Decision = _backupCount > 0 ? ServerDeleteDecision.DeleteServerAndBackups : ServerDeleteDecision.DeleteServerOnly;
 
-    private void OnNoClicked(object sender, RoutedEventArgs e)
-    {
+    private void Dialog_SecondaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args) =>
         Decision = ServerDeleteDecision.DeleteServerOnly;
-        DialogResult = true;
-    }
-
-    private void OnConfirmClicked(object sender, RoutedEventArgs e)
-    {
-        Decision = ServerDeleteDecision.DeleteServerOnly;
-        DialogResult = true;
-    }
-
-    private void OnCancelClicked(object sender, RoutedEventArgs e)
-    {
-        Decision = ServerDeleteDecision.Cancel;
-        DialogResult = false;
-    }
 }

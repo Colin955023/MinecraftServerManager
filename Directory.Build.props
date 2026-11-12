@@ -1,34 +1,39 @@
 <Project>
   <PropertyGroup>
     <RepoRoot>$(MSBuildThisFileDirectory)</RepoRoot>
-    <TargetFramework>net10.0-windows</TargetFramework>
-    <NuGetAudit>true</NuGetAudit>
-    <NuGetAuditMode>all</NuGetAuditMode>
-    <NuGetAuditLevel>low</NuGetAuditLevel>
-    <Version>2.1.1</Version>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <AppendPlatformToOutputPath>false</AppendPlatformToOutputPath>
+    <TargetPlatformMinVersion>10.0.22000.0</TargetPlatformMinVersion>
+    <!-- .NET SDK 內建的預設投影套件 10.0.26100.57 會在裁剪時產生 IL2104 警告，指定較新的投影套件版本 -->
+    <WindowsSdkPackageVersion>10.0.26100.87</WindowsSdkPackageVersion>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <Version>2.2.0</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>10-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisModeSecurity>All</AnalysisModeSecurity>
     <AnalysisModeReliability>All</AnalysisModeReliability>
     <AnalysisModePerformance>All</AnalysisModePerformance>
     <AnalysisModeUsage>All</AnalysisModeUsage>
-    <ProduceReferenceAssembly>true</ProduceReferenceAssembly>
-    <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
-    <GenerateDocumentationFile Condition="$([System.String]::Copy('$(MSBuildProjectDirectory)').StartsWith('$(RepoRoot)tests')) != 'True'">true</GenerateDocumentationFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PublishDocumentationFiles>false</PublishDocumentationFiles>
     <NoWarn>$(NoWarn);1591</NoWarn>
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1900</WarningsNotAsErrors>
-    <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <LangVersion>latest</LangVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+    <CsWinRTWindowsMetadata
+      Condition="'$(CsWinRTWindowsMetadata)' == '' and '$(WindowsSdkDir)' == ''">local</CsWinRTWindowsMetadata>
   </PropertyGroup>
-
+  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('Tests'))">
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CsWinRT1032;CA1859</NoWarn>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
-    <Deterministic>true</Deterministic>
+    <RestoreLockedMode>true</RestoreLockedMode>
   </PropertyGroup>
 </Project>

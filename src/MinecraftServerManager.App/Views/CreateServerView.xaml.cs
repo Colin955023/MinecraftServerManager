@@ -1,11 +1,17 @@
-using System.Windows.Controls;
+using Microsoft.UI.Xaml.Controls;
+using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-public partial class CreateServerView : UserControl
+/// <summary>建立新伺服器分頁 View</summary>
+public sealed partial class CreateServerView : UserControl
 {
-    public CreateServerView()
+    public CreateServerViewModel ViewModel { get; }
+
+    public CreateServerView(CreateServerViewModel viewModel)
     {
+        ArgumentNullException.ThrowIfNull(viewModel);
+        ViewModel = viewModel;
         InitializeComponent();
     }
 }

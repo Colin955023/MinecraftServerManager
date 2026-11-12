@@ -3,14 +3,13 @@ using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.App.Collections;
+using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 模組版本展示模型
-/// </summary>
+/// <summary>模組版本展示模型</summary>
 public sealed class ModVersionDisplayItem
 {
     public string VersionId { get; init; } = string.Empty;
@@ -29,17 +28,15 @@ public sealed class ModVersionDisplayItem
 
     public string? ExpectedHash { get; init; }
 
-    public string HashAlgorithm { get; init; } = "sha512";
+    public string HashAlgorithm { get; init; } = ModHelpers.PreferredHashAlgorithm;
 
     public IReadOnlyList<string> Dependencies { get; init; } = [];
 }
 
-/// <summary>
-/// 線上模組版本選擇對話方塊 ViewModel
-/// </summary>
+/// <summary>線上模組版本選擇對話方塊 ViewModel</summary>
 public sealed partial class ModVersionPickerViewModel : ViewModelBase
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ModVersionPicker");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModVersionPickerViewModel));
     private readonly IModrinthClient _modrinthClient;
     private readonly string _projectId;
     private readonly string? _loader;
@@ -49,10 +46,7 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
     public partial ModVersionDisplayItem? SelectedVersion { get; set; }
 
     [ObservableProperty]
-    public partial string StatusMessage { get; set; } = "正在讀取版本清單…";
-
-    [ObservableProperty]
-    public partial bool IsBusy { get; set; }
+    public partial string StatusMessage { get; set; } = "正在讀取版本清單...";
 
     public ModVersionPickerViewModel(
         IModrinthClient modrinthClient,
@@ -67,34 +61,25 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
         _minecraftVersion = minecraftVersion;
 
         ProjectTitle = projectTitle;
-        WindowTitle = $"選擇模組版本 — {projectTitle}";
         Versions = [];
 
         _ = RunSafeAsync(LoadVersionsAsync, "載入模組版本清單", Logger);
     }
 
-    public string WindowTitle { get; }
-
     public string ProjectTitle { get; }
 
     public BulkObservableCollection<ModVersionDisplayItem> Versions { get; }
 
-    /// <summary>
-    /// 使用者選擇「加入安裝清單」時所挑定的版本。
-    /// </summary>
+    /// <summary>使用者選擇「加入安裝清單」時所挑定的版本。</summary>
     public ModVersionDisplayItem? QueuedVersion { get; private set; }
 
-    /// <summary>
-    /// 使用者是否選擇立即安裝（false 代表僅加入安裝清單）。
-    /// </summary>
+    /// <summary>使用者是否選擇立即安裝（false 代表僅加入安裝清單）。</summary>
     public bool InstallImmediately { get; private set; }
 
     public event Action<bool>? RequestClose;
 
-    [RelayCommand]
     public async Task LoadVersionsAsync()
     {
-        IsBusy = true;
         try
         {
             var list = await _modrinthClient
@@ -113,9 +98,11 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
                     DatePublished = FormatPublishedDate(version.DatePublished),
                     FileName = file?.Filename ?? "-",
                     DownloadUrl = file?.Url ?? string.Empty,
-                    ExpectedHash = ResolveHash(file, out string algorithm),
+                    ExpectedHash = ModHelpers.ResolveHash(file, out string algorithm),
                     HashAlgorithm = algorithm,
-                    Dependencies = [.. version.Dependencies
+                    // 僅必要相依才需要補齊；選用、內嵌與不相容項目不可當成必要相依
+                    Dependencies = (string[])[.. version.Dependencies
+                        .Where(static d => d.DependencyType == ModDependencyType.Required)
                         .Select(static d => d.ProjectId ?? string.Empty)
                         .Where(static id => id.Length > 0)]
                 };
@@ -135,11 +122,8 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
         }
         catch (Exception exception)
         {
+            Logger.Warning(exception, "讀取模組版本清單失敗");
             StatusMessage = $"讀取版本清單失敗：{exception.Message}";
-        }
-        finally
-        {
-            IsBusy = false;
         }
     }
 
@@ -186,29 +170,6 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
 
         QueuedVersion = SelectedVersion;
         return true;
-    }
-
-    private static string? ResolveHash(ModFile? file, out string algorithm)
-    {
-        algorithm = "sha512";
-        if (file?.Hashes is null)
-        {
-            return null;
-        }
-
-        if (file.Hashes.TryGetValue("sha512", out string? sha512) && !string.IsNullOrWhiteSpace(sha512))
-        {
-            algorithm = "sha512";
-            return sha512;
-        }
-
-        if (file.Hashes.TryGetValue("sha1", out string? sha1) && !string.IsNullOrWhiteSpace(sha1))
-        {
-            algorithm = "sha1";
-            return sha1;
-        }
-
-        return null;
     }
 
     private static string FormatPublishedDate(string raw)

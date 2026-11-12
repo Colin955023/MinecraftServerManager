@@ -5,9 +5,7 @@ using MinecraftServerManager.Core.Utilities;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 單一建議 JVM 參數項目模型
-/// </summary>
+/// <summary>單一建議 JVM 參數項目模型</summary>
 public sealed partial class JvmArgOptionItem(string option, string description, bool isChecked = true) : ObservableObject
 {
     public string Option { get; } = option;
@@ -18,9 +16,7 @@ public sealed partial class JvmArgOptionItem(string option, string description, 
     public partial bool IsChecked { get; set; } = isChecked;
 }
 
-/// <summary>
-/// JVM 參數設定對話方塊 ViewModel
-/// </summary>
+/// <summary>JVM 參數設定對話方塊 ViewModel</summary>
 public sealed partial class JvmArgsViewModel : ObservableObject
 {
     private readonly int? _javaMajor;
@@ -28,8 +24,7 @@ public sealed partial class JvmArgsViewModel : ObservableObject
     private readonly string _loaderType;
     private readonly HashSet<string> _recommendedSet = new(StringComparer.OrdinalIgnoreCase);
 
-    [ObservableProperty]
-    public partial string DescriptionText { get; set; } = string.Empty;
+    public string DescriptionText { get; }
 
     [ObservableProperty]
     public partial bool HasCustomArgs { get; set; }
@@ -48,24 +43,23 @@ public sealed partial class JvmArgsViewModel : ObservableObject
         _memoryMaxMb = memoryMaxMb;
         _loaderType = loaderType;
 
-        InitDescriptionText();
+        DescriptionText = CreateDescriptionText(javaMajor);
         LoadArgs(existingArgs);
     }
 
-    private void InitDescriptionText()
+    private static string CreateDescriptionText(int? javaMajor)
     {
-        if (_javaMajor.HasValue && _javaMajor.Value >= 21)
+        if (javaMajor.HasValue && javaMajor.Value >= 21)
         {
-            DescriptionText = $"目前偵測為 Java {_javaMajor.Value}，已自動套用 ZGC 低延遲最佳化設定。滑鼠游標移至項目可檢視說明。";
+            return $"目前偵測為 Java {javaMajor.Value}，已自動套用 ZGC 低延遲最佳化設定。滑鼠游標移至項目可檢視說明。";
         }
-        else if (_javaMajor.HasValue)
+
+        if (javaMajor.HasValue)
         {
-            DescriptionText = $"目前偵測為 Java {_javaMajor.Value}，已自動套用 G1GC (Aikar's Flags) 最佳化設定。滑鼠游標移至項目可檢視說明。";
+            return $"目前偵測為 Java {javaMajor.Value}，已自動套用 G1GC (Aikar's Flags) 最佳化設定。滑鼠游標移至項目可檢視說明。";
         }
-        else
-        {
-            DescriptionText = "Java 21+ 建議使用 ZGC；Java 8/16/17 建議使用 G1GC。滑鼠游標移至項目可檢視說明。";
-        }
+
+        return "Java 21+ 建議使用 ZGC；Java 8/16/17 建議使用 G1GC。滑鼠游標移至項目可檢視說明。";
     }
 
     private void LoadArgs(IEnumerable<string>? existingArgs)
@@ -110,12 +104,14 @@ public sealed partial class JvmArgsViewModel : ObservableObject
         CustomArgsText = string.Empty;
     }
 
-    /// <summary>
-    /// 取得使用者勾選與自訂的最終 JVM 參數清單
-    /// </summary>
+    /// <summary>最近一次 <see cref="GetFinalJvmArgs"/> 因可執行外部命令而被排除的自訂參數</summary>
+    public IReadOnlyList<string> RejectedArgs { get; private set; } = [];
+
+    /// <summary>取得使用者勾選與自訂的最終 JVM 參數清單（排除可執行外部命令的選項）</summary>
     public IReadOnlyList<string> GetFinalJvmArgs()
     {
         var result = new List<string>();
+        var rejected = new List<string>();
         foreach (var item in RecommendedArgs)
         {
             if (item.IsChecked)
@@ -129,13 +125,18 @@ public sealed partial class JvmArgsViewModel : ObservableObject
             var customTokens = JvmOptionPolicy.NormalizeJvmArgs(CustomArgsText);
             foreach (string token in customTokens)
             {
-                if (!result.Contains(token, StringComparer.OrdinalIgnoreCase))
+                if (JvmOptionPolicy.IsCommandExecutionOption(token))
+                {
+                    rejected.Add(token);
+                }
+                else if (!result.Contains(token, StringComparer.OrdinalIgnoreCase))
                 {
                     result.Add(token);
                 }
             }
         }
 
+        RejectedArgs = rejected;
         return result;
     }
 }

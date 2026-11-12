@@ -47,4 +47,20 @@ public sealed record ServerConfig
         JvmArgs = [.. jvmArgs ?? []];
         BackupPath = backupPath ?? string.Empty;
     }
+
+    /// <summary>複製並替換伺服器路徑（經建構子重新驗證）</summary>
+    public ServerConfig WithPath(string path) =>
+        new(Name, MinecraftVersion, LoaderType, LoaderVersion, MemoryMaxMb, MemoryMinMb, path, JvmArgs, BackupPath);
+
+    /// <summary>複製並替換記憶體設定（經建構子重新驗證）</summary>
+    public ServerConfig WithMemory(int memoryMaxMb, int? memoryMinMb) =>
+        new(Name, MinecraftVersion, LoaderType, LoaderVersion, memoryMaxMb, memoryMinMb, Path, JvmArgs, BackupPath);
+
+    /// <summary>複製並替換備份路徑</summary>
+    public ServerConfig WithBackupPath(string backupPath) =>
+        new(Name, MinecraftVersion, LoaderType, LoaderVersion, MemoryMaxMb, MemoryMinMb, Path, JvmArgs, backupPath);
+
+    /// <summary>複製並替換 Minecraft 版本與載入器資訊</summary>
+    public ServerConfig WithLoader(MinecraftVersion minecraftVersion, LoaderKind loaderType, string loaderVersion) =>
+        new(Name, minecraftVersion, loaderType, loaderVersion, MemoryMaxMb, MemoryMinMb, Path, JvmArgs, BackupPath);
 }

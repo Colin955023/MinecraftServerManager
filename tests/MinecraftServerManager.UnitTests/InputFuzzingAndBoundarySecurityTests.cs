@@ -6,9 +6,7 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-/// <summary>
-/// 輸入解析、安全邊界與確定性變異（Deterministic Fuzzing）強健性測試
-/// </summary>
+/// <summary>輸入解析、安全邊界與確定性變異（Deterministic Fuzzing）強健性測試</summary>
 public sealed class InputFuzzingAndBoundarySecurityTests
 {
     private static readonly string[] BoundaryPropertyKeys =
@@ -84,50 +82,32 @@ public sealed class InputFuzzingAndBoundarySecurityTests
         }
     }
 
-    [Fact]
-    public void ServerPropertiesValidator_WithExtremeNumberBoundaries_HandlesGracefully()
+    [Theory]
+    [InlineData("-9223372036854775809", false, false)]
+    [InlineData("-9223372036854775808", false, false)]
+    [InlineData("-2147483649", false, false)]
+    [InlineData("-2147483648", false, false)]
+    [InlineData("-1", false, false)]
+    [InlineData("0", false, true)]
+    [InlineData("1", true, true)]
+    [InlineData("65534", true, true)]
+    [InlineData("65535", false, true)]
+    [InlineData("65536", false, true)]
+    [InlineData("2147483647", false, true)]
+    [InlineData("2147483648", false, false)]
+    [InlineData("9223372036854775807", false, false)]
+    [InlineData("9223372036854775808", false, false)]
+    [InlineData("9999999999999999999999999999999999999999", false, false)]
+    public void ServerPropertiesValidator_WithExtremeNumberBoundaries_HandlesGracefully(
+        string val,
+        bool expectedPortValid,
+        bool expectedPlayersValid)
     {
-        string[] extremeValues =
-        [
-            "-9223372036854775809",
-            "-9223372036854775808",
-            "-2147483649",
-            "-2147483648",
-            "-1",
-            "0",
-            "1",
-            "65534",
-            "65535",
-            "65536",
-            "2147483647",
-            "2147483648",
-            "9223372036854775807",
-            "9223372036854775808",
-            "9999999999999999999999999999999999999999"
-        ];
+        var (portValid, _) = ServerPropertiesValidator.ValidateProperty("server-port", val, "25565");
+        Assert.Equal(expectedPortValid, portValid);
 
-        foreach (string val in extremeValues)
-        {
-            var (portValid, _) = ServerPropertiesValidator.ValidateProperty("server-port", val, "25565");
-            if (val is "1" or "65534")
-            {
-                Assert.True(portValid, $"連接埠邊界案例未通過：{val}");
-            }
-            else
-            {
-                Assert.False(portValid, $"無效連接埠未被拒絕：{val}");
-            }
-
-            var (playersValid, _) = ServerPropertiesValidator.ValidateProperty("max-players", val, "20");
-            if (int.TryParse(val, out int p) && p >= 0)
-            {
-                Assert.True(playersValid, $"有效最大玩家數未通過：{val}");
-            }
-            else
-            {
-                Assert.False(playersValid, $"無效最大玩家數未被拒絕：{val}");
-            }
-        }
+        var (playersValid, _) = ServerPropertiesValidator.ValidateProperty("max-players", val, "20");
+        Assert.Equal(expectedPlayersValid, playersValid);
     }
 
     [Fact]
@@ -186,31 +166,22 @@ public sealed class InputFuzzingAndBoundarySecurityTests
     [Fact]
     public void SafeFileSystem_PathContainment_RejectsAllTraversalPayloads()
     {
-        string baseDir = Path.Combine(Path.GetTempPath(), "mc_det_fuzz_base_" + Guid.NewGuid().ToString("N"));
+        using var baseDirTemp = new TempDirectory("mc_det_fuzz_base_");
+        string baseDir = Path.Combine(baseDirTemp.FullName, "root");
         Directory.CreateDirectory(baseDir);
 
-        try
+        foreach (string payload in MaliciousPathTraversalPayloads)
         {
-            foreach (string payload in MaliciousPathTraversalPayloads)
-            {
-                string targetPath = Path.Combine(baseDir, payload);
-                bool isWithin = SafeFileSystem.IsPathWithin(baseDir, targetPath);
+            string targetPath = Path.Combine(baseDir, payload);
+            bool isWithin = SafeFileSystem.IsPathWithin(baseDir, targetPath);
 
-                string normalizedTarget = Path.GetFullPath(targetPath);
-                string normalizedBase = Path.GetFullPath(baseDir);
-                bool actuallyWithin = normalizedTarget.StartsWith(normalizedBase, StringComparison.OrdinalIgnoreCase);
+            string normalizedTarget = Path.GetFullPath(targetPath);
+            string normalizedBase = Path.GetFullPath(baseDir);
+            bool actuallyWithin = normalizedTarget.StartsWith(normalizedBase, StringComparison.OrdinalIgnoreCase);
 
-                if (!actuallyWithin)
-                {
-                    Assert.False(isWithin, $"路徑穿越未被攔截：{payload}");
-                }
-            }
-        }
-        finally
-        {
-            if (Directory.Exists(baseDir))
+            if (!actuallyWithin)
             {
-                Directory.Delete(baseDir, recursive: true);
+                Assert.False(isWithin, $"路徑穿越未被攔截：{payload}");
             }
         }
     }
@@ -218,150 +189,113 @@ public sealed class InputFuzzingAndBoundarySecurityTests
     [Fact]
     public void SafeZipArchive_WithZipSlipEntries_RejectsExtractionBeforeWriting()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "mc_det_zip_" + Guid.NewGuid().ToString("N"));
+        using var tempDirTemp = new TempDirectory("mc_det_zip_");
+        string tempDir = Path.Combine(tempDirTemp.FullName, "root");
         Directory.CreateDirectory(tempDir);
 
-        try
+        for (int i = 0; i < ZipSlipPayloads.Length; i++)
         {
-            for (int i = 0; i < ZipSlipPayloads.Length; i++)
+            string traversalName = ZipSlipPayloads[i];
+            string zipPath = Path.Combine(tempDir, $"slip_{i}.zip");
+            string extractDest = Path.Combine(tempDir, $"dest_{i}");
+            Directory.CreateDirectory(extractDest);
+
+            using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
             {
-                string traversalName = ZipSlipPayloads[i];
-                string zipPath = Path.Combine(tempDir, $"slip_{i}.zip");
-                string extractDest = Path.Combine(tempDir, $"dest_{i}");
-                Directory.CreateDirectory(extractDest);
-
-                using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
-                {
-                    var entry = archive.CreateEntry(traversalName);
-                    using var writer = new StreamWriter(entry.Open());
-                    writer.Write("pwned");
-                }
-
-                // 驗證明確擲出 SafeArchiveException
-                var ex = Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(zipPath, extractDest));
-                Assert.NotNull(ex.Message);
-
-                // 驗證預定目錄外絕無任何外洩寫入檔案
-                string outsideFile = Path.Combine(tempDir, "secret.txt");
-                Assert.False(File.Exists(outsideFile), $"檔案不應被寫入目標目錄之外：{outsideFile}");
+                var entry = archive.CreateEntry(traversalName);
+                using var writer = new StreamWriter(entry.Open());
+                writer.Write("pwned");
             }
-        }
-        finally
-        {
-            if (Directory.Exists(tempDir))
-            {
-                Directory.Delete(tempDir, recursive: true);
-            }
+
+            // 驗證明確擲出 SafeArchiveException
+            Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(zipPath, extractDest));
+
+            // 驗證預定目錄外絕無任何外洩寫入檔案
+            string outsideFile = Path.Combine(tempDir, "secret.txt");
+            Assert.False(File.Exists(outsideFile), $"檔案不應被寫入目標目錄之外：{outsideFile}");
         }
     }
 
     [Fact]
     public void SafeZipArchive_CorruptedAndTruncatedArchive_RejectsWithSafeArchiveException()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "mc_corrupt_det_zip_" + Guid.NewGuid().ToString("N"));
+        using var tempDirTemp = new TempDirectory("mc_corrupt_det_zip_");
+        string tempDir = Path.Combine(tempDirTemp.FullName, "root");
         Directory.CreateDirectory(tempDir);
 
         var deterministicRng = new Random(1337);
 
-        try
+        for (int i = 0; i < 20; i++)
         {
-            for (int i = 0; i < 20; i++)
+            string corruptPath = Path.Combine(tempDir, $"corrupt_{i}.zip");
+            string destDir = Path.Combine(tempDir, $"out_{i}");
+
+            byte[] garbage = new byte[64 + (i * 16)];
+            deterministicRng.NextBytes(garbage);
+
+            if (i % 2 == 0)
             {
-                string corruptPath = Path.Combine(tempDir, $"corrupt_{i}.zip");
-                string destDir = Path.Combine(tempDir, $"out_{i}");
-
-                byte[] garbage = new byte[64 + (i * 16)];
-                deterministicRng.NextBytes(garbage);
-
-                if (i % 2 == 0)
-                {
-                    garbage[0] = 0x50; // 'P'
-                    garbage[1] = 0x4B; // 'K'
-                    garbage[2] = 0x03;
-                    garbage[3] = 0x04;
-                }
-
-                File.WriteAllBytes(corruptPath, garbage);
-
-                // 明確要求擲出 SafeArchiveException，拒絕使用過於寬鬆的 ThrowsAny
-                Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(corruptPath, destDir));
+                garbage[0] = 0x50; // 'P'
+                garbage[1] = 0x4B; // 'K'
+                garbage[2] = 0x03;
+                garbage[3] = 0x04;
             }
-        }
-        finally
-        {
-            if (Directory.Exists(tempDir))
-            {
-                Directory.Delete(tempDir, recursive: true);
-            }
+
+            File.WriteAllBytes(corruptPath, garbage);
+
+            // 明確要求擲出 SafeArchiveException，拒絕使用過於寬鬆的 ThrowsAny
+            Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(corruptPath, destDir));
         }
     }
 
     [Fact]
     public void SafeZipArchive_DuplicatePathCollision_RejectsExtraction()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "mc_dup_zip_" + Guid.NewGuid().ToString("N"));
+        using var tempDirTemp = new TempDirectory("mc_dup_zip_");
+        string tempDir = Path.Combine(tempDirTemp.FullName, "root");
         Directory.CreateDirectory(tempDir);
 
-        try
+        string zipPath = Path.Combine(tempDir, "collision.zip");
+        string extractDest = Path.Combine(tempDir, "extract");
+
+        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
         {
-            string zipPath = Path.Combine(tempDir, "collision.zip");
-            string extractDest = Path.Combine(tempDir, "extract");
+            var entry1 = archive.CreateEntry("data.txt");
+            using (var writer = new StreamWriter(entry1.Open())) { writer.Write("first"); }
 
-            using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
-            {
-                var entry1 = archive.CreateEntry("data.txt");
-                using (var writer = new StreamWriter(entry1.Open())) { writer.Write("first"); }
-
-                var entry2 = archive.CreateEntry("data.txt");
-                using (var writer = new StreamWriter(entry2.Open())) { writer.Write("second"); }
-            }
-
-            Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(zipPath, extractDest));
+            var entry2 = archive.CreateEntry("data.txt");
+            using (var writer = new StreamWriter(entry2.Open())) { writer.Write("second"); }
         }
-        finally
-        {
-            if (Directory.Exists(tempDir))
-            {
-                Directory.Delete(tempDir, recursive: true);
-            }
-        }
+
+        Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(zipPath, extractDest));
     }
 
     [Fact]
     public void SafeZipArchive_ExtractionFailure_PreservesExistingDestinationFiles()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "mc_safe_extract_" + Guid.NewGuid().ToString("N"));
+        using var tempDirTemp = new TempDirectory("mc_safe_extract_");
+        string tempDir = Path.Combine(tempDirTemp.FullName, "root");
         Directory.CreateDirectory(tempDir);
 
-        try
+        string extractDest = Path.Combine(tempDir, "target");
+        Directory.CreateDirectory(extractDest);
+        string existingFile = Path.Combine(extractDest, "important_original.txt");
+        File.WriteAllText(existingFile, "critical data");
+
+        // 建立一個惡意 zip（嘗試 Zip Slip）
+        string maliciousZip = Path.Combine(tempDir, "malicious.zip");
+        using (var archive = ZipFile.Open(maliciousZip, ZipArchiveMode.Create))
         {
-            string extractDest = Path.Combine(tempDir, "target");
-            Directory.CreateDirectory(extractDest);
-            string existingFile = Path.Combine(extractDest, "important_original.txt");
-            File.WriteAllText(existingFile, "critical data");
-
-            // 建立一個惡意 zip（嘗試 Zip Slip）
-            string maliciousZip = Path.Combine(tempDir, "malicious.zip");
-            using (var archive = ZipFile.Open(maliciousZip, ZipArchiveMode.Create))
-            {
-                var entry = archive.CreateEntry("../escape.txt");
-                using var writer = new StreamWriter(entry.Open());
-                writer.Write("bad");
-            }
-
-            Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(maliciousZip, extractDest));
-
-            // 驗證原始既有檔案未遭損毀或移除
-            Assert.True(File.Exists(existingFile), "解壓縮失敗不應影響目標目錄既有檔案");
-            Assert.Equal("critical data", File.ReadAllText(existingFile));
+            var entry = archive.CreateEntry("../escape.txt");
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write("bad");
         }
-        finally
-        {
-            if (Directory.Exists(tempDir))
-            {
-                Directory.Delete(tempDir, recursive: true);
-            }
-        }
+
+        Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(maliciousZip, extractDest));
+
+        // 驗證原始既有檔案未遭損毀或移除
+        Assert.True(File.Exists(existingFile), "解壓縮失敗不應影響目標目錄既有檔案");
+        Assert.Equal("critical data", File.ReadAllText(existingFile));
     }
 
     private static string MutatePropertiesStringDeterministic(string baseText, int seed)

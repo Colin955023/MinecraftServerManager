@@ -4,32 +4,22 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-public sealed class ManageJavaViewModelTests : IDisposable
+public sealed partial class ManageJavaViewModelTests : IDisposable
 {
+    private readonly TempDirectory _tempDirTemp = new("msm_java_vm_test_");
     private readonly string _tempDir;
     private readonly string _dummyJava17;
     private readonly string _dummyJava21;
 
     public ManageJavaViewModelTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), "msm_java_vm_test_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_tempDir);
+        _tempDir = _tempDirTemp.FullName;
         _dummyJava17 = Path.Combine(_tempDir, "java17.exe");
         _dummyJava21 = Path.Combine(_tempDir, "java21.exe");
         File.WriteAllText(_dummyJava17, "fake binary 17");
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_tempDir))
-            {
-                Directory.Delete(_tempDir, recursive: true);
-            }
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
-    }
+    public void Dispose() => _tempDirTemp.Dispose();
 
     [Fact]
     public async Task InstallWithWinget_WhenTargetMajorAlreadyExistsLocally_TriggersGuardAndSkipsInstall()
@@ -42,11 +32,13 @@ public sealed class ManageJavaViewModelTests : IDisposable
 
         var vm = new ManageJavaViewModel(
             javaDetector: detector,
-            javaRequirementService: null,
+            javaRequirementService: NoOp.Create<IMinecraftJavaRequirementService>(),
             javaInstaller: installer,
             currentJavaPath: string.Empty,
             minecraftVersion: "1.20.1",
-            loaderName: "Paper")
+            loaderName: "Paper",
+            fileSystem: new Infrastructure.FileSystem.LocalFileSystem(),
+            uiService: NoOpUiService.Instance)
         {
             SelectedInstallMajor = 17
         };
@@ -79,11 +71,13 @@ public sealed class ManageJavaViewModelTests : IDisposable
 
         var vm = new ManageJavaViewModel(
             javaDetector: detector,
-            javaRequirementService: null,
+            javaRequirementService: NoOp.Create<IMinecraftJavaRequirementService>(),
             javaInstaller: installer,
             currentJavaPath: string.Empty,
             minecraftVersion: "1.20.5",
-            loaderName: "Paper")
+            loaderName: "Paper",
+            fileSystem: new Infrastructure.FileSystem.LocalFileSystem(),
+            uiService: NoOpUiService.Instance)
         {
             SelectedInstallMajor = 21
         };
@@ -97,6 +91,40 @@ public sealed class ManageJavaViewModelTests : IDisposable
         Assert.Equal(21, vm.SelectedJava.MajorVersion);
         Assert.Equal(_dummyJava21, vm.SelectedJava.ExecutablePath);
         Assert.Contains("成功安裝並選取 Java 21", vm.StatusMessage);
+    }
+
+    [Fact]
+    public async Task InstallWithWinget_KeepsBusyWhileInstallingAndClearsWhenFinished()
+    {
+        var detector = new FakeJavaDetector(
+        [
+            new JavaRuntimeInfo(_dummyJava17, 17, Is64Bit: true, Vendor: "Microsoft OpenJDK")
+        ]);
+        ManageJavaViewModel? vm = null;
+        bool? busyDuringInstall = null;
+        var installer = new FakeJavaInstaller
+        {
+            OnInstall = _ => busyDuringInstall = vm?.IsBusy
+        };
+
+        vm = new ManageJavaViewModel(
+            javaDetector: detector,
+            javaRequirementService: NoOp.Create<IMinecraftJavaRequirementService>(),
+            javaInstaller: installer,
+            currentJavaPath: string.Empty,
+            minecraftVersion: "1.20.5",
+            loaderName: "Paper",
+            fileSystem: new Infrastructure.FileSystem.LocalFileSystem(),
+            uiService: NoOpUiService.Instance)
+        {
+            SelectedInstallMajor = 21
+        };
+
+        await vm.InstallWithWingetAsync();
+
+        // 安裝前先重新載入清單（巢狀忙碌），安裝途中仍須維持忙碌，全部結束後才解除
+        Assert.True(busyDuringInstall);
+        Assert.False(vm.IsBusy);
     }
 
     private sealed class FakeJavaDetector(IEnumerable<JavaRuntimeInfo> initial) : IJavaRuntimeDetector
@@ -119,8 +147,6 @@ public sealed class ManageJavaViewModelTests : IDisposable
         public bool InstallInvoked { get; private set; }
         public int LastInstalledMajor { get; private set; }
         public Action<int>? OnInstall { get; init; }
-
-        public Task<bool> IsWingetAvailableAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
 
         public Task<ProcessExitResult> InstallWithWingetAsync(int majorVersion, CancellationToken cancellationToken = default)
         {

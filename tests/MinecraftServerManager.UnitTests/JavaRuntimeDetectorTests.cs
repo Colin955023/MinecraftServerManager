@@ -1,85 +1,85 @@
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Infrastructure.Java;
+using MinecraftServerManager.Infrastructure.Utilities;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
+/// <summary>Java 執行環境偵測快取與單檔解壓殘留清理單元測試</summary>
+[Collection("EnvironmentVariableCollection")]
 public sealed class JavaRuntimeDetectorTests
 {
     [Fact]
-    public async Task FindBestMatchPrefersExact64Bit()
+    public async Task DetectAsync_UsesCacheWhenFileTimestampAndSizeMatch()
     {
-        var testRuntimes = new List<JavaRuntimeInfo>
+        using var tempDir = new TempDirectory("msm-java-detector-");
+        string javaBinDir = Path.Combine(tempDir.FullName, "jdk-21", "bin");
+        Directory.CreateDirectory(javaBinDir);
+        string javaExe = Path.Combine(javaBinDir, "java.exe");
+        File.WriteAllText(javaExe, "fake java binary");
+
+        string? origJavaHome = Environment.GetEnvironmentVariable("JAVA_HOME");
+        string? origPath = Environment.GetEnvironmentVariable("PATH");
+        string? origDataDir = Environment.GetEnvironmentVariable("MSM_USER_DATA_DIR");
+
+        int processStartCount = 0;
+        var runner = new StubProcessRunner(_ =>
         {
-            new("C:\\Java\\jdk-8\\bin\\java.exe", 8, Is64Bit: true, JavawPath: "C:\\Java\\jdk-8\\bin\\javaw.exe"),
-            new("C:\\Java\\jdk-17-x86\\bin\\java.exe", 17, Is64Bit: false, JavawPath: "C:\\Java\\jdk-17-x86\\bin\\javaw.exe"),
-            new("C:\\Java\\jdk-17-x64\\bin\\java.exe", 17, Is64Bit: true, JavawPath: "C:\\Java\\jdk-17-x64\\bin\\javaw.exe"),
-            new("C:\\Java\\jdk-21\\bin\\java.exe", 21, Is64Bit: true, JavawPath: "C:\\Java\\jdk-21\\bin\\javaw.exe"),
-        };
+            Interlocked.Increment(ref processStartCount);
+            return new StubManagedProcess(
+                exitCode: 0,
+                interactive: false,
+                initialOutputs:
+                [
+                    new ProcessOutput(ProcessOutputKind.StandardError, "openjdk version \"21.0.4\" 2024-07-16 LTS"),
+                    new ProcessOutput(ProcessOutputKind.StandardError, "OpenJDK Runtime Environment Temurin-21.0.4+7 (build 21.0.4+7-LTS)"),
+                    new ProcessOutput(ProcessOutputKind.StandardError, "OpenJDK 64-Bit Server VM Temurin-21.0.4+7 (build 21.0.4+7-LTS, mixed mode, sharing)")
+                ]);
+        });
 
-        var detector = new FakeDetector(testRuntimes);
-        var match = await detector.FindBestMatchAsync(17);
-
-        Assert.NotNull(match);
-        Assert.Equal(17, match.MajorVersion);
-        Assert.True(match.Is64Bit);
-        Assert.Equal("C:\\Java\\jdk-17-x64\\bin\\java.exe", match.ExecutablePath);
-    }
-
-    [Fact]
-    public async Task FindBestMatchFallsBackToHigherCompatibleMajor()
-    {
-        var testRuntimes = new List<JavaRuntimeInfo>
+        try
         {
-            new("C:\\Java\\jdk-8\\bin\\java.exe", 8, Is64Bit: true),
-            new("C:\\Java\\jdk-21\\bin\\java.exe", 21, Is64Bit: true),
-        };
+            Environment.SetEnvironmentVariable("JAVA_HOME", Path.Combine(tempDir.FullName, "jdk-21"));
+            Environment.SetEnvironmentVariable("PATH", javaBinDir);
+            Environment.SetEnvironmentVariable("MSM_USER_DATA_DIR", tempDir.FullName);
 
-        var detector = new FakeDetector(testRuntimes);
-        var match = await detector.FindBestMatchAsync(17);
+            var detector = new JavaRuntimeDetector(runner);
 
-        Assert.NotNull(match);
-        Assert.Equal(21, match.MajorVersion);
-    }
+            // 第一次強制偵測應呼叫外部行程並寫入快取
+            var first = await detector.DetectAsync(forceRefresh: true);
+            Assert.Contains(first, j => string.Equals(j.ExecutablePath, javaExe, StringComparison.OrdinalIgnoreCase) && j.MajorVersion == 21);
+            int callsAfterFirst = processStartCount;
+            Assert.True(callsAfterFirst >= 1);
 
-    [Fact]
-    public async Task FindBestMatchReturnsNullWhenNoCompatibleVersion()
-    {
-        var testRuntimes = new List<JavaRuntimeInfo>
-        {
-            new("C:\\Java\\jdk-8\\bin\\java.exe", 8, Is64Bit: true),
-            new("C:\\Java\\jdk-11\\bin\\java.exe", 11, Is64Bit: true),
-        };
-
-        var detector = new FakeDetector(testRuntimes);
-        var match = await detector.FindBestMatchAsync(17);
-
-        Assert.Null(match);
-    }
-
-    private sealed class FakeDetector(IReadOnlyList<JavaRuntimeInfo> runtimes) : IJavaRuntimeDetector
-    {
-        public Task<IReadOnlyList<JavaRuntimeInfo>> DetectAsync(bool forceRefresh = false, CancellationToken cancellationToken = default) =>
-            Task.FromResult(runtimes);
-
-        public Task<JavaRuntimeInfo?> FindBestMatchAsync(int targetMajor, CancellationToken cancellationToken = default)
-        {
-            var exact64 = runtimes.FirstOrDefault(r => r.MajorVersion == targetMajor && r.Is64Bit);
-            if (exact64 is not null)
+            // 新執行個體讀取磁碟快取：若該 java.exe 時間戳記與檔案大小未變，不應對此 javaExe 重新啟動行程
+            int targetExeCalls = 0;
+            var secondRunner = new StubProcessRunner(spec =>
             {
-                return Task.FromResult<JavaRuntimeInfo?>(exact64);
-            }
+                if (string.Equals(spec.FileName, javaExe, StringComparison.OrdinalIgnoreCase))
+                {
+                    Interlocked.Increment(ref targetExeCalls);
+                }
 
-            var exact = runtimes.FirstOrDefault(r => r.MajorVersion == targetMajor);
-            if (exact is not null)
-            {
-                return Task.FromResult<JavaRuntimeInfo?>(exact);
-            }
+                return new StubManagedProcess(1);
+            });
+            var cachedDetector = new JavaRuntimeDetector(secondRunner);
+            var second = await cachedDetector.DetectAsync(forceRefresh: false);
 
-            return Task.FromResult(runtimes
-                .Where(r => r.MajorVersion > targetMajor)
-                .OrderBy(r => r.MajorVersion)
-                .ThenByDescending(r => r.Is64Bit)
-                .FirstOrDefault());
+            Assert.Contains(second, j => string.Equals(j.ExecutablePath, javaExe, StringComparison.OrdinalIgnoreCase) && j.MajorVersion == 21);
+            Assert.Equal(0, targetExeCalls);
         }
+        finally
+        {
+            Environment.SetEnvironmentVariable("JAVA_HOME", origJavaHome);
+            Environment.SetEnvironmentVariable("PATH", origPath);
+            Environment.SetEnvironmentVariable("MSM_USER_DATA_DIR", origDataDir);
+        }
+    }
+
+    [Fact]
+    public void CleanupStaleSingleFileExtractDirectories_DoesNotThrow()
+    {
+        var exception = Record.Exception(() => _ = RuntimePaths.CleanupStaleSingleFileExtractDirectories());
+        Assert.Null(exception);
     }
 }

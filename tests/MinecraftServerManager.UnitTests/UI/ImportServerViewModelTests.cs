@@ -10,19 +10,35 @@ namespace MinecraftServerManager.UnitTests.UI;
 public sealed class ImportServerViewModelTests
 {
     [Fact]
-    public async Task ImportAsync_WhenSourcePathEmpty_SetsStatusMessageAndFails()
+    public async Task ExecuteImportAsync_WhenSourcePathEmpty_SetsStatusMessageAndFails()
     {
         var fakeServerManager = new FakeServerManager();
         var vm = new ImportServerViewModel(fakeServerManager, NoOpUiService.Instance);
 
-        await vm.ImportAsync();
+        await vm.ExecuteImportAsync();
 
         Assert.Contains("請先選取來源目錄", vm.StatusMessage);
         Assert.False(fakeServerManager.ImportCalled);
     }
 
     [Fact]
-    public async Task ImportAsync_WhenValidInput_ExecutesImportSuccessfully()
+    public async Task ExecuteImportAsync_WhenServerNameEmpty_SetsStatusMessageAndFails()
+    {
+        var fakeServerManager = new FakeServerManager();
+        var vm = new ImportServerViewModel(fakeServerManager, NoOpUiService.Instance)
+        {
+            SourcePath = "C:\\Servers\\MyServer",
+            ServerName = "   "
+        };
+
+        await vm.ExecuteImportAsync();
+
+        Assert.Contains("請輸入匯入後的伺服器名稱", vm.StatusMessage);
+        Assert.False(fakeServerManager.ImportCalled);
+    }
+
+    [Fact]
+    public async Task ExecuteImportAsync_WhenValidInput_ExecutesImportSuccessfully()
     {
         var fakeServerManager = new FakeServerManager();
         var vm = new ImportServerViewModel(fakeServerManager, NoOpUiService.Instance)
@@ -31,19 +47,79 @@ public sealed class ImportServerViewModelTests
             ServerName = "ImportedServer"
         };
 
-        bool closeRequested = false;
-        vm.RequestClose += success => closeRequested = success;
+        bool success = await vm.ExecuteImportAsync();
 
-        await vm.ImportAsync();
+        Assert.True(success);
+        Assert.True(fakeServerManager.ImportCalled);
+        Assert.Equal(ImportTransferMode.Copy, fakeServerManager.LastMode);
+        Assert.Equal("ImportedServer", vm.ImportedServerName);
+    }
+
+    [Fact]
+    public async Task ExecuteImportAsync_WhenMoveModeSelected_PassesMoveModeToServerManager()
+    {
+        var fakeServerManager = new FakeServerManager();
+        var vm = new ImportServerViewModel(fakeServerManager, NoOpUiService.Instance)
+        {
+            SourcePath = "C:\\Servers\\MyServer",
+            ServerName = "MovedServer",
+            IsMoveMode = true,
+        };
+
+        Assert.False(vm.IsCopyMode);
+        Assert.True(vm.IsMoveMode);
+        Assert.Equal(ImportTransferMode.Move, vm.TransferMode);
+
+        await vm.ExecuteImportAsync();
 
         Assert.True(fakeServerManager.ImportCalled);
-        Assert.Equal("ImportedServer", vm.ImportedServerName);
-        Assert.True(closeRequested);
+        Assert.Equal(ImportTransferMode.Move, fakeServerManager.LastMode);
+    }
+
+    [Fact]
+    public async Task ExecuteImportAsync_WhenFailedResult_SetsStatusAndShowsWarning()
+    {
+        var fakeServerManager = new FakeServerManager
+        {
+            ResultToReturn = ServerImportResult.Failed("ImportedServer", "目錄格式不正確")
+        };
+        var vm = new ImportServerViewModel(fakeServerManager, NoOpUiService.Instance)
+        {
+            SourcePath = "C:\\Servers\\MyServer",
+            ServerName = "ImportedServer"
+        };
+
+        bool success = await vm.ExecuteImportAsync();
+
+        Assert.False(success);
+        Assert.Contains("目錄格式不正確", vm.StatusMessage);
+    }
+
+    [Fact]
+    public async Task ExecuteImportAsync_WhenOperationCanceled_SetsCanceledStatus()
+    {
+        var fakeServerManager = new FakeServerManager
+        {
+            ThrowOnImport = new OperationCanceledException()
+        };
+        var vm = new ImportServerViewModel(fakeServerManager, NoOpUiService.Instance)
+        {
+            SourcePath = "C:\\Servers\\MyServer",
+            ServerName = "ImportedServer"
+        };
+
+        bool success = await vm.ExecuteImportAsync();
+
+        Assert.False(success);
+        Assert.Contains("已取消", vm.StatusMessage);
     }
 
     private sealed class FakeServerManager : IServerManager
     {
         public bool ImportCalled { get; private set; }
+        public ImportTransferMode LastMode { get; private set; }
+        public ServerImportResult? ResultToReturn { get; set; }
+        public Exception? ThrowOnImport { get; set; }
 
         public Task<ServerImportResult> ImportServerAsync(
             string sourceDirectory,
@@ -53,6 +129,18 @@ public sealed class ImportServerViewModelTests
             CancellationToken cancellationToken = default)
         {
             ImportCalled = true;
+            LastMode = mode;
+
+            if (ThrowOnImport is not null)
+            {
+                throw ThrowOnImport;
+            }
+
+            if (ResultToReturn is not null)
+            {
+                return Task.FromResult(ResultToReturn);
+            }
+
             var config = new ServerConfig(
                 ServerName.Parse(targetName),
                 MinecraftVersion.Parse("1.20.4"),
@@ -83,6 +171,6 @@ public sealed class ImportServerViewModelTests
             Task.FromResult(ServerOperationResult.Ok());
 
         public Task<ServerScanReport> ScanAndRegisterAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ServerScanReport(0, 0, 0, []));
+            Task.FromResult(new ServerScanReport(0, 0, 0));
     }
 }

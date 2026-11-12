@@ -34,6 +34,31 @@ public sealed class ModVersionPickerViewModelTests
     }
 
     [Fact]
+    public async Task LoadVersionsAsync_OnlyRequiredDependenciesAreKept()
+    {
+        var versions = new List<OnlineModVersion>
+        {
+            new(
+                versionId: "v1",
+                versionNumber: "1.0.0",
+                displayName: "Version 1.0",
+                files: [new ModFile("test.jar", "https://example.com/test.jar", IsPrimary: true)],
+                dependencies:
+                [
+                    new OnlineModDependency("req-lib", ModDependencyType.Required),
+                    new OnlineModDependency("opt-lib", ModDependencyType.Optional),
+                    new OnlineModDependency("emb-lib", ModDependencyType.Embedded),
+                    new OnlineModDependency("bad-lib", ModDependencyType.Incompatible),
+                ])
+        };
+
+        var vm = new ModVersionPickerViewModel(new FakeModrinthClient(versions), "proj-1", "Test Mod");
+        await vm.LoadVersionsAsync();
+
+        Assert.Equal(["req-lib"], Assert.Single(vm.Versions).Dependencies);
+    }
+
+    [Fact]
     public async Task LoadVersionsAsync_WhenNoVersions_SetsEmptyStatusMessage()
     {
         var client = new FakeModrinthClient([]);
@@ -92,16 +117,13 @@ public sealed class ModVersionPickerViewModelTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult(versions);
 
-        public Task<ModrinthVersionLookupResult?> LookupVersionByHashAsync(
-            string hash,
-            string algorithm = "sha512",
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult<ModrinthVersionLookupResult?>(null);
-
         public Task<IReadOnlyDictionary<string, ModrinthVersionLookupResult>> LookupVersionsByHashesAsync(
             IReadOnlyList<string> hashes,
             string algorithm = "sha512",
             CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyDictionary<string, ModrinthVersionLookupResult>>(new Dictionary<string, ModrinthVersionLookupResult>());
+
+        public Task<IReadOnlyDictionary<string, string>> GetProjectTitlesAsync(IReadOnlyCollection<string> projectIdsOrSlugs, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>());
     }
 }

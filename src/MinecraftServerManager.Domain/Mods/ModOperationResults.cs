@@ -1,51 +1,45 @@
 namespace MinecraftServerManager.Domain.Mods;
 
-/// <summary>
-/// 模組檔案操作結果（下載、覆蓋與回復狀態）
-/// </summary>
-public sealed record ModFileOperationResult(
-    string Status,
-    string? FinalPath = null,
-    bool RollbackPerformed = false,
-    string Message = "")
+/// <summary>模組操作結果狀態</summary>
+public enum ModOperationStatus
 {
-    public bool Completed => string.Equals(Status, "completed", StringComparison.OrdinalIgnoreCase);
-    public bool Cancelled => string.Equals(Status, "cancelled", StringComparison.OrdinalIgnoreCase);
-    public bool Failed => string.Equals(Status, "failed", StringComparison.OrdinalIgnoreCase);
-
-    public static ModFileOperationResult Success(string finalPath, string message = "") =>
-        new("completed", finalPath, false, message);
-
-    public static ModFileOperationResult Cancel(string message = "", bool rollbackPerformed = false) =>
-        new("cancelled", null, rollbackPerformed, message);
-
-    public static ModFileOperationResult Fail(string message, bool rollbackPerformed = false) =>
-        new("failed", null, rollbackPerformed, message);
+    Completed,
+    Partial,
+    Cancelled,
+    Failed,
 }
 
-/// <summary>
-/// 本地模組檔案異動結果（啟用、停用、刪除等批次操作）
-/// </summary>
+/// <summary>模組檔案操作結果（下載、覆蓋與回復狀態）</summary>
+public sealed record ModFileOperationResult(
+    ModOperationStatus Status,
+    string Message = "")
+{
+    public bool Completed => Status is ModOperationStatus.Completed or ModOperationStatus.Partial;
+    public bool Failed => Status == ModOperationStatus.Failed;
+
+    public static ModFileOperationResult Success(string message = "") =>
+        new(ModOperationStatus.Completed, message);
+
+    public static ModFileOperationResult Cancel(string message = "") =>
+        new(ModOperationStatus.Cancelled, message);
+
+    public static ModFileOperationResult Fail(string message) =>
+        new(ModOperationStatus.Failed, message);
+}
+
+/// <summary>本地模組檔案異動結果（啟用、停用、刪除等批次操作）</summary>
 public sealed record LocalModMutationResult(
-    string Status,
+    ModOperationStatus Status,
     string Title = "",
     string Message = "",
-    string? FinalPath = null,
-    int AffectedCount = 0,
-    IReadOnlyList<string>? MissingIds = null)
+    int AffectedCount = 0)
 {
-    public IReadOnlyList<string> MissingIds { get; init; } = MissingIds ?? [];
+    public bool Completed => Status is ModOperationStatus.Completed or ModOperationStatus.Partial;
+    public bool Failed => Status == ModOperationStatus.Failed;
 
-    public bool Completed => string.Equals(Status, "completed", StringComparison.OrdinalIgnoreCase);
-    public bool Partial => string.Equals(Status, "partial", StringComparison.OrdinalIgnoreCase);
-    public bool Failed => string.Equals(Status, "failed", StringComparison.OrdinalIgnoreCase);
+    public static LocalModMutationResult Success(string title = "", string message = "", int affectedCount = 1) =>
+        new(ModOperationStatus.Completed, title, message, affectedCount);
 
-    public static LocalModMutationResult Success(string title = "", string message = "", string? finalPath = null, int affectedCount = 1) =>
-        new("completed", title, message, finalPath, affectedCount);
-
-    public static LocalModMutationResult Failure(string title, string message, IEnumerable<string>? missingIds = null) =>
-        new("failed", title, message, null, 0, missingIds?.ToArray());
-
-    public static LocalModMutationResult PartialSuccess(string title, string message, int affectedCount, IEnumerable<string>? missingIds = null) =>
-        new("partial", title, message, null, affectedCount, missingIds?.ToArray());
+    public static LocalModMutationResult Failure(string title, string message) =>
+        new(ModOperationStatus.Failed, title, message, 0);
 }

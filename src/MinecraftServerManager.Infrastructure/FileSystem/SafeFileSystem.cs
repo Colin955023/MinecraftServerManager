@@ -1,6 +1,8 @@
 using MinecraftServerManager.Infrastructure.Logging;
 using System.Text;
 using MinecraftServerManager.Infrastructure.Utilities;
+using System.IO.Enumeration;
+using FindEntry = System.IO.Enumeration.FileSystemEntry;
 
 namespace MinecraftServerManager.Infrastructure.FileSystem;
 
@@ -15,16 +17,20 @@ public sealed record FileSystemMetadata(
     string FullPath,
     string Name,
     long Length,
-    DateTime LastWriteTime,
     DateTime LastWriteTimeUtc,
     DateTime CreationTimeUtc,
     FileAttributes Attributes);
 
 public static class SafeFileSystem
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("SafeFileSystem");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(SafeFileSystem));
+    private static readonly Encoding DefaultUtf8Encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
     public const int DefaultMaxEntries = 100_000;
     public const long DefaultMaxTotalBytes = 128L * 1024 * 1024 * 1024;
+
+    // 與 DirectoryInfo 預設列舉一致：包含隱藏／系統項目、遇到無法存取的目錄擲出例外（不吞沒）
+    private static readonly EnumerationOptions FlatEnumerationOptions = new() { AttributesToSkip = 0, IgnoreInaccessible = false, ReturnSpecialDirectories = false };
+    private static readonly EnumerationOptions TreeEnumerationOptions = new() { RecurseSubdirectories = true, AttributesToSkip = 0, IgnoreInaccessible = false, ReturnSpecialDirectories = false };
 
     public static string ResolveStableDirectory(string path, bool create = false)
     {
@@ -46,20 +52,18 @@ public static class SafeFileSystem
     public static string ResolveStablePath(string path, bool createParent = false)
     {
         string fullPath = GetFullPath(path);
-        string parent = Path.GetDirectoryName(fullPath)
-            ?? throw new SafeFileSystemException($"找不到路徑父資料夾： {fullPath}");
-        ResolveStableDirectory(parent, createParent);
-        if (File.Exists(fullPath) || Directory.Exists(fullPath))
+        if (Path.GetDirectoryName(fullPath) is not { } parent)
         {
-            EnsureNotReparsePoint(fullPath);
+            // 路徑本身即根目錄（磁碟機根或 UNC 共用根）：沒有父資料夾，直接驗證根目錄存在
+            return ResolveStableDirectory(fullPath);
         }
 
+        ResolveStableDirectory(parent, createParent);
+        EnsureNotReparsePoint(fullPath);
         return fullPath;
     }
 
-    /// <summary>
-    /// 驗證一般檔案路徑後檢查檔案是否存在。
-    /// </summary>
+    /// <summary>驗證一般檔案路徑後檢查檔案是否存在。</summary>
     public static bool FileExists(string path)
     {
         try
@@ -72,9 +76,7 @@ public static class SafeFileSystem
         }
     }
 
-    /// <summary>
-    /// 驗證目錄路徑後檢查目錄是否存在。
-    /// </summary>
+    /// <summary>驗證目錄路徑後檢查目錄是否存在。</summary>
     public static bool DirectoryExists(string path)
     {
         try
@@ -87,45 +89,64 @@ public static class SafeFileSystem
         }
     }
 
-    /// <summary>
-    /// 建立經過路徑穩定性檢查的目錄。
-    /// </summary>
+    /// <summary>建立經過路徑穩定性檢查的目錄。</summary>
     public static string CreateDirectory(string path) => ResolveStableDirectory(path, create: true);
 
-    /// <summary>
-    /// 以受限走訪列舉目錄中的檔案。
-    /// </summary>
+    private static IEnumerable<FileSystemEntry> EnumerateEntries(string directoryPath, SearchOption searchOption) => searchOption switch
+    {
+        SearchOption.TopDirectoryOnly => ListBoundedDirectory(directoryPath),
+        SearchOption.AllDirectories => EnumerateBoundedTree(directoryPath),
+        _ => throw new ArgumentOutOfRangeException(nameof(searchOption)),
+    };
+
+    private static bool MatchesPattern(FileSystemEntry entry, bool isDirectory, string searchPattern) =>
+        entry.IsDirectory == isDirectory &&
+        FileSystemName.MatchesSimpleExpression(searchPattern, Path.GetFileName(entry.FullPath), ignoreCase: true);
+
+    /// <summary>以受限走訪列舉目錄中的檔案。</summary>
     public static IReadOnlyList<string> EnumerateFiles(
         string directoryPath,
         string searchPattern,
         SearchOption searchOption = SearchOption.TopDirectoryOnly)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(searchPattern);
-        IReadOnlyList<FileSystemEntry> entries = searchOption switch
-        {
-            SearchOption.TopDirectoryOnly => ListBoundedDirectory(directoryPath),
-            SearchOption.AllDirectories => WalkBoundedTree(directoryPath),
-            _ => throw new ArgumentOutOfRangeException(nameof(searchOption)),
-        };
-
-        return [.. entries
-            .Where(entry => !entry.IsDirectory &&
-                System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(
-                    searchPattern,
-                    Path.GetFileName(entry.FullPath),
-                    ignoreCase: true))
+        return [.. EnumerateEntries(directoryPath, searchOption)
+            .Where(entry => MatchesPattern(entry, isDirectory: false, searchPattern))
             .Select(static entry => entry.FullPath)];
     }
 
-    /// <summary>
-    /// 取得經過路徑穩定性檢查之目錄的最後修改時間。
-    /// </summary>
+    /// <summary>檢查目錄中是否存在符合條件之檔案，支援提早短路傳回以避免完整樹狀走訪與集合配置。</summary>
+    public static bool HasAnyFile(
+        string directoryPath,
+        string searchPattern,
+        SearchOption searchOption = SearchOption.TopDirectoryOnly)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(searchPattern);
+        if (string.IsNullOrWhiteSpace(directoryPath) || !DirectoryExists(directoryPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            return EnumerateEntries(directoryPath, searchOption)
+                .Any(entry => MatchesPattern(entry, isDirectory: false, searchPattern));
+        }
+        catch (Exception ex) when (ex is SafeFileSystemException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>取得經過路徑穩定性檢查之目錄的最後修改時間。</summary>
     public static DateTime GetDirectoryLastWriteTime(string path) =>
         Directory.GetLastWriteTime(ResolveStableDirectory(path));
 
-    /// <summary>
-    /// 取得指定路徑所在磁碟之可用剩餘空間位元組數；若無法取得或路徑無效則傳回 null。
-    /// </summary>
+    /// <summary>判斷目錄是否沒有任何項目；延遲列舉，遇到第一筆即傳回，不建立完整清單。</summary>
+    public static bool IsDirectoryEmpty(string directoryPath) =>
+        !new DirectoryInfo(ResolveStableDirectory(directoryPath)).EnumerateFileSystemInfos().Any();
+
+    /// <summary>取得指定路徑所在磁碟之可用剩餘空間位元組數；若無法取得或路徑無效則傳回 null。</summary>
     public static long? GetAvailableFreeSpace(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -149,14 +170,13 @@ public static class SafeFileSystem
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
         {
+            Logger.Warning(ex, "查詢路徑 {Path} 磁碟剩餘空間失敗", path);
         }
 
         return null;
     }
 
     public static long GetFileLength(string path) => new FileInfo(ResolveStablePath(path)).Length;
-
-    public static DateTime GetFileLastWriteTime(string path) => File.GetLastWriteTime(ResolveStablePath(path));
 
     public static DateTime GetFileLastWriteTimeUtc(string path) => File.GetLastWriteTimeUtc(ResolveStablePath(path));
 
@@ -174,17 +194,9 @@ public static class SafeFileSystem
             info.FullName,
             info.Name,
             info.Length,
-            info.LastWriteTime,
             info.LastWriteTimeUtc,
             info.CreationTimeUtc,
             info.Attributes);
-    }
-
-    public static string? ResolveFileLinkTarget(string path)
-    {
-        string stablePath = GetFullPath(path);
-        var info = new FileInfo(stablePath);
-        return info.ResolveLinkTarget(returnFinalTarget: true)?.FullName;
     }
 
     public static void SetDirectoryHidden(string path, bool hidden)
@@ -203,24 +215,10 @@ public static class SafeFileSystem
         string searchPattern = "*",
         SearchOption searchOption = SearchOption.TopDirectoryOnly)
     {
-        IReadOnlyList<FileSystemEntry> entries = searchOption switch
-        {
-            SearchOption.TopDirectoryOnly => ListBoundedDirectory(directoryPath),
-            SearchOption.AllDirectories => WalkBoundedTree(directoryPath),
-            _ => throw new ArgumentOutOfRangeException(nameof(searchOption)),
-        };
-
-        return [.. entries
-            .Where(entry => entry.IsDirectory &&
-                System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(
-                    searchPattern,
-                    Path.GetFileName(entry.FullPath),
-                    ignoreCase: true))
+        return [.. EnumerateEntries(directoryPath, searchOption)
+            .Where(entry => MatchesPattern(entry, isDirectory: true, searchPattern))
             .Select(static entry => entry.FullPath)];
     }
-
-    public static IReadOnlyList<string> EnumerateFileSystemEntries(string directoryPath) =>
-        [.. ListBoundedDirectory(directoryPath, rejectReparse: false).Select(static entry => entry.FullPath)];
 
     public static FileStream OpenRead(
         string filePath,
@@ -236,22 +234,29 @@ public static class SafeFileSystem
         return new FileStream(stablePath, FileMode.Open, FileAccess.Read, share, 4096, options);
     }
 
+    /// <summary>將 UTF-8 位元組解碼為字串，並自動剝除開頭的 UTF-8 BOM（避免首字元殘留 \uFEFF）</summary>
+    public static string DecodeUtf8WithoutBom(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.StartsWith(Encoding.UTF8.Preamble))
+        {
+            bytes = bytes[Encoding.UTF8.Preamble.Length..];
+        }
+
+        return Encoding.UTF8.GetString(bytes);
+    }
+
     public static string ReadAllText(string filePath, Encoding? encoding = null, long maxBytes = 16L * 1024 * 1024)
     {
         byte[] bytes = ReadRegularFile(filePath, maxBytes)
             ?? throw new FileNotFoundException("找不到或無法安全讀取檔案", filePath);
-        using var reader = new StreamReader(new MemoryStream(bytes, writable: false), encoding ?? Encoding.UTF8);
-        return reader.ReadToEnd();
+        return (encoding ?? Encoding.UTF8).GetString(bytes);
     }
 
     public static string[] ReadAllLines(string filePath, Encoding? encoding = null, long maxBytes = 16L * 1024 * 1024)
     {
-        if (GetFileLength(filePath) > maxBytes)
-        {
-            throw new IOException($"檔案大小超過安全上限：{filePath}");
-        }
-
-        using var reader = new StreamReader(OpenRead(filePath), encoding ?? Encoding.UTF8);
+        byte[] bytes = ReadRegularFile(filePath, maxBytes)
+            ?? throw new FileNotFoundException("找不到或無法安全讀取檔案", filePath);
+        using var reader = new StreamReader(new MemoryStream(bytes, writable: false), encoding ?? Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         var lines = new List<string>();
         while (reader.ReadLine() is { } line)
         {
@@ -261,44 +266,87 @@ public static class SafeFileSystem
         return [.. lines];
     }
 
-    public static Task<string> ReadAllTextAsync(
+    public static async Task<string> ReadAllTextAsync(
         string filePath,
         Encoding? encoding = null,
         long maxBytes = 16L * 1024 * 1024,
-        CancellationToken cancellationToken = default) =>
-        Task.Run(() => ReadAllText(filePath, encoding, maxBytes), cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        string stablePath = ResolveStablePath(filePath);
+        var info = new FileInfo(stablePath);
+        if (!info.Exists || (info.Attributes & FileAttributes.Directory) != 0)
+        {
+            throw new FileNotFoundException("找不到或無法安全讀取檔案", filePath);
+        }
 
-    public static Task WriteAllBytesAsync(
+        if (info.Length > maxBytes)
+        {
+            throw new IOException($"檔案大小超過安全上限：{filePath}");
+        }
+
+        return await File.ReadAllTextAsync(stablePath, encoding ?? Encoding.UTF8, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 讀取檔案尾端最多 <paramref name="maxBytes"/> 位元組並以 UTF-8 解碼（允許對方持續寫入／刪除）；
+    /// <paramref name="truncated"/> 表示檔案較大而僅讀取尾端，首行可能不完整
+    /// </summary>
+    public static string ReadTailText(string filePath, int maxBytes, out bool truncated)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
+        using var stream = OpenRead(filePath, FileShare.ReadWrite | FileShare.Delete);
+        long length = stream.Length;
+        truncated = length > maxBytes;
+        if (length == 0)
+        {
+            return string.Empty;
+        }
+
+        int bytesToRead = (int)Math.Min(length, maxBytes);
+        stream.Seek(-bytesToRead, SeekOrigin.End);
+        byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(bytesToRead);
+        try
+        {
+            int bytesRead = stream.ReadAtLeast(buffer.AsSpan(0, bytesToRead), bytesToRead, throwOnEndOfStream: false);
+            return Encoding.UTF8.GetString(buffer, 0, bytesRead);
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    public static async Task WriteAllBytesAsync(
         string filePath,
         ReadOnlyMemory<byte> content,
-        CancellationToken cancellationToken = default) =>
-        Task.Run(() => WriteAllBytes(filePath, content.Span), cancellationToken);
-
-    public static Task WriteAllTextAsync(
-        string filePath,
-        string content,
-        Encoding? encoding = null,
-        CancellationToken cancellationToken = default) =>
-        Task.Run(() => WriteAllText(filePath, content, encoding), cancellationToken);
-
-    public static void WriteAllBytes(string filePath, ReadOnlySpan<byte> content)
+        CancellationToken cancellationToken = default)
     {
-        if (!AtomicFileWriter.WriteBytes(filePath, content))
+        if (!await AtomicFileWriter.WriteBytesAsync(filePath, content, cancellationToken: cancellationToken).ConfigureAwait(false))
         {
             throw new IOException($"無法安全寫入檔案：{filePath}");
         }
     }
 
-    public static void WriteAllText(string filePath, string content, Encoding? encoding = null)
+    public static Task WriteAllTextAsync(
+        string filePath,
+        string content,
+        Encoding? encoding = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(content);
-        Encoding textEncoding = encoding ?? new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-        byte[] preamble = textEncoding.GetPreamble();
+        Encoding textEncoding = encoding ?? DefaultUtf8Encoding;
+        ReadOnlySpan<byte> preamble = textEncoding.GetPreamble();
         byte[] body = textEncoding.GetBytes(content);
+        if (preamble.IsEmpty)
+        {
+            return WriteAllBytesAsync(filePath, body, cancellationToken);
+        }
+
         byte[] payload = new byte[preamble.Length + body.Length];
-        preamble.CopyTo(payload, 0);
-        body.CopyTo(payload, preamble.Length);
-        WriteAllBytes(filePath, payload);
+        preamble.CopyTo(payload);
+        body.CopyTo(payload.AsSpan(preamble.Length));
+        return WriteAllBytesAsync(filePath, payload, cancellationToken);
     }
 
     public static void DeleteFile(string filePath)
@@ -308,6 +356,26 @@ public static class SafeFileSystem
         {
             ClearReadOnlyAttribute(stablePath);
             File.Delete(stablePath);
+        }
+    }
+
+    /// <summary>盡力刪除檔案（暫存檔清理用）：路徑為空或檔案不存在視為成功；IO／權限失敗時記錄警告並回傳 false，不擲出例外</summary>
+    public static bool TryDeleteFile(string? filePath)
+    {
+        if (string.IsNullOrEmpty(filePath))
+        {
+            return true;
+        }
+
+        try
+        {
+            DeleteFile(filePath);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.Warning(ex, "清理檔案失敗（已忽略）: {Path}", filePath);
+            return false;
         }
     }
 
@@ -331,6 +399,29 @@ public static class SafeFileSystem
         Directory.Delete(stablePath, recursive);
     }
 
+    /// <summary>
+    /// 將來源目錄的第一層項目逐一搬移至目的目錄（同名保留原檔名）。
+    /// <paramref name="skip"/> 回傳 true 的項目不搬移；<paramref name="beforeMove"/> 於每次搬移前以（項目, 目的路徑）呼叫。
+    /// </summary>
+    public static void MoveChildren(
+        string sourceDirectory,
+        string destinationDirectory,
+        Func<FileSystemEntry, bool>? skip = null,
+        Action<FileSystemEntry, string>? beforeMove = null)
+    {
+        foreach (FileSystemEntry entry in ListBoundedDirectory(sourceDirectory, rejectReparse: false))
+        {
+            if (skip?.Invoke(entry) == true)
+            {
+                continue;
+            }
+
+            string destination = Path.Combine(destinationDirectory, Path.GetFileName(entry.FullPath));
+            beforeMove?.Invoke(entry, destination);
+            MovePath(entry.FullPath, destination);
+        }
+    }
+
     public static void MovePath(string sourcePath, string destinationPath, bool overwrite = false)
     {
         string source = ResolveStablePath(sourcePath);
@@ -342,19 +433,56 @@ public static class SafeFileSystem
             throw new SafeFileSystemException("移動來源與目的地不得為 reparse point");
         }
 
-        if (isDirectory)
+        if (isDirectory && overwrite && Directory.Exists(destination))
         {
-            if (overwrite && Directory.Exists(destination))
-            {
-                DeleteDirectory(destination, recursive: true);
-            }
-
-            Directory.Move(source, destination);
-            return;
+            DeleteDirectory(destination, recursive: true);
         }
 
-        File.Move(source, destination, overwrite);
+        MoveCore(source, destination, isDirectory, overwrite);
     }
+
+    /// <summary>所有移動入口共用的實際搬移：邊界與 reparse 檢查由呼叫端負責，此處統一套用防毒／索引短暫鎖檔的重試</summary>
+    private static void MoveCore(string source, string destination, bool isDirectory, bool overwrite)
+    {
+        if (isDirectory)
+        {
+            RetryTransientMove(() => Directory.Move(source, destination));
+        }
+        else
+        {
+            RetryTransientMove(() => File.Move(source, destination, overwrite));
+        }
+    }
+
+    // 剛解壓或寫入的檔案常被防毒或索引短暫開啟，稍候重試即可成功
+    private const int TransientMoveMaxAttempts = 8;
+    private static readonly TimeSpan TransientMoveBaseDelay = TimeSpan.FromMilliseconds(150);
+
+    private static void RetryTransientMove(Action move)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                move();
+                return;
+            }
+            catch (Exception ex) when (attempt < TransientMoveMaxAttempts && IsTransientMoveFailure(ex))
+            {
+                Logger.Warning(ex, "移動路徑暫時遭拒（第 {Attempt} 次），稍後重試", attempt);
+                Thread.Sleep(TransientMoveBaseDelay * attempt);
+            }
+        }
+    }
+
+    private static bool IsTransientMoveFailure(Exception ex) => ex switch
+    {
+        UnauthorizedAccessException => true,
+        FileNotFoundException or DirectoryNotFoundException or PathTooLongException => false,
+        // ERROR_ACCESS_DENIED (5)、ERROR_SHARING_VIOLATION (32)、ERROR_LOCK_VIOLATION (33)
+        IOException io => (io.HResult & 0xFFFF) is 5 or 32 or 33,
+        _ => false,
+    };
 
     public static void CopyFile(string sourcePath, string destinationPath, bool overwrite = false)
     {
@@ -377,29 +505,18 @@ public static class SafeFileSystem
     {
         try
         {
-            string full = GetFullPath(path);
-            if (!File.Exists(full) && !Directory.Exists(full))
-            {
-                return false;
-            }
-
-            return (File.GetAttributes(full) & FileAttributes.ReparsePoint) != 0;
+            // FileInfo.Attributes 對不存在的路徑回傳 -1 而不擲例外：單次系統呼叫，且不以例外作為常態流程
+            FileAttributes attributes = new FileInfo(GetFullPath(path)).Attributes;
+            return attributes != (FileAttributes)(-1) && (attributes & FileAttributes.ReparsePoint) != 0;
         }
-        catch (FileNotFoundException)
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
             return false;
         }
-        catch (DirectoryNotFoundException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return false;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
+            // 無法讀取屬性時視為 reparse point（失敗即拒絕）
+            return true;
         }
     }
 
@@ -411,19 +528,20 @@ public static class SafeFileSystem
             string target = GetFullPath(targetPath);
             string relative = Path.GetRelativePath(basePath, target);
             bool within = relative is "."
-                || (!relative.Equals("..", StringComparison.Ordinal)
+                || (!Path.IsPathFullyQualified(relative)
+                    && !relative.Equals("..", StringComparison.Ordinal)
                     && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal));
             if (!within)
             {
                 return false;
             }
 
-            if (strict && !File.Exists(target) && !Directory.Exists(target))
+            if (strict && !Path.Exists(target))
             {
                 return false;
             }
 
-            string? existingParent = File.Exists(target) || Directory.Exists(target)
+            string? existingParent = Path.Exists(target)
                 ? target
                 : Path.GetDirectoryName(target);
             if (existingParent is null)
@@ -434,16 +552,13 @@ public static class SafeFileSystem
             EnsureNoReparseAlongPath(existingParent, basePath);
             return true;
         }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return false;
         }
     }
 
+    /// <summary>列舉單一目錄（不下探）並套用項目數、總位元組與 reparse point 安全上限；結果為即時清單。</summary>
     public static IReadOnlyList<FileSystemEntry> ListBoundedDirectory(
         string directoryPath,
         int maxEntries = DefaultMaxEntries,
@@ -452,26 +567,11 @@ public static class SafeFileSystem
     {
         ValidateLimits(maxEntries, maxTotalBytes);
         string directory = ResolveStableDirectory(directoryPath);
-        var entries = new List<FileSystemEntry>();
-        long totalBytes = 0;
-
-        foreach (var info in new DirectoryInfo(directory).EnumerateFileSystemInfos())
-        {
-            AddEntry(info, entries, ref totalBytes, maxEntries, maxTotalBytes, rejectReparse);
-        }
-
-        return entries;
+        var factory = new BoundedEntryFactory(directoryPath, maxEntries, maxTotalBytes, rejectReparse);
+        return [.. new FileSystemEnumerable<FileSystemEntry>(directory, factory.Create, FlatEnumerationOptions)];
     }
 
-    /// <summary>
-    /// 以串流延遲列舉（Streaming）方式走訪目錄樹，支援剪枝下探謂詞（Prune Predicate）與總量上限安全防護。
-    /// </summary>
-    /// <param name="directoryPath">欲走訪之根目錄路徑</param>
-    /// <param name="maxEntries">允許之最大項目數（預設 100,000）</param>
-    /// <param name="maxTotalBytes">允許之最大檔案總位元組數（預設 128 GB）</param>
-    /// <param name="rejectReparse">是否拒絕重解析點（符號連結/連接點，預設 true）</param>
-    /// <param name="pruneDirectory">剪枝謂詞：傳入即將下探之目錄完整路徑與目錄名稱，若回傳 true 則略過該目錄不向下遞迴</param>
-    /// <returns>檔案系統項目之延遲列舉集合</returns>
+    /// <summary>以串流延遲列舉走訪目錄樹，支援剪枝述詞（pruneDirectory 回傳 true 則不向下遞迴）與總量安全上限</summary>
     public static IEnumerable<FileSystemEntry> EnumerateBoundedTree(
         string directoryPath,
         int maxEntries = DefaultMaxEntries,
@@ -481,96 +581,50 @@ public static class SafeFileSystem
     {
         ValidateLimits(maxEntries, maxTotalBytes);
         string root = ResolveStableDirectory(directoryPath);
-        var pending = new Queue<string>([root]);
-        int entryCount = 0;
-        long totalBytes = 0;
-
-        while (pending.Count > 0)
+        var factory = new BoundedEntryFactory(directoryPath, maxEntries, maxTotalBytes, rejectReparse);
+        var walk = new FileSystemEnumerable<FileSystemEntry>(root, factory.Create, TreeEnumerationOptions)
         {
-            string current = pending.Dequeue();
-            var dirInfo = new DirectoryInfo(current);
-            if (!dirInfo.Exists)
-            {
-                continue;
-            }
+            // 不下探 reparse 目錄，避免跟隨 junction 走出邊界或形成迴圈
+            ShouldRecursePredicate = (ref FindEntry entry) =>
+                (entry.Attributes & FileAttributes.ReparsePoint) == 0
+                && (pruneDirectory is null || !pruneDirectory(entry.ToFullPath(), entry.FileName.ToString())),
+        };
 
-            foreach (var info in dirInfo.EnumerateFileSystemInfos())
-            {
-                bool isReparsePoint = IsReparsePoint(info.FullName);
-                if (isReparsePoint && rejectReparse)
-                {
-                    throw new SafeFileSystemException($"路徑不可為 reparse point： {info.FullName}");
-                }
-
-                bool isDirectory = info is DirectoryInfo;
-                long length = isDirectory ? 0 : ((FileInfo)info).Length;
-
-                if (entryCount >= maxEntries)
-                {
-                    throw new SafeFileSystemException($"目錄項目數超過安全上限 ({maxEntries})：{directoryPath}");
-                }
-
-                if (length > maxTotalBytes - totalBytes)
-                {
-                    throw new SafeFileSystemException($"目錄檔案總大小超過安全上限 ({maxTotalBytes} 位元組)：{directoryPath}");
-                }
-
-                entryCount++;
-                totalBytes += length;
-
-                var entry = new FileSystemEntry(info.FullName, isDirectory, length, info.LastWriteTimeUtc, info.CreationTimeUtc);
-
-                if (isDirectory)
-                {
-                    bool shouldPrune = pruneDirectory is not null && pruneDirectory(info.FullName, info.Name);
-                    if (!shouldPrune)
-                    {
-                        pending.Enqueue(info.FullName);
-                    }
-                }
-
-                yield return entry;
-            }
+        foreach (FileSystemEntry entry in walk)
+        {
+            yield return entry;
         }
     }
 
-    public static IReadOnlyList<FileSystemEntry> WalkBoundedTree(
-        string directoryPath,
-        int maxEntries = DefaultMaxEntries,
-        long maxTotalBytes = DefaultMaxTotalBytes,
-        bool rejectReparse = true,
-        Func<string, string, bool>? pruneDirectory = null) => [.. EnumerateBoundedTree(directoryPath, maxEntries, maxTotalBytes, rejectReparse, pruneDirectory)];
-
-    private static void AddEntry(
-        FileSystemInfo info,
-        List<FileSystemEntry> entries,
-        ref long totalBytes,
-        int maxEntries,
-        long maxTotalBytes,
-        bool rejectReparse)
+    private sealed class BoundedEntryFactory(string directoryPath, int maxEntries, long maxTotalBytes, bool rejectReparse)
     {
-        bool isReparsePoint = IsReparsePoint(info.FullName);
-        if (isReparsePoint && rejectReparse)
-        {
-            throw new SafeFileSystemException($"路徑不可為 reparse point： {info.FullName}");
-        }
+        private int _entryCount;
+        private long _totalBytes;
 
-        bool isDirectory = info is DirectoryInfo;
-        long length = isDirectory ? 0 : ((FileInfo)info).Length;
-        if (entries.Count >= maxEntries)
+        public FileSystemEntry Create(ref FindEntry entry)
         {
-            throw new SafeFileSystemException("目錄項目數超過安全上限");
-        }
+            if (rejectReparse && (entry.Attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new SafeFileSystemException($"路徑不可為 reparse point： {entry.ToFullPath()}");
+            }
 
-        if (length > maxTotalBytes - totalBytes)
-        {
-            throw new SafeFileSystemException("目錄檔案總大小超過安全上限");
-        }
+            bool isDirectory = entry.IsDirectory;
+            long length = isDirectory ? 0 : entry.Length;
+            if (_entryCount >= maxEntries)
+            {
+                throw new SafeFileSystemException($"目錄項目數超過安全上限 ({maxEntries})：{directoryPath}", isLimitExceeded: true);
+            }
 
-        totalBytes += length;
-        entries.Add(new FileSystemEntry(info.FullName, isDirectory, length, info.LastWriteTimeUtc, info.CreationTimeUtc));
+            if (length > maxTotalBytes - _totalBytes)
+            {
+                throw new SafeFileSystemException($"目錄檔案總大小超過安全上限 ({maxTotalBytes} 位元組)：{directoryPath}", isLimitExceeded: true);
+            }
+
+            _entryCount++;
+            _totalBytes += length;
+            return new FileSystemEntry(entry.ToFullPath(), isDirectory, length, entry.LastWriteTimeUtc.UtcDateTime, entry.CreationTimeUtc.UtcDateTime);
+        }
     }
-
     public static bool DeleteWithin(string baseDirectory, string targetPath)
     {
         try
@@ -595,11 +649,7 @@ public static class SafeFileSystem
 
             if (File.Exists(target))
             {
-                var fileInfo = new FileInfo(target);
-                if (fileInfo.IsReadOnly)
-                {
-                    fileInfo.IsReadOnly = false;
-                }
+                ClearReadOnlyAttribute(target);
                 File.Delete(target);
                 return true;
             }
@@ -613,8 +663,9 @@ public static class SafeFileSystem
 
             return false;
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning(ex, "受限路徑刪除失敗");
             return false;
         }
     }
@@ -650,29 +701,23 @@ public static class SafeFileSystem
                 ResolveStableDirectory(destParent, create: true);
             }
 
-            if (File.Exists(source))
+            bool isDirectory = Directory.Exists(source);
+            if (!isDirectory && !File.Exists(source))
             {
-                File.Move(source, destination, overwrite: true);
-                return true;
+                return false;
             }
 
-            if (Directory.Exists(source))
-            {
-                Directory.Move(source, destination);
-                return true;
-            }
-
-            return false;
+            MoveCore(source, destination, isDirectory, overwrite: true);
+            return true;
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning(ex, "受限路徑移動失敗");
             return false;
         }
     }
 
-    /// <summary>
-    /// 嚴格在基準目錄內移動直接子項目（失敗時擲出例外）
-    /// </summary>
+    /// <summary>嚴格在基準目錄內移動直接子項目（失敗時擲出例外）</summary>
     public static void MoveWithinStrict(string baseDirectory, string sourcePath, string destinationPath)
     {
         string baseDir = ResolveStableDirectory(baseDirectory);
@@ -701,113 +746,29 @@ public static class SafeFileSystem
             throw new SafeFileSystemException($"移動來源不可為 reparse point： {source}");
         }
 
-        if (File.Exists(destination) || Directory.Exists(destination))
+        if (Path.Exists(destination))
         {
             throw new SafeFileSystemException($"移動目的地已存在： {destination}");
         }
 
-        if (File.Exists(source))
+        bool isDirectory = Directory.Exists(source);
+        if (!isDirectory && !File.Exists(source))
         {
-            File.Move(source, destination);
-            return;
+            throw new FileNotFoundException($"找不到移動來源項目： {source}");
         }
 
-        if (Directory.Exists(source))
-        {
-            Directory.Move(source, destination);
-            return;
-        }
-
-        throw new FileNotFoundException($"找不到移動來源項目： {source}");
+        MoveCore(source, destination, isDirectory, overwrite: false);
     }
 
-    /// <summary>
-    /// 僅複製同一基準目錄內的一般檔案或目錄樹
-    /// </summary>
-    public static bool CopyWithin(string baseDirectory, string sourcePath, string destinationPath, bool overwrite = false)
+    /// <summary>安全遞迴複製目錄樹，強制具備符號連結防護與受限走訪</summary>
+    public static void CopyDirectoryTreeSafe(string source, string destination, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            string baseDir = ResolveStableDirectory(baseDirectory);
-            string source = GetFullPath(sourcePath);
-            string destination = GetFullPath(destinationPath);
-
-            if (string.Equals(baseDir, source, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(baseDir, destination, StringComparison.OrdinalIgnoreCase) ||
-                !IsPathWithin(baseDir, source, strict: false) ||
-                !IsPathWithin(baseDir, destination, strict: false))
-            {
-                return false;
-            }
-
-            if (IsReparsePoint(source) || IsReparsePoint(destination))
-            {
-                return false;
-            }
-
-            if (File.Exists(source))
-            {
-                string? destParent = Path.GetDirectoryName(destination);
-                if (!string.IsNullOrEmpty(destParent) && !Directory.Exists(destParent))
-                {
-                    ResolveStableDirectory(destParent, create: true);
-                }
-
-                File.Copy(source, destination, overwrite);
-                return true;
-            }
-
-            if (Directory.Exists(source))
-            {
-                if (!Directory.Exists(destination))
-                {
-                    Directory.CreateDirectory(destination);
-                }
-
-                var entries = WalkBoundedTree(source);
-                foreach (var entry in entries)
-                {
-                    string rel = Path.GetRelativePath(source, entry.FullPath);
-                    string targetChild = Path.Combine(destination, rel);
-
-                    if (entry.IsDirectory)
-                    {
-                        if (!Directory.Exists(targetChild))
-                        {
-                            Directory.CreateDirectory(targetChild);
-                        }
-                    }
-                    else
-                    {
-                        string? targetDir = Path.GetDirectoryName(targetChild);
-                        if (!string.IsNullOrEmpty(targetDir) && !Directory.Exists(targetDir))
-                        {
-                            Directory.CreateDirectory(targetDir);
-                        }
-
-                        File.Copy(entry.FullPath, targetChild, overwrite);
-                    }
-                }
-
-                return true;
-            }
-
-            return false;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// 安全遞迴複製目錄樹，強制具備符號連結防護與受限走訪
-    /// </summary>
-    public static void CopyDirectoryTreeSafe(string source, string destination)
-    {
-        var entries = WalkBoundedTree(source, rejectReparse: true);
+        cancellationToken.ThrowIfCancellationRequested();
+        // 先完整具體化再複製，避免目的地位於來源內時走訪到剛複製的項目
+        var entries = EnumerateBoundedTree(source, rejectReparse: true).ToList();
         foreach (var entry in entries)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             string rel = Path.GetRelativePath(source, entry.FullPath);
             string target = Path.Combine(destination, rel);
 
@@ -818,7 +779,7 @@ public static class SafeFileSystem
             else
             {
                 string? dir = Path.GetDirectoryName(target);
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                if (!string.IsNullOrEmpty(dir))
                 {
                     Directory.CreateDirectory(dir);
                 }
@@ -843,12 +804,26 @@ public static class SafeFileSystem
                 break;
             }
 
-            if (current.Exists && IsReparsePoint(current.FullName))
+            if (IsExistingReparsePoint(current))
             {
                 throw new SafeFileSystemException($"路徑不可包含 reparse point： {current.FullName}");
             }
 
             current = current.Parent;
+        }
+    }
+
+    /// <summary>單次屬性讀取判斷既有目錄是否為 reparse point（不存在回傳 -1 屬性，不需額外 stat）；讀取失敗時退回逐步檢查以維持原語意</summary>
+    private static bool IsExistingReparsePoint(DirectoryInfo directory)
+    {
+        try
+        {
+            FileAttributes attributes = directory.Attributes;
+            return attributes != (FileAttributes)(-1) && (attributes & FileAttributes.ReparsePoint) != 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return directory.Exists && IsReparsePoint(directory.FullName);
         }
     }
 
@@ -862,15 +837,8 @@ public static class SafeFileSystem
 
     private static void ValidateLimits(int maxEntries, long maxTotalBytes)
     {
-        if (maxEntries < 0)
-        {
-            ArgumentOutOfRangeException.ThrowIfNegative(maxEntries);
-        }
-
-        if (maxTotalBytes < 0)
-        {
-            ArgumentOutOfRangeException.ThrowIfNegative(maxTotalBytes);
-        }
+        ArgumentOutOfRangeException.ThrowIfNegative(maxEntries);
+        ArgumentOutOfRangeException.ThrowIfNegative(maxTotalBytes);
     }
 
     private static string GetFullPath(string path)
@@ -881,18 +849,28 @@ public static class SafeFileSystem
 
     public static byte[]? ReadRegularFile(string filePath, long maxBytes = 16 * 1024 * 1024)
     {
-        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath) || IsReparsePoint(filePath))
+        // FileExists 經 ResolveStablePath 驗證整條路徑，reparse point 或超出邊界時回傳 false
+        if (string.IsNullOrWhiteSpace(filePath) || !FileExists(filePath))
         {
             return null;
         }
 
-        var fileInfo = new FileInfo(filePath);
-        if (fileInfo.Length > maxBytes)
+        // 以單一串流檢查長度並讀取，避免檢查後檔案變大的競態
+        using var stream = OpenRead(filePath);
+        long length = stream.Length;
+        if (length > maxBytes)
         {
-            throw new IOException($"檔案大小超過安全上限 ({fileInfo.Length} > {maxBytes})： {filePath}");
+            throw new IOException($"檔案大小超過安全上限 ({length} > {maxBytes})： {filePath}");
         }
 
-        return File.ReadAllBytes(filePath);
+        byte[] buffer = GC.AllocateUninitializedArray<byte>((int)length);
+        stream.ReadExactly(buffer);
+        if (stream.ReadByte() != -1)
+        {
+            throw new IOException($"檔案於讀取期間變更：{filePath}");
+        }
+
+        return buffer;
     }
 
     public static void RemoveReadOnlyAttributesRecursive(string directoryPath)
@@ -914,7 +892,7 @@ public static class SafeFileSystem
 
         try
         {
-            if (File.Exists(path) || Directory.Exists(path))
+            if (Path.Exists(path))
             {
                 FileAttributes attributes = File.GetAttributes(path);
                 if ((attributes & FileAttributes.ReadOnly) != 0)
@@ -925,7 +903,23 @@ public static class SafeFileSystem
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning("清除唯讀屬性失敗: {0}", ex.Message);
+            Logger.Warning(ex, "清除唯讀屬性失敗");
+        }
+    }
+
+    private static void ClearReadOnly(FileSystemInfo info)
+    {
+        try
+        {
+            if ((info.Attributes & FileAttributes.ReadOnly) != 0)
+            {
+                info.Attributes &= ~FileAttributes.ReadOnly;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // 單一項目失敗不得中斷其餘項目，後續刪除若仍被擋會明確回報
+            Logger.Warning(ex, "清除唯讀屬性失敗: {Path}", info.FullName);
         }
     }
 
@@ -933,30 +927,18 @@ public static class SafeFileSystem
     {
         try
         {
-            if (directory.Attributes.HasFlag(FileAttributes.ReadOnly))
-            {
-                directory.Attributes &= ~FileAttributes.ReadOnly;
-            }
+            ClearReadOnly(directory);
 
-            foreach (var file in directory.EnumerateFiles())
+            // 預設會略過隱藏／系統項目，故僅排除 reparse point：不下探連結目錄，且含隱藏檔
+            var options = new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint };
+            foreach (var info in directory.EnumerateFileSystemInfos("*", options))
             {
-                if (file.IsReadOnly)
-                {
-                    file.IsReadOnly = false;
-                }
-            }
-
-            foreach (var subDir in directory.EnumerateDirectories())
-            {
-                if (!IsReparsePoint(subDir.FullName))
-                {
-                    RemoveReadOnlyAttributesRecursive(subDir);
-                }
+                ClearReadOnly(info);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning("遞迴清除目錄唯讀屬性失敗: {0}", ex.Message);
+            Logger.Warning(ex, "遞迴清除目錄唯讀屬性失敗");
         }
     }
 }

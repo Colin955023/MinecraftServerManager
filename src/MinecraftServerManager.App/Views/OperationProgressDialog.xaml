@@ -1,98 +1,54 @@
-<Window x:Class="MinecraftServerManager.App.Views.OperationProgressDialog"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="作業進度"
-        Width="520"
-        Height="250"
-        ResizeMode="NoResize"
-        WindowStartupLocation="CenterOwner"
-        Background="{DynamicResource WindowBrush}"
-        Foreground="{DynamicResource TextBrush}">
-  <Grid Margin="24">
+<ContentDialog x:Class="MinecraftServerManager.App.Views.OperationProgressDialog"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  mc:Ignorable="d"
+  Title="{x:Bind DialogHeading, Mode=OneTime}"
+  Closing="ContentDialog_Closing">
+
+  <!-- 放寬 ContentDialog 預設最大寬度（548），讓固定尺寸內容可完整顯示 -->
+  <ContentDialog.Resources>
+    <x:Double x:Key="ContentDialogMaxWidth">760</x:Double>
+  </ContentDialog.Resources>
+
+  <!-- 固定寬高：進度文字長短不同時視窗不再跳動 -->
+  <Grid Margin="0,12,0,0"
+    Width="640">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
-      <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
+    <!-- 階段狀態說明（固定三行高度，過長以刪節號截斷並以提示顯示全文） -->
     <TextBlock Grid.Row="0"
-               x:Name="TitleText"
-               Text="處理中..."
-               FontSize="18"
-               FontWeight="Bold"
-               Foreground="{DynamicResource TextBrush}"
-               Margin="0,0,0,6" />
+      Text="{x:Bind PhaseMessage, Mode=OneWay}"
+      ToolTipService.ToolTip="{x:Bind PhaseMessage, Mode=OneWay}"
+      FontSize="14"
+      Height="64"
+      MaxLines="3"
+      TextWrapping="Wrap"
+      TextTrimming="CharacterEllipsis"
+      Foreground="{ThemeResource MutedTextBrush}"
+      Margin="0,0,0,16" />
 
-    <TextBlock Grid.Row="1"
-               x:Name="PhaseText"
-               Text="正在準備作業..."
-               FontSize="13"
-               MinHeight="56"
-               TextWrapping="Wrap"
-               Foreground="{DynamicResource MutedTextBrush}"
-               Margin="0,0,0,16" />
+    <!-- 進度列 -->
+    <ProgressBar Grid.Row="1"
+      Height="8"
+      Minimum="0"
+      Maximum="100"
+      Value="{x:Bind ProgressValue, Mode=OneWay}"
+      Foreground="{ThemeResource AccentBrush}"
+      CornerRadius="4" />
 
-    <!-- 現代流光進度條 (原生 ProgressBar 百分比同步 + 外部流光層) -->
-    <Grid Grid.Row="2" x:Name="ProgressTrackContainer" Height="22">
-      <Border x:Name="TrackBorder"
-              Background="{DynamicResource CardBrush}"
-              BorderBrush="{DynamicResource BorderBrush}"
-              BorderThickness="1"
-              CornerRadius="6"
-              ClipToBounds="True">
-        <Grid>
-          <ProgressBar x:Name="OperationProgressBar"
-                       Minimum="0"
-                       Maximum="100"
-                       Value="0"
-                       Height="22"
-                       BorderThickness="0"
-                       Background="Transparent"
-                       Foreground="{DynamicResource AccentBrush}">
-            <ProgressBar.Template>
-              <ControlTemplate TargetType="ProgressBar">
-                <Grid x:Name="PART_Track">
-                  <Border x:Name="PART_Indicator"
-                          HorizontalAlignment="Left"
-                          Background="{TemplateBinding Foreground}"
-                          CornerRadius="5" />
-                </Grid>
-              </ControlTemplate>
-            </ProgressBar.Template>
-          </ProgressBar>
-
-          <!-- 全域動態流光光效層 (Shimmer Wave) -->
-          <Border x:Name="ShimmerWave"
-                  HorizontalAlignment="Left"
-                  Width="140"
-                  Opacity="0.4"
-                  IsHitTestVisible="False">
-            <Border.Background>
-              <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                <GradientStop Color="#00FFFFFF" Offset="0.0" />
-                <GradientStop Color="#60FFFFFF" Offset="0.4" />
-                <GradientStop Color="#A0FFFFFF" Offset="0.5" />
-                <GradientStop Color="#60FFFFFF" Offset="0.6" />
-                <GradientStop Color="#00FFFFFF" Offset="1.0" />
-              </LinearGradientBrush>
-            </Border.Background>
-            <Border.RenderTransform>
-              <TranslateTransform x:Name="ShimmerTransform" X="-150" />
-            </Border.RenderTransform>
-          </Border>
-        </Grid>
-      </Border>
-    </Grid>
-
-    <TextBlock Grid.Row="3"
-               x:Name="PercentText"
-               Text="0%"
-               FontSize="13"
-               FontWeight="SemiBold"
-               HorizontalAlignment="Right"
-               VerticalAlignment="Top"
-               Foreground="{DynamicResource TextBrush}"
-               Margin="0,8,0,0" />
+    <!-- 百分比文字 -->
+    <TextBlock Grid.Row="2"
+      Text="{x:Bind PercentDisplay, Mode=OneWay}"
+      FontSize="13"
+      FontWeight="SemiBold"
+      HorizontalAlignment="Right"
+      Foreground="{ThemeResource TextBrush}"
+      Margin="0,8,0,0" />
   </Grid>
-</Window>
+</ContentDialog>

@@ -1,25 +1,27 @@
 using System.Collections.Frozen;
 using MinecraftServerManager.Core.Errors;
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Settings;
 
 public sealed class SettingsManager
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(SettingsManager));
+
     private static readonly FrozenSet<string> ValidThemeModes = FrozenSet.ToFrozenSet(["system", "light", "dark"], StringComparer.Ordinal);
     private readonly Lock _syncRoot = new();
     private readonly string _settingsPath;
     private UserSettings _settings;
 
-    public SettingsManager(string? userDataDirectory = null)
+    public SettingsManager(string userDataDirectory)
     {
-        string resolvedUserDataDirectory = ResolveUserDataDirectory(userDataDirectory);
-        _settingsPath = Path.Combine(resolvedUserDataDirectory, "user_settings.json");
+        ArgumentException.ThrowIfNullOrWhiteSpace(userDataDirectory);
+        _settingsPath = Path.Combine(Path.GetFullPath(userDataDirectory), "user_settings.json");
         _settings = LoadSettings();
     }
-
-    public string SettingsPath => _settingsPath;
 
     public UserSettings Snapshot
     {
@@ -32,7 +34,7 @@ public sealed class SettingsManager
         }
     }
 
-    public static string NormalizeServersRootPath(string? path)
+    public static string NormalizeExactServersRootPath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -42,24 +44,29 @@ public sealed class SettingsManager
         try
         {
             string resolved = Path.GetFullPath(path.Trim());
-            if (!string.Equals(Path.GetFileName(resolved), "servers", StringComparison.OrdinalIgnoreCase))
-            {
-                resolved = Path.Combine(resolved, "servers");
-            }
-
-            return Path.TrimEndingDirectorySeparator(Path.GetFullPath(resolved));
+            return Path.TrimEndingDirectorySeparator(resolved);
         }
-        catch (ArgumentException)
-        {
-            return string.Empty;
-        }
-        catch (NotSupportedException)
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
         {
             return string.Empty;
         }
     }
 
+    public static string NormalizeServersRootPath(string? path)
+    {
+        string resolved = NormalizeExactServersRootPath(path);
+        if (string.IsNullOrEmpty(resolved))
+        {
+            return string.Empty;
+        }
 
+        if (!string.Equals(Path.GetFileName(resolved), "servers", StringComparison.OrdinalIgnoreCase))
+        {
+            resolved = Path.Combine(resolved, "servers");
+        }
+
+        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(resolved));
+    }
 
     public string GetServersRoot()
     {
@@ -79,6 +86,16 @@ public sealed class SettingsManager
         Update(settings => settings with { ServersRoot = normalized });
     }
 
+    public void SetExactServersRoot(string? path)
+    {
+        string normalized = NormalizeExactServersRootPath(path);
+        if (!string.IsNullOrEmpty(normalized))
+        {
+            SafeFileSystem.ResolveStableDirectory(normalized, create: true);
+        }
+        Update(settings => settings with { ServersRoot = normalized });
+    }
+
     public string GetValidatedServersRootPath(bool create = false)
     {
         string serversRoot = GetServersRoot();
@@ -87,7 +104,7 @@ public sealed class SettingsManager
             throw new ConfigurationException("尚未設定伺服器主資料夾");
         }
 
-        serversRoot = NormalizeServersRootPath(serversRoot);
+        serversRoot = NormalizeExactServersRootPath(serversRoot);
         if (SafeFileSystem.FileExists(serversRoot))
         {
             throw new ConfigurationException($"伺服器資料夾路徑無效： {serversRoot}");
@@ -126,38 +143,25 @@ public sealed class SettingsManager
 
     public void SetAutoUpdateEnabled(bool enabled) => Update(settings => settings with { AutoUpdateEnabled = enabled });
 
-    public bool IsFirstRunCompleted()
+    public bool IsAutoBackupBeforeStartEnabled()
     {
         lock (_syncRoot)
         {
-            return _settings.FirstRunCompleted;
+            return _settings.AutoBackupBeforeStart;
         }
     }
 
-    public void MarkFirstRunCompleted() => Update(static settings => settings with { FirstRunCompleted = true });
+    public void SetAutoBackupBeforeStartEnabled(bool enabled) => Update(settings => settings with { AutoBackupBeforeStart = enabled });
 
-    /// <summary>
-    /// 全域 UI 縮放比例（0.5～3.0，預設 1.0）
-    /// </summary>
-    public double GetUiScale()
+    public int GetBackupRetentionCount()
     {
         lock (_syncRoot)
         {
-            return NormalizeUiScale(_settings.UiScale);
+            return _settings.BackupRetentionCount;
         }
     }
 
-    public void SetUiScale(double scale) => Update(settings => settings with { UiScale = NormalizeUiScale(scale) });
-
-    private static double NormalizeUiScale(double scale)
-    {
-        if (double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0)
-        {
-            return 1.0;
-        }
-
-        return Math.Clamp(Math.Round(scale, 2), 0.5, 3.0);
-    }
+    public void SetBackupRetentionCount(int count) => Update(settings => settings with { BackupRetentionCount = count });
 
     public WindowPreferences GetWindowPreferences()
     {
@@ -181,6 +185,10 @@ public sealed class SettingsManager
 
     public void SetThemeMode(string? mode) => UpdateWindowPreferences(preferences => preferences with { ThemeMode = NormalizeThemeMode(mode) });
 
+    public string? GetCustomAccentColor() => GetWindowPreferences().CustomAccentColor;
+
+    public void SetCustomAccentColor(string? hex) => UpdateWindowPreferences(preferences => preferences with { CustomAccentColor = string.IsNullOrWhiteSpace(hex) ? null : hex.Trim() });
+
     private static WindowPreferences NormalizeWindowPreferences(WindowPreferences? preferences)
     {
         preferences ??= new WindowPreferences();
@@ -189,26 +197,69 @@ public sealed class SettingsManager
         {
             ThemeMode = NormalizeThemeMode(preferences.ThemeMode),
             MainWindow = mainWindow,
+            CustomAccentColor = string.IsNullOrWhiteSpace(preferences.CustomAccentColor) ? null : preferences.CustomAccentColor.Trim(),
         };
     }
 
     private UserSettings LoadSettings()
     {
-        using var result = JsonCodec.ReadJsonWithBytes(_settingsPath);
-        if (result is null)
+        byte[]? bytes = null;
+        try
         {
+            bytes = SafeFileSystem.ReadRegularFile(_settingsPath, JsonCodec.DefaultMaxBytes);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.Warning(ex, "讀取設定檔失敗: {Path}", _settingsPath);
+        }
+
+        UserSettings? loaded = bytes is null ? null : JsonCodec.Deserialize<UserSettings>(bytes);
+        if (loaded is null)
+        {
+            // 檔案存在卻讀不到（損毀、過大或被鎖定）：先保留原檔，避免預設值覆蓋使用者設定
+            PreserveUnreadableSettings();
             var defaults = new UserSettings();
-            Save(defaults);
+            TrySaveDefaults(defaults);
             return defaults;
         }
 
-        UserSettings? loaded = JsonCodec.Deserialize<UserSettings>(result.RawBytes);
-        var normalized = NormalizeSettings(loaded ?? new UserSettings());
+        var normalized = NormalizeSettings(loaded);
         if (loaded != normalized)
         {
             Save(normalized);
         }
         return normalized;
+    }
+
+    private void PreserveUnreadableSettings()
+    {
+        if (!SafeFileSystem.FileExists(_settingsPath))
+        {
+            return;
+        }
+
+        try
+        {
+            SafeFileSystem.CopyFile(_settingsPath, _settingsPath + ".bad", overwrite: true);
+            Logger.Warning("設定檔無法讀取，已備份為 {Path}.bad 並改用預設值", _settingsPath);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Warning(ex, "無法備份損毀的設定檔: {Path}", _settingsPath);
+        }
+    }
+
+    private void TrySaveDefaults(UserSettings defaults)
+    {
+        try
+        {
+            Save(defaults);
+        }
+        catch (IOException ex)
+        {
+            // 寫入失敗不應使啟動失敗；使用記憶體中的預設值繼續
+            Logger.Warning(ex, "無法寫入預設設定檔: {Path}", _settingsPath);
+        }
     }
 
     private void Update(Func<UserSettings, UserSettings> update)
@@ -235,10 +286,16 @@ public sealed class SettingsManager
     {
         return settings with
         {
-            ServersRoot = NormalizeServersRootPath(settings.ServersRoot).Trim(),
+            ServersRoot = NormalizeExactServersRootPath(settings.ServersRoot).Trim(),
             WindowPreferences = NormalizeWindowPreferences(settings.WindowPreferences),
+            BackupRetentionCount = NormalizeBackupRetentionCount(settings.BackupRetentionCount),
         };
     }
+
+    private static int NormalizeBackupRetentionCount(int count) =>
+        count < ServerDefaults.MinBackupRetentionCount
+            ? ServerDefaults.DefaultBackupRetentionCount
+            : Math.Min(count, ServerDefaults.MaxBackupRetentionCount);
 
     private static string NormalizeThemeMode(string? mode)
     {
@@ -246,13 +303,4 @@ public sealed class SettingsManager
         return ValidThemeModes.Contains(normalized) ? normalized : "system";
     }
 
-    private static string ResolveUserDataDirectory(string? userDataDirectory)
-    {
-        if (!string.IsNullOrWhiteSpace(userDataDirectory))
-        {
-            return Path.GetFullPath(userDataDirectory);
-        }
-
-        return RuntimePaths.GetUserDataDir();
-    }
 }

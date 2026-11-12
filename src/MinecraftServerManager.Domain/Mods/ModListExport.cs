@@ -1,8 +1,6 @@
 namespace MinecraftServerManager.Domain.Mods;
 
-/// <summary>
-/// 模組列表匯出格式
-/// </summary>
+/// <summary>模組清單匯出格式</summary>
 public enum ModListExportFormat
 {
     Text,
@@ -11,9 +9,7 @@ public enum ModListExportFormat
     Xlsx,
 }
 
-/// <summary>
-/// 模組列表匯出的單列資料，不含任何 UI 型別
-/// </summary>
+/// <summary>模組清單匯出的單列資料，不含任何 UI 型別</summary>
 public sealed record ModListExportRow(
     string Id,
     string Name,

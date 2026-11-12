@@ -1,204 +1,431 @@
 using System.ComponentModel;
-using System.Windows;
-using System.Windows.Media;
+using Microsoft.UI.Windowing;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using MinecraftServerManager.App.Controls;
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.App.Views;
+using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Logging;
-using MinecraftServerManager.Infrastructure.Settings;
+using Windows.Graphics;
+using Windows.UI;
 
 namespace MinecraftServerManager.App;
 
+/// <summary>應用程式主視窗 (WinUI 3 原生視窗)</summary>
 public sealed partial class MainWindow : Window, IAsyncDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("MainWindow");
-    private readonly AppCompositionRoot? _compositionRoot;
-    private readonly MainViewModel _viewModel;
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(MainWindow));
+
+    private AppCompositionRoot? _compositionRoot;
+    private MainViewModel? _viewModel;
+    private RectInt32? _restoredBounds;
     private bool _shutdownInProgress;
     private bool _shutdownCompleted;
+    private WinUiService? _uiService;
 
-    /// <summary>
-    /// 建立主視窗並持有其應用程式組合根（於視窗關閉時非同步釋放）
-    /// </summary>
-    public MainWindow(string serversRoot, SettingsManager settingsManager)
+    private readonly Dictionary<string, UIElement> _viewCache = new(StringComparer.OrdinalIgnoreCase);
+
+    public MainViewModel? ViewModel => _viewModel;
+
+    public MainWindow()
     {
-        _compositionRoot = new AppCompositionRoot(serversRoot, settingsManager);
         InitializeComponent();
-        _viewModel = _compositionRoot.MainViewModel;
-        InitializeWindow();
+        Title = "Minecraft 伺服器管理器";
+
+        ExtendsContentIntoTitleBar = true;
+
+        WindowIconHelper.SetIcon(AppWindow);
+
+        AppWindow.Closing += MainWindow_AppWindowClosing;
+        RootGrid.Loaded += MainWindow_Loaded;
     }
 
-    /// <summary>
-    /// 於背景開始預熱（Java 候選、版本清單等）
-    /// </summary>
-    public void StartBackgroundWarmup() => _compositionRoot?.StartBackgroundWarmup();
-
-    private void InitializeWindow()
+    /// <summary>初始化主視窗之組合根與 ViewModel 繫結</summary>
+    public void InitializeViewModel(AppCompositionRoot compositionRoot, WinUiService uiService)
     {
+        _uiService = uiService ?? throw new ArgumentNullException(nameof(uiService));
+        _compositionRoot = compositionRoot ?? throw new ArgumentNullException(nameof(compositionRoot));
+        _viewModel = compositionRoot.MainViewModel;
+
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
-        _viewModel.NotificationRequested += ViewModel_NotificationRequested;
         _viewModel.ResetWindowSizeRequested += OnResetWindowSizeRequested;
-        _viewModel.UiScaleChanged += ApplyUiScale;
-        DataContext = _viewModel;
+        _viewModel.UpdateAvailable += ViewModel_UpdateAvailable;
+        _viewModel.ThemeModeChanged += ApplyThemeMode;
 
-        Loaded += MainWindow_Loaded;
-        Closing += MainWindow_Closing;
-        SizeChanged += MainWindow_SizeChanged;
-    }
+        ApplyThemeMode(_viewModel.ThemeMode);
+        UpdateCurrentPage(_viewModel.CurrentPage);
 
-    private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (_viewModel.CurrentPage is AboutPreferencesViewModel aboutVm)
-        {
-            int sw = (int)SystemParameters.PrimaryScreenWidth;
-            int sh = (int)SystemParameters.PrimaryScreenHeight;
-            int ww = (int)ActualWidth;
-            int wh = (int)ActualHeight;
-            aboutVm.UpdateDisplayInfo(sw, sh, ww, wh);
-        }
-    }
+        RestoreWindowPosition();
+        PushWindowMetrics();
+        AppWindow.Changed += OnAppWindowChanged;
 
-    /// <summary>
-    /// 套用全域 UI 縮放至主視窗與所有快顯對話方塊（經由共用動態資源）。
-    /// </summary>
-    private void ApplyUiScale(double scale)
-    {
-        if (double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0)
-        {
-            scale = 1.0;
-        }
-
-        scale = Math.Clamp(scale, 0.5, 3.0);
-        UiScaleTransform.ScaleX = scale;
-        UiScaleTransform.ScaleY = scale;
-
-        // 提供給對話方塊使用的共用縮放資源
-        Application.Current.Resources["UiScaleValue"] = scale;
-        Application.Current.Resources["UiScaleTransform"] = new ScaleTransform(scale, scale);
-
-        Logger.Information("已套用全域 UI 縮放: {Scale:P0}", scale);
-    }
-
-    private void OnResetWindowSizeRequested()
-    {
-        Logger.Information("收到重設主視窗大小請求，還原為 1350x820 並置中");
-        WindowState = WindowState.Normal;
-        Width = 1350;
-        Height = 820;
-        Left = (SystemParameters.PrimaryScreenWidth - Width) / 2;
-        Top = (SystemParameters.PrimaryScreenHeight - Height) / 2;
-    }
-
-    private void ViewModel_NotificationRequested(string title, string message, NotificationLevel level)
-    {
-        if (level == NotificationLevel.Error)
-        {
-            _compositionRoot?.UiService.ShowError(message, title);
-        }
-        else
-        {
-            _compositionRoot?.UiService.ShowWarning(message, title);
-        }
+        _ = ViewModelBase.RunSafeAsync(() => _viewModel.CheckForUpdateOnStartupAsync(), "啟動檢查更新", Logger);
     }
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        Logger.Information("主視窗已載入完成，目前主題: {Theme}", _viewModel.IsLightTheme ? "淺色 (Light)" : "深色 (Dark)");
-        ApplyTheme(_viewModel.IsLightTheme);
-        RestoreWindowPosition();
-        ApplyUiScale(_viewModel.Settings.GetUiScale());
+        Logger.Information("主視窗 UI 已載入完成");
 
-        int sw = (int)SystemParameters.PrimaryScreenWidth;
-        int sh = (int)SystemParameters.PrimaryScreenHeight;
-        int ww = (int)ActualWidth;
-        int wh = (int)ActualHeight;
-        _viewModel.AboutPreferences?.UpdateDisplayInfo(sw, sh, ww, wh);
-
-        // 啟動時自動檢查更新（判斷邏輯位於 ViewModel，此處僅負責提示）
-        _ = ViewModelBase.RunSafeAsync(() => _viewModel.CheckForUpdateOnStartupAsync(), "啟動檢查更新", Logger);
-    }
-
-
-
-    /// <summary>
-    /// 非同步釋放主視窗持有的應用程式組合根
-    /// </summary>
-    public async ValueTask DisposeAsync()
-    {
-        if (_compositionRoot is not null)
+        // 對話框需要主視窗內容的 XamlRoot，須待 UI 載入完成後才能顯示
+        RootGrid.Loaded -= MainWindow_Loaded;
+        if (_viewModel is not null)
         {
-            await _compositionRoot.DisposeAsync().ConfigureAwait(true);
+            _ = ViewModelBase.RunSafeAsync(() => _viewModel.CheckOrphanedServersOnStartupAsync(), "檢查遺留伺服器行程", Logger);
         }
     }
 
-    private void MainWindow_Closing(object? sender, CancelEventArgs e)
+    private void ApplyThemeMode(string mode)
+    {
+        ElementTheme targetTheme = mode switch
+        {
+            "light" => ElementTheme.Light,
+            "dark" => ElementTheme.Dark,
+            _ => ElementTheme.Default
+        };
+
+        RootGrid.RequestedTheme = targetTheme;
+        _uiService!.CurrentTheme = targetTheme;
+        TitleBarThemeHelper.ApplyTitleBarTheme(AppWindow, targetTheme);
+        Logger.Information("主視窗套用主題模式: {Mode} ({TargetTheme})", mode, targetTheme);
+    }
+
+    private void UpdateCurrentPage(PageViewModel? page)
+    {
+        if (page is null || _viewModel is null)
+        {
+            return;
+        }
+
+        UIElement view = page switch
+        {
+            CreateServerViewModel vm => GetOrCreateView("create", () => new CreateServerView(vm)),
+            ManageServerViewModel vm => GetOrCreateView("manage", () => new ManageServerView(vm)),
+            ModsViewModel vm => GetOrCreateView("mods", () => new ModsView(vm)),
+            AboutPreferencesViewModel vm => GetOrCreateView("about_preferences", () => new AboutPreferencesView(vm)),
+            _ => new TextBlock { Text = page.Title, Margin = new Thickness(20) }
+        };
+
+        PageContentHost.Content = view;
+    }
+
+    private UIElement GetOrCreateView(string key, Func<UIElement> factory)
+    {
+        if (!_viewCache.TryGetValue(key, out var view))
+        {
+            view = factory();
+            _viewCache[key] = view;
+        }
+        return view;
+    }
+
+    private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainViewModel.CurrentPage))
+        {
+            UpdateCurrentPage(_viewModel?.CurrentPage);
+        }
+    }
+
+    private void ViewModel_UpdateAvailable(UpdateCheckResult result)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            ShowNotification($"已偵測到新版本 v{result.LatestVersion}，請至「關於與設定」檢視詳細更新資訊。", "發現新版本", NotificationType.Info, durationSeconds: 5);
+        });
+    }
+
+
+    /// <summary>以 InfoBar 顯示資訊、成功與警告通知（錯誤由 WinUiService 以對話方塊顯示）</summary>
+    public void ShowNotification(string message, string? title = null, NotificationType type = NotificationType.Info, int? durationSeconds = null) =>
+        ShowInfoBar(
+            title ?? NotificationPresentation.GetDefaultTitle(type),
+            message,
+            type,
+            durationSeconds ?? NotificationPresentation.GetDisplaySeconds(type));
+
+    private Brush GetSafeThemeBrush(string key, Color fallbackColor)
+    {
+        try
+        {
+            if (ThemeBrush.ResolveBrush(key, RootGrid.ActualTheme) is { } brush)
+            {
+                return brush;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "取得通知筆刷「{Key}」失敗", key);
+        }
+
+        return new SolidColorBrush(fallbackColor);
+    }
+
+    /// <summary>於右上角以 WinUI 原生 InfoBar 顯示浮動通知：滑鼠停留時暫停自動關閉，最多同時顯示 4 則</summary>
+    private void ShowInfoBar(string title, string message, NotificationType type, int durationSeconds)
+    {
+        bool isLight = RootGrid.ActualTheme == ElementTheme.Light;
+        var infoBar = new InfoBar
+        {
+            Title = title,
+            Message = message,
+            Severity = NotificationPresentation.ToSeverity(type),
+            IsClosable = true,
+            IsOpen = true,
+        };
+
+        // InfoBar 預設背景為半透明，外層以卡片色承載確保浮於頁面內容上仍清晰可讀
+        var host = new Border
+        {
+            Background = GetSafeThemeBrush("CardBrush", isLight ? Color.FromArgb(255, 255, 255, 255) : Color.FromArgb(255, 31, 34, 41)),
+            CornerRadius = new CornerRadius(8),
+            MinWidth = 280,
+            MaxWidth = 420,
+            Child = infoBar,
+        };
+
+        var timer = DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromSeconds(durationSeconds > 0 ? durationSeconds : 3);
+        timer.Tick += (s, e) =>
+        {
+            timer.Stop();
+            infoBar.IsOpen = false;
+        };
+
+        infoBar.Closed += (s, e) =>
+        {
+            timer.Stop();
+            NotificationContainer.Children.Remove(host);
+        };
+        host.PointerEntered += (s, e) => timer.Stop();
+        host.PointerExited += (s, e) => timer.Start();
+
+        while (NotificationContainer.Children.Count >= 4)
+        {
+            // 經 IsOpen=false 走 Closed 流程，確保被擠出之通知一併停止計時器
+            var oldest = NotificationContainer.Children[0];
+            if (oldest is Border { Child: InfoBar oldBar })
+            {
+                oldBar.IsOpen = false;
+            }
+
+            NotificationContainer.Children.Remove(oldest);
+        }
+
+        NotificationContainer.Children.Add(host);
+        timer.Start();
+
+        if (type == NotificationType.Warning)
+        {
+            AudioFeedback.PlayWarning();
+        }
+        else
+        {
+            AudioFeedback.PlayInfo();
+        }
+    }
+
+    private void RestoreWindowPosition()
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        double scale = WindowLayoutHelper.GetScale(this);
+
+        var winSettings = _viewModel.Settings.GetMainWindowSettings();
+
+        int targetWidth = winSettings.Width > 0 ? (int)(winSettings.Width * scale) : (int)(1350 * scale);
+        int targetHeight = winSettings.Height > 0 ? (int)(winSettings.Height * scale) : (int)(820 * scale);
+
+        AppWindow.Resize(new SizeInt32(targetWidth, targetHeight));
+
+        var displayArea = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary);
+        var workArea = displayArea.WorkArea;
+
+        if (winSettings.X.HasValue && winSettings.Y.HasValue)
+        {
+            int targetX = (int)(winSettings.X.Value * scale);
+            int targetY = (int)(winSettings.Y.Value * scale);
+
+            if (targetX >= workArea.X && targetX + targetWidth <= workArea.X + workArea.Width &&
+                targetY >= workArea.Y && targetY + targetHeight <= workArea.Y + workArea.Height)
+            {
+                AppWindow.Move(new PointInt32(targetX, targetY));
+            }
+            else
+            {
+                CenterWindow(workArea, targetWidth, targetHeight);
+            }
+        }
+        else
+        {
+            CenterWindow(workArea, targetWidth, targetHeight);
+        }
+
+        // 最大化前先記下還原後的視窗範圍，供關閉時儲存（最大化時的外框尺寸不可當作還原尺寸）
+        _restoredBounds = new RectInt32(AppWindow.Position.X, AppWindow.Position.Y, AppWindow.Size.Width, AppWindow.Size.Height);
+
+        if (winSettings.Maximized && AppWindow.Presenter is OverlappedPresenter presenter)
+        {
+            presenter.Maximize();
+        }
+    }
+
+    private void OnAppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        if (args.DidSizeChange || args.DidPositionChange)
+        {
+            if (AppWindow.Presenter is not OverlappedPresenter { State: not OverlappedPresenterState.Restored })
+            {
+                _restoredBounds = new RectInt32(AppWindow.Position.X, AppWindow.Position.Y, AppWindow.Size.Width, AppWindow.Size.Height);
+            }
+
+            // 大小或位置（可能換到不同縮放的螢幕）改變時同步「關於與設定」顯示的即時尺寸
+            PushWindowMetrics();
+        }
+    }
+
+    private void PushWindowMetrics()
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        double scale = WindowLayoutHelper.GetScale(this);
+        var screen = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).OuterBounds;
+        _viewModel.UpdateWindowMetrics(new WindowMetrics(
+            (int)Math.Round(AppWindow.Size.Width / scale),
+            (int)Math.Round(AppWindow.Size.Height / scale),
+            screen.Width,
+            screen.Height,
+            scale));
+    }
+
+    private void CenterWindow(RectInt32 workArea, int width, int height) =>
+        AppWindow.Move(WindowLayoutHelper.CenterWithin(workArea, workArea, width, height));
+
+    private void SaveWindowPosition()
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        double scale = WindowLayoutHelper.GetScale(this);
+
+        var state = (AppWindow.Presenter as OverlappedPresenter)?.State;
+        bool isMax = state == OverlappedPresenterState.Maximized;
+
+        // 最大化或最小化時改存先前記錄的還原範圍，避免下次還原時視窗變成近乎全螢幕或位於螢幕外
+        RectInt32 bounds = state is OverlappedPresenterState.Maximized or OverlappedPresenterState.Minimized && _restoredBounds is { } restored
+            ? restored
+            : new RectInt32(AppWindow.Position.X, AppWindow.Position.Y, AppWindow.Size.Width, AppWindow.Size.Height);
+
+        int width = (int)(bounds.Width / scale);
+        int height = (int)(bounds.Height / scale);
+        int x = (int)(bounds.X / scale);
+        int y = (int)(bounds.Y / scale);
+
+        _viewModel.Settings.SetMainWindowSettings(width, height, x, y, isMax);
+    }
+
+    private void OnResetWindowSizeRequested()
+    {
+        double scale = WindowLayoutHelper.GetScale(this);
+
+        int width = (int)(1350 * scale);
+        int height = (int)(820 * scale);
+
+        if (AppWindow.Presenter is OverlappedPresenter presenter &&
+            presenter.State == OverlappedPresenterState.Maximized)
+        {
+            presenter.Restore();
+        }
+
+        AppWindow.Resize(new SizeInt32(width, height));
+        var displayArea = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary);
+        CenterWindow(displayArea.WorkArea, width, height);
+    }
+
+    private void MainWindow_AppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
         if (_shutdownCompleted)
         {
             return;
         }
 
-        // 若無伺服器執行中，直接儲存狀態並允許視窗即時關閉
         if (_compositionRoot?.IsServerRunning != true)
         {
             Logger.Information("主視窗正在關閉，儲存視窗位置與大小");
-            if (_viewModel is not null)
-            {
-                SaveWindowPosition();
-                UnregisterWindowEvents();
-            }
-
+            SaveWindowPosition();
+            UnregisterWindowEvents();
             _shutdownCompleted = true;
             _ = ViewModelBase.RunSafeAsync(DisposeSafelyAsync, "非同步釋放視窗資源", Logger);
             return;
         }
 
-        // 有伺服器正在執行，取消立即關閉並在背景停止伺服器後再關閉
-        e.Cancel = true;
+        args.Cancel = true;
         if (_shutdownInProgress)
         {
             return;
         }
 
         _shutdownInProgress = true;
-        Logger.Information("主視窗正在關閉（等候執行中伺服器停止），儲存視窗位置與大小");
-        if (_viewModel is not null)
-        {
-            SaveWindowPosition();
-            UnregisterWindowEvents();
-        }
-
+        Logger.Information("主視窗關閉請求：伺服器執行中，先確認並平順停止所有伺服器");
         _ = ViewModelBase.RunSafeAsync(ShutdownAndCloseAsync, "關閉應用程式與伺服器資源", Logger);
     }
 
     private void UnregisterWindowEvents()
     {
+        AppWindow.Closing -= MainWindow_AppWindowClosing;
+        AppWindow.Changed -= OnAppWindowChanged;
         if (_viewModel is not null)
         {
             _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
-            _viewModel.NotificationRequested -= ViewModel_NotificationRequested;
             _viewModel.ResetWindowSizeRequested -= OnResetWindowSizeRequested;
-            _viewModel.UiScaleChanged -= ApplyUiScale;
-            _viewModel.UnregisterEvents();
+            _viewModel.UpdateAvailable -= ViewModel_UpdateAvailable;
+            _viewModel.ThemeModeChanged -= ApplyThemeMode;
+            _viewModel.DisposePages();
         }
     }
 
-    /// <summary>
-    /// 以非同步方式釋放應用程式資源（伺服器行程等）後再關閉視窗，避免 UI 執行緒同步等待
-    /// </summary>
     private async Task ShutdownAndCloseAsync()
     {
+        bool proceed = false;
         try
         {
+            proceed = _compositionRoot is null || await _compositionRoot.StopAllServersForShutdownAsync().ConfigureAwait(true);
+            if (!proceed)
+            {
+                Logger.Information("使用者取消關閉應用程式");
+                _shutdownInProgress = false;
+                return;
+            }
+
+            SaveWindowPosition();
+            UnregisterWindowEvents();
             await DisposeAsync().ConfigureAwait(true);
         }
         catch (Exception ex)
         {
-            Logger.Warning("關閉應用程式資源時發生例外: {Message}", ex.Message);
+            Logger.Warning(ex, "關閉應用程式資源時發生例外");
         }
         finally
         {
-            _shutdownCompleted = true;
-            _compositionRoot?.UiService.RunOnUi(Close);
+            if (proceed)
+            {
+                _shutdownCompleted = true;
+                DispatcherQueue.TryEnqueue(Close);
+            }
+            else
+            {
+                _shutdownInProgress = false;
+            }
         }
     }
 
@@ -210,122 +437,43 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Logger.Warning("非同步釋放視窗資源時發生例外: {Message}", ex.Message);
+            Logger.Warning(ex, "非同步釋放視窗資源時發生例外");
         }
     }
 
-    private void RestoreWindowPosition()
+    public async ValueTask DisposeAsync()
     {
-        var settings = _viewModel.Settings;
-        var winSettings = settings.GetMainWindowSettings();
-
-        if (winSettings.Width > 0 && winSettings.Height > 0)
+        if (_compositionRoot is not null)
         {
-            Width = Math.Max(MinWidth, winSettings.Width);
-            Height = Math.Max(MinHeight, winSettings.Height);
-        }
-
-        WindowStartupLocation = WindowStartupLocation.CenterScreen;
-
-        if (winSettings.Maximized)
-        {
-            WindowState = WindowState.Maximized;
+            await _compositionRoot.DisposeAsync().ConfigureAwait(false);
         }
     }
 
-    private void SaveWindowPosition()
+    private void OnNavigateCreateClicked(object sender, RoutedEventArgs e) =>
+        _viewModel?.Navigate("create");
+
+    private void OnNavigateManageClicked(object sender, RoutedEventArgs e) =>
+        _viewModel?.Navigate("manage");
+
+    private void OnNavigateModsClicked(object sender, RoutedEventArgs e) =>
+        _viewModel?.Navigate("mods");
+
+    private void OnNavigateAboutClicked(object sender, RoutedEventArgs e) =>
+        _viewModel?.Navigate("about_preferences");
+
+    private void OnImportServerClicked(object sender, RoutedEventArgs e)
     {
-        var settings = _viewModel.Settings;
-
-        bool isMax = WindowState == WindowState.Maximized;
-        int width = isMax ? (int)RestoreBounds.Width : (int)ActualWidth;
-        int height = isMax ? (int)RestoreBounds.Height : (int)ActualHeight;
-        int? x = isMax ? (int?)RestoreBounds.Left : (int?)Left;
-        int? y = isMax ? (int?)RestoreBounds.Top : (int?)Top;
-
-        settings.SetMainWindowSettings(width, height, x, y, isMax);
-    }
-
-    private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(MainViewModel.IsLightTheme))
+        if (_viewModel?.ImportServerCommand.CanExecute(null) == true)
         {
-            ApplyTheme(_viewModel.IsLightTheme);
+            _viewModel.ImportServerCommand.Execute(null);
         }
     }
 
-    private static readonly KeyValuePair<string, SolidColorBrush>[] LightBrushes = CreateBrushes([
-        ("WindowBrush", "#F5F6FA"),
-        ("SidebarBrush", "#FFFFFF"),
-        ("CardBrush", "#FFFFFF"),
-        ("BorderBrush", "#D9DEE8"),
-        ("TextBrush", "#1A1D24"),
-        ("MutedTextBrush", "#5E6675"),
-        ("AccentBrush", "#4F6FD8"),
-        ("AccentHoverBrush", "#3D5CC4"),
-        ("DangerBrush", "#DC2626"),
-        ("DangerHoverBrush", "#B91C1C"),
-        ("SuccessBrush", "#1A7F37"),
-        ("SuccessHoverBrush", "#1F883D"),
-        ("NotificationBrush", "#E7EEFF"),
-        ("ButtonDefaultHoverBrush", "#E2E8F0"),
-        ("NavButtonHoverBrush", "#E5E7EB"),
-        ("DataGridGridLineBrush", "#D1D5DB"),
-        ("WarningBrush", "#B45309"),
-        ("ButtonDisabledBackgroundBrush", "#E2E8F0"),
-        ("ButtonDisabledForegroundBrush", "#1A1D24"),
-        ("ButtonDisabledBorderBrush", "#CBD5E1"),
-        ("ComboBoxPopupBackgroundBrush", "#FFFFFF"),
-        ("ComboBoxItemHoverBrush", "#EBF0FF"),
-        ("ComboBoxItemSelectedBrush", "#D6E4FF")
-    ]);
-
-    private static readonly KeyValuePair<string, SolidColorBrush>[] DarkBrushes = CreateBrushes([
-        ("WindowBrush", "#101114"),
-        ("SidebarBrush", "#17191E"),
-        ("CardBrush", "#1F2229"),
-        ("BorderBrush", "#353A45"),
-        ("TextBrush", "#F3F4F6"),
-        ("MutedTextBrush", "#A5ACB9"),
-        ("AccentBrush", "#4F6FD8"),
-        ("AccentHoverBrush", "#3D5CC4"),
-        ("DangerBrush", "#B91C1C"),
-        ("DangerHoverBrush", "#991B1B"),
-        ("SuccessBrush", "#238636"),
-        ("SuccessHoverBrush", "#2EA043"),
-        ("NotificationBrush", "#283A5A"),
-        ("ButtonDefaultHoverBrush", "#2E3440"),
-        ("NavButtonHoverBrush", "#2D323E"),
-        ("DataGridGridLineBrush", "#3F4552"),
-        ("WarningBrush", "#F59E0B"),
-        ("ButtonDisabledBackgroundBrush", "#2B2D35"),
-        ("ButtonDisabledForegroundBrush", "#94A3B8"),
-        ("ButtonDisabledBorderBrush", "#383C46"),
-        ("ComboBoxPopupBackgroundBrush", "#1F2229"),
-        ("ComboBoxItemHoverBrush", "#2E3442"),
-        ("ComboBoxItemSelectedBrush", "#3B4459")
-    ]);
-
-    private static KeyValuePair<string, SolidColorBrush>[] CreateBrushes((string Key, string Hex)[] items)
+    private void OnOpenFolderClicked(object sender, RoutedEventArgs e)
     {
-        var result = new KeyValuePair<string, SolidColorBrush>[items.Length];
-        for (int i = 0; i < items.Length; i++)
+        if (_viewModel?.OpenServersFolderCommand.CanExecute(null) == true)
         {
-            var color = (Color)ColorConverter.ConvertFromString(items[i].Hex);
-            var brush = new SolidColorBrush(color);
-            brush.Freeze();
-            result[i] = new KeyValuePair<string, SolidColorBrush>(items[i].Key, brush);
-        }
-        return result;
-    }
-
-    private static void ApplyTheme(bool isLight)
-    {
-        var brushes = isLight ? LightBrushes : DarkBrushes;
-        var resources = Application.Current.Resources;
-        foreach (var pair in brushes)
-        {
-            resources[pair.Key] = pair.Value;
+            _viewModel.OpenServersFolderCommand.Execute(null);
         }
     }
 }

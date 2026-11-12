@@ -8,36 +8,27 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>
-/// 舊版 server.properties 自動遷移服務
-/// </summary>
+/// <summary>舊版 server.properties 自動遷移服務</summary>
 public static class ServerPropertiesMigrationService
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerPropertiesMigration");
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerPropertiesMigrationService));
 
-    private static readonly FrozenDictionary<string, string> GamemodeMap = new Dictionary<string, string>
-    {
-        ["0"] = "survival",
-        ["1"] = "creative",
-        ["2"] = "adventure",
-        ["3"] = "spectator"
-    }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+    // 舊版以數字 0–3 表示，索引即數值
+    private static readonly string[] GamemodeNames = ["survival", "creative", "adventure", "spectator"];
 
-    private static readonly FrozenDictionary<string, string> DifficultyMap = new Dictionary<string, string>
-    {
-        ["0"] = "peaceful",
-        ["1"] = "easy",
-        ["2"] = "normal",
-        ["3"] = "hard"
-    }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+    private static readonly string[] DifficultyNames = ["peaceful", "easy", "normal", "hard"];
 
     private static readonly FrozenDictionary<string, string> LevelTypeNormalizedMap = new Dictionary<string, string>
     {
         ["default"] = "minecraft:normal",
         ["flat"] = "minecraft:flat",
         ["largebiomes"] = "minecraft:large_biomes",
+        ["large_biomes"] = "minecraft:large_biomes",
         ["amplified"] = "minecraft:amplified"
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly FrozenDictionary<string, string>.AlternateLookup<ReadOnlySpan<char>> LevelTypeSpanLookup =
+        LevelTypeNormalizedMap.GetAlternateLookup<ReadOnlySpan<char>>();
 
     private static readonly FrozenDictionary<string, string> DeprecatedKeys = new Dictionary<string, string>
     {
@@ -46,9 +37,7 @@ public static class ServerPropertiesMigrationService
         ["announce-player-achievements"] = "自 1.12 起移除，已改為遊戲規則 announceAdvancements"
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// 分析現有屬性字典並產生遷移計畫
-    /// </summary>
+    /// <summary>分析現有屬性字典並產生遷移計畫</summary>
     public static ServerPropertiesMigrationPlan PlanMigration(
         IReadOnlyDictionary<string, string> properties,
         string? minecraftVersion = null)
@@ -80,13 +69,13 @@ public static class ServerPropertiesMigrationService
             }
         }
 
-        if (newProps.TryGetValue("gamemode", out string? rawGm) && GamemodeMap.TryGetValue(rawGm.Trim(), out string? mappedGm))
+        if (newProps.TryGetValue("gamemode", out string? rawGm) && TryMapLegacyIndex(rawGm, GamemodeNames, out string? mappedGm))
         {
             newProps["gamemode"] = mappedGm;
             changes.Add($"遊戲模式轉換：gamemode={rawGm} ➔ {mappedGm} (1.14+)");
         }
 
-        if (newProps.TryGetValue("difficulty", out string? rawDiff) && DifficultyMap.TryGetValue(rawDiff.Trim(), out string? mappedDiff))
+        if (newProps.TryGetValue("difficulty", out string? rawDiff) && TryMapLegacyIndex(rawDiff, DifficultyNames, out string? mappedDiff))
         {
             newProps["difficulty"] = mappedDiff;
             changes.Add($"遊戲難度轉換：difficulty={rawDiff} ➔ {mappedDiff} (1.14+)");
@@ -94,8 +83,7 @@ public static class ServerPropertiesMigrationService
 
         if (IsVersionAtLeast119(minecraftVersion) && newProps.TryGetValue("level-type", out string? rawLt))
         {
-            string lookupKey = rawLt.Trim().ToLowerInvariant().Replace("_", string.Empty);
-            if (LevelTypeNormalizedMap.TryGetValue(lookupKey, out string? mappedLt) && !string.Equals(rawLt, mappedLt, StringComparison.Ordinal))
+            if (LevelTypeSpanLookup.TryGetValue(rawLt.AsSpan().Trim(), out string? mappedLt) && !string.Equals(rawLt, mappedLt, StringComparison.Ordinal))
             {
                 newProps["level-type"] = mappedLt;
                 changes.Add($"地圖類型命名空間轉換：level-type={rawLt} ➔ {mappedLt} (1.19+)");
@@ -116,9 +104,7 @@ public static class ServerPropertiesMigrationService
             MigratedProperties: newProps);
     }
 
-    /// <summary>
-    /// 將遷移計畫套用並寫入指定伺服器目錄下的 server.properties
-    /// </summary>
+    /// <summary>將遷移計畫套用並寫入指定伺服器目錄下的 server.properties</summary>
     public static bool ApplyMigrationToDirectory(
         string directoryPath,
         ServerPropertiesMigrationPlan plan,
@@ -143,11 +129,11 @@ public static class ServerPropertiesMigrationService
             try
             {
                 SafeFileSystem.CopyFile(propsPath, backupPath, overwrite: true);
-                Logger.Information("已建立 server.properties 備份：{BackupPath}", backupPath);
+                Logger.Information("已建立 server.properties 備份: {BackupPath}", backupPath);
             }
             catch (Exception ex)
             {
-                Logger.Warning("建立 server.properties.backup 失敗：{Message}", ex.Message);
+                Logger.Warning(ex, "建立 server.properties.backup 失敗");
             }
         }
 
@@ -159,6 +145,19 @@ public static class ServerPropertiesMigrationService
         }
 
         return success;
+    }
+
+    private static bool TryMapLegacyIndex(string raw, string[] names, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? mapped)
+    {
+        ReadOnlySpan<char> trimmed = raw.AsSpan().Trim();
+        if (trimmed.Length == 1 && char.IsAsciiDigit(trimmed[0]) && trimmed[0] - '0' < names.Length)
+        {
+            mapped = names[trimmed[0] - '0'];
+            return true;
+        }
+
+        mapped = null;
+        return false;
     }
 
     private static readonly VersionValue Min119Version = new(1, 19, 0);

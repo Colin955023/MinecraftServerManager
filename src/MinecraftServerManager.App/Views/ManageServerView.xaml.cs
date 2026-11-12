@@ -1,55 +1,35 @@
-using System.Windows.Controls;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using MinecraftServerManager.App.Controls;
 using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-public partial class ManageServerView : UserControl
+/// <summary>管理伺服器頁面 View</summary>
+public sealed partial class ManageServerView : UserControl
 {
-    public ManageServerView()
+    public ManageServerViewModel ViewModel { get; }
+
+    public ManageServerView(ManageServerViewModel viewModel)
     {
+        ArgumentNullException.ThrowIfNull(viewModel);
+        ViewModel = viewModel;
         InitializeComponent();
     }
 
-    private void OnDataGridMouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private void OnServersListViewDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
-        if (DataContext is ManageServerViewModel vm && vm.ConfigureServerCommand.CanExecute(null))
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
-            vm.ConfigureServerCommand.Execute(null);
-        }
-    }
-
-    private void OnViewPreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
-    {
-        if (e.OriginalSource is System.Windows.DependencyObject dep)
-        {
-            if (FindVisualParent<Button>(dep) != null ||
-                FindVisualParent<DataGridRow>(dep) != null ||
-                FindVisualParent<System.Windows.Controls.Primitives.ScrollBar>(dep) != null ||
-                FindVisualParent<System.Windows.Controls.Primitives.Thumb>(dep) != null ||
-                FindVisualParent<TextBox>(dep) != null ||
-                FindVisualParent<ComboBox>(dep) != null)
+            if (ViewModel.Lifecycle.MonitorServerCommand.CanExecute(null))
             {
-                return;
+                ViewModel.Lifecycle.MonitorServerCommand.Execute(null);
             }
-        }
-
-        if (DataContext is ManageServerViewModel vm)
-        {
-            vm.SelectedServer = null;
-        }
+        });
     }
 
-    private static T? FindVisualParent<T>(System.Windows.DependencyObject? child) where T : System.Windows.DependencyObject
-    {
-        while (child != null)
-        {
-            if (child is T parent)
-            {
-                return parent;
-            }
+    private void OnHeaderSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.List.Servers.SortBy(TableSortKeys.Servers, e);
 
-            child = System.Windows.Media.VisualTreeHelper.GetParent(child);
-        }
-        return null;
-    }
+    private void OnHeaderAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.List.Servers, TableSortKeys.Servers);
 }

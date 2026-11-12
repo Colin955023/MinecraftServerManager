@@ -4,29 +4,19 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class ServerPlayerConfigStoreTests : IDisposable
+public sealed partial class ServerPlayerConfigStoreTests : IDisposable
 {
+    private readonly TempDirectory _testDirTemp = new("msm_player_store_tests_");
     private readonly string _testDir;
     private readonly ServerPlayerConfigStore _store;
 
     public ServerPlayerConfigStoreTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "msm_player_store_tests_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testDir);
+        _testDir = _testDirTemp.FullName;
         _store = new ServerPlayerConfigStore();
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testDir))
-            {
-                Directory.Delete(_testDir, recursive: true);
-            }
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
-    }
+    public void Dispose() => _testDirTemp.Dispose();
 
     [Fact]
     public async Task LoadBundleAsync_WhenDirectoryHasNoJsonFiles_ReturnsEmptyCollections()

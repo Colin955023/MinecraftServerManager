@@ -1,50 +1,68 @@
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
+using MinecraftServerManager.Core;
+using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Infrastructure.Settings;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-public sealed class AboutPreferencesViewModelTests : IDisposable
+public sealed partial class AboutPreferencesViewModelTests : IDisposable
 {
+    private readonly TempDirectory _testDirTemp = new("msm_test_");
     private readonly string _testDir;
 
     public AboutPreferencesViewModelTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "msm_test_" + Guid.NewGuid().ToString("N"));
+        _testDir = _testDirTemp.FullName;
     }
 
-    public void Dispose()
+    public void Dispose() => _testDirTemp.Dispose();
+
+    private AboutPreferencesViewModel Create(IUiService uiService, SettingsManager? settings = null, IUpdateCheckerService? updateChecker = null, IAppUpdateService? appUpdateService = null, Action? onResetWindowSizeRequested = null) =>
+        new(uiService, settings ?? new SettingsManager(_testDir), updateChecker ?? NoOp.Create<IUpdateCheckerService>(), static _ => { }, onResetWindowSizeRequested ?? (static () => { }), NoOp.Create<IExternalLauncher>(), appUpdateService ?? NoOp.Create<IAppUpdateService>());
+
+    [Fact]
+    public void OpenLicense_OpensGplV3FullText()
     {
-        try
-        {
-            if (Directory.Exists(_testDir))
-            {
-                Directory.Delete(_testDir, recursive: true);
-            }
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
+        var launcher = new RecordingLauncher();
+        var vm = new AboutPreferencesViewModel(new NoOpUiService(), new SettingsManager(_testDir), NoOp.Create<IUpdateCheckerService>(), static _ => { }, static () => { }, launcher, NoOp.Create<IAppUpdateService>());
+
+        vm.OpenLicenseCommand.Execute(null);
+
+        Assert.Equal(AppInfo.LicenseUrl, Assert.Single(launcher.OpenedUrls));
+        Assert.Equal("https://www.gnu.org/licenses/gpl-3.0.html", AppInfo.LicenseUrl);
+    }
+
+    [Theory]
+    [InlineData(1.0, "目前螢幕解析度：1920 × 1080")]
+    [InlineData(1.5, "目前螢幕解析度：1920 × 1080（縮放 150%）")]
+    public void UpdateWindowMetrics_ShowsCurrentSizesAndScale(double scale, string expectedScreen)
+    {
+        var vm = Create(new NoOpUiService());
+
+        vm.UpdateWindowMetrics(new WindowMetrics(1280, 720, 1920, 1080, scale));
+
+        Assert.Equal(expectedScreen, vm.ScreenResolutionInfo);
+        Assert.Equal("目前主視窗大小：1280 × 720", vm.CurrentWindowSizeInfo);
+
+        vm.UpdateWindowMetrics(new WindowMetrics(1500, 900, 1920, 1080, scale));
+        Assert.Equal("目前主視窗大小：1500 × 900", vm.CurrentWindowSizeInfo);
     }
 
     [Fact]
     public void ShouldAlignWithAppInfo()
     {
-        var vm = new AboutPreferencesViewModel();
-
-        Assert.Equal("about_preferences", vm.Key);
-        Assert.Equal("關於與設定", vm.Title);
-        Assert.Equal(Core.AppInfo.Version, AboutPreferencesViewModel.AppVersion);
-        Assert.Equal(Core.AppInfo.AppName, AboutPreferencesViewModel.AppDescription);
-        Assert.Equal(Core.AppInfo.RepositoryUrl, AboutPreferencesViewModel.GithubUrl);
-        Assert.Equal("GNU General Public License v3.0 (GPL-3.0)", Core.AppInfo.License);
+        Assert.Equal(AppInfo.Version, AboutPreferencesViewModel.AppVersion);
+        Assert.Equal(AppInfo.AppName, AboutPreferencesViewModel.AppDescription);
+        Assert.Equal(AppInfo.Author, AboutPreferencesViewModel.AppAuthor);
     }
 
     [Fact]
     public void ManualCheckVisibilityShouldBeInvertedFromAutoUpdate()
     {
-        var vm = new AboutPreferencesViewModel
-        {
-            IsAutoUpdateEnabled = true
-        };
+        var vm = Create(NoOpUiService.Instance);
+        vm.IsAutoUpdateEnabled = true;
         Assert.False(vm.IsManualCheckVisible);
 
         vm.IsAutoUpdateEnabled = false;
@@ -54,85 +72,100 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     [Fact]
     public void ResetAllSettingsShouldRestoreDefaults()
     {
-        var settings = new Infrastructure.Settings.SettingsManager(_testDir);
+        var settings = new SettingsManager(_testDir);
         bool windowSizeResetCalled = false;
-        string notificationMsg = string.Empty;
-        var vm = new AboutPreferencesViewModel(
-            settingsManager: settings,
-            notificationSink: (msg, _) => notificationMsg = msg,
-            onResetWindowSizeRequested: () => windowSizeResetCalled = true)
-        {
-            IsAutoUpdateEnabled = false,
-            SelectedThemeModeIndex = 1 // 淺色
-        };
+        var ui = new ManualUiService();
+        var vm = Create(
+            ui,
+            settings,
+            onResetWindowSizeRequested: () => windowSizeResetCalled = true);
+        vm.IsAutoUpdateEnabled = false;
+        vm.SelectedThemeModeIndex = 1; // 淺色
 
         vm.ResetAllSettingsCommand.Execute(null);
 
         Assert.True(vm.IsAutoUpdateEnabled);
         Assert.Equal(0, vm.SelectedThemeModeIndex);
         Assert.True(windowSizeResetCalled);
-        Assert.Empty(notificationMsg);
+        Assert.Empty(ui.Notifications);
     }
 
     [Fact]
-    public void UiScaleChangesShouldApplyImmediatelyWithoutApplyButton()
+    public void SelectAccentColorShouldUpdateSettingsAndViewModel()
     {
-        var settings = new Infrastructure.Settings.SettingsManager(_testDir);
-        double invokedScale = 0;
-        var vm = new AboutPreferencesViewModel(
-            settingsManager: settings,
-            onUiScaleChanged: scale => invokedScale = scale)
-        {
-            // 切換到 125% (索引 2)
-            SelectedUiScaleIndex = 2
-        };
+        var settings = new SettingsManager(_testDir);
+        var vm = Create(NoOpUiService.Instance, settings);
 
-        Assert.Equal(1.25, settings.GetUiScale());
-        Assert.Equal(1.25, invokedScale);
+        var customColor = Windows.UI.Color.FromArgb(255, 18, 52, 86);
+        vm.SelectAccentColor(customColor);
+
+        Assert.True(vm.IsCustomAccentColor);
+        Assert.Equal("#123456", vm.CustomAccentColor);
+        Assert.Equal("#123456", settings.GetCustomAccentColor());
+
+        vm.ResetAccentColor();
+        Assert.False(vm.IsCustomAccentColor);
+        Assert.Null(vm.CustomAccentColor);
+        Assert.Null(settings.GetCustomAccentColor());
+    }
+
+    [Fact]
+    public void AccentColorService_ParseAndFormatHex_ShouldRoundTripCorrectly()
+    {
+        var parsed = AccentColorService.ParseColor("#3A7BD5");
+        Assert.NotNull(parsed);
+        Assert.Equal(255, parsed.Value.A);
+        Assert.Equal(0x3A, parsed.Value.R);
+        Assert.Equal(0x7B, parsed.Value.G);
+        Assert.Equal(0xD5, parsed.Value.B);
+        Assert.Equal("#3A7BD5", AccentColorService.ToHex(parsed.Value));
+
+        Assert.Null(AccentColorService.ParseColor(null));
+        Assert.Null(AccentColorService.ParseColor(""));
+        Assert.Null(AccentColorService.ParseColor("#ZZZZZZ"));
     }
 
     [Fact]
     public async Task CheckForUpdatesShouldNotifyWhenAlreadyLatestVersion()
     {
-        string notification = string.Empty;
-        var mockChecker = new MockUpdateChecker(new Core.Ports.UpdateCheckResult(
+        var ui = new ManualUiService();
+        var mockChecker = new MockUpdateChecker(new UpdateCheckResult(
             HasUpdate: false,
-            CurrentVersion: Core.AppInfo.Version,
-            LatestVersion: Core.AppInfo.Version,
-            ReleaseTitle: Core.AppInfo.Version,
+            CurrentVersion: "2.1.0",
+            LatestVersion: "2.1.0",
+            ReleaseTitle: "v2.1.0",
             ReleaseNotes: "無更新",
             DownloadUrl: null,
             Sha256ChecksumUrl: null,
             ReleasePageUrl: "https://example.com"));
 
-        var vm = new AboutPreferencesViewModel(
-            updateChecker: mockChecker,
-            notificationSink: (msg, isErr) => notification = msg);
+        var vm = Create(
+            ui,
+            updateChecker: mockChecker);
 
         await vm.CheckForUpdatesCommand.ExecuteAsync(null);
 
-        Assert.Contains("目前已是最新版本", notification);
+        Assert.Contains(ui.Notifications, static n => n.Message.Contains("目前已是最新版本", StringComparison.Ordinal));
     }
 
     [Fact]
     public async Task CheckForUpdates_WhenUserDeclinesUpdate_DoesNotDownloadOrApply()
     {
-        var mockChecker = new MockUpdateChecker(new Core.Ports.UpdateCheckResult(
+        var mockChecker = new MockUpdateChecker(new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: Core.AppInfo.Version,
-            LatestVersion: "2.0.1",
-            ReleaseTitle: "2.0.1",
-            ReleaseNotes: "更新說明",
-            DownloadUrl: "https://example.com/msm.exe",
-            Sha256ChecksumUrl: "https://example.com/msm.exe.sha256",
+            CurrentVersion: "2.1.0",
+            LatestVersion: "2.2.0",
+            ReleaseTitle: "v2.2.0",
+            ReleaseNotes: "測試更新",
+            DownloadUrl: "https://example.com/update.exe",
+            Sha256ChecksumUrl: null,
             ReleasePageUrl: "https://example.com"));
-
         var mockUpdateService = new MockAppUpdateService();
-        var mockUi = new ConfirmingUiService(confirmResult: false);
+        var fakeUi = new ManualUiService { ConfirmResult = false };
 
-        var vm = new AboutPreferencesViewModel(
+        var vm = Create(
+            fakeUi,
             updateChecker: mockChecker,
-            uiService: mockUi,
             appUpdateService: mockUpdateService);
 
         await vm.CheckForUpdatesCommand.ExecuteAsync(null);
@@ -144,22 +177,21 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     [Fact]
     public async Task CheckForUpdates_WhenUserConfirmsUpdate_DownloadsAndAppliesUpdate()
     {
-        var mockChecker = new MockUpdateChecker(new Core.Ports.UpdateCheckResult(
+        var mockChecker = new MockUpdateChecker(new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: Core.AppInfo.Version,
-            LatestVersion: "2.0.1",
-            ReleaseTitle: "2.0.1",
-            ReleaseNotes: "更新說明",
-            DownloadUrl: "https://example.com/msm.exe",
-            Sha256ChecksumUrl: "https://example.com/msm.exe.sha256",
+            CurrentVersion: "2.1.0",
+            LatestVersion: "2.2.0",
+            ReleaseTitle: "v2.2.0",
+            ReleaseNotes: "測試更新",
+            DownloadUrl: "https://example.com/update.exe",
+            Sha256ChecksumUrl: null,
             ReleasePageUrl: "https://example.com"));
-
         var mockUpdateService = new MockAppUpdateService();
-        var mockUi = new ConfirmingUiService(confirmResult: true);
+        var fakeUi = new ManualUiService { ConfirmResult = true };
 
-        var vm = new AboutPreferencesViewModel(
+        var vm = Create(
+            fakeUi,
             updateChecker: mockChecker,
-            uiService: mockUi,
             appUpdateService: mockUpdateService);
 
         await vm.CheckForUpdatesCommand.ExecuteAsync(null);
@@ -168,19 +200,48 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
         Assert.True(mockUpdateService.ApplyInvoked);
     }
 
-    private sealed class ConfirmingUiService(bool confirmResult) : NoOpUiService
+    [Fact]
+    public void AccentColorService_ApplyAndReset_FiresAccentColorChanged()
     {
-        public override bool Confirm(string message, string title, UiMessageLevel level = UiMessageLevel.Question) =>
-            confirmResult;
+        bool eventFired = false;
+        Action handler = () => eventFired = true;
+        AccentColorService.AccentColorChanged += handler;
+        try
+        {
+            AccentColorService.ApplyAccentColor("#FF112233");
+            Assert.True(eventFired);
+
+            eventFired = false;
+            AccentColorService.ApplyAccentColor(null);
+            Assert.True(eventFired);
+        }
+        finally
+        {
+            AccentColorService.AccentColorChanged -= handler;
+        }
     }
 
-    private sealed class MockAppUpdateService : Core.Ports.IAppUpdateService
+    [Fact]
+    public void ResetAccentColor_ResetsCustomColorAndAppliesSystemDefault()
+    {
+        var settings = new SettingsManager(_testDir);
+        settings.SetCustomAccentColor("#112233");
+        var vm = Create(NoOpUiService.Instance, settings);
+
+        vm.ResetAccentColor();
+
+        Assert.False(vm.IsCustomAccentColor);
+        Assert.Null(vm.CustomAccentColor);
+        Assert.Null(settings.Snapshot.WindowPreferences.CustomAccentColor);
+    }
+
+    private sealed class MockAppUpdateService : IAppUpdateService
     {
         public bool DownloadInvoked { get; private set; }
         public bool ApplyInvoked { get; private set; }
 
         public Task<string> DownloadAndVerifyUpdateAsync(
-            Core.Ports.UpdateCheckResult update,
+            UpdateCheckResult update,
             IProgress<(int Percentage, string StatusMessage)>? progress = null,
             CancellationToken cancellationToken = default)
         {
@@ -191,9 +252,63 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
         public void ApplyUpdateAndRestart(string verifiedInstallerPath) => ApplyInvoked = true;
     }
 
-    private sealed class MockUpdateChecker(Core.Ports.UpdateCheckResult result) : Core.Ports.IUpdateCheckerService
+    private sealed class MockUpdateChecker(UpdateCheckResult result) : IUpdateCheckerService
     {
-        public Task<Core.Ports.UpdateCheckResult> CheckForUpdateAsync(CancellationToken cancellationToken = default) =>
+        public Task<UpdateCheckResult> CheckForUpdateAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(result);
+    }
+
+    [Fact]
+    public void BackupSettings_LoadFromAndWriteToSettings()
+    {
+        var settings = new SettingsManager(_testDir);
+        var vm = Create(new NoOpUiService(), settings);
+        Assert.False(vm.IsAutoBackupBeforeStartEnabled);
+        Assert.Equal(10, vm.BackupRetentionCount);
+
+        vm.IsAutoBackupBeforeStartEnabled = true;
+        vm.BackupRetentionCount = 7;
+
+        Assert.True(settings.IsAutoBackupBeforeStartEnabled());
+        Assert.Equal(7, settings.GetBackupRetentionCount());
+    }
+
+    [Fact]
+    public void BackupRetentionCount_NaN_RestoresCurrentSetting()
+    {
+        var settings = new SettingsManager(_testDir);
+        settings.SetBackupRetentionCount(5);
+        var vm = Create(new NoOpUiService(), settings);
+
+        vm.BackupRetentionCount = double.NaN;
+
+        Assert.Equal(5, vm.BackupRetentionCount);
+        Assert.Equal(5, settings.GetBackupRetentionCount());
+    }
+
+    [Fact]
+    public void BackupRetentionCount_OutOfRangeIsClamped()
+    {
+        var settings = new SettingsManager(_testDir);
+        var vm = Create(new NoOpUiService(), settings);
+
+        vm.BackupRetentionCount = 999;
+
+        Assert.Equal(100, vm.BackupRetentionCount);
+        Assert.Equal(100, settings.GetBackupRetentionCount());
+    }
+
+    [Fact]
+    public async Task ResetAllSettings_RestoresBackupDefaults()
+    {
+        var settings = new SettingsManager(_testDir);
+        settings.SetAutoBackupBeforeStartEnabled(true);
+        settings.SetBackupRetentionCount(3);
+        var vm = Create(new NoOpUiService(), settings);
+
+        await vm.ResetAllSettingsCommand.ExecuteAsync(null);
+
+        Assert.False(settings.IsAutoBackupBeforeStartEnabled());
+        Assert.Equal(10, settings.GetBackupRetentionCount());
     }
 }

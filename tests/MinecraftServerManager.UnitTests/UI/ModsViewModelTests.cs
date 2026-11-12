@@ -10,32 +10,37 @@ public sealed class ModsViewModelTests
     private static ModsViewModel CreateTestViewModel(IModrinthClient? modrinthClient = null)
     {
         return new ModsViewModel(
-            dependencyPlanner: new Infrastructure.Mods.ModDependencyPlanner(),
-            modListExporter: new Infrastructure.Mods.ModListExporter(),
-            modrinthClient: modrinthClient);
+            new Infrastructure.Mods.ModDependencyPlanner(),
+            new Infrastructure.Mods.ModListExporter(),
+            new Infrastructure.Mods.ModFileService(),
+            NoOpUiService.Instance,
+            NoOp.Create<IServerManager>(),
+            NoOp.Create<IModManager>(),
+            modrinthClient ?? NoOp.Create<IModrinthClient>(),
+            NoOp.Create<IExternalLauncher>());
     }
 
     [Fact]
     public void PlatformOptionsShouldContainModrinthAndCurseForgeWithModrinthDefault()
     {
         var vm = CreateTestViewModel();
-        Assert.Equal("Modrinth", vm.SelectedPlatform);
-        Assert.Contains("Modrinth", ModsViewModel.PlatformOptions);
-        Assert.Contains("CurseForge", ModsViewModel.PlatformOptions);
+        Assert.Equal("Modrinth", vm.Online.SelectedPlatform);
+        Assert.Contains("Modrinth", OnlineModSearchViewModel.PlatformOptions);
+        Assert.Contains("CurseForge", OnlineModSearchViewModel.PlatformOptions);
     }
 
     [Fact]
     public void SwitchingToCurseForgeShouldClearOnlineModsAndShowHint()
     {
         var vm = CreateTestViewModel();
-        vm.OnlineMods.Add(new OnlineModRowItem { Title = "TestMod" });
-        Assert.NotEmpty(vm.OnlineMods);
+        vm.Online.OnlineMods.Add(new OnlineModRowItem { Title = "TestMod" });
+        Assert.NotEmpty(vm.Online.OnlineMods);
 
-        vm.SelectedPlatform = "CurseForge";
+        vm.Online.SelectedPlatform = "CurseForge";
 
-        Assert.Empty(vm.OnlineMods);
-        Assert.Null(vm.SelectedOnlineMod);
-        Assert.Equal("CurseForge 模組搜尋即將推出，敬請期待", vm.OnlineResultHint);
+        Assert.Empty(vm.Online.OnlineMods);
+        Assert.Null(vm.Online.SelectedOnlineMod);
+        Assert.Equal("CurseForge 模組搜尋即將推出，敬請期待", vm.Online.OnlineResultHint);
     }
 
     [Fact]
@@ -44,12 +49,12 @@ public sealed class ModsViewModelTests
         bool modrinthCalled = false;
         var fakeModrinth = new FakeModrinthClient(() => modrinthCalled = true);
         var vm = CreateTestViewModel(modrinthClient: fakeModrinth);
-        vm.SelectedPlatform = "CurseForge";
+        vm.Online.SelectedPlatform = "CurseForge";
 
-        await vm.SearchOnlineModsCommand.ExecuteAsync(null);
+        await vm.Online.SearchOnlineModsCommand.ExecuteAsync(null);
 
         Assert.False(modrinthCalled);
-        Assert.Equal("CurseForge 模組搜尋即將推出，敬請期待", vm.OnlineResultHint);
+        Assert.Equal("CurseForge 模組搜尋即將推出，敬請期待", vm.Online.OnlineResultHint);
     }
 
     private sealed class FakeModrinthClient(Action onSearchCalled) : IModrinthClient
@@ -74,16 +79,13 @@ public sealed class ModsViewModelTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<OnlineModVersion>>([]);
 
-        public Task<ModrinthVersionLookupResult?> LookupVersionByHashAsync(
-            string hash,
-            string algorithm = "sha512",
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult<ModrinthVersionLookupResult?>(null);
-
         public Task<IReadOnlyDictionary<string, ModrinthVersionLookupResult>> LookupVersionsByHashesAsync(
             IReadOnlyList<string> hashes,
             string algorithm = "sha512",
             CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyDictionary<string, ModrinthVersionLookupResult>>(new Dictionary<string, ModrinthVersionLookupResult>());
+
+        public Task<IReadOnlyDictionary<string, string>> GetProjectTitlesAsync(IReadOnlyCollection<string> projectIdsOrSlugs, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>());
     }
 }

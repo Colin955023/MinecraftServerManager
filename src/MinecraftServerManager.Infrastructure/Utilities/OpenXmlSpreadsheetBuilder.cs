@@ -3,7 +3,6 @@ using System.Globalization;
 using System.IO.Compression;
 using System.Security;
 using System.Text;
-using System.Xml;
 using MinecraftServerManager.Core.Mods;
 
 namespace MinecraftServerManager.Infrastructure.Utilities;
@@ -16,18 +15,10 @@ public static class OpenXmlSpreadsheetBuilder
 {
     private static readonly SearchValues<char> InvalidSheetNameChars = SearchValues.Create("[]:*?/\\");
     private static readonly string[] CachedColumnNames = [.. Enumerable.Range(1, 100).Select(ComputeExcelColumnName)];
-    private static readonly XmlWriterSettings SheetXmlWriterSettings = new()
-    {
-        Encoding = new UTF8Encoding(false),
-        OmitXmlDeclaration = false,
-        CheckCharacters = false,
-    };
 
-    /// <summary>
-    /// 將字串表格建立為標準 OpenXML SpreadsheetML (.xlsx) 二進位位元組陣列。
-    /// </summary>
+    /// <summary>將字串表格建立為標準 OpenXML SpreadsheetML (.xlsx) 二進位位元組陣列。</summary>
     /// <param name="sheetName">工作表名稱（預設為「Sheet1」）。</param>
-    /// <param name="rows">資料列集合，每列為單元格字串清單。</param>
+    /// <param name="rows">資料列集合，每列為儲存格字串清單。</param>
     /// <returns>合法的 XLSX 壓縮檔位元組陣列。</returns>
     public static byte[] BuildWorkbook(string sheetName, IReadOnlyList<IReadOnlyList<string>> rows)
     {
@@ -76,46 +67,29 @@ public static class OpenXmlSpreadsheetBuilder
             WriteEntry(archive, "xl/workbook.xml", workbookXml);
             WriteEntry(archive, "xl/_rels/workbook.xml.rels", workbookRelsXml);
 
-            // 以 XmlWriter 直寫 xl/worksheets/sheet1.xml 串流，避免巨量字串與位元組陣列配置
+            // 直寫 xl/worksheets/sheet1.xml 串流，避免巨量字串配置；文字經過濾與跳脫後輸出
             var sheetEntry = archive.CreateEntry("xl/worksheets/sheet1.xml", CompressionLevel.Optimal);
-            using var sheetStream = sheetEntry.Open();
-            using var writer = XmlWriter.Create(sheetStream, SheetXmlWriterSettings);
-
-            writer.WriteStartDocument(standalone: true);
-            writer.WriteStartElement("worksheet", "http://schemas.openxmlformats.org/spreadsheetml/2006/main");
-            writer.WriteStartElement("sheetData");
+            using var writer = new StreamWriter(sheetEntry.Open(), new UTF8Encoding(false));
+            writer.Write(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
 
             for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
             {
                 var row = rows[rowIndex];
-                int excelRowNum = rowIndex + 1;
-                writer.WriteStartElement("row");
-                writer.WriteAttributeString("r", excelRowNum.ToString(CultureInfo.InvariantCulture));
-
+                string excelRowNum = (rowIndex + 1).ToString(CultureInfo.InvariantCulture);
+                writer.Write($"<row r=\"{excelRowNum}\">");
                 for (int colIndex = 0; colIndex < row.Count; colIndex++)
                 {
-                    string colName = GetExcelColumnName(colIndex + 1);
-                    string cellRef = $"{colName}{excelRowNum}";
-                    string cellValue = SanitizeXmlText(row[colIndex]);
-
-                    writer.WriteStartElement("c");
-                    writer.WriteAttributeString("r", cellRef);
-                    writer.WriteAttributeString("t", "inlineStr");
-                    writer.WriteStartElement("is");
-                    writer.WriteStartElement("t");
-                    writer.WriteAttributeString("xml", "space", null, "preserve");
-                    writer.WriteString(cellValue);
-                    writer.WriteEndElement(); // </t>
-                    writer.WriteEndElement(); // </is>
-                    writer.WriteEndElement(); // </c>
+                    writer.Write($"<c r=\"{GetExcelColumnName(colIndex + 1)}{excelRowNum}\" t=\"inlineStr\"><is><t xml:space=\"preserve\">");
+                    writer.Write(SecurityElement.Escape(SanitizeXmlText(row[colIndex])));
+                    writer.Write("</t></is></c>");
                 }
 
-                writer.WriteEndElement(); // </row>
+                writer.Write("</row>");
             }
 
-            writer.WriteEndElement(); // </sheetData>
-            writer.WriteEndElement(); // </worksheet>
-            writer.WriteEndDocument();
+            writer.Write("</sheetData></worksheet>");
         }
 
         return memoryStream.ToArray();
@@ -125,13 +99,11 @@ public static class OpenXmlSpreadsheetBuilder
     {
         var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
         using var stream = entry.Open();
-        using var writer = new StreamWriter(stream, new UTF8Encoding(false));
+        using var writer = new StreamWriter(stream);
         writer.Write(content);
     }
 
-    /// <summary>
-    /// 計算 1-indexed 數字對應的 Excel 欄名（例如 1 -> A, 26 -> Z, 27 -> AA）。
-    /// </summary>
+    /// <summary>計算 1-indexed 數字對應的 Excel 欄名（例如 1 -> A, 26 -> Z, 27 -> AA）。</summary>
     public static string GetExcelColumnName(int columnNumber)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(columnNumber);
@@ -145,22 +117,21 @@ public static class OpenXmlSpreadsheetBuilder
 
     private static string ComputeExcelColumnName(int columnNumber)
     {
-        string result = string.Empty;
+        Span<char> buffer = stackalloc char[4];
+        int pos = buffer.Length;
         int current = columnNumber;
 
         while (current > 0)
         {
             int remainder = (current - 1) % 26;
-            result = (char)('A' + remainder) + result;
+            buffer[--pos] = (char)('A' + remainder);
             current = (current - 1) / 26;
         }
 
-        return result;
+        return new string(buffer[pos..]);
     }
 
-    /// <summary>
-    /// 正規化 Excel 工作表名稱，移除不合法字元並截斷至 31 字元以內。
-    /// </summary>
+    /// <summary>正規化 Excel 工作表名稱，移除不合法字元並截斷至 31 字元以內。</summary>
     public static string NormalizeSheetName(string? sheetName)
     {
         if (string.IsNullOrWhiteSpace(sheetName))
@@ -168,14 +139,10 @@ public static class OpenXmlSpreadsheetBuilder
             return "Sheet1";
         }
 
-        var sb = new StringBuilder(sheetName.Length);
-        foreach (char c in sheetName)
+        string validText = RemoveInvalidXmlRunes(sheetName);
+        var sb = new StringBuilder(validText.Length);
+        foreach (char c in validText)
         {
-            if (IsInvalidXmlChar(c))
-            {
-                continue;
-            }
-
             if (InvalidSheetNameChars.Contains(c))
             {
                 sb.Append('_');
@@ -189,15 +156,13 @@ public static class OpenXmlSpreadsheetBuilder
         string cleaned = sb.ToString().Trim('\'').Trim();
         if (cleaned.Length > 31)
         {
-            cleaned = cleaned[..31].Trim();
+            cleaned = cleaned[..(char.IsHighSurrogate(cleaned[30]) ? 30 : 31)].Trim();
         }
 
         return string.IsNullOrEmpty(cleaned) ? "Sheet1" : cleaned;
     }
 
-    /// <summary>
-    /// 清洗文字中 XML 1.0 不允許的控制字元（除 \t, \n, \r 外之 0x00-0x1F）。
-    /// </summary>
+    /// <summary>清洗文字中 XML 1.0 不允許的控制字元（除 \t, \n, \r 外之 0x00-0x1F）。</summary>
     public static string SanitizeXmlText(string? text)
     {
         if (string.IsNullOrEmpty(text))
@@ -205,45 +170,53 @@ public static class OpenXmlSpreadsheetBuilder
             return string.Empty;
         }
 
-        text = ModHelpers.StripColorAndFormattingCodes(text);
+        return RemoveInvalidXmlRunes(ModHelpers.StripColorAndFormattingCodes(text));
+    }
 
-        bool hasInvalid = false;
-        foreach (char c in text)
-        {
-            if (IsInvalidXmlChar(c))
-            {
-                hasInvalid = true;
-                break;
-            }
-        }
-
-        if (!hasInvalid)
+    /// <summary>移除 XML 1.0 不允許之字元（含孤立代理字元），保留合法代理字對（如 emoji）。</summary>
+    private static string RemoveInvalidXmlRunes(string text)
+    {
+        int firstInvalid = IndexOfInvalidXmlRune(text);
+        if (firstInvalid < 0)
         {
             return text;
         }
 
         var sb = new StringBuilder(text.Length);
-        foreach (char c in text)
+        sb.Append(text, 0, firstInvalid);
+        ReadOnlySpan<char> remaining = text.AsSpan(firstInvalid);
+        while (!remaining.IsEmpty)
         {
-            if (!IsInvalidXmlChar(c))
+            OperationStatus status = Rune.DecodeFromUtf16(remaining, out Rune rune, out int consumed);
+            if (status == OperationStatus.Done && IsValidXmlRune(rune))
             {
-                sb.Append(c);
+                sb.Append(remaining[..consumed]);
             }
+
+            remaining = remaining[consumed..];
         }
 
         return sb.ToString();
     }
 
-    private static bool IsInvalidXmlChar(char c)
+    /// <summary>以 Unicode 純量值逐一檢查，回傳第一個 XML 1.0 不允許字元（含孤立代理字元）之索引；全部合法時回傳 -1。</summary>
+    private static int IndexOfInvalidXmlRune(ReadOnlySpan<char> text)
     {
-        // XML 1.0 規範合法字元包含 #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD]
-        return c switch
+        int index = 0;
+        while (index < text.Length)
         {
-            '\t' or '\n' or '\r' => false,
-            < ' ' => true,
-            >= '\uD800' and <= '\uDFFF' => false, // 代理對由 .NET 字串處理
-            '\uFFFE' or '\uFFFF' => true,
-            _ => false
-        };
+            OperationStatus status = Rune.DecodeFromUtf16(text[index..], out Rune rune, out int consumed);
+            if (status != OperationStatus.Done || !IsValidXmlRune(rune))
+            {
+                return index;
+            }
+
+            index += consumed;
+        }
+
+        return -1;
     }
+
+    private static bool IsValidXmlRune(Rune rune) =>
+        rune.Value is 0x9 or 0xA or 0xD or (>= 0x20 and <= 0xD7FF) or (>= 0xE000 and <= 0xFFFD) or >= 0x10000;
 }

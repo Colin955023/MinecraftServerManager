@@ -5,16 +5,29 @@ namespace MinecraftServerManager.UnitTests.UI;
 
 public sealed class CreateServerViewModelTests
 {
+    internal static CreateServerViewModel Create(Core.Ports.ILoaderCatalogService? loaderCatalog = null, long systemMemoryMb = 16384) =>
+        new(
+            new Infrastructure.FileSystem.LocalFileSystem(),
+            NoOpUiService.Instance,
+            NoOp.Create<Core.Ports.IJavaRuntimeDetector>(),
+            NoOp.Create<Core.Ports.IServerManager>(),
+            loaderCatalog ?? NoOp.Create<Core.Ports.ILoaderCatalogService>(),
+            systemMemoryMb,
+            NoOp.Create<Core.Ports.IExternalLauncher>(),
+            static (_, _) => { },
+            NoOp.Create<Core.Ports.IMinecraftJavaRequirementService>(),
+            NoOp.Create<Core.Ports.IJavaInstaller>(),
+            NoOp.Create<Core.Ports.IServerRuntimeHost>(),
+            NoOp.Create<Core.Servers.IServerLaunchPlanner>());
+
     [Fact]
     public void MemoryValidationShouldCatchInvalidValues()
     {
-        var vm = new CreateServerViewModel(systemMemoryMb: 16384)
-        {
-            MinMemoryMb = "4096",
-            MaxMemoryMb = "2048"
-        };
+        var vm = Create(systemMemoryMb: 16384);
+        vm.MinMemoryMb = "4096";
+        vm.MaxMemoryMb = "2048";
         Assert.True(vm.IsMemoryError);
-        Assert.Contains("最小記憶體必須小於最大記憶體", vm.MemoryWarningText);
+        Assert.Contains("最小記憶體不可大於最大記憶體", vm.MemoryWarningText);
 
         vm.MinMemoryMb = "1024";
         vm.MaxMemoryMb = "32768";
@@ -24,25 +37,21 @@ public sealed class CreateServerViewModelTests
         vm.MinMemoryMb = "1024";
         vm.MaxMemoryMb = "12288";
         Assert.False(vm.IsMemoryError);
-        Assert.True(vm.IsMemoryWarning);
         Assert.Contains("超過系統記憶體的一半", vm.MemoryWarningText);
 
         vm.MinMemoryMb = "1024";
         vm.MaxMemoryMb = "4096";
         Assert.False(vm.IsMemoryError);
-        Assert.False(vm.IsMemoryWarning);
         Assert.Empty(vm.MemoryWarningText);
     }
 
     [Fact]
     public void ResetFormShouldRestoreDefaults()
     {
-        var vm = new CreateServerViewModel
-        {
-            ServerName = "自訂伺服器",
-            SelectedLoader = "Fabric",
-            MaxMemoryMb = "8192"
-        };
+        var vm = Create();
+        vm.ServerName = "自訂伺服器";
+        vm.SelectedLoader = "Fabric";
+        vm.MaxMemoryMb = "8192";
 
         vm.ResetFormCommand.Execute(null);
 
@@ -52,59 +61,9 @@ public sealed class CreateServerViewModelTests
     }
 
     [Fact]
-    public async Task AutoDetectJavaShouldSilentlySetPathWhenFoundWithoutNotification()
-    {
-        string notification = string.Empty;
-        var fakeDetector = new FakeJavaDetector(new Core.Ports.JavaRuntimeInfo(
-            ExecutablePath: @"C:\Java\bin\java.exe",
-            MajorVersion: 21,
-            Is64Bit: true,
-            Vendor: "Microsoft"));
-
-        var fakeReq = new FakeJavaRequirement(21);
-
-        var vm = new CreateServerViewModel(
-            javaDetector: fakeDetector,
-            javaRequirementService: fakeReq,
-            notificationSink: (msg, isErr) => notification = msg)
-        {
-            SelectedMinecraftVersion = "1.21.4"
-        };
-
-        await vm.AutoDetectJavaCommand.ExecuteAsync(null);
-
-        Assert.Equal(@"C:\Java\bin\java.exe", vm.JavaPath);
-        Assert.Empty(notification); // 驗證不會彈出提示，靜默填入
-    }
-
-    private sealed class FakeJavaDetector(Core.Ports.JavaRuntimeInfo? match) : Core.Ports.IJavaRuntimeDetector
-    {
-        public Task<IReadOnlyList<Core.Ports.JavaRuntimeInfo>> DetectAsync(bool forceRefresh = false, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<Core.Ports.JavaRuntimeInfo>>(match != null ? [match] : []);
-
-        public Task<Core.Ports.JavaRuntimeInfo?> FindBestMatchAsync(int targetMajor, CancellationToken cancellationToken = default) =>
-            Task.FromResult(match);
-    }
-
-    private sealed class FakeJavaRequirement(int major) : Core.Ports.IMinecraftJavaRequirementService
-    {
-        public Task<int> GetRequiredJavaMajorAsync(string minecraftVersion, Domain.Servers.LoaderKind loader = Domain.Servers.LoaderKind.Unknown, CancellationToken cancellationToken = default) =>
-            Task.FromResult(major);
-
-        public int? GetCachedJavaMajor(string minecraftVersion, Domain.Servers.LoaderKind loader = Domain.Servers.LoaderKind.Unknown) => major;
-
-        public Task<IReadOnlyDictionary<string, int>> PreloadAllJavaRequirementsAsync(bool force = false, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyDictionary<string, int>>(new Dictionary<string, int>());
-
-        public IReadOnlyList<int> GetCachedAvailableJavaMajors() => [major];
-
-        public void ReloadCache() { }
-    }
-
-    [Fact]
     public void IsMinecraftVersionReloadEnabledShouldToggleBasedOnSelectedLoader()
     {
-        var vm = new CreateServerViewModel();
+        var vm = Create();
         Assert.Equal("Paper", vm.SelectedLoader);
         Assert.False(vm.IsMinecraftVersionReloadEnabled);
 
@@ -133,10 +92,8 @@ public sealed class CreateServerViewModelTests
     [Fact]
     public void LoaderVersionsMenuShouldBeDisabledForPaperFabricQuiltAndEnabledForForgeNeoForge()
     {
-        var vm = new CreateServerViewModel
-        {
-            SelectedLoader = "Paper"
-        };
+        var vm = Create();
+        vm.SelectedLoader = "Paper";
         Assert.False(vm.IsLoaderVersionEnabled);
 
         vm.SelectedLoader = "Fabric";
@@ -156,7 +113,7 @@ public sealed class CreateServerViewModelTests
     public async Task InitializeVersionsShouldAutoSelectFirstLatestVersionWhenNotManuallySelected()
     {
         var fakeCatalog = new FakeLoaderCatalog();
-        var vm = new CreateServerViewModel(loaderCatalog: fakeCatalog);
+        var vm = Create(fakeCatalog);
 
         for (int i = 0; i < 50 && vm.IsLoadingVersions; i++)
         {
@@ -169,9 +126,6 @@ public sealed class CreateServerViewModelTests
 
     private sealed class FakeLoaderCatalog : Core.Ports.ILoaderCatalogService
     {
-        public Task<IReadOnlyList<Core.Loaders.LoaderVersion>> GetMinecraftVersionsAsync(bool includeSnapshots = false, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<Core.Loaders.LoaderVersion>>([new("26.3"), new("1.21.4"), new("1.20.1")]);
-
         public Task<IReadOnlyList<Core.Loaders.LoaderVersion>> GetMinecraftVersionsForLoaderAsync(Domain.Servers.LoaderKind loader, bool includeSnapshots = false, bool forceReload = false, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<Core.Loaders.LoaderVersion>>([new("26.3"), new("1.21.4"), new("1.20.1")]);
 
@@ -183,8 +137,6 @@ public sealed class CreateServerViewModelTests
 
         public Task ForceReloadAllLoadersAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task WarmupLoadersAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<IReadOnlyList<Core.Loaders.LoaderVersion>> ReloadAndMergeMinecraftVersionsAsync(bool includeSnapshots = false, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<Core.Loaders.LoaderVersion>>([new("26.3")]);
     }
 }
 
@@ -193,11 +145,9 @@ public sealed class CreateServerSynchronizationTests
     [Fact]
     public void ServerNameShouldSynchronizeWithLoaderAndVersion()
     {
-        var vm = new CreateServerViewModel
-        {
-            // 初始切換 loader（版本尚未載入時與 loader 同步）
-            SelectedLoader = "Fabric"
-        };
+        var vm = CreateServerViewModelTests.Create();
+        // 初始切換 loader（版本尚未載入時與 loader 同步）
+        vm.SelectedLoader = "Fabric";
         Assert.Equal("Fabric", vm.ServerName);
 
         // 切換版本
@@ -215,16 +165,4 @@ public sealed class CreateServerSynchronizationTests
         Assert.Equal("SuperServer", vm.ServerName);
     }
 
-    [Fact]
-    public void IsNotDetectingJavaShouldInvertIsDetectingJava()
-    {
-        var vm = new CreateServerViewModel();
-        Assert.True(vm.IsNotDetectingJava);
-
-        vm.IsDetectingJava = true;
-        Assert.False(vm.IsNotDetectingJava);
-
-        vm.IsDetectingJava = false;
-        Assert.True(vm.IsNotDetectingJava);
-    }
 }

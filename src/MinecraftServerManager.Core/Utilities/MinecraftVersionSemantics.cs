@@ -3,9 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace MinecraftServerManager.Core.Utilities;
 
-/// <summary>
-/// Minecraft 版本與載入器純語意工具類別
-/// </summary>
+/// <summary>Minecraft 版本與載入器純語意工具類別</summary>
 public static partial class MinecraftVersionSemantics
 {
     [GeneratedRegex(@"minecraft[-_.:\s]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)", RegexOptions.IgnoreCase)]
@@ -32,9 +30,7 @@ public static partial class MinecraftVersionSemantics
     [GeneratedRegex(@"^\d+\.\d+(?:\.\d+)*$")]
     private static partial Regex OfficialReleasePattern();
 
-    /// <summary>
-    /// 判斷 Minecraft 版本字串是否為標準正式發布版本（純數字點分版號，排除 pre、rc、snapshot、experiment 等測試版）
-    /// </summary>
+    /// <summary>判斷 Minecraft 版本字串是否為標準正式發布版本（純數字點分版號，排除 pre、rc、snapshot、experiment 等測試版）</summary>
     public static bool IsOfficialReleaseVersion(string? version)
     {
         if (string.IsNullOrWhiteSpace(version))
@@ -56,9 +52,7 @@ public static partial class MinecraftVersionSemantics
         MinecraftPattern7()
     ];
 
-    /// <summary>
-    /// 判斷 Minecraft 版本是否支援 Fabric / Quilt（1.14 以上或快照）
-    /// </summary>
+    /// <summary>判斷 Minecraft 版本是否支援 Fabric / Quilt（1.14 以上或快照）</summary>
     public static bool IsFabricCompatible(string minecraftVersion)
     {
         if (string.IsNullOrWhiteSpace(minecraftVersion))
@@ -66,26 +60,11 @@ public static partial class MinecraftVersionSemantics
             return false;
         }
 
-        // 明確為舊版 1.0～1.13.x 則不支援
-        if (VersionValue.TryParse(minecraftVersion, out var parsed))
-        {
-            if (parsed.Major == 1 && parsed.Minor < 14)
-            {
-                return false;
-            }
-            if (parsed.Major >= 1)
-            {
-                return true;
-            }
-        }
-
-        // 快照版本或非標準版本格式（如 24w..., 26.3...），預設相容
-        return true;
+        // 明確為舊版 1.0～1.13.x 則不支援；快照版本或非標準版本格式（如 24w..., 26.3...）預設相容
+        return !(VersionValue.TryParse(minecraftVersion, out var parsed) && parsed.Major == 1 && parsed.Minor < 14);
     }
 
-    /// <summary>
-    /// 判斷 Minecraft 版本是否支援 NeoForge（>= 1.20.1）
-    /// </summary>
+    /// <summary>判斷 Minecraft 版本是否支援 NeoForge（>= 1.20.1）</summary>
     public static bool IsNeoForgeCompatible(string minecraftVersion)
     {
         if (string.IsNullOrWhiteSpace(minecraftVersion))
@@ -110,9 +89,7 @@ public static partial class MinecraftVersionSemantics
         return false;
     }
 
-    /// <summary>
-    /// 從 NeoForge 座標或版本字串推導對應之 Minecraft 版本（支援 47.x -> 1.20.1、20.x/21.x -> 1.20.x/1.21.x 以及 >= 26.x 新版規範）
-    /// </summary>
+    /// <summary>從 NeoForge 座標或版本字串推導對應之 Minecraft 版本（支援 47.x -> 1.20.1、20.x/21.x -> 1.20.x/1.21.x 以及 >= 26.x 新版規範）</summary>
     public static string? DeriveMinecraftVersionFromNeoForge(string? neoForgeVersion)
     {
         if (string.IsNullOrWhiteSpace(neoForgeVersion))
@@ -152,7 +129,13 @@ public static partial class MinecraftVersionSemantics
 
         if (major >= 26)
         {
-            return minor == 0 ? $"{major}.0" : $"{major}.{minor}";
+            // 26.x 起 NeoForge 版本為「MC 版本.建置號」，如 26.1.2.36 對應 MC 26.1.2；修訂號為 0 時對應基礎版 26.1
+            ReadOnlySpan<char> afterMinor = remainder[(secondDot + 1)..];
+            int patchEnd = afterMinor.IndexOf('.');
+            ReadOnlySpan<char> patchSpan = patchEnd >= 0 ? afterMinor[..patchEnd] : afterMinor;
+            return int.TryParse(patchSpan, NumberStyles.None, CultureInfo.InvariantCulture, out int patch) && patch > 0
+                ? $"{major}.{minor}.{patch}"
+                : $"{major}.{minor}";
         }
 
         if (major >= 20)
@@ -163,9 +146,7 @@ public static partial class MinecraftVersionSemantics
         return null;
     }
 
-    /// <summary>
-    /// 正規化 Minecraft 版本字串，清除範圍修飾字元或提取有效版本號碼
-    /// </summary>
+    /// <summary>正規化 Minecraft 版本字串，清除範圍修飾字元或提取有效版本號碼</summary>
     public static string NormalizeMinecraftVersion(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -183,9 +164,7 @@ public static partial class MinecraftVersionSemantics
         return trimmed.Trim('~', '^', '=', '>', '<', ' ', '[', ']', '(', ')');
     }
 
-    /// <summary>
-    /// 從文字中擷取 Minecraft 版本
-    /// </summary>
+    /// <summary>從文字中擷取 Minecraft 版本</summary>
     public static string? ExtractMinecraftVersionFromText(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))

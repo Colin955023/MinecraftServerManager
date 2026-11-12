@@ -1,64 +1,82 @@
-using MinecraftServerManager.Infrastructure.Logging;
-using System.Windows;
-using System.Windows.Media.Animation;
+using System.ComponentModel;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
-public enum NotificationLevel
+/// <summary>具備自主倒數、滑鼠暫停功能的 WinUI 3 原生錯誤對話方塊</summary>
+public sealed partial class NotificationDialog : ContentDialog, INotifyPropertyChanged
 {
-    Warning,
-    Error,
-}
+    private static readonly PropertyChangedEventArgs ButtonTextChangedArgs = new(nameof(ButtonText));
 
-/// <summary>
-/// 具備自主平滑淡出與滑鼠懸停暫停功能的系統提示視窗
-/// </summary>
-public partial class NotificationDialog : Window
-{
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("NotificationDialog");
-    private readonly NotificationLevel _level;
-    private readonly IUiService _ui;
     private readonly IUiTimer _autoCloseTimer;
     private readonly double _totalSeconds;
     private double _elapsedSeconds;
     private bool _isPaused;
     private bool _isClosing;
+    private string _buttonText;
 
-    public NotificationDialog(IUiService ui, string title, string message, NotificationLevel level = NotificationLevel.Warning)
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public string DialogTitle { get; }
+    public string Message { get; }
+    public string IconGlyph { get; }
+
+    public string ButtonText
+    {
+        get => _buttonText;
+        private set
+        {
+            if (string.Equals(_buttonText, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _buttonText = value;
+            PropertyChanged?.Invoke(this, ButtonTextChangedArgs);
+        }
+    }
+
+    public NotificationDialog(IUiService ui, string title, string message)
     {
         ArgumentNullException.ThrowIfNull(ui);
         InitializeComponent();
 
-        _ui = ui;
-        _level = level;
-        Title = title;
-        TitleText.Text = title;
-        MessageText.Text = message;
+        DialogTitle = title;
+        Message = message;
+        IconGlyph = "❌";
+        _totalSeconds = 10.0;
+        _buttonText = $"確定 ({(int)_totalSeconds}s)";
 
-        _totalSeconds = level switch
+        _autoCloseTimer = ui.CreateUiTimer(TimeSpan.FromMilliseconds(100), AutoCloseTimer_Tick);
+        // 倒數僅於實際顯示期間進行：排隊等待或被巢狀對話框暫時隱藏時不計時，重新顯示後續算
+        Opened += (_, _) =>
         {
-            NotificationLevel.Error => 10.0,
-            _ => 6.0
+            if (!_isClosing)
+            {
+                _autoCloseTimer.StartTimer();
+            }
         };
+        Closed += (_, _) => _autoCloseTimer.StopTimer();
+    }
 
-        switch (level)
-        {
-            case NotificationLevel.Error:
-                IconText.Text = "❌";
-                CountdownProgress.SetResourceReference(ForegroundProperty, "DangerBrush");
-                break;
-            case NotificationLevel.Warning:
-            default:
-                IconText.Text = "⚠️";
-                CountdownProgress.SetResourceReference(ForegroundProperty, "WarningBrush");
-                break;
-        }
-
+    private void Dialog_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        _isPaused = true;
         UpdateCountdownUi();
+    }
 
-        _autoCloseTimer = _ui.CreateUiTimer(TimeSpan.FromMilliseconds(100), AutoCloseTimer_Tick);
-        _autoCloseTimer.StartTimer();
+    private void Dialog_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        _isPaused = false;
+        UpdateCountdownUi();
+    }
+
+    private void Dialog_PrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)
+    {
+        _autoCloseTimer.StopTimer();
+        _isClosing = true;
     }
 
     private void AutoCloseTimer_Tick()
@@ -72,7 +90,8 @@ public partial class NotificationDialog : Window
         if (_elapsedSeconds >= _totalSeconds)
         {
             _autoCloseTimer.StopTimer();
-            BeginFadeOutAndClose();
+            _isClosing = true;
+            Hide();
         }
         else
         {
@@ -85,139 +104,9 @@ public partial class NotificationDialog : Window
         double remaining = Math.Max(0, _totalSeconds - _elapsedSeconds);
         int ceilSeconds = (int)Math.Ceiling(remaining);
 
-        if (_isPaused)
-        {
-            OkButton.Content = "確定 (已暫停)";
-        }
-        else
-        {
-            OkButton.Content = $"確定 ({ceilSeconds}s)";
-        }
+        ButtonText = _isPaused ? "確定 (已暫停)" : $"確定 ({ceilSeconds}s)";
 
         double percent = Math.Clamp(remaining / _totalSeconds * 100.0, 0, 100);
         CountdownProgress.Value = percent;
-    }
-
-    private void Window_Loaded(object sender, RoutedEventArgs e)
-    {
-        switch (_level)
-        {
-            case NotificationLevel.Error:
-                AudioFeedback.PlayError();
-                break;
-            case NotificationLevel.Warning:
-            default:
-                AudioFeedback.PlayWarning();
-                break;
-        }
-    }
-
-    private void Window_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
-    {
-        _isPaused = true;
-        UpdateCountdownUi();
-    }
-
-    private void Window_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
-    {
-        _isPaused = false;
-        UpdateCountdownUi();
-    }
-
-    private static readonly Lock SyncLock = new();
-    private static string? _lastMessage;
-    private static DateTimeOffset _lastShownTime;
-
-    public static void Show(IUiService ui, Window? owner, string title, string message, NotificationLevel level = NotificationLevel.Warning)
-    {
-        lock (SyncLock)
-        {
-            if (string.Equals(message, _lastMessage, StringComparison.Ordinal) &&
-                DateTimeOffset.UtcNow - _lastShownTime < TimeSpan.FromSeconds(2))
-            {
-                return;
-            }
-
-            _lastMessage = message;
-            _lastShownTime = DateTimeOffset.UtcNow;
-        }
-
-        void Action()
-        {
-            var dialog = new NotificationDialog(ui, title, message, level);
-            Window? effectiveOwner = owner ?? Application.Current?.MainWindow;
-            if (effectiveOwner is { IsVisible: true })
-            {
-                dialog.Owner = effectiveOwner;
-            }
-            dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
-
-            dialog.ShowDialog();
-        }
-
-        ui.RunOnUi(Action);
-    }
-
-    private void OkButton_Click(object sender, RoutedEventArgs e)
-    {
-        _autoCloseTimer.StopTimer();
-        SafeClose();
-    }
-
-    private void BeginFadeOutAndClose()
-    {
-        if (_isClosing)
-        {
-            return;
-        }
-
-        _isClosing = true;
-        _autoCloseTimer.StopTimer();
-
-        var anim = new DoubleAnimation(0.0, TimeSpan.FromMilliseconds(280))
-        {
-            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
-        };
-        anim.Completed += (_, _) => SafeClose();
-        BeginAnimation(OpacityProperty, anim);
-    }
-
-    private void SafeClose()
-    {
-        try
-        {
-            if (System.Windows.Interop.ComponentDispatcher.IsThreadModal)
-            {
-                DialogResult = true;
-            }
-        }
-        catch (InvalidOperationException ex)
-        {
-            Logger.Warning("非強制回應視窗設定 DialogResult 異常（安全關閉）: {0}", ex.Message);
-        }
-
-        Close();
-    }
-
-    protected override void OnClosed(EventArgs e)
-    {
-        _autoCloseTimer.StopTimer();
-        base.OnClosed(e);
-        try
-        {
-            if (Owner is not null)
-            {
-                if (Owner.WindowState == WindowState.Minimized)
-                {
-                    Owner.WindowState = WindowState.Normal;
-                }
-                Owner.Activate();
-                Owner.Focus();
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("對話框關閉後回復擁有者視窗焦點異常: {0}", ex.Message);
-        }
     }
 }

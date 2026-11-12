@@ -31,7 +31,7 @@ public sealed class FlexVersionFuzzingTests
 
             string input = sb.ToString();
 
-            // 驗證解析與標準化絕不擲出未捕捉例外
+            // 驗證解析與標準化絕不擲出未攔截例外
             string normalized = FlexVersion.NormalizeModVersionString(input);
             var version = new FlexVersion(input);
             var versionFromNorm = new FlexVersion(normalized);

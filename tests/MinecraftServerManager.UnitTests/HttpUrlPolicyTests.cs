@@ -26,6 +26,12 @@ public sealed class HttpUrlPolicyTests
     [InlineData("2002:0a00:0001::1")]
     [InlineData("64:ff9b::a00:1")]
     [InlineData("::ffff:127.0.0.1")]
+    [InlineData("240.0.0.1")]
+    [InlineData("255.255.255.255")]
+    [InlineData("192.88.99.1")]
+    [InlineData("64:ff9b:1::a00:1")]
+    [InlineData("2001:10::1")]
+    [InlineData("2001:20::1")]
     public void IsPublicAddress_NonPublicAddresses_ReturnsFalse(string text) =>
         Assert.False(HttpUrlPolicy.IsPublicAddress(IPAddress.Parse(text)));
 }

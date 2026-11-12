@@ -1,15 +1,11 @@
 using System.Collections.ObjectModel;
 using MinecraftServerManager.App.ViewModels;
-using MinecraftServerManager.App.Views;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
-using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.App.Services;
 
-/// <summary>
-/// 訊息對話方塊的嚴重程度（與 WPF 型別解耦）
-/// </summary>
+/// <summary>訊息對話方塊的嚴重程度</summary>
 public enum UiMessageLevel
 {
     Question,
@@ -18,32 +14,27 @@ public enum UiMessageLevel
     Error,
 }
 
-/// <summary>
-/// 進度視窗工作階段：提供進度回報器，並於工作結束時關閉視窗
-/// </summary>
-public interface IProgressSession<TReport>
+/// <summary>刪除伺服器確認結果列舉</summary>
+public enum ServerDeleteDecision
+{
+    Cancel,
+    DeleteServerOnly,
+    DeleteServerAndBackups,
+}
+
+/// <summary>進度視窗工作階段：提供進度回報器；<see cref="IDisposable.Dispose"/> 時關閉視窗（可重複呼叫）</summary>
+public interface IProgressSession<TReport> : IDisposable
 {
     public IProgress<TReport> Progress { get; }
-
-    /// <summary>
-    /// 標示工作已完成並關閉視窗
-    /// </summary>
-    public void Complete();
 }
 
-/// <summary>
-/// 通用作業進度視窗控制點
-/// </summary>
-public interface IOperationProgress
+/// <summary>通用作業進度視窗控制點；<see cref="IDisposable.Dispose"/> 時關閉視窗（可重複呼叫）</summary>
+public interface IOperationProgress : IDisposable
 {
     public void UpdateProgress(int current, int total, string message);
-
-    public void Close();
 }
 
-/// <summary>
-/// 非模態監控視窗控制點
-/// </summary>
+/// <summary>非模態監控視窗控制點</summary>
 public interface IMonitorWindow
 {
     public bool IsOpen { get; }
@@ -51,92 +42,82 @@ public interface IMonitorWindow
     public event Action? Closed;
 
     public void BringToFront();
+
+    public void Close();
 }
 
-/// <summary>
-/// 所有使用者介面互動（訊息框、檔案選取、對話方塊、進度與視窗）的抽象。
-/// ViewModel 僅相依此介面，具體 WPF 實作位於 <see cref="WpfUiService"/>。
-/// </summary>
+/// <summary>使用者介面互動抽象（ViewModel 僅相依此介面）</summary>
 public interface IUiService
 {
-    public bool Confirm(string message, string title, UiMessageLevel level = UiMessageLevel.Question);
+    public Task<bool> ConfirmAsync(string message, string title, UiMessageLevel level = UiMessageLevel.Question);
 
-    /// <summary>
-    /// 於螢幕右下角顯示非阻塞式浮動提示（Toast），自動淡出
-    /// </summary>
-    public void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3);
+    /// <summary>顯示兩鍵確認對話方塊；主要按鈕回傳 true，次要按鈕或關閉回傳 false</summary>
+    public Task<bool> ConfirmChoiceAsync(string message, string title, string primaryText, string closeText, UiMessageLevel level = UiMessageLevel.Question);
 
-    public void ShowWarning(string message, string title);
+    /// <summary>顯示三鍵確認對話方塊；是回傳 true、否回傳 false、取消或關閉回傳 null</summary>
+    public Task<bool?> ConfirmYesNoCancelAsync(
+        string message,
+        string title,
+        string yesText = "是",
+        string noText = "否",
+        string cancelText = "取消",
+        UiMessageLevel level = UiMessageLevel.Question);
 
-    public void ShowError(string message, string title);
+    /// <summary>通知提示唯一入口：資訊、成功與警告以右上角 InfoBar 顯示並自動關閉；錯誤以對話方塊顯示</summary>
+    public void ShowNotification(string message, string? title = null, NotificationType type = NotificationType.Info);
+
+    public Task ShowErrorAsync(string message, string title);
 
     public void CopyToClipboard(string text);
 
-    /// <summary>
-    /// 將主視窗還原並帶到前景
-    /// </summary>
     public void ActivateMainWindow();
 
-    /// <summary>
-    /// 關閉應用程式並指定結束代碼
-    /// </summary>
     public void ShutdownApplication(int exitCode = 0);
 
-    /// <summary>
-    /// 以非阻塞方式於 UI 執行緒執行動作；非 UI 環境時不執行
-    /// </summary>
+    public void RestartApplication();
+
+    /// <summary>以非阻塞方式於 UI 執行緒執行動作；非 UI 環境時不執行</summary>
     public void PostToUi(Action action, bool afterLayout = false);
 
-    /// <summary>
-    /// 已在 UI 執行緒則直接執行，否則派送至 UI 執行緒；非 UI 環境時直接執行
-    /// </summary>
+    /// <summary>已在 UI 執行緒則直接執行，否則派送至 UI 執行緒；非 UI 環境時直接執行</summary>
     public void RunOnUi(Action action);
 
-    /// <summary>
-    /// 建立於 UI 執行緒觸發的計時器
-    /// </summary>
     public IUiTimer CreateUiTimer(TimeSpan interval, Action tick);
 
-    /// <summary>
-    /// 選取檔案；取消時回傳 null
-    /// </summary>
-    public IReadOnlyList<string>? PickFiles(string title, string filter, bool multiselect = false);
+    /// <summary>選取檔案；取消時回傳 null</summary>
+    public Task<IReadOnlyList<string>?> PickFilesAsync(string title, FileTypeChoice fileType, bool multiselect = false);
 
-    public string? PickSaveFile(string title, string fileName, string filter);
+    public Task<string?> PickSaveFileAsync(string title, string fileName, FileTypeChoice fileType);
 
-    public string? PickFolder(string title, string? initialDirectory = null);
+    public Task<string?> PickFolderAsync(string title, string? initialDirectory = null);
 
-    public bool? ShowManageJava(ManageJavaViewModel viewModel);
+    public Task<bool?> ShowManageJavaAsync(ManageJavaViewModel viewModel);
 
-    public bool? ShowJvmArgs(JvmArgsViewModel viewModel);
+    public Task<bool?> ShowJvmArgsAsync(JvmArgsViewModel viewModel);
 
-    public bool? ShowServerProperties(ServerPropertiesViewModel viewModel);
+    public Task<bool?> ShowServerPropertiesAsync(ServerPropertiesViewModel viewModel);
 
-    public bool? ShowPlayerManagement(PlayerManagementViewModel viewModel);
+    public Task<bool?> ShowPlayerManagementAsync(PlayerManagementViewModel viewModel);
 
-    public bool? ShowRestoreBackup(RestoreBackupViewModel viewModel);
+    public Task<bool?> ShowRestoreBackupAsync(RestoreBackupViewModel viewModel);
 
-    public bool? ShowServerMemory(ServerMemoryViewModel viewModel);
+    public Task<bool?> ShowServerMemoryAsync(ServerMemoryViewModel viewModel);
 
-    public bool? ShowImportServer(ImportServerViewModel viewModel);
+    public Task<bool?> ShowImportServerAsync(ImportServerViewModel viewModel);
 
-    public bool? ShowModVersionPicker(ModVersionPickerViewModel viewModel);
+    public Task<bool?> ShowModVersionPickerAsync(ModVersionPickerViewModel viewModel);
 
-    public bool? ShowModInstallQueue(ObservableCollection<ModInstallQueueItem> queue);
+    public Task<bool?> ShowModInstallQueueAsync(ObservableCollection<ModInstallQueueItem> queue);
 
-    /// <summary>
-    /// 顯示模組更新清單；使用者確認時回傳所選項目，取消時回傳 null
-    /// </summary>
-    public IReadOnlyList<ModUpdateCandidateItem>? ShowModUpdates(IEnumerable<ModUpdateCandidateItem> items);
+    /// <summary>顯示模組更新清單；使用者確認時回傳所選項目，取消時回傳 null</summary>
+    public Task<IReadOnlyList<ModUpdateCandidateItem>?> ShowModUpdatesAsync(IEnumerable<ModUpdateCandidateItem> items);
 
-    public ServerDeleteDecision ShowServerDeleteConfirmation(string serverName, int backupCount);
+    public Task<ServerDeleteDecision> ShowServerDeleteConfirmationAsync(string serverName, int backupCount);
 
-    public void ShowExportModList(string serverName, IReadOnlyList<ModListExportRow> rows, IModListExporter exporter, IExternalLauncher? launcher);
+    public Task ShowExportModListAsync(string serverName, IReadOnlyList<ModListExportRow> rows, IModListExporter exporter, IExternalLauncher launcher);
 
-    /// <summary>
-    /// 顯示初次啟動初始化對話方塊，回傳是否成功完成初始化
-    /// </summary>
-    public bool ShowServerInitialization(ServerConfig config, string javaPath, IServerRuntime runtime);
+    /// <summary>顯示初次啟動初始化對話方塊，回傳是否成功完成初始化</summary>
+    public Task<bool> ShowServerInitializationAsync(ServerInitializationViewModel viewModel);
 
     public IMonitorWindow OpenServerMonitor(ServerMonitorViewModel viewModel);
 

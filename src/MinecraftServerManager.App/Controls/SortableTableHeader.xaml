@@ -1,0 +1,57 @@
+<UserControl
+  x:Class="MinecraftServerManager.App.Controls.SortableTableHeader"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  mc:Ignorable="d">
+
+  <Grid HorizontalAlignment="Stretch"
+    VerticalAlignment="Stretch">
+    <Button Click="OnHeaderClicked"
+      DoubleTapped="OnButtonDoubleTapped"
+      Background="Transparent"
+      BorderThickness="0"
+      CornerRadius="0"
+      Padding="8,6"
+      HorizontalAlignment="Stretch"
+      HorizontalContentAlignment="Left"
+      VerticalAlignment="Stretch">
+      <StackPanel Orientation="Horizontal"
+        Spacing="4">
+        <TextBlock Text="{x:Bind Text, Mode=OneWay}"
+          FontWeight="SemiBold"
+          FontSize="12"
+          TextTrimming="CharacterEllipsis"
+          VerticalAlignment="Center" />
+        <FontIcon Glyph="{x:Bind SortGlyph}"
+          FontSize="10"
+          Opacity="0.7"
+          VerticalAlignment="Center"
+          Visibility="{x:Bind SortIndicatorVisibility}" />
+      </StackPanel>
+    </Button>
+
+    <!-- 右側垂直分隔線與手動拖曳調整欄寬區 -->
+    <Grid x:Name="SplitterGrip"
+      Width="8"
+      HorizontalAlignment="Right"
+      VerticalAlignment="Stretch"
+      Background="Transparent"
+      Visibility="{x:Bind SplitterVisibility}"
+      PointerPressed="OnSplitterPointerPressed"
+      PointerMoved="OnSplitterPointerMoved"
+      PointerReleased="OnSplitterPointerReleased"
+      PointerCanceled="OnSplitterPointerCanceled"
+      PointerCaptureLost="OnSplitterPointerCaptureLost"
+      PointerEntered="OnSplitterPointerEntered"
+      PointerExited="OnSplitterPointerExited"
+      DoubleTapped="OnSplitterDoubleTapped"
+      ToolTipService.ToolTip="拖曳可手動調整欄寬；按兩下自動對齊最寬項目">
+      <Border Width="1"
+        HorizontalAlignment="Right"
+        VerticalAlignment="Stretch"
+        Background="{ThemeResource DataGridGridLineBrush}" />
+    </Grid>
+  </Grid>
+</UserControl>

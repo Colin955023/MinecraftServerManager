@@ -1,69 +1,35 @@
-using System.Windows;
-using MinecraftServerManager.App.ViewModels;
+using Microsoft.UI.Xaml.Controls;
 using MinecraftServerManager.Domain.Mods;
-using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.Views;
 
 /// <summary>
-/// 模組列表匯出對話方塊（Code-behind 僅負責讀取所選格式與視窗生命週期，匯出流程位於 <see cref="ExportModListViewModel"/>）
+/// 模組清單匯出格式選擇對話方塊。只負責選擇格式；對話方塊關閉後才由 <see cref="ViewModels.ExportModListViewModel"/>
+/// 執行儲存位置選取、匯出與開啟確認，避免在 ContentDialog 開啟期間疊加其他 ContentDialog（WinUI 同時只允許一個）。
 /// </summary>
-public partial class ExportModListDialog : Window
+public sealed partial class ExportModListDialog : ContentDialog
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ExportModListDialog");
-    private readonly ExportModListViewModel _viewModel;
-    private bool _isExporting;
-
-    public ExportModListDialog(ExportModListViewModel viewModel)
+    public ExportModListDialog()
     {
         InitializeComponent();
-        _viewModel = viewModel;
     }
 
-    private void Cancel_Click(object sender, RoutedEventArgs e)
+    /// <summary>使用者選取的匯出格式</summary>
+    public ModListExportFormat SelectedFormat
     {
-        DialogResult = false;
-        Close();
-    }
-
-    private async void Export_Click(object sender, RoutedEventArgs e)
-    {
-        if (_isExporting)
+        get
         {
-            return;
-        }
-
-        _isExporting = true;
-        try
-        {
-            if (await _viewModel.ExportAsync(GetSelectedFormat()).ConfigureAwait(true) && IsLoaded)
+            if (JsonRadio.IsChecked == true)
             {
-                DialogResult = true;
-                Close();
+                return ModListExportFormat.Json;
             }
-        }
-        catch (Exception ex)
-        {
-            Logger.Error(ex, "匯出模組清單失敗: {Message}", ex.Message);
-        }
-        finally
-        {
-            _isExporting = false;
-        }
-    }
 
-    private ModListExportFormat GetSelectedFormat()
-    {
-        if (JsonRadio.IsChecked == true)
-        {
-            return ModListExportFormat.Json;
-        }
+            if (HtmlRadio.IsChecked == true)
+            {
+                return ModListExportFormat.Html;
+            }
 
-        if (HtmlRadio.IsChecked == true)
-        {
-            return ModListExportFormat.Html;
+            return XlsxRadio.IsChecked == true ? ModListExportFormat.Xlsx : ModListExportFormat.Text;
         }
-
-        return XlsxRadio.IsChecked == true ? ModListExportFormat.Xlsx : ModListExportFormat.Text;
     }
 }

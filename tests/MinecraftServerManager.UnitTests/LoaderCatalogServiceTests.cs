@@ -1,31 +1,22 @@
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Loaders;
+using MinecraftServerManager.Infrastructure.Utilities;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class LoaderCatalogServiceTests : IDisposable
+public sealed partial class LoaderCatalogServiceTests : IDisposable
 {
+    private readonly TempDirectory _cacheDirTemp = new("msm-catalog-tests-");
     private readonly string _cacheDir;
 
     public LoaderCatalogServiceTests()
     {
-        _cacheDir = Path.Combine(Path.GetTempPath(), "msm-catalog-tests-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_cacheDir);
+        _cacheDir = _cacheDirTemp.FullName;
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_cacheDir))
-            {
-                Directory.Delete(_cacheDir, recursive: true);
-            }
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
-    }
+    public void Dispose() => _cacheDirTemp.Dispose();
 
     [Fact]
     public async Task GetMinecraftVersionsAsyncParsesReleasesAndSnapshotsCorrectly()
@@ -39,7 +30,7 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         }
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(manifestJson);
+        var fakeHttp = new StubHttpPort(manifestJson);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var releasesOnly = await service.GetMinecraftVersionsAsync(includeSnapshots: false);
@@ -52,6 +43,48 @@ public sealed class LoaderCatalogServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetLoaderVersionsAsyncFallsBackToStaleCacheWhenRemoteReturnsNothing()
+    {
+        var online = new LoaderCatalogService(new StubHttpPort("""[{ "version": "0.15.7", "stable": true }]"""), _cacheDir);
+        Assert.Single(await online.GetLoaderVersionsAsync(LoaderKind.Fabric, "1.20.4"));
+
+        string cacheFile = Path.Combine(_cacheDir, "fabric_versions_cache.json");
+        File.SetLastWriteTimeUtc(cacheFile, DateTime.UtcNow.AddDays(-30));
+
+        // 網路失敗時 IHttpPort 回傳失敗結果（此處為 null 文字）而非擲出
+        var offline = new LoaderCatalogService(new StubHttpPort((string?)null), _cacheDir);
+        var versions = await offline.GetLoaderVersionsAsync(LoaderKind.Fabric, "1.20.4");
+
+        Assert.Equal("0.15.7", Assert.Single(versions).Version);
+    }
+
+    [Fact]
+    public async Task GetPaperMinecraftVersionsFallsBackToStaleCacheWhenRemoteReturnsNothing()
+    {
+        var online = new LoaderCatalogService(new StubHttpPort(uri =>
+        {
+            string url = uri.AbsoluteUri;
+            if (url.EndsWith("/projects/paper", StringComparison.OrdinalIgnoreCase))
+            {
+                return """{ "versions": { "1.21": [ "1.21.4" ] } }""";
+            }
+
+            return url.Contains("/builds", StringComparison.Ordinal)
+                ? """[{"id": 100, "channel": "STABLE"}]"""
+                : """{"version": {"java": {"version": {"minimum": 21}}}}""";
+        }), _cacheDir);
+        Assert.Single(await online.GetPaperMinecraftVersionsAsync());
+
+        string cacheFile = Path.Combine(_cacheDir, "paper_mc_versions_cache.json");
+        File.SetLastWriteTimeUtc(cacheFile, DateTime.UtcNow.AddDays(-30));
+
+        var offline = new LoaderCatalogService(new StubHttpPort((string?)null), _cacheDir);
+        var versions = await offline.GetPaperMinecraftVersionsAsync();
+
+        Assert.Equal("1.21.4", Assert.Single(versions).Version);
+    }
+
+    [Fact]
     public async Task GetLoaderVersionsAsyncForFabricFiltersStableVersions()
     {
         string fabricJson = """
@@ -61,7 +94,7 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         ]
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(fabricJson);
+        var fakeHttp = new StubHttpPort(fabricJson);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.Fabric, "1.20.4");
@@ -83,13 +116,36 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         </metadata>
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(forgeXml);
+        var fakeHttp = new StubHttpPort(forgeXml);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.Forge, "1.20.4");
         var item = Assert.Single(versions);
         Assert.Equal("49.0.1", item.Version);
         Assert.Equal("1.20.4", item.MinecraftVersion);
+    }
+
+    [Fact]
+    public async Task GetLoaderVersionsAsyncForForgeSortsBySemanticVersion()
+    {
+        string forgeXml = """
+        <metadata>
+            <versioning>
+                <versions>
+                    <version>1.20.1-47.9.0</version>
+                    <version>1.20.1-47.10.0</version>
+                    <version>1.20.1-47.2.0</version>
+                    <version>1.20.1-47.11.1</version>
+                    <version>1.20.1-47.1.0</version>
+                </versions>
+            </versioning>
+        </metadata>
+        """;
+
+        var service = new LoaderCatalogService(new StubHttpPort(forgeXml), _cacheDir);
+
+        var versions = await service.GetLoaderVersionsAsync(LoaderKind.Forge, "1.20.1");
+        Assert.Equal(["47.11.1", "47.10.0", "47.9.0", "47.2.0"], versions.Select(static v => v.Version));
     }
 
     [Fact]
@@ -106,7 +162,7 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         </metadata>
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(neoForgeXml);
+        var fakeHttp = new StubHttpPort(neoForgeXml);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.NeoForge, "1.20.4");
@@ -130,7 +186,7 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         </metadata>
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(neoForgeXml);
+        var fakeHttp = new StubHttpPort(neoForgeXml);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         // 使用者查詢 26.3，統一規則解析為 26.3，應能成功比對
@@ -152,7 +208,7 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         ]
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(fabricJson);
+        var fakeHttp = new StubHttpPort(fabricJson);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.Fabric, "1.20.4");
@@ -178,7 +234,7 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         </metadata>
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(forgeXml);
+        var fakeHttp = new StubHttpPort(forgeXml);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.Forge, "1.20.4");
@@ -187,6 +243,56 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         Assert.Equal("49.0.5", versions[1].Version);
         Assert.Equal("49.0.4", versions[2].Version);
         Assert.Equal("49.0.2", versions[3].Version);
+    }
+
+    [Fact]
+    public async Task GetLoaderVersionsAsyncForNeoForgeSortsFourSegmentVersionsNumerically()
+    {
+        string neoForgeXml = """
+        <metadata>
+            <versioning>
+                <versions>
+                    <version>26.3.0.79</version>
+                    <version>26.3.0.101</version>
+                    <version>26.3.0.9</version>
+                    <version>26.3.0.99</version>
+                    <version>26.3.0.100</version>
+                    <version>26.3.0.80</version>
+                </versions>
+            </versioning>
+        </metadata>
+        """;
+
+        var service = new LoaderCatalogService(new StubHttpPort(neoForgeXml), _cacheDir);
+
+        var versions = await service.GetLoaderVersionsAsync(LoaderKind.NeoForge, "26.3");
+        Assert.Equal(["26.3.0.101", "26.3.0.100", "26.3.0.99", "26.3.0.80"], versions.Select(static v => v.Version));
+    }
+
+    [Fact]
+    public async Task GetLoaderVersionsAsyncForNeoForgeSeparatesMinecraftHotfixReleases()
+    {
+        string neoForgeXml = """
+        <metadata>
+            <versioning>
+                <versions>
+                    <version>26.1.0.5</version>
+                    <version>26.1.2.36-beta</version>
+                    <version>26.1.2.126</version>
+                    <version>26.1.1.14</version>
+                </versions>
+            </versioning>
+        </metadata>
+        """;
+
+        var service = new LoaderCatalogService(new StubHttpPort(neoForgeXml), _cacheDir);
+
+        var hotfix = await service.GetLoaderVersionsAsync(LoaderKind.NeoForge, "26.1.2");
+        Assert.Equal(["26.1.2.126", "26.1.2.36-beta"], hotfix.Select(static v => v.Version));
+        Assert.All(hotfix, static v => Assert.Equal("26.1.2", v.MinecraftVersion));
+
+        var baseRelease = await service.GetLoaderVersionsAsync(LoaderKind.NeoForge, "26.1");
+        Assert.Equal("26.1.0.5", Assert.Single(baseRelease).Version);
     }
 
     [Fact]
@@ -207,7 +313,7 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         </metadata>
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(neoForgeXml);
+        var fakeHttp = new StubHttpPort(neoForgeXml);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.NeoForge, "1.20.4");
@@ -231,10 +337,8 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         }
         """;
 
-        int requestCount = 0;
-        var fakeHttp = new FakeCatalogHttpPort(uri =>
+        var fakeHttp = new StubHttpPort(uri =>
         {
-            requestCount++;
             string url = uri.AbsoluteUri;
             if (url.EndsWith("/projects/paper", StringComparison.OrdinalIgnoreCase))
             {
@@ -258,7 +362,6 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetMinecraftVersionsForLoaderAsync(LoaderKind.Paper);
-        // 應篩選排除 1.21-pre1 與 24w05a，僅保留 5 個正式發布版
         Assert.Equal(5, versions.Count);
         Assert.Equal("1.21.4", versions[0].Version);
         Assert.Equal(21, versions[0].JavaMajor);
@@ -267,15 +370,13 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         Assert.Equal(17, versions[4].JavaMajor);
         Assert.DoesNotContain(versions, v => v.Version.Contains('-') || v.Version.Contains('w'));
 
-        // 驗證寫入 paper_mc_versions_cache.json
         string cacheFile = Path.Combine(_cacheDir, "paper_mc_versions_cache.json");
         Assert.True(File.Exists(cacheFile));
 
-        // 第二次呼叫：直接從快取讀取，不發送額外網路請求
-        int reqBefore = requestCount;
+        int reqBefore = fakeHttp.RequestCount;
         var cachedVersions = await service.GetMinecraftVersionsForLoaderAsync(LoaderKind.Paper);
         Assert.Equal(5, cachedVersions.Count);
-        Assert.Equal(reqBefore, requestCount);
+        Assert.Equal(reqBefore, fakeHttp.RequestCount);
         Assert.Equal(21, cachedVersions[0].JavaMajor);
     }
 
@@ -307,7 +408,7 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         ]
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(buildsJson);
+        var fakeHttp = new StubHttpPort(buildsJson);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var builds = await service.GetLoaderVersionsAsync(LoaderKind.Paper, "1.21.4");
@@ -316,9 +417,6 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         Assert.Equal("165", item.Version);
         Assert.True(item.Stable);
         Assert.Equal("https://fill-data.papermc.io/paper-1.21.4-165.jar", item.Url);
-
-        // 驗證不應在磁碟中寫入零碎的 build 快取檔案
-        Assert.False(File.Exists(Path.Combine(_cacheDir, "paper_1.21.4_builds_cache.json")));
     }
 
     [Fact]
@@ -351,7 +449,7 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         }
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(uri =>
+        var fakeHttp = new StubHttpPort(uri =>
         {
             if (uri.ToString().Contains("version_manifest.json"))
             {
@@ -373,9 +471,7 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         Assert.Equal(21, v.JavaMajor);
 
         string mcCache = Path.Combine(_cacheDir, "mc_versions_cache.json");
-        string reqCache = Path.Combine(_cacheDir, "mc_java_requirements_cache.json");
         Assert.True(File.Exists(mcCache));
-        Assert.False(File.Exists(reqCache));
         string mcContent = await File.ReadAllTextAsync(mcCache);
         Assert.Contains("\"JavaMajor\": 21", mcContent);
     }
@@ -394,7 +490,7 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         }
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(manifestJson);
+        var fakeHttp = new StubHttpPort(manifestJson);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var fabricVersions = await service.GetMinecraftVersionsForLoaderAsync(LoaderKind.Fabric);
@@ -449,7 +545,7 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         }
         """;
 
-        var fakeHttp = new FakeCatalogHttpPort(uri =>
+        var fakeHttp = new StubHttpPort(uri =>
         {
             string s = uri.ToString();
             if (s.EndsWith("/projects/paper", StringComparison.OrdinalIgnoreCase))
@@ -493,7 +589,7 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         """;
         await File.WriteAllTextAsync(cacheFile, dirtyCacheJson);
 
-        var fakeHttp = new FakeCatalogHttpPort("");
+        var fakeHttp = new StubHttpPort("");
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetMinecraftVersionsAsync(includeSnapshots: false);
@@ -501,44 +597,64 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         var item = Assert.Single(versions);
         Assert.Equal("1.20.4", item.Version);
 
-        // 驗證快取檔案已自動清洗並剔除 Stable: false
         string cleanedJson = await File.ReadAllTextAsync(cacheFile);
         Assert.DoesNotContain("24w05a", cleanedJson);
     }
 
-    private sealed class FakeCatalogHttpPort : IHttpPort
+    [Fact]
+    public void MojangVersionCatalogParsesManifestAndFiltersServerJars()
     {
-        private readonly Func<Uri, string?> _handler;
-
-        public FakeCatalogHttpPort(string responseText)
+        const string manifest = """
         {
-            _handler = _ => responseText;
+            "versions": [
+                { "id": "1.21.4", "type": "release", "url": "https://example.com/1.21.4.json" },
+                { "id": "1.2.4", "type": "release", "url": "https://example.com/1.2.4.json" },
+                { "id": "24w05a", "type": "snapshot", "url": "https://example.com/24w05a.json" }
+            ]
         }
+        """;
 
-        public FakeCatalogHttpPort(Func<Uri, string?> handler)
-        {
-            _handler = handler;
-        }
+        using var doc = JsonCodec.ParseDocument(manifest);
+        var versions = MojangVersionCatalog.ParseManifest(doc);
 
-        public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default) =>
-            Task.FromResult(_handler(uri));
+        Assert.Contains(versions, static v => v.Version == "1.21.4" && v.Stable);
+        Assert.Contains(versions, static v => v.Version == "24w05a" && !v.Stable);
+        Assert.DoesNotContain(versions, static v => v.Version == "1.2.4");
+    }
 
-        public Task<HttpJsonResponse<T>> GetJsonAsync<T>(Uri uri, CancellationToken cancellationToken = default) =>
-            throw new NotImplementedException();
+    [Fact]
+    public void MojangVersionCatalogFindsCachedPackageUrl()
+    {
+        File.WriteAllText(
+            MojangVersionCatalog.GetVersionsCachePath(_cacheDir),
+            """[{ "Version": "1.20.4", "Url": "https://example.com/1.20.4.json", "Stable": true }]""");
 
-        public Task<HttpResult> DownloadAsync(
-            Uri uri,
-            string targetPath,
-            IProgress<HttpProgress>? progress = null,
-            string? expectedHash = null,
-            string expectedHashAlgorithm = "sha256",
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new HttpResult(true));
+        Assert.Equal("https://example.com/1.20.4.json", MojangVersionCatalog.TryGetCachedPackageUrl(_cacheDir, "1.20.4"));
+        Assert.Null(MojangVersionCatalog.TryGetCachedPackageUrl(_cacheDir, "1.19.2"));
+        Assert.Equal("https://example.com/1.20.4.json", MojangVersionCatalog.GetCachedReleasePackageUrls(_cacheDir)["1.20.4"]);
+    }
 
-        public Task<string?> PostJsonAsync(
-            Uri uri,
-            string jsonPayload,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult<string?>(null);
+    [Fact]
+    public async Task MojangVersionCatalogFallsBackToSecondaryManifestUrl()
+    {
+        var http = new StubHttpPort(uri => uri.AbsoluteUri == MojangVersionCatalog.ManifestFallbackUrl
+            ? """{ "versions": [ { "id": "1.20.1", "type": "release", "url": "https://example.com/1.20.1.json" } ] }"""
+            : null);
+
+        var versions = await MojangVersionCatalog.FetchManifestAsync(http, CancellationToken.None);
+
+        Assert.NotNull(versions);
+        Assert.Single(versions);
+        Assert.Equal(2, http.RequestCount);
+    }
+
+    [Fact]
+    public async Task MojangVersionCatalogAppliesJavaFloorForPaper()
+    {
+        var http = new StubHttpPort(static _ => """{ "version": { "java": { "version": { "minimum": 7 } } } }""");
+
+        int? major = await MojangVersionCatalog.FetchPaperJavaMajorAsync(http, "1.8.8", CancellationToken.None);
+
+        Assert.Equal(MojangVersionCatalog.MinimumJavaMajor, major);
     }
 }

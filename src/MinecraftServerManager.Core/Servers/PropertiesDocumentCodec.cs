@@ -3,9 +3,7 @@ using System.Text;
 
 namespace MinecraftServerManager.Core.Servers;
 
-/// <summary>
-/// Java .properties 格式檔案編解碼器
-/// </summary>
+/// <summary>Java .properties 格式檔案編解碼器</summary>
 public static class PropertiesDocumentCodec
 {
     private static readonly SearchValues<char> KeyEscapeChars = SearchValues.Create("\\=: ");
@@ -23,19 +21,25 @@ public static class PropertiesDocumentCodec
         foreach (ReadOnlySpan<char> rawLine in content.AsSpan().EnumerateLines())
         {
             ReadOnlySpan<char> trimmed = rawLine.TrimStart();
-            if (trimmed.IsEmpty || trimmed[0] == '#' || trimmed[0] == '!')
+            bool isContinuation = logicalLine.Length > 0;
+
+            // 依 Java Properties 規則：註解與空白行僅在邏輯行開頭才有意義；延續行即使以 # 開頭也屬於值的一部分
+            if (!isContinuation && (trimmed.IsEmpty || trimmed[0] == '#' || trimmed[0] == '!'))
             {
                 continue;
             }
+
+            // 延續行的前導空白不屬於值
+            ReadOnlySpan<char> segment = isContinuation ? trimmed : rawLine;
 
             // 處理跨行延續（行末有奇數個反斜線）
-            if (HasOddTrailingBackslashes(rawLine))
+            if (HasOddTrailingBackslashes(segment))
             {
-                logicalLine.Append(rawLine[..^1]);
+                logicalLine.Append(segment[..^1]);
                 continue;
             }
 
-            logicalLine.Append(rawLine);
+            logicalLine.Append(segment);
             FlushLogicalLine(logicalLine, keyBuilder, valueBuilder, result);
         }
 

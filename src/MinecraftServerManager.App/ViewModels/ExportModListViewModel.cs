@@ -1,26 +1,25 @@
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
+using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>
-/// 模組列表匯出流程：選擇儲存位置、執行匯出並詢問是否開啟檔案；所有互動皆經由 <see cref="IUiService"/>
-/// </summary>
+/// <summary>模組清單匯出流程：選擇儲存位置、執行匯出並詢問是否開啟檔案；所有互動皆經由 <see cref="IUiService"/></summary>
 public sealed class ExportModListViewModel(
     string serverName,
     IReadOnlyList<ModListExportRow> rows,
     IModListExporter exporter,
-    IExternalLauncher? launcher,
+    IExternalLauncher launcher,
     IUiService ui)
 {
-    /// <summary>
-    /// 依指定格式匯出；使用者取消或匯出失敗時回傳 false
-    /// </summary>
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ExportModListViewModel));
+
+    /// <summary>依指定格式匯出；使用者取消或匯出失敗時回傳 false</summary>
     public async Task<bool> ExportAsync(ModListExportFormat format)
     {
-        (string extension, string filter) = Describe(format);
-        string? path = ui.PickSaveFile("儲存模組列表", $"{serverName}_模組列表{extension}", filter);
+        FileTypeChoice fileType = Describe(format);
+        string? path = await ui.PickSaveFileAsync("儲存模組清單", $"{serverName}_模組清單{fileType.Extension}", fileType).ConfigureAwait(true);
         if (string.IsNullOrWhiteSpace(path))
         {
             return false;
@@ -29,27 +28,44 @@ public sealed class ExportModListViewModel(
         try
         {
             await exporter.ExportAsync(rows, format, path).ConfigureAwait(true);
-
-            if (ui.Confirm($"已儲存：\n{path}\n\n是否要立即開啟匯出的檔案？", "匯出成功", UiMessageLevel.Information))
-            {
-                // 匯出檔案為程式內建產出內容，不需判斷是否拒絕開啟
-                launcher?.OpenFile(path, isTrusted: true);
-            }
-
-            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
         }
         catch (Exception ex)
         {
-            ui.ShowError($"匯出失敗：{ex.Message}", "錯誤");
+            Logger.Error(ex, "模組清單匯出失敗");
+            await ui.ShowErrorAsync($"匯出失敗：{ex.Message}", "錯誤").ConfigureAwait(true);
             return false;
         }
+
+        Logger.Information("模組清單已匯出: {Path}", path);
+
+        // 匯出已成功；後續開啟確認若失敗只提示，不得誤報為匯出失敗
+        try
+        {
+            if (await ui.ConfirmAsync($"已儲存：\n{path}\n\n是否要立即開啟匯出的檔案？", "匯出成功", UiMessageLevel.Information).ConfigureAwait(true) &&
+                !launcher.OpenFile(path, isTrusted: true))
+            {
+                // 匯出檔案為程式內建產出內容，不需判斷是否拒絕開啟
+                ui.ShowNotification($"無法開啟檔案：{path}", "開啟失敗", NotificationType.Warning);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Warning(ex, "開啟匯出檔案流程失敗");
+            ui.ShowNotification($"檔案已匯出，但開啟時發生錯誤：{ex.Message}", "開啟失敗", NotificationType.Warning);
+        }
+
+        return true;
     }
 
-    private static (string Extension, string Filter) Describe(ModListExportFormat format) => format switch
+    private static FileTypeChoice Describe(ModListExportFormat format) => format switch
     {
-        ModListExportFormat.Json => (".json", "JSON 檔案 (*.json)|*.json"),
-        ModListExportFormat.Html => (".html", "HTML 網頁 (*.html)|*.html"),
-        ModListExportFormat.Xlsx => (".xlsx", "Excel 工作表 (*.xlsx)|*.xlsx"),
-        _ => (".txt", "純文字檔案 (*.txt)|*.txt"),
+        ModListExportFormat.Json => FileTypeChoice.Json,
+        ModListExportFormat.Html => FileTypeChoice.Html,
+        ModListExportFormat.Xlsx => FileTypeChoice.Xlsx,
+        _ => FileTypeChoice.Text,
     };
 }

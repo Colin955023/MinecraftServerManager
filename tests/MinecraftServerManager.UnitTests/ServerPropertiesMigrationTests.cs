@@ -90,6 +90,5 @@ public sealed class ServerPropertiesMigrationTests
 
         Assert.False(plan.NeedsMigration);
         Assert.Empty(plan.Changes);
-        Assert.Equal("設定檔符合最新規範，無需遷移", plan.Summary());
     }
 }

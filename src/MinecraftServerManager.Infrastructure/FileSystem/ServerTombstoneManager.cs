@@ -1,28 +1,39 @@
 using MinecraftServerManager.Domain.ValueObjects;
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
+using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Infrastructure.FileSystem;
 
-/// <summary>
-/// 伺服器刪除交易暫存目錄（Tombstone）記錄
-/// </summary>
+/// <summary>伺服器刪除交易暫存目錄（Tombstone）記錄</summary>
 public sealed record DeleteTombstoneRecord(
     string ServerName,
     string OriginalPath,
     DateTime Timestamp,
     int SchemaVersion = 1);
 
-/// <summary>
-/// 伺服器刪除交易暫存與中斷復原管理工具
-/// </summary>
+/// <summary>伺服器刪除交易暫存與中斷復原管理工具</summary>
 public static class ServerTombstoneManager
 {
-    public const string DeletePrefix = ".msm-delete-";
-    public const string DeleteMarker = ".msm-delete-marker.json";
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerTombstoneManager));
 
-    /// <summary>
-    /// 準備伺服器刪除 tombstone 並將目錄安全移入暫存
-    /// </summary>
+    public const string DeletePrefix = ServerDefaults.InternalPrefix + "delete-";
+    public const string DeleteMarker = ServerDefaults.InternalPrefix + "delete-marker.json";
+
+    private static readonly string[] EphemeralStagingPrefixes =
+    [
+        ServerDefaults.InternalPrefix + "create-staging-",
+        ServerDefaults.InternalPrefix + "import-staging-",
+        ServerDefaults.InternalPrefix + "restore-staging-",
+    ];
+
+    private static readonly string[] ProtectedRestorePrefixes =
+    [
+        ServerDefaults.InternalPrefix + "restore-rollback-",
+        ServerDefaults.InternalPrefix + "restore-preserved-logs-",
+    ];
+
+    /// <summary>準備伺服器刪除 tombstone 並將目錄安全移入暫存</summary>
     public static (string TombstonePath, string JournalPath) PrepareDeleteTombstone(
         string serversRoot,
         string serverName,
@@ -43,29 +54,34 @@ public static class ServerTombstoneManager
         string journalPath = Path.Combine(root, $"{tombstoneName}.json");
 
         var record = new DeleteTombstoneRecord(validatedName, original, DateTime.UtcNow);
-        string json = JsonCodec.Serialize(record);
+        byte[] json = JsonCodec.SerializeToUtf8Bytes(record)
+            ?? throw new IOException($"無法序列化刪除紀錄： {journalPath}");
 
         // 寫入外部紀錄
-        AtomicFileWriter.WriteText(journalPath, json);
+        // 紀錄是當機復原的依據；寫入失敗時不得搬移目錄
+        if (!AtomicFileWriter.WriteBytes(journalPath, json))
+        {
+            throw new IOException($"無法寫入刪除紀錄： {journalPath}");
+        }
 
         // 嚴格在邊界內移動目錄至 tombstone
         SafeFileSystem.MoveWithinStrict(root, original, tombstonePath);
 
         // 寫入內部標記
         string internalMarker = Path.Combine(tombstonePath, DeleteMarker);
-        AtomicFileWriter.WriteText(internalMarker, json);
+        if (!AtomicFileWriter.WriteBytes(internalMarker, json))
+        {
+            // 外部紀錄已足以復原，內部標記僅為輔助
+            Logger.Warning("寫入刪除標記失敗: {Path}", internalMarker);
+        }
 
         return (tombstonePath, journalPath);
     }
 
-    /// <summary>
-    /// 於啟動時掃描並復原或清理未完成的刪除 tombstone
-    /// </summary>
+    /// <summary>於啟動時掃描並復原或清理未完成的刪除 tombstone</summary>
     public static void RecoverDeleteTombstones(
         string serversRoot,
-        Func<string, string?> registeredServerLookup,
-        Action<string>? onRecovered = null,
-        Action<string>? onCleaned = null)
+        Func<string, string?> registeredServerLookup)
     {
         if (!SafeFileSystem.DirectoryExists(serversRoot))
         {
@@ -78,12 +94,24 @@ public static class ServerTombstoneManager
         foreach (var entry in entries)
         {
             string dirName = Path.GetFileName(entry.FullPath);
-            if (!entry.IsDirectory || !dirName.StartsWith(DeletePrefix, StringComparison.OrdinalIgnoreCase))
+            if (!entry.IsDirectory || SafeFileSystem.IsReparsePoint(entry.FullPath))
             {
                 continue;
             }
 
-            if (SafeFileSystem.IsReparsePoint(entry.FullPath))
+            if (IsMatchingPrefix(dirName, EphemeralStagingPrefixes))
+            {
+                SafeFileSystem.DeleteWithin(root, entry.FullPath);
+                continue;
+            }
+
+            if (IsMatchingPrefix(dirName, ProtectedRestorePrefixes))
+            {
+                Logger.Warning("偵測到未完成還原之保護快照目錄，予以保留供人工檢視: {Path}", entry.FullPath);
+                continue;
+            }
+
+            if (!dirName.StartsWith(DeletePrefix, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -96,10 +124,11 @@ public static class ServerTombstoneManager
             {
                 try
                 {
-                    record = JsonCodec.Deserialize<DeleteTombstoneRecord>(SafeFileSystem.ReadAllText(markerPath));
+                    record = JsonCodec.ReadFile<DeleteTombstoneRecord>(markerPath);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Logger.Warning(ex, "反序列化墓碑內部標記失敗");
                     record = null;
                 }
             }
@@ -108,10 +137,11 @@ public static class ServerTombstoneManager
             {
                 try
                 {
-                    record = JsonCodec.Deserialize<DeleteTombstoneRecord>(SafeFileSystem.ReadAllText(journalPath));
+                    record = JsonCodec.ReadFile<DeleteTombstoneRecord>(journalPath);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Logger.Warning(ex, "反序列化墓碑外部記錄失敗");
                     record = null;
                 }
             }
@@ -128,7 +158,6 @@ public static class ServerTombstoneManager
                 // 已從登記中移除，確認已提交刪除，執行安全清理
                 SafeFileSystem.DeleteWithin(root, entry.FullPath);
                 SafeFileSystem.DeleteWithin(root, journalPath);
-                onCleaned?.Invoke(record.ServerName);
                 continue;
             }
 
@@ -145,18 +174,15 @@ public static class ServerTombstoneManager
                 SafeFileSystem.MoveWithinStrict(root, entry.FullPath, targetOriginal);
                 SafeFileSystem.DeleteWithin(targetOriginal, Path.Combine(targetOriginal, DeleteMarker));
                 SafeFileSystem.DeleteWithin(root, journalPath);
-                onRecovered?.Invoke(record.ServerName);
             }
-            catch
+            catch (Exception ex)
             {
-                // 若還原失敗則保留目錄供管理員檢視
+                Logger.Warning(ex, "還原伺服器目錄失敗，保留目錄供管理員檢視");
             }
         }
     }
 
-    /// <summary>
-    /// 安全清理指定 tombstone 目錄與其 journal 檔案
-    /// </summary>
+    /// <summary>安全清理指定 tombstone 目錄與其 journal 檔案</summary>
     public static bool CleanTombstone(string serversRoot, string tombstonePath, string? journalPath = null)
     {
         string root = SafeFileSystem.ResolveStableDirectory(serversRoot);
@@ -168,5 +194,17 @@ public static class ServerTombstoneManager
         }
 
         return success;
+    }
+
+    private static bool IsMatchingPrefix(string dirName, string[] prefixes)
+    {
+        foreach (string prefix in prefixes)
+        {
+            if (dirName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }

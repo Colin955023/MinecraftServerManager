@@ -1,14 +1,8 @@
+using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 
 namespace MinecraftServerManager.UnitTests.Architecture;
-/// <summary>
-/// 架構規則違反記錄項目
-/// </summary>
-/// <param name="FilePath">相對於儲存庫根目錄之檔案路徑</param>
-/// <param name="LineNumber">違反規則之原始行號（從 1 起算）</param>
-/// <param name="LineContent">該行原始文字內容</param>
-/// <param name="RuleId">規則識別代號（例如 A1、A2）</param>
-/// <param name="Message">違反原因或規則說明</param>
+/// <summary>架構規則違反記錄項目</summary>
 public sealed record SourceViolation(
     string FilePath,
     int LineNumber,
@@ -16,27 +10,20 @@ public sealed record SourceViolation(
     string RuleId,
     string Message);
 
-/// <summary>
-/// 提供原始碼文字掃描、註解/字串清洗與架構違規偵測之共用工具
-/// </summary>
+/// <summary>提供原始碼文字掃描、註解/字串清洗與架構違規偵測之共用工具</summary>
 public static class SourceScanner
 {
     private static readonly Lazy<string> SolutionRootLazy = new(ResolveSolutionRoot);
 
-    /// <summary>
-    /// 取得專案儲存庫根目錄絕對路徑
-    /// </summary>
+    /// <summary>取得專案儲存庫根目錄絕對路徑</summary>
     public static string SolutionRoot => SolutionRootLazy.Value;
 
-    /// <summary>
-    /// 尋找儲存庫根目錄（依據 MinecraftServerManager.sln 或 Directory.Build.props 向上遞迴查詢）
-    /// </summary>
     private static string ResolveSolutionRoot()
     {
         string? current = AppContext.BaseDirectory;
         while (!string.IsNullOrEmpty(current))
         {
-            if (File.Exists(Path.Combine(current, "MinecraftServerManager.sln")) ||
+            if (File.Exists(Path.Combine(current, "MinecraftServerManager.slnx")) ||
                 File.Exists(Path.Combine(current, "Directory.Build.props")))
             {
                 return Path.GetFullPath(current);
@@ -54,22 +41,16 @@ public static class SourceScanner
         throw new InvalidOperationException($"無法自路徑 '{AppContext.BaseDirectory}' 向上定位專案儲存庫根目錄。");
     }
 
-    /// <summary>
-    /// 取得指定相對目錄下所有符合條件的 C# 原始碼檔案清單（自動排除 bin、obj 及產生之原始碼）
-    /// </summary>
-    /// <param name="relativeDirectory">相對根目錄之路徑（例如 "src" 或 "tests"）</param>
-    /// <returns>相對路徑（統一採正斜線 / 格式）與絕對路徑之鍵值配對清單</returns>
+    /// <summary>取得指定相對目錄下所有 C# 原始碼檔案（排除 bin、obj 及產生之原始碼）</summary>
     public static IReadOnlyList<(string RelativePath, string FullPath)> GetSourceFiles(string relativeDirectory)
     {
         string fullDirectory = Path.Combine(SolutionRoot, relativeDirectory);
         if (!Directory.Exists(fullDirectory))
         {
-            return Array.Empty<(string, string)>();
+            return [];
         }
 
         var results = new List<(string RelativePath, string FullPath)>();
-        var rootUri = new Uri(SolutionRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar);
-
         foreach (string file in Directory.EnumerateFiles(fullDirectory, "*.cs", SearchOption.AllDirectories))
         {
             string normalized = file.Replace('\\', '/');
@@ -81,21 +62,43 @@ public static class SourceScanner
                 continue;
             }
 
-            Uri fileUri = new(file);
-            string relativePath = Uri.UnescapeDataString(rootUri.MakeRelativeUri(fileUri).ToString()).Replace('\\', '/');
+            string relativePath = Path.GetRelativePath(SolutionRoot, file).Replace('\\', '/');
             results.Add((relativePath, file));
         }
 
         return results;
     }
 
-    /// <summary>
-    /// 清除 C# 原始碼中的單行註解、多行註解與字串字面值（將內容置換為等長空格並保留換行符號），
-    /// 同時保留插值字串內的程式碼表達式，以確保原始碼長度、列號與行號完全精確對齊。
-    /// </summary>
-    /// <param name="sourceCode">原始 C# 程式碼字串</param>
-    /// <returns>清洗後之程式碼字串</returns>
-    public static string StripCommentsAndStrings(string sourceCode)
+    /// <summary>清除單行/多行註解與字串字面值為等長空格（保留插值字串內運算式與換行對齊）</summary>
+    public static string StripCommentsAndStrings(string sourceCode) => StripCore(sourceCode, commentRanges: null);
+
+    /// <summary>僅清除註解為等長空格（保留字串字面值與換行對齊）</summary>
+    public static string StripCommentsOnly(string sourceCode)
+    {
+        if (string.IsNullOrEmpty(sourceCode))
+        {
+            return string.Empty;
+        }
+
+        var commentRanges = new List<(int Start, int End)>();
+        _ = StripCore(sourceCode, commentRanges);
+
+        char[] chars = sourceCode.ToCharArray();
+        foreach (var (start, end) in commentRanges)
+        {
+            for (int k = start; k < end; k++)
+            {
+                if (chars[k] is not '\r' and not '\n')
+                {
+                    chars[k] = ' ';
+                }
+            }
+        }
+
+        return new string(chars);
+    }
+
+    private static string StripCore(string sourceCode, List<(int Start, int End)>? commentRanges)
     {
         if (string.IsNullOrEmpty(sourceCode))
         {
@@ -114,6 +117,7 @@ public static class SourceScanner
             // 1. 單行註解 //
             if (c == '/' && next == '/')
             {
+                int commentStart = i;
                 chars[i] = ' ';
                 chars[i + 1] = ' ';
                 i += 2;
@@ -127,12 +131,14 @@ public static class SourceScanner
                     i++;
                 }
 
+                commentRanges?.Add((commentStart, i));
                 continue;
             }
 
             // 2. 多行註解 /* ... */
             if (c == '/' && next == '*')
             {
+                int commentStart = i;
                 chars[i] = ' ';
                 chars[i + 1] = ' ';
                 i += 2;
@@ -154,6 +160,7 @@ public static class SourceScanner
                     i++;
                 }
 
+                commentRanges?.Add((commentStart, i));
                 continue;
             }
 
@@ -251,7 +258,7 @@ public static class SourceScanner
                         break;
                     }
 
-                    // 逐字插值字串中的表達式處理
+                    // 逐字插值字串中的運算式處理
                     if (isInterpolated && chars[i] == '{')
                     {
                         if (i + 1 < len && chars[i + 1] == '{')
@@ -442,21 +449,16 @@ public static class SourceScanner
         return new string(chars);
     }
 
-    /// <summary>
-    /// 對目標檔案清單進行正規表示式違規掃描
-    /// </summary>
-    /// <param name="files">欲掃描之檔案集合</param>
-    /// <param name="pattern">違規模式之正規表示式</param>
-    /// <param name="ruleId">規則代號</param>
-    /// <param name="ruleDescription">規則說明</param>
-    /// <param name="isWhitelisted">白名單判定委派（傳入檔案相對路徑，回傳 true 則跳過檢查）</param>
-    /// <returns>違規清單</returns>
+    private static readonly ConcurrentDictionary<(string Path, bool PreserveStrings), (string[] Original, string[] Stripped)> LineCache = new();
+
+    /// <summary>對目標檔案清單進行正規表示式違規掃描（preserveStrings=true 時僅移除註解並保留字串內容）</summary>
     public static List<SourceViolation> ScanViolations(
         IEnumerable<(string RelativePath, string FullPath)> files,
         Regex pattern,
         string ruleId,
         string ruleDescription,
-        Func<string, bool> isWhitelisted)
+        Func<string, bool> isWhitelisted,
+        bool preserveStrings = false)
     {
         var violations = new List<SourceViolation>();
 
@@ -467,11 +469,12 @@ public static class SourceScanner
                 continue;
             }
 
-            string rawText = File.ReadAllText(fullPath);
-            string stripped = StripCommentsAndStrings(rawText);
-
-            string[] originalLines = rawText.Split('\n');
-            string[] strippedLines = stripped.Split('\n');
+            var (originalLines, strippedLines) = LineCache.GetOrAdd((fullPath, preserveStrings), static key =>
+            {
+                string rawText = File.ReadAllText(key.Path);
+                string stripped = key.PreserveStrings ? StripCommentsOnly(rawText) : StripCommentsAndStrings(rawText);
+                return (rawText.Split('\n'), stripped.Split('\n'));
+            });
 
             int lineCount = Math.Min(originalLines.Length, strippedLines.Length);
             for (int lineIdx = 0; lineIdx < lineCount; lineIdx++)

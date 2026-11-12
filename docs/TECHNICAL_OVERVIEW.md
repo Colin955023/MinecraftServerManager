@@ -1,152 +1,192 @@
 # Minecraft 伺服器管理器技術手冊
 
-本手冊說明 Minecraft 伺服器管理器程式所採用的技術堆疊、分層架構、核心演算法與安全機制。
+技術堆疊、分層架構與安全機制。
 
-## 技術堆疊總覽
+## 技術堆疊
 
-| 領域 | 技術與元件 | 說明 |
-|---|---|---|
-| 核心平台 | .NET 10（`net10.0-windows`） | 採用最新 LTS 框架，提供高效能 JIT 與非同步 I/O |
-| 語言標準 | C#（`LangVersion=latest`） | 採用 C# 14 / .NET 10 現代慣用語：`System.Threading.Lock`、集合運算式、Span/Memory API、`[GeneratedRegex]` 與模式匹配 |
-| 使用者介面 | WPF（Windows Presentation Foundation） | 原生 Windows 桌面框架，落實 MVVM 模式與資料繫結 |
-| 資料序列化 | `System.Text.Json`（Source Generator） | 高效能唯讀 Span、串流與編譯時期來源產生器（`AppJsonSerializerContext`），零反射開銷 |
-| 網路通訊 | `System.Net.Http.HttpClient` | 集中連線池管理、自動重試預算與完整逾時控制 |
-| 外部行程管理 | `System.Diagnostics.Process` | 非同步串流重新導向、平順停止（Graceful Shutdown）與行程樹強制清理（`Process.Kill(entireProcessTree: true)`） |
-| 正規表示式最佳化 | `[GeneratedRegex]` Source Generator | 編譯時期產生比對狀態機，零執行期正規表示式解析開銷 |
-| 平行運算 | `Parallel.ForEachAsync` | 多核平行化處理模組掃描與檔案雜湊運算 |
-| 測試驗證 | xUnit、UnitTests、IntegrationTests | 完整本機隔離測試，無外部網路與使用者環境相依性 |
-| 封裝發布 | 原生 Single-File、官方原生安全壓縮 | 採用官方原生 Single-File 封裝技術，搭配功能開關裁切與單檔壓縮 |
+| 領域 | 技術 |
+|---|---|
+| 平台 | .NET 10（`net10.0-windows10.0.26100.0`，`WindowsSdkPackageVersion` 10.0.26100.87，`TargetPlatformMinVersion=10.0.22000.0`，僅 Windows 11），C# 14 |
+| 介面 | 原生 WinUI 3（Windows App SDK 元件套件 2.6.5）、MVVM（CommunityToolkit.Mvvm）、XAML `{x:Bind}`、深淺色主題 |
+| JSON | `System.Text.Json` 來源產生器（`AppJsonSerializerContext`），無反射、可裁剪 |
+| 網路 | `HttpClient`（經 `IHttpPort`）；`HttpUrlPolicy` 只允許 HTTPS 並於連線時驗證解析結果皆為公開位址，單一位址 5 秒未連上即改試下一個（整體連線逾時 20 秒） |
+| 行程 | `Process`（經 `IProcessRunner`），平順停止與行程樹終止 |
+| 正規表示式 | `[GeneratedRegex]` |
+| 測試 | xUnit v3、單元與整合測試、架構規則 A1～A31；全程本機隔離，無網路 |
+| 發布 | 單檔自包含、完整裁剪（`MinecraftServerManager.exe`） |
 
-## 專案分層架構
-
-專案依照清晰的單向相依性原則劃分：
+## 專案分層
 
 ```text
 src/
-├─ MinecraftServerManager.App/             WPF 視窗、View、ViewModel、Dialog、佈景主題與組合根
-├─ MinecraftServerManager.Core/            業務工作流程、用例（Use Cases）、交易管理與介面合約
-├─ MinecraftServerManager.Domain/          領域實體、值物件與純領域邏輯（無外部相依性）
-└─ MinecraftServerManager.Infrastructure/  安全檔案系統、網路下載、行程管理、Java 探測與系統整合
+├─ MinecraftServerManager.App/             WinUI 3 視窗、View、ViewModel、組合根
+├─ MinecraftServerManager.Core/            工作流程、使用案例、介面合約
+├─ MinecraftServerManager.Domain/          領域實體、值物件、純邏輯
+└─ MinecraftServerManager.Infrastructure/  檔案系統、網路、行程、Java 探測
 tests/
-├─ MinecraftServerManager.UnitTests/       領域邏輯與業務流程之單元測試
-└─ MinecraftServerManager.IntegrationTests/元件協作與整合驗證測試
+└─ MinecraftServerManager.UnitTests/
 ```
 
-### 相依關係規則
+相依方向：`App → Core → Domain`、`App → Infrastructure`、`Infrastructure → Core／Domain`；Domain 不相依任何專案。
 
-```text
-App → Core → Domain
-App → Infrastructure
-Infrastructure → Core Contracts / Domain
-Domain （不相依其他任何專案，純粹領域邏輯）
-```
-
-- **Domain**：完全不相依 WPF、檔案 I/O、網路或作業系統 API，確保領域邏輯的純粹性與可測試性
-- **Core**：定義核心服務合約（Contracts）、工作流程（Workflows）與交易編排（Orchestration）
-- **Infrastructure**：具體實作 Core 定義之介面，負責實體磁碟存取、外部行程呼叫、HTTP 呼叫與 Java 環境探測
-- **App**：負責視窗繪製、使用者互動與 ViewModel 狀態管理；透過專屬的組合根（`AppCompositionRoot`）集中裝配所有底層服務、管理連線與行程生命週期，並於主視窗顯式啟動流程中完成目錄引導與背景非同步預熱（啟動初期採用 `ShutdownMode.OnExplicitShutdown`，主視窗顯示後切換為 `OnMainWindowClose`，並於主視窗關閉時執行安全關閉），徹底讓 Code-behind 專注於純 UI 邏輯。所有訊息框、檔案選取、對話方塊、進度與視窗控制，以及 UI 執行緒派送與計時器，皆經由 `IUiService` 介面進行（`WpfUiService` 為唯一的 WPF 實作），ViewModel 不直接建立視窗、呼叫 `MessageBox` 或使用 `Dispatcher`；唯一例外為 `App.xaml.cs` 於 `IUiService` 建立之前處理的單一實體提示、啟動失敗與全域未處理例外對話方塊。
+- **Domain**：不使用 WinUI、檔案 I/O、網路或系統 API。
+- **Core**：服務合約與工作流程。
+- **Infrastructure**：實作 Core 介面（磁碟、行程、HTTP、Java 探測）。
+- **App**：視窗與 ViewModel；`AppCompositionRoot` 裝配所有服務。UI 互動只經 `IUiService`（`WinUiService` 為唯一實作，例外見 A7）；檔案 I/O 只經注入的 Core 連接埠（A29）。
+- **大型頁面拆分**：一個區塊一個子 ViewModel，父 ViewModel 負責組合、導覽與對話框，`Dispose` 由父統一轉呼叫。
+  - `ManageServerViewModel` → `List`（清單、選取、狀態、目錄大小）、`Lifecycle`（啟動、停止、監控視窗）、`Backup`、`ServersRoot`。頁面由 `PageViewModelFactory`（依 `PageServices`，僅組合根與工廠可見，A31）建立；子 ViewModel 另經 `ServerStopCoordinator`、`ServerStartPreflight` 協作。
+  - `ModsViewModel` → `Local`、`Online`、`Queue`（版本挑選、相依解析、批次安裝）、`Updates`（雜湊比對、批次更新）；共用狀態 `ModsContext`，子 ViewModel 互不參照。
+  - `ServerInitializationViewModel`：執行初次啟動流程、彙整輸出、倒數關閉。
 
 ## 關鍵技術與安全設計
 
 ### 1. 安全檔案系統（SafeFileSystem）
 
-- **路徑邊界防護（Path Containment）**：嚴格驗證所有檔案存取路徑必須落在預期的工作目錄之內，全面阻斷路徑穿越（Directory Traversal）攻擊
-- **符號連結防護（Reparse Point Defense）**：在走訪檔案與目錄時，嚴格辨識並攔截惡意符號連結與 NTFS 節點（Junction），受限於邊界目錄向上檢查，避免誤殺作業系統層級之掛載點與 AppData
-- **目錄清理唯讀屬性防護**：在執行目錄遞迴刪除前，自動清除檔案與子資料夾的 Windows `FileAttributes.ReadOnly` 唯讀屬性，避免權限例外中斷操作
-- **受限目錄走訪（Bounded Walk）**：限制最大走訪深度與檔案總數上限，避免惡意目錄遞迴造成堆疊溢位或資源耗竭；容量格式化計算全面採用 `WalkBoundedTree`，杜絕符號連結死循環
-- **安全不可部分完成替換（Native Atomic File Replacement）**：重要設定檔與資料儲存時，先寫入暫存檔案並驗證完整性，再透過作業系統原生 `File.Replace` 不可部分完成替換目標檔案，防止斷電損壞並保留安全描述元
-- **封存檔高效解壓縮與節流（ArrayPool & Throttled Progress）**：解壓縮流程全面採用 `ArrayPool<byte>.Shared` 消除大型物件堆積（LOH）重複配置，於解壓縮串流迴圈實施 100ms / 1% 節流（Throttling）回報
-- **ZIP 伺服器匯入非同步背景保護**：解壓縮與大型檔案複製流程一律透過 `await Task.Run(...)` 派發至背景執行緒非同步運行，徹底杜絕同步 I/O 阻塞 WPF UI 執行緒（Dispatcher Thread），確保進度條動畫流暢播放與百分比順暢跳動
+- **路徑邊界**：存取路徑必須落在預期目錄內，阻斷路徑穿越。
+- **符號連結與 Junction**：走訪時辨識並攔截；僅在邊界內向上檢查，不誤傷系統掛載點。
+- **受限走訪**：限制深度與檔案總數（`EnumerateBoundedTree`），避免惡意目錄造成資源耗竭或無窮迴圈。
+- **原子替換**：重要檔案先寫暫存檔再以 `File.Replace` 取代，防斷電損壞。`AtomicFileWriter.Write*` 回傳是否成功；登錄檔、啟動腳本與初始設定等不可靜默失敗者用 `WriteTextOrThrow`／`WriteJsonOrThrow`。
+- **移動**：`MovePath`、`MoveWithin`、`MoveWithinStrict` 各自負責邊界檢查，實際搬移共用 `MoveCore`，統一套用防毒／索引短暫鎖檔的重試。
+- **刪除前清除唯讀屬性**。
+- **ZIP 處理**：`ArrayPool<byte>` 緩衝、進度節流（100 ms／1%）；解壓與大檔複製一律 `Task.Run`，不阻塞 UI 執行緒。
 
-### 2. 交易式備份與還原機制（Transactional Restore）
+### 2. 交易式備份與還原
 
-- **隔離解壓縮驗證**：備份還原時一律先解壓縮至獨立暫存隔離區，並執行路徑邊界與檔案完整性校驗
-- **現場記錄安全保護（Live Logs Protection）**：執行目標目錄還原覆蓋前，自動將伺服器現場之 `logs/` 與 `crash-reports/` 暫存隔離；待還原覆蓋成功後自動移回合併，防止還原操作抹除發生當機或故障當下的關鍵排查線索
-- **前置狀態快照**：執行目標目錄覆蓋前，自動為伺服器現況建立復原快照（Rollback Snapshot）
-- **失敗自動回復**：若解壓縮或檔案複製過程遭遇任何例外，立即自動回復至還原前的快照狀態，確保伺服器永不處於毀損中間態
-- **備份上限維護**：內建自動清理原則，維持最新 10 份備份，自動清除過期備份以節省磁碟空間
+- 還原先解壓至隔離暫存區並驗證路徑與完整性。
+- 覆蓋前建立還原快照；任何例外自動回復：快照完成後才失敗時，先清除已搬入的還原內容再搬回原檔；回復未完成則保留快照目錄供人工復原。
+- 還原前暫存 `logs/`、`crash-reports/`，完成後合併移回。
+- 保留份數可設定（預設 10、範圍 1～100，`ServerBackupService` 以 `retentionCountProvider` 取值），超過即刪最舊。
+- 執行中的伺服器不可備份。
+- 啟動前自動備份：設定 `auto_backup_before_start`（預設關閉）；伺服器無有效備份資料夾或備份失敗時詢問是否仍要啟動。
 
-### 3. 伺服器完整性與容量檢查
+### 3. 伺服器管理、完整性與根目錄遷移
 
-- **啟動檔案檢查（ServerIntegrityService）**：依載入器檢查核心 JAR、啟動腳本及參數檔；缺少必要檔案時在管理清單標示警告並停用啟動操作。
-- **目錄容量計算（ServerDirectorySizeService）**：透過 `SafeFileSystem.WalkBoundedTree` 在背景計算伺服器檔案容量，排除 `backups/`，並以短期快取減少重複走訪。
+- **完整性（`ServerIntegrityService`）**：依載入器檢查核心 JAR、啟動腳本、參數檔；缺少時警告並停用啟動。
+- **目錄大小（`ServerDirectorySizeService`）**：背景計算，排除 `backups/`，短期快取，不跟隨符號連結。
+- **根目錄遷移（`ServersRootRelocator`）**：根目錄一律為「所選資料夾\servers」（所選資料夾已名為 `servers` 則不再附加）；相同路徑、檔案目標、原根目錄子目錄無法遷移；遷移目標必須為空；同磁碟移動、跨磁碟複製加驗證；失敗自動回復並以 `AtomicFileWriter` 更新 `servers.json` 路徑。
+- **登錄檔損毀保護**：`servers.json`、`user_settings.json` 無法解析時先複製為 `.bad` 再以空白／預設值繼續。備份檔名須為「伺服器名稱＋`yyyyMMdd-HHmmss`」，名稱互為前綴的伺服器不會誤刪彼此備份。
+- **`ServerManager` 職責**：建立、刪除、更新、掃描；登錄檔由 `ServerRegistryStore`、匯入由 `ServerImportWorkflow`、共用輔助由 `ServerSetupHelpers`。讀取於背景執行緒；首次存取時於背景清理未完成刪除墓碑（`.msm-deleting-*`）與純中繼暫存目錄（`.msm-create-staging-*`、`.msm-import-staging-*`、`.msm-restore-staging-*`），若發現未完成還原之快照（`.msm-restore-rollback-*`、`.msm-restore-preserved-logs-*`）則記錄警告並完整保留。
+- **匯入**：存放目錄內已有同名且非空的資料夾時拒絕匯入（失敗清理只處理本流程搬入的內容）；複製或遷移（`ImportTransferMode`）；遷移僅在匯入、驗證、寫入設定全部成功後才移除來源資料夾或 `.zip`；原地匯入跳過移除。
 
-### 4. 高效能獨立主控台與記錄管線
+### 4. 執行階段、監控與啟動檢查
 
-- **獨立視窗架構**：伺服器啟動後於專屬視窗獨立運作，避免高頻記錄阻礙主介面操作
-- **伺服器就緒即時偵測（Server Ready Detection）**：非同步記錄管線持續精確比對伺服器就緒特徵（`"Done ("` / `"Done in "`），於完成啟動時觸發 `ServerReady` 事件並即時解鎖介面操作與狀態卡片
-- **微批次記錄聚合與緩衝區池化（Log Buffer Pooling）**：採用通道（Channel）與可重複使用緩衝區（`_reusableFlushBatch`）消除計時器常態性集合記憶體配置，高負載時合併大量記錄輸出，徹底根除 UI 畫面算繪瓶頸
-- **ANSI 終端機控制碼清理**：非同步過濾終端機控制色碼，保留純文字內容
-- **編譯時期正規表示式玩家計數**：利用 `[GeneratedRegex]` 原始程式碼產生器即時解析玩家加入與離開事件，維護精確線上人數
-- **行程平順關閉與強制終止**：優先向伺服器 stdin 傳送 `stop` 指令並等候行程正常關閉；若逾時則透過行程樹強制終止，防止孤兒 Java 行程滯留
-- **Forge / NeoForge 啟動參數與 Java 環境注入**：
-  - 伺服器建立、設定更新與啟動時，自動將推薦之垃圾回收參數、記憶體範圍（`-Xms`、`-Xmx`）與自訂 JVM 參數透過不可分割寫入安全同步至 `user_jvm_args.txt`。
-  - 針對 Windows 批次檔啟動方式（`run.bat`），啟動規劃器自動解析指定 Java 實體之根路徑推導 `JAVA_HOME`，並將該 Java `bin/` 目錄插入至執行環境變數 `PATH` 之最前端，直接注入 `ProcessStartSpec`，確保批次檔順暢以使用者指定的精確 Java 版本執行。
-- **Java 命令絕對路徑強化與字碼頁重新導向防護（SafeScriptValidator & ServerManager）**：
-  - 啟動腳本產生與驗證嚴格落實反向白名單機制，全面拒絕未限定之純 `java` 或 `java.exe` 命令，強制替換為已解析之根目錄化絕對路徑，防範環境變數與 PATH 混淆攻擊。
-  - 腳本安全驗證器內建針對合規字碼頁切換輸出重新導向（如 `chcp 65001 > nul` / `chcp 950 >nul`）之安全剝離驗證，既維持對惡意管線與檔案重導向的攔截，又支援批次檔標準語法。
+- **多伺服器**：每台伺服器各一個 `IServerRuntime`，由 `IServerRuntimeHost`（`ServerRuntimeHost`）依名稱（不分大小寫）管理，可同時執行；每台有各自的監控視窗，主視窗關閉時一併關閉。
+- **就緒偵測**：輸出不分大小寫含 `"Done ("` 或 `"Done in "` 即設 `IsReady` 並觸發 `ServerReady`。
+- **啟動前置檢查（`ServerStartPreflight`）**：比對其他執行中伺服器的 `server-port`（未設定視為 25565，只比連接埠），相同則阻擋；再依設定執行啟動前自動備份。
+- **平順停止（`ServerStopCoordinator`）**：送 `stop` 後等待 60 秒（`ServerDefaults.GracefulStopTimeout`），逾時由使用者選「繼續等待」或「強制終止」，不自動強制終止；清單狀態顯示「停止中」。關閉主視窗時若有伺服器執行，先確認並停止全部，取消則不關閉。
+- **遺留行程偵測（`RunningServerRegistry`）**：啟動時以 PID 與行程啟動時間登記於 `running_servers.json`，結束時移除；下次啟動比對 PID＋啟動時間（防 PID 重用），偵測到存活的遺留行程時提示並可終止行程樹（`IProcessInspector`）。
+- **記錄管線**：`LogLineBuffer`（有界 Channel，滿載捨棄最舊）由 UI 計時器批次排出；監控主控台超過 2200 行修剪至 1800 行；初始化視窗每次最多 500 行。`ServerLogReader` 於背景讀 `logs/latest.log` 尾端最多 2 MB／2500 行，並清除色碼。
+- **玩家計數**：`[GeneratedRegex]` 比對加入、離開與人數行，錨定於僅由方括號群組組成的日誌前綴（如 `[12:00:00] [Server thread/INFO]:`），聊天內容無法偽造；支援 `.` 開頭的基岩版名稱。
+- **啟動腳本（`StartScriptWriter`）**：`start_server.bat` 與 `user_jvm_args.txt` 只由此寫入；含空白的 JVM 參數自動加引號；Java 路徑須通過 `SafeScriptValidator.IsSafeJavaExecutable`，拒絕純 `java`／`java.exe`，一律使用已解析的絕對路徑；允許 `chcp 65001 > nul` 這類字碼頁切換，攔截其他管線與重導向。可執行外部命令或載入原生程式庫的 JVM 選項（`JvmOptionPolicy.IsCommandExecutionOption`：`-XX:OnError`、`-XX:OnOutOfMemoryError`、`-agentpath`、`-agentlib`、`-Xbootclasspath`）於腳本驗證、啟動規劃與 JVM 參數設定三處一律拒絕。
+- **行程結束**：`IManagedProcess.WaitForExitAsync` 的所有等待者共用同一個結束工作並留存結束結果；伺服器自行結束時由 `ServerRuntime` 釋放行程資源。
+- **Forge／NeoForge**：GC、記憶體與自訂 JVM 參數寫入 `user_jvm_args.txt`；`run.bat` 啟動時由 Java 路徑推導 `JAVA_HOME` 並將其 `bin/` 置於 `PATH` 最前。
+- **Java 版本**：僅依 Mojang 官方 JSON（`javaVersion.majorVersion`／`java_version.major`，未標註的舊版為 `jre-legacy`＝Java 8）取得或快取，不以版本號寫死推算。
 
-### 5. 平行化模組管理、Modrinth 整合與 FlexVersion 引擎
+### 5. 模組管理、Modrinth 與 FlexVersion
 
-- **平行化本地掃描與防抖動機制**：透過 `Parallel.ForEachAsync` 平行讀取伺服器 `mods` 目錄，快速擷取模組中繼資料並計算雜湊；模組重新整理內建 300ms 智慧防抖（Debounce），防範介面頻繁觸發時的重度磁碟 I/O 開銷
-- **原生 FlexVersion 彈性語意版本比較引擎**：
-  - 規格參照開放原始碼專案 Prism Launcher 之版本解析與偏序比較原則，由本專案採用 C# / .NET 10 原生機制（`ReadOnlySpan<char>`、自訂 `Section` 值型別）落實乾淨室獨立實作（Clean-room Implementation），支援多區段語意化版本、前導零正規化、忽略 `+` 建置中繼資料與預發布版降級比較，確保版本新舊判定的數學自反性、反對稱性與傳遞性。
-  - 模組更新檢查演算法利用 FlexVersion 全序關係由相容候選集合中判定最大版本（最高相容版本），確保版本決策之單調性與確定性。
-- **模組智慧啟閉**：透過標準化副檔名切換（`.jar` 與 `.jar.disabled`）實現無損啟用與停用，並自動處理檔名衝突備份
-- **邊下載邊串流增量雜湊校驗（Single-Pass Streaming Hash Verification）**：下載 Modrinth 線上模組與更新資產時，於 HTTP 回應串流寫入本機磁碟的同時透過增量雜湊轉換器同步計算 SHA-512／SHA-256／SHA-1，寫入完成立即驗證，徹底消除下載完成後二次重讀全檔磁碟 I/O 的效能開銷；雜湊不符即主動清理暫存檔。
-- **多元清單匯出與原生 XLSX 產生器（ModListExporter & ExportModListViewModel）**：具備專屬互動對話方塊，支援依狀態（包含或排除已停用模組）及相依關係自訂篩選，並將模組清單匯出為純文字（.txt）、JSON（.json）、HTML（.html）與 Excel（.xlsx）格式。其中 XLSX 格式由原生輕量級 `OpenXmlSpreadsheetBuilder` 直接透過 `System.IO.Compression.ZipArchive` 產生，零第三方套件相依性，且檔案完全合規相容 Microsoft Excel 與 LibreOffice。
+- **平行掃描**：`Parallel.ForEachAsync` 讀 `mods` 目錄並計算雜湊；以世代編號標記載入，切換伺服器後的舊結果直接捨棄。
+- **`FlexVersion`**：移植自 Prism Launcher（GPL-3.0-only，版權聲明見 `FlexVersion.cs` 與 `COPYING.md`），支援多區段版本、前導零正規化、忽略 `+` 建置中繼資料、預發布降級比較與模組版本字串正規化。
+- **下載來源**：`ModFileInstaller.InstallRemoteModAsync` 強制驗證為官方 Modrinth CDN 且必須提供雜湊值（SHA-512／SHA-1），缺一即拒絕下載。
+- **下載逾時與續傳（`HttpDownloadClient`）**：`HttpDownloadOptions.Timeout` 為閒置逾時（每收到資料即重新計時）；既無預期雜湊也無 ETag 時不續傳，一律重新下載。
+- **版本清單後備**：`IHttpPort` 於網路失敗時回傳失敗結果而非擲出，`LoaderCatalogService` 對失敗、空結果與例外一律改用過期快取。
 
-### 6. 視窗生命週期、前台焦點與全客製化通知架構
+### 6. WinUI 3 視窗、模態與主題
 
-- **前台焦點維持（Focus Preservation）**：子對話方塊（如 `ServerInitializationDialog`）關閉或檢視頁面跳轉時，主動透過擁有者視窗啟動機制（`Owner?.Activate()`）維持 WPF 主視窗之前台狀態，防止 Windows 桌面視窗管理員（DWM）因前台暫態失去焦點而將焦點轉移至其他第三方應用程式。
-- **淘汰原生 MessageBox 與全 WPF 客製化視窗**：系統淘汰舊式原生 `MessageBox`，全面改由 WPF 原生自訂對話方塊（`CustomConfirmDialog` 與 `NotificationDialog`）負責確認與警示，100% 契合深淺色動態主題。
-- **視窗算繪就緒音效回饋（AudioFeedback）**：將 Windows 系統音效呼叫移至對話視窗的 `Loaded` 事件中觸發，並透過安全標準 Windows 音效機制精準發聲（Warning / Error / Info / Question），防範未算繪視窗在建構時期被 Windows 靜音的問題。
+- **對話框**：輕量對話框用 `ContentDialog`，由 `DialogStackCoordinator` 佇列（WinUI 同一執行緒同時只能開一個，故全程式共用主視窗的協調器；巢狀時先隱藏上層、等待關閉〔逾時 3 秒保底〕再顯示，上層關閉後重現）；進度對話框可暫時讓位。不得在 `ContentDialog` 按鈕事件中再開 `ContentDialog`。提供雙鍵確認、自訂按鈕文字的兩鍵選擇（`ConfirmChoiceAsync`，Esc 對應次要按鈕，安全選項置於次要）、三鍵（`ConfirmYesNoCancelAsync`）。
+- **大型視窗**：Java 管理、模組更新、安裝清單、版本挑選、名單管理、還原備份、伺服器初始化、屬性設定及監控主控台為獨立 WinUI 視窗，統一經 `ModalWindowHost.ConfigureDialogWindow`（主題、圖示、標題列色、`ResizeToDip`、關閉時 `Bindings.StopTracking()`；可選 `RegisterUnsavedChangesPrompt`）；ViewModel 於命令內要求關閉時一律經 `ModalWindowHost.CloseDeferred` 延後關閉（同步關閉會在命令結束更新按鈕狀態時造成原生閃退）；`CenterOnParent` 依父視窗與螢幕工作區置中並夾限。維持 `GWLP_HWNDPARENT` 與 `EnableWindow` 停用父視窗（`OverlappedPresenter.IsModal` 與可最小化子視窗不符，故不採用）。
+- **圖示**：`ContentPresenter` 搭配 `ColorIcons.xaml` 的 `DataTemplate`。
+- **表格**：虛擬化 `ListView`＋`TableListViewItemStyle`＋`DataGridGridLineBrush`；`TableFrame` 提供表頭列與內容區外框，`TableCell` 提供右側分隔線、單行截斷與 ToolTip；`SortableTableHeader` 支援拖曳調欄寬與按兩下自動對齊；排序由 `TableSortKeys` 提供原始數值，文字用 `NaturalSortHelper`（`CompareOptions.NumericOrdering`）。
+- **當機診斷（`CrashDiagnostics`）**：啟動時寫 `session.marker`（PID、啟動時間、記錄檔路徑），正常結束且 PID 相符才刪除；下次啟動若標記仍在且行程已不存在（或 PID 已被晚於標記的行程重用）即記錄「上次未正常結束」；另記錄 UI 執行緒的非取消例外（含 HRESULT 與前 12 個堆疊框架，每次執行上限 300 筆）。
+- **選取器**：`Microsoft.Windows.Storage.Pickers` 的 `FileOpenPicker`、`FileSavePicker`、`FolderPicker`，以 `AppWindow.Id` 繫結。
+- **外觀服務**：`TitleBarThemeHelper`（標題列按鈕色）、`AccentColorService`（系統強調色用 `AccentLight1`／`AccentDark1`，自訂色計算色階覆蓋資源）、`WindowIconHelper`（內嵌資源圖示）、`AudioFeedback`（`MessageBeep`）。
+- **主題**：`ElementTheme` 與 `ThemeDictionaries`，可跟隨系統；狀態色文字以 `ThemeBrush.ForegroundKey` 指定資源鍵。
+- **通知（`IUiService.ShowNotification`，擴充方法 `Notify` 套用預設標題）**：`Info`／`Success`／`Warning` 以右上角 `InfoBar` 顯示（最多 4 則；`Warning` 8 秒，其餘 3 秒；滑鼠停留暫停）；`Error` 以 `NotificationDialog` 排隊顯示。分級：前置條件不符、輸入驗證、無可處理項目、自動調整、不影響資料的開啟失敗為 `Warning`；完成為 `Success`；例外或 I/O 失敗為 `Error`；需使用者決定用確認對話框。
 
-### 7. 名單管理系統架構（Player Management System）
+### 7. 名單管理
 
-- **核心名冊整合（ServerPlayerConfigStore）**：封裝伺服器四大名單持久化檔案：管理員名單（`ops.json`，含 1～4 級權限與略過人數上限標記）、白名單（`whitelist.json`）、玩家封鎖名冊（`banned-players.json`）與 IP 封鎖名冊（`banned-ips.json`）。
-- **離線玩家索引快取（usercache.json）**：主動讀取伺服器內部之 `usercache.json`，在離線或無公網環境下自動解析關聯玩家名稱與 UUID，提供名稱快速自動補完。
-- **原子不可分割寫入保證**：名單儲存時一律透過 `AtomicFileWriter` 進行不可分割置換，防止名冊並行編輯損毀。
-- **高效單次點選 UI 互動與虛擬化回收**：表格採用 `DataGridTemplateColumn` 內嵌 `<CheckBox>`，實現按一下立即切換核取狀態；長列表與表格全面開啟 `EnableRowVirtualization="True"` 與 `VirtualizingPanel.VirtualizationMode="Recycling"`，確保記憶體低駐留與捲動高流暢度。
+- `ServerPlayerConfigStore` 封裝 `ops.json`（1～4 級與略過人數上限）、`whitelist.json`、`banned-players.json`、`banned-ips.json`；寫入一律經 `AtomicFileWriter`。
+- 讀取 `usercache.json` 於離線時關聯名稱與 UUID 並提供自動補完。
+- 核取方塊直接繫結 ViewModel。
 
-### 8. Java 探測去重與安全邊界防護
+### 8. Java 探測
 
-- **Oracle Shim 跳板轉發器與 Junction 排除**：在環境變數 `PATH` 與候選目錄掃描中，精準過濾包含 `\Oracle\Java\javapath`、`\Oracle\Java\java8path` 與 `\Common Files\Oracle\Java\` 之目錄，並檢查執行檔 PE 中繼資料之 `shimconsole.exe` / `shim.exe`，徹底杜絕 Java 8 重複項。
-- **原生符號連結解析（ResolveLinkTarget）**：利用 .NET 原生 `FileSystemInfo.ResolveLinkTarget(returnFinalTarget: true)` 精準解析實體 JRE 目錄，確保候選路徑之唯一性與真實性。
+- **Oracle Shim 去重**：過濾 `\Oracle\Java\javapath`、`\Oracle\Java\java8path`、`\Common Files\Oracle\Java\`，並檢查 PE 中繼資料中的 `shimconsole.exe`／`shim.exe`。
+- **連結解析**：`ResolveLinkTarget(returnFinalTarget: true)` 解析實體 JRE 目錄。
+- **位元數**：`PortableExecutableInspector` 以 `PEReader` 讀 PE 標頭的 `Machine` 欄位判斷 32／64 位元；自動更新也以此確認下載檔為合法 PE。
+- **快取（`java_candidates_cache.json`）**：記錄路徑、檔案大小、最後修改時間（UTC Ticks），未變動則免啟動 `java -version`。
 
-### 9. 雙版本原生單一檔案發布
+### 9. 單檔自包含發布
 
-- **原生 Single-File 封裝**：直接於 `MinecraftServerManager.App.csproj` 設定 `<PublishSingleFile>true</PublishSingleFile>`，確保無論透過發布腳本或於 IDE 中直接發布，皆產出標準原生單一可執行檔
-- **雙版本發布策略**：
-  - **`MinecraftServerManager-self-contained.exe`（獨立自包含版）**：包含完整 .NET 10 Runtime 與所有必要原生函式庫，啟用微軟官方原生單檔壓縮（`EnableCompressionInSingleFile=true`）並僅保留繁體中文與英文之衛星資源組件（`SatelliteResourceLanguages`），具備最高穩定性與隨點即開特性
-  - **`MinecraftServerManager-framework-dependent.exe`（框架相依版）**：僅包含應用程式編譯中繼資料，體積極小，仰賴目標電腦安裝之 .NET 10 Desktop Runtime (x64)
+`scripts/dotnet_publish.ps1` 或 `dotnet publish` 皆產出相同的 `MinecraftServerManager.exe`，不需另裝 Windows App SDK 或 .NET。僅參照 `Microsoft.WindowsAppSDK.WinUI`、`.DWrite`、`.Runtime`（Base、Foundation、InteractiveExperiences 由 WinUI 帶入）。單檔屬性只定義於 `App.csproj`，不用第三方加殼。
 
-### 10. 執行期功能開關裁切（Feature Switches）
+**發布屬性**
 
-以下安全防護與功能開關全量集中宣告於 `MinecraftServerManager.App.csproj`（單一事實來源），確保所有途徑之發布產出皆維持一致：
+| 屬性 | 值 |
+|---|---|
+| `SelfContained`、`WindowsAppSDKSelfContained`、`PublishSingleFile`、`IncludeAllContentForSelfExtract`、`EnableCompressionInSingleFile` | `true` |
+| `PublishTrimmed` | `true`（`TrimMode=full`） |
+| `DebugType` | `none` |
 
-- `HttpActivityPropagationSupport=false`：停用 HttpClient 內部 OpenTelemetry 分散式追蹤
-- `MetricsSupport=false`：停用度量指標系統以降低資源負擔
-- `EnableUnsafeBinaryFormatterSerialization=false`、`EnableUnsafeUTF7Encoding=false`：徹底移除過時且具安全隱患的序列化與編碼邏輯
-- `StartupHookSupport=false`：停用外部啟動攔截掛鉤檢查，杜絕環境變數注入
-- `CustomResourceTypesSupport=false`：停用自訂資源型別序列化功能
-- `XmlResolverIsNetworkingEnabledByDefault=false`：停用 XML 外部網路解析器
-- `DebuggerSupport=false`：停用執行期除錯支援
-- `EventSourceSupport=false`：停用非必要之 EventSource 診斷記錄
-- `MetadataUpdaterSupport=false`：停用熱重載中繼資料更新機制
+**發布時排除**
 
-## 品質保證與建置自動化
+| 檔案／類別 | 理由 |
+|---|---|
+| WebView2、Bootstrap、背景工作、推播通知、`RestartAgent.exe`、MapControl 頁面 | 未使用的 Windows App SDK 元件 |
+| 獨立 `Microsoft.UI.Xaml.Controls.pri`、`packages.lock.json`、`app.manifest` | 發布不需要 |
+| `Microsoft.UI.Xaml.Phone.dll`、`Microsoft.UI.Designer.dll`、`DWriteCore.dll` | 下列已實測畫面皆未載入；文字繪製用系統 `DWrite.dll` |
+| 全部 `.winmd` | 型別中繼資料已由 CsWinRT 編入組件 |
+| 散放 `.xaml` | 已編譯為 `.pri` 內的 XBF |
+| 非 `zh-TW` 語系資源 | 只提供繁體中文 |
+| `System.Xml` | 程式未參照，由裁剪移除（Maven 中繼資料用 `[GeneratedRegex]`，XLSX 串流直寫） |
 
-專案透過自動化腳本實施嚴格門禁：
+**已實測未載入**（UIA 樹與模組清單同未裁剪版）：建立、管理、模組、關於與設定等主要畫面；Java 管理、JVM 參數、匯入伺服器、調色盤對話框。
 
-```bat
-# 執行品質門禁（隱私檢查、格式化驗證、Release 編譯品質分析、全量測試）
-pwsh -NoProfile -File scripts\dotnet_quality_gate.ps1
+啟動時 `AppCompositionRoot.WarmupAsync` 呼叫 `RuntimePaths.CleanupStaleSingleFileExtractDirectories`，清除 `%TEMP%\.net\MinecraftServerManager\` 下非目前執行個體的舊解壓資料夾。
 
-# 發布單一執行檔
-pwsh -NoProfile -File scripts\dotnet_publish.ps1
-```
+### 10. 建置與維護工具鏈
 
-- **隱私與安全檢查**：整合 Gitleaks 掃描原始程式碼中的金鑰與敏感資訊
-- **程式碼排版與分析**：強制執行 `dotnet format --verify-no-changes` 與 Roslyn Analyzers 靜態程式碼品質檢驗
-- **測試隔離原則**：測試案例不得發起真實公網請求、不得開啟互動對話方塊、不得建立全域 Windows 特殊路徑，所有檔案測試均限定於暫存目錄內執行
+- **`scripts/lib/Common.ps1`**：腳本共用入口（環境初始化、版本讀取、sha256sum 相容雜湊檔、`Invoke-SmokeTest`、Release 資產清單）；腳本與 workflow 不得重複實作。
+- **`scripts/dotnet_quality_gate.ps1`**：腳本編碼、版本單一事實來源（`App.csproj` 不得重複定義 `<Version>`）、Gitleaks（本機 `gitleaks dir`，CI 用 `gitleaks-action`）、還原、格式（本機自動修正，CI 強制無變更）、Release 建置（0 警告 0 錯誤）、全量測試。測試以 `Microsoft.Testing.Extensions.CodeCoverage` 收集 cobertura，結尾輸出行與分支涵蓋率（依「檔案＋行號」聯集，排除產生碼與測試碼，不設門檻）。
+- **`scripts/dotnet_publish.ps1`**：單檔發布、單一 exe 斷言、煙霧測試（`--smoke-test`，CI 以 `GITHUB_ACTIONS` 略過）、SHA-256；SLSA 證明由 CI 產生。
+- **`scripts/extract_release_notes.ps1`**：依 `Directory.Build.props` 版本完整比對擷取 `CHANGELOG.md` 章節（`2.2.1` 不誤配 `2.2.10`）。
+- **CI**：`ci-test.yml`（Gitleaks、品質門禁、涵蓋率上傳、`publish-check`〔發布與裁剪檢查；煙霧測試為實驗性，`continue-on-error`，視代管執行器是否有互動桌面〕）、`codeql.yml`（每週排程）、`oss-scorecard.yml`（每週排程）、`validate-renovate.yml`。
+- **發布（`build-release.yml`）**：僅限 `master` 手動觸發，預檢同一 commit 的 `CI` 與 `CodeQL Analysis (C#)` 已成功；資產為單檔 `.exe`、SLSA 證明（`.intoto.jsonl`）、SPDX 2.2 SBOM（Microsoft SBOM Tool，版本與 SHA-256 釘選）與各自 `.sha256`（`Get-ReleaseAssetNames`）。先建草稿 Release，端對端驗證 SHA-256 與 SLSA 後才公開；重跑清除未完成草稿，禁止覆蓋已公開版本。
+- **Renovate**：.NET 相依限 major 10，Windows App SDK 限 major 2，Windows SDK 套件限 `10.0.26100.*`；新版本滿 3 天才建 PR（安全修補除外）。
+
+### 11. 共用入口與架構規則（A1～A31）
+
+`SharedEntryArchitectureTests.cs` 以原始碼掃描強制執行下表（規則表 `Rules`，A9 為獨立測試）。掃描預設清除註解與字串；標「字串」者只清除註解。呼叫端一律使用統一入口，不得自建相似 helper 或直接呼叫底層 API；新增入口或例外須同步更新本表與測試白名單。路徑省略 `src/MinecraftServerManager.` 前綴。
+
+| 編號 | 規則 | 統一入口／要求 | 允許例外（白名單） |
+| --- | --- | --- | --- |
+| A1 | 檔案與目錄 I/O | `SafeFileSystem`（含 `GetAvailableFreeSpace`、受限走訪、唯讀屬性清除、`TryDeleteFile`、`ReadTailText`、`IsDirectoryEmpty`）、`AtomicFileWriter`；禁止 `File`、`Directory`、`FileInfo`、`DirectoryInfo`、`FileStream`、`DriveInfo` | `Infrastructure/FileSystem/`、`AtomicFileWriter`、`RotatingFileLoggerProvider`、`HttpDownloadClient`（續傳寫入） |
+| A2 | ZIP／JAR | `SafeZipArchive`（逐筆讀取 `ReadEntryBytesBounded`／`ReadEntryTextBounded`）；禁止 `ZipFile`、`new ZipArchive`、`ZipArchiveEntry.Open()` | `SafeZipArchive`、`OpenXmlSpreadsheetBuilder`（記憶體建立 XLSX） |
+| A3 | 外部行程 | `IProcessRunner`、`IExternalLauncher`；禁止 `Process.Start`、`new Process`、`ProcessStartInfo` | `ProcessRunner`（另實作 `IProcessInspector`） |
+| A4 | HTTP 用戶端 | `IHttpPort`；禁止 `new HttpClient`、`SocketsHttpHandler`、`HttpClientHandler` | `AppCompositionRoot` |
+| A5 | JSON | `JsonCodec` + `AppJsonSerializerContext`；禁止 `JsonSerializer`、`JsonDocument`、`new JsonSerializerOptions` | `JsonCodec`、`Core/Ports/IHttpPort.cs` |
+| A6 | 正規表示式 | `[GeneratedRegex]`；禁止 `new Regex(` 與 `Regex` 靜態方法 | 無 |
+| A7 | UI、對話框、選取器、計時器 | `IUiService`；檔案選取器以 `FileTypeChoice` 預設集合（Zip／Jar／JavaExecutable／Json／Html／Xlsx／Text，建構子私有）限定可選副檔名，不提供「所有檔案」；禁止 `MessageBoxW`、`FileOpenPicker`、`FileSavePicker`、`FolderPicker`、`DispatcherTimer`、`DispatcherQueueTimer`、`new ContentDialog` | `WinUiService`、`App.xaml.cs`、`MainWindow.xaml.cs`、`App/Views/` |
+| A8 | unsafe | `src/`、`tests/` 禁止 `unsafe` | 無（自動排除 `obj/`、`bin/`、`.g.cs`） |
+| A9 | 分層相依 | Domain 不參照任何專案、不 using `System.IO`／`System.Net`／`System.Diagnostics`；Core 僅參照 Domain、不 using `System.IO`／`System.Net.Http`／`System.Diagnostics`；Infrastructure 不參照 App | 無 |
+| A10 | ViewModel 邊界 | `App/ViewModels` 嚴禁持有原生 `Process` 實體 | 無 |
+| A11 | 雜湊 | `HashCalculator`（`TryResolveAlgorithm`、`IsHexDigest`）；禁止 `SHA256`、`SHA1`、`MD5`、`SHA512`、`IncrementalHash`、`HashAlgorithmName.`、`CryptographicOperations.HashData` | `HashCalculator`、`HttpDownloadClient`（串流同步計算） |
+| A12 | 記錄輸出 | `ComponentLogger`／`AppLogging`；禁止 `Console`、`Trace`、`Debug` 直接輸出 | 無 |
+| A13 | ViewModel 非同步 | 禁止裸 `_ = XxxAsync(` 與 `_ = Task.Run(`，統一使用 `ViewModelBase.RunSafeAsync` | 無 |
+| A14 | 系統提示音效 | `AudioFeedback`；禁止 `SystemSounds`、`SoundPlayer`、`MessageBeep` | `AudioFeedback` |
+| A15 | 日誌等級 | 禁止 `Debug`／`Trace` 等級（`Logger.Debug(`、`LogTrace(` 等） | 無 |
+| A16 | 視窗外觀與強調色 | `TitleBarThemeHelper`、`AccentColorService`、`ModalWindowHost`、`WindowIconHelper`；禁止 `AppWindowTitleBar`、`UISettings`、`SetWindowLongPtrW`、`LoadIconW` | 上述四個服務 |
+| A17 | 保留裝置名稱、模組檔名剝除（字串） | `ServerName.IsWindowsDeviceName`、`ModHelpers` | `Domain/ValueObjects/ServerName.cs`、`Core/Mods/ModHelpers.cs` |
+| A18 | 例外攔截 | 禁止無型別 `catch`；一律 `catch (Exception ex)` 或更具體型別 | 無 |
+| A19 | 模組副檔名判斷（字串） | `ModHelpers`（`IsJarFileName`、`IsModFileName`、`ToDisabledModFileName` 等） | `ModHelpers`、`Domain/Mods/OnlineModVersion.cs`（相依方向） |
+| A20 | Minecraft／PaperMC 版本中繼資料（字串） | `MojangVersionCatalog` 唯一持有版本快取檔名、Mojang Manifest（V2 優先）與 PaperMC 端點 | `MojangVersionCatalog` |
+| A21 | P/Invoke | `LibraryImport`／`DllImport` 僅限指定輔助類別 | `App.xaml.cs`、`AudioFeedback`、`ModalWindowHost`、`WindowIconHelper`、`WindowLayoutHelper` |
+| A22 | 系統資料夾路徑 | `RuntimePaths`；禁止 `Environment.GetFolderPath`、`Path.GetTempPath` | `RuntimePaths` |
+| A23 | 路徑 API | `Path.IsPathFullyQualified`、`Path.TrimEndingDirectorySeparator`、`Path.GetFullPath(path, basePath)`；禁止 `IsPathRooted` 與 `TrimEnd` 分隔字元 | `SafeZipArchive`（拒絕具根路徑項目） |
+| A24 | 進度轉接 | Core／Infrastructure 使用 `SynchronousProgress<T>`，禁止 `new Progress<T>` | 無 |
+| A25 | 表格排序 | `TableSortExtensions.SortBy` + `TableSortKeys` 型別化排序鍵（欄位名稱對應 `Func<T, object?>`，容量與下載量採原始數值；不使用反射）；欄寬自動調整經 `SortableTableHeader.AutoFit` + `SortKeyMap.WithDisplay` 顯示文字；禁止於呼叫端直接使用 `SortKeyComparer` | `NaturalSortHelper`、`TableSortExtensions` |
+| A26 | 暫存檔命名（字串） | `AtomicFileWriter.CreateTempSiblingPath`／`TempFileExtension` | `AtomicFileWriter` |
+| A27 | ANSI 清洗與記憶體參數（字串） | `ModHelpers.StripColorAndFormattingCodes`、`MemoryUtils`（`ApplyMemoryFlags`、`ResolveEffectiveMinMemoryMb`、`CheckServerMemory` 統一記憶體驗證） | `ModHelpers`、`Core/Utilities/MemoryUtils.cs` |
+| A28 | 載入器種類解析 | `LoaderKinds.TryParse`／`ParseOrDefault`；禁止 `Enum.TryParse<LoaderKind>` | `Domain/Servers/LoaderKinds.cs` |
+| A29 | 呈現層檔案 I/O | `App/ViewModels`、`App/Views` 經由 `ILocalFileSystem`、`IServerLogReader`、`IModFileService`、`IServersRootService`、`IServerBackupService`（備份摘要、目的地驗證、檔名產生）；禁止 `SafeFileSystem.`、`ModFileInstaller.`、`ServersRootRelocator.`、`PropertiesDocumentCodec.` | 無 |
+| A30 | 視窗尺寸 | `WindowLayoutHelper.ResizeToDip`（邏輯像素依視窗 DPI 換算實體像素）；禁止直接呼叫 `AppWindow.Resize` | `WindowLayoutHelper`、`MainWindow.xaml.cs`（還原使用者視窗大小） |
+| A31 | 頁面相依集合 | `PageServices` 僅供組合根與頁面工廠；ViewModel 宣告所需的個別相依 | `AppCompositionRoot`、`ViewModels/PageServices.cs`、`ViewModels/PageViewModelFactory.cs` |

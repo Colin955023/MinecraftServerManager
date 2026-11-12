@@ -2,6 +2,11 @@ namespace MinecraftServerManager.Infrastructure.Http;
 
 public sealed class HttpSecurityException : InvalidOperationException
 {
+    public HttpSecurityException()
+        : base()
+    {
+    }
+
     public HttpSecurityException(string message)
         : base(message)
     {

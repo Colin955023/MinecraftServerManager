@@ -20,8 +20,8 @@ jobs:
   analyze-csharp:
     name: CodeQL (C# / .NET 10)
     runs-on: windows-latest
+    timeout-minutes: 30
     env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       DOTNET_CLI_FORCE_UTF8_ENCODING: "1"
     permissions:
       security-events: write
@@ -40,11 +40,7 @@ jobs:
         with:
           global-json-file: global.json
           cache: true
-          cache-dependency-path: |
-            global.json
-            Directory.Packages.props
-            src/**/*.csproj
-            tests/**/*.csproj
+          cache-dependency-path: "**/packages.lock.json"
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
@@ -56,8 +52,7 @@ jobs:
       - name: Build Solution for CodeQL
         env:
           MSBUILDDISABLENODEREUSE: "1"
-          DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER: "1"
-        run: dotnet build src/MinecraftServerManager.App/MinecraftServerManager.App.csproj -c Release -p:UseSharedCompilation=false
+        run: dotnet build src/MinecraftServerManager.App/MinecraftServerManager.App.csproj -p:UseSharedCompilation=false
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3

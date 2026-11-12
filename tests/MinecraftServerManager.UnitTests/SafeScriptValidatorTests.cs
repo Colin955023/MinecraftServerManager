@@ -18,20 +18,14 @@ public sealed class SafeScriptValidatorTests
     [InlineData("chcp 65001 & calc > nul")]
     public void RejectsCommandChainingAndRedirectionEvenWithSafePrefix(string maliciousLine)
     {
-        string dir = CreateTempDirectory();
-        try
-        {
-            string script = Path.Combine(dir, "run.bat");
-            File.WriteAllText(script, maliciousLine);
+        using var dirTemp = new TempDirectory("msm-test-script-");
+        string dir = dirTemp.FullName;
+        string script = Path.Combine(dir, "run.bat");
+        File.WriteAllText(script, maliciousLine);
 
-            bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
+        bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
 
-            Assert.False(isValid);
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-        }
+        Assert.False(isValid);
     }
 
     [Theory]
@@ -40,85 +34,61 @@ public sealed class SafeScriptValidatorTests
     [InlineData("java -jar %USERPROFILE%\\server.jar")]
     public void RejectsUnsafeVariableExpansion(string unsafeLine)
     {
-        string dir = CreateTempDirectory();
-        try
-        {
-            string script = Path.Combine(dir, "run.bat");
-            File.WriteAllText(script, unsafeLine);
+        using var dirTemp = new TempDirectory("msm-test-script-");
+        string dir = dirTemp.FullName;
+        string script = Path.Combine(dir, "run.bat");
+        File.WriteAllText(script, unsafeLine);
 
-            bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
+        bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
 
-            Assert.False(isValid);
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-        }
+        Assert.False(isValid);
     }
 
     [Fact]
     public void RejectsPathTraversalInScript()
     {
-        string dir = CreateTempDirectory();
-        try
-        {
-            string script = Path.Combine(dir, "run.bat");
-            File.WriteAllText(script, "java @..\\outside.txt\r\n");
+        using var dirTemp = new TempDirectory("msm-test-script-");
+        string dir = dirTemp.FullName;
+        string script = Path.Combine(dir, "run.bat");
+        File.WriteAllText(script, "java @..\\outside.txt\r\n");
 
-            bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
+        bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
 
-            Assert.False(isValid);
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-        }
+        Assert.False(isValid);
     }
 
     [Fact]
     public void RejectsNonWhitelistedCommands()
     {
-        string dir = CreateTempDirectory();
-        try
-        {
-            string script = Path.Combine(dir, "run.bat");
-            File.WriteAllText(script, "powershell -Command Invoke-WebRequest http://evil.com\r\n");
+        using var dirTemp = new TempDirectory("msm-test-script-");
+        string dir = dirTemp.FullName;
+        string script = Path.Combine(dir, "run.bat");
+        File.WriteAllText(script, "powershell -Command Invoke-WebRequest http://evil.com\r\n");
 
-            bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
+        bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
 
-            Assert.False(isValid);
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-        }
+        Assert.False(isValid);
     }
 
     [Fact]
     public void AcceptsValidForgeAndNeoForgeLaunchScripts()
     {
-        string dir = CreateTempDirectory();
-        try
-        {
-            string script = Path.Combine(dir, "run.bat");
-            string validContent = """
-                REM Forge server start script
-                @echo off
-                chcp 65001
-                cd /d "%~dp0"
-                "C:\Program Files\Java\jdk-21\bin\java.exe" @user_jvm_args.txt @libraries/net/minecraftforge/forge/1.20.1/win_args.txt %*
-                pause
-                """;
-            File.WriteAllText(script, validContent);
+        using var dirTemp = new TempDirectory("msm-test-script-");
+        string dir = dirTemp.FullName;
+        string script = Path.Combine(dir, "run.bat");
+        string validContent = """
+            REM Forge server start script
+            @echo off
+            chcp 65001
+            cd /d "%~dp0"
+            "C:\Program Files\Java\jdk-21\bin\java.exe" @user_jvm_args.txt @libraries/net/minecraftforge/forge/1.20.1/win_args.txt %*
+            pause
+            """;
+        File.WriteAllText(script, validContent);
 
-            bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
+        bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
 
-            Assert.True(isValid);
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-        }
+        Assert.True(isValid);
     }
 
     [Theory]
@@ -127,26 +97,40 @@ public sealed class SafeScriptValidatorTests
     [InlineData("@chcp 65001 > nul")]
     public void AcceptsChcpNulRedirection(string chcpLine)
     {
-        string dir = CreateTempDirectory();
-        try
-        {
-            string script = Path.Combine(dir, "start_server.bat");
-            string content = $"""
-                @echo off
-                {chcpLine}
-                cd /d "%~dp0"
-                "C:\Java\bin\java.exe" -Xms1024M -Xmx2048M -jar "server.jar" nogui %*
-                """;
-            File.WriteAllText(script, content);
+        using var dirTemp = new TempDirectory("msm-test-script-");
+        string dir = dirTemp.FullName;
+        string script = Path.Combine(dir, "start_server.bat");
+        string content = $"""
+            @echo off
+            {chcpLine}
+            cd /d "%~dp0"
+            "C:\Java\bin\java.exe" -Xms1024M -Xmx2048M -jar "server.jar" nogui %*
+            """;
+        File.WriteAllText(script, content);
 
-            bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
+        bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
 
-            Assert.True(isValid);
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-        }
+        Assert.True(isValid);
+    }
+
+    [Theory]
+    [InlineData("-XX:OnError=calc.exe")]
+    [InlineData("-XX:OnOutOfMemoryError=calc.exe")]
+    [InlineData("-xx:onerror=calc.exe")]
+    [InlineData("-agentpath:C:/evil.dll")]
+    [InlineData("-agentlib:jdwp=transport=dt_socket")]
+    [InlineData("-Xbootclasspath/a:evil.jar")]
+    public void RejectsJvmOptionsThatExecuteExternalCommands(string jvmOption)
+    {
+        using var dirTemp = new TempDirectory("msm-test-script-");
+        string dir = dirTemp.FullName;
+        string script = Path.Combine(dir, "start_server.bat");
+        File.WriteAllText(script, $"""
+            @echo off
+            "C:\Java\bin\java.exe" -Xms1024M -Xmx2048M {jvmOption} -jar "server.jar" nogui %*
+            """);
+
+        Assert.False(SafeScriptValidator.ValidateScriptContent(script, dir));
     }
 
     [Theory]
@@ -156,52 +140,33 @@ public sealed class SafeScriptValidatorTests
     [InlineData("\"java.exe\" -jar server.jar")]
     public void RejectsUnqualifiedJavaCommands(string unqualifiedCommand)
     {
-        string dir = CreateTempDirectory();
-        try
-        {
-            string script = Path.Combine(dir, "unqualified.bat");
-            string content = $"""
-                @echo off
-                cd /d "%~dp0"
-                {unqualifiedCommand}
-                """;
-            File.WriteAllText(script, content);
+        using var dirTemp = new TempDirectory("msm-test-script-");
+        string dir = dirTemp.FullName;
+        string script = Path.Combine(dir, "unqualified.bat");
+        string content = $"""
+            @echo off
+            cd /d "%~dp0"
+            {unqualifiedCommand}
+            """;
+        File.WriteAllText(script, content);
 
-            bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
+        bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
 
-            Assert.False(isValid);
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-        }
+        Assert.False(isValid);
     }
 
     [Fact]
     public void RejectsScriptOutsideServerDirectory()
     {
-        string dir = CreateTempDirectory();
-        string outsideDir = CreateTempDirectory();
-        try
-        {
-            string script = Path.Combine(outsideDir, "outside.bat");
-            File.WriteAllText(script, "@echo off\r\njava -jar server.jar\r\n");
+        using var dirTemp = new TempDirectory("msm-test-script-");
+        string dir = dirTemp.FullName;
+        using var outsideDirTemp = new TempDirectory("msm-test-script-");
+        string outsideDir = outsideDirTemp.FullName;
+        string script = Path.Combine(outsideDir, "outside.bat");
+        File.WriteAllText(script, "@echo off\r\njava -jar server.jar\r\n");
 
-            bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
+        bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
 
-            Assert.False(isValid);
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-            Directory.Delete(outsideDir, recursive: true);
-        }
-    }
-
-    private static string CreateTempDirectory()
-    {
-        string path = Path.Combine(Path.GetTempPath(), "msm-test-script-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(path);
-        return path;
+        Assert.False(isValid);
     }
 }

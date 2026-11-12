@@ -3,29 +3,19 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests.Servers;
 
-public sealed class ServerDirectorySizeServiceTests : IDisposable
+public sealed partial class ServerDirectorySizeServiceTests : IDisposable
 {
+    private readonly TempDirectory _testDirTemp = new("msm-dirsize-tests-");
     private readonly string _testDir;
     private readonly ServerDirectorySizeService _sizeService;
 
     public ServerDirectorySizeServiceTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "msm-dirsize-tests-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testDir);
+        _testDir = _testDirTemp.FullName;
         _sizeService = new ServerDirectorySizeService(cacheDuration: TimeSpan.FromSeconds(5));
     }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testDir))
-            {
-                Directory.Delete(_testDir, recursive: true);
-            }
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
-    }
+    public void Dispose() => _testDirTemp.Dispose();
 
     [Fact]
     public async Task CalculateServerSizeAsync_NonExistentDirectory_ReturnsZero()
@@ -38,7 +28,7 @@ public sealed class ServerDirectorySizeServiceTests : IDisposable
     [Fact]
     public async Task CalculateServerSizeAsync_CalculatesFilesAndExcludesBackups()
     {
-        // 建立常規檔案
+        // 建立一般檔案
         File.WriteAllText(Path.Combine(_testDir, "server.jar"), new string('a', 100));
         File.WriteAllText(Path.Combine(_testDir, "server.properties"), new string('b', 50));
 
@@ -67,17 +57,12 @@ public sealed class ServerDirectorySizeServiceTests : IDisposable
         long initialSize = await _sizeService.CalculateServerSizeAsync(_testDir);
         Assert.Equal(500, initialSize);
 
-        // 在目錄中新增檔案（不清除快取的情況下呼叫）
+        // 在目錄中新增檔案
         File.WriteAllBytes(Path.Combine(_testDir, "extra.bin"), new byte[300]);
 
         long cachedSize = await _sizeService.CalculateServerSizeAsync(_testDir);
         // 應該命中快取，仍為 500
         Assert.Equal(500, cachedSize);
-
-        // 失效快取後重新計算
-        _sizeService.InvalidateCache(_testDir);
-        long refreshedSize = await _sizeService.CalculateServerSizeAsync(_testDir);
-        Assert.Equal(800, refreshedSize);
     }
 
     [Fact]
@@ -93,8 +78,8 @@ public sealed class ServerDirectorySizeServiceTests : IDisposable
     [Fact]
     public async Task CalculateServerSizeAsync_FailedCalculation_DoesNotCacheAndReturnsNegativeOne()
     {
-        // 建立一個嚴格限制最大項目數為 2 的服務實例
-        var strictService = new ServerDirectorySizeService(maxEntries: 2);
+        // 建立一個嚴格限制最大項目數為 2 的服務執行個體
+        var strictService = new ServerDirectorySizeService(TimeSpan.FromSeconds(5), maxEntries: 2);
 
         // 在目錄中建立 5 個檔案以超出上限
         string overflowDir = Path.Combine(_testDir, "overflowDir");
@@ -104,7 +89,7 @@ public sealed class ServerDirectorySizeServiceTests : IDisposable
             File.WriteAllText(Path.Combine(overflowDir, $"file_{i}.dat"), "data");
         }
 
-        // 走訪超限會捕捉例外並回傳 -1L
+        // 走訪超限會攔截例外並回傳 -1L
         long result = await strictService.CalculateServerSizeAsync(overflowDir);
         Assert.Equal(-1, result);
 

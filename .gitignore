@@ -6,14 +6,9 @@
 !.vscode/extensions.json
 *.code-workspace
 
-# Project runtime
-config.json
-/settings.json
+# 建置與發布產生的記錄、發行說明草稿
 *.log
-logs/
-temp/
-tmp/
-cache/
+release_notes.md
 
 # 敏感資料 / 本機憑證
 .env
@@ -45,8 +40,4 @@ TestResults/
 *.userosscache
 *.sln.docstates
 .artifacts/
-publish/
 output/
-*_wpftmp.csproj
-*_wpftmp.*
-.gitleaks.toml

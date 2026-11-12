@@ -2,19 +2,14 @@ using Microsoft.Extensions.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Logging;
 
-/// <summary>
-/// 應用程式記錄管理中心
-/// </summary>
+/// <summary>應用程式記錄管理中心</summary>
 public static class AppLogging
 {
     private static readonly Lock SyncRoot = new();
     private static RotatingFileLoggerProvider? _fileLoggerProvider;
-    private static LoggerExternalScopeProvider? _scopeProvider;
 
-    /// <summary>
-    /// 初始化應用程式記錄管線
-    /// </summary>
-    public static void Initialize(RotatingFileLoggerOptions? options = null)
+    /// <summary>初始化應用程式記錄管線</summary>
+    public static void Initialize()
     {
         lock (SyncRoot)
         {
@@ -23,17 +18,11 @@ public static class AppLogging
                 return;
             }
 
-            options ??= new RotatingFileLoggerOptions();
-
-            _scopeProvider = new LoggerExternalScopeProvider();
-            _fileLoggerProvider = new RotatingFileLoggerProvider(options);
-            _fileLoggerProvider.SetScopeProvider(_scopeProvider);
+            _fileLoggerProvider = new RotatingFileLoggerProvider(new RotatingFileLoggerOptions());
         }
     }
 
-    /// <summary>
-    /// 取得指定類別名稱之 ILogger
-    /// </summary>
+    /// <summary>取得指定類別名稱之 ILogger</summary>
     public static ILogger CreateLogger(string categoryName)
     {
         // 初始化檢查與建立記錄器必須在同一把鎖內完成，避免與 Shutdown 競態而使用到已釋放的工廠
@@ -44,30 +33,22 @@ public static class AppLogging
         }
     }
 
-    /// <summary>
-    /// 取得已綁定 component 之 ComponentLogger
-    /// </summary>
+    /// <summary>取得已繫結 component 之 ComponentLogger</summary>
     public static ComponentLogger CreateComponentLogger(string componentName)
     {
         var logger = CreateLogger(componentName);
         return new ComponentLogger(logger);
     }
 
-    /// <summary>
-    /// 關閉並清除記錄管線，確保檔案串流完成寫入與釋放
-    /// </summary>
-    public static void Shutdown()
+    /// <summary>目前寫入中的記錄檔完整路徑；記錄管線未初始化時為 null</summary>
+    public static string? CurrentLogFilePath
     {
-        lock (SyncRoot)
+        get
         {
-            try
+            lock (SyncRoot)
             {
-                _fileLoggerProvider?.Dispose();
-            }
-            finally
-            {
-                _fileLoggerProvider = null;
-                _scopeProvider = null;
+                string? path = _fileLoggerProvider?.CurrentFilePath;
+                return string.IsNullOrEmpty(path) ? null : path;
             }
         }
     }
