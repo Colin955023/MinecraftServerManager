@@ -249,7 +249,7 @@ public static class SafeFileSystem
     {
         byte[] bytes = ReadRegularFile(filePath, maxBytes)
             ?? throw new FileNotFoundException("找不到或無法安全讀取檔案", filePath);
-        return (encoding ?? Encoding.UTF8).GetString(bytes);
+        return encoding is null ? DecodeUtf8WithoutBom(bytes) : encoding.GetString(bytes);
     }
 
     public static string[] ReadAllLines(string filePath, Encoding? encoding = null, long maxBytes = 16L * 1024 * 1024)

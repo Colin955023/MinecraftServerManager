@@ -253,6 +253,9 @@ public sealed class SafeFileSystemTests
         await File.WriteAllBytesAsync(path, [.. Encoding.UTF8.GetPreamble(), .. "內容"u8.ToArray()], TestContext.Current.CancellationToken);
 
         Assert.Equal("內容", await SafeFileSystem.ReadAllTextAsync(path, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal("內容", SafeFileSystem.ReadAllText(path));
+        Assert.Throws<IOException>(() => SafeFileSystem.ReadAllText(path, maxBytes: 2));
+        Assert.Throws<FileNotFoundException>(() => SafeFileSystem.ReadAllText(temp.Combine("missing.txt")));
         await Assert.ThrowsAsync<IOException>(() => SafeFileSystem.ReadAllTextAsync(path, maxBytes: 2, cancellationToken: TestContext.Current.CancellationToken));
         await Assert.ThrowsAsync<FileNotFoundException>(() => SafeFileSystem.ReadAllTextAsync(temp.Combine("missing.txt"), cancellationToken: TestContext.Current.CancellationToken));
         await Assert.ThrowsAsync<FileNotFoundException>(() => SafeFileSystem.ReadAllTextAsync(temp.FullName, cancellationToken: TestContext.Current.CancellationToken));

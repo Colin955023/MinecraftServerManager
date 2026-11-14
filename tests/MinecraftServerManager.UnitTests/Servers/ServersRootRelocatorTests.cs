@@ -124,6 +124,42 @@ public sealed class ServersRootRelocatorTests : IDisposable
     }
 
     [Fact]
+    public void RelocateAllContent_WhenLaterItemCanceledAfterLeftover_RestoresDeletedFilesToSource()
+    {
+        string oldRoot = Root("old");
+        string newRoot = Path.Combine(Root("new"), "servers");
+        string alpha = Path.Combine(oldRoot, "Alpha");
+        string lockedFile = Path.Combine(alpha, "z-sub", "locked.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(lockedFile)!);
+        File.WriteAllText(Path.Combine(alpha, "world.txt"), "data");
+        File.WriteAllText(lockedFile, "locked");
+        Directory.CreateDirectory(Path.Combine(oldRoot, "Beta"));
+        File.WriteAllText(Path.Combine(oldRoot, "Beta", "beta.txt"), "beta");
+        Directory.CreateDirectory(Path.Combine(oldRoot, "Gamma"));
+
+        using var cts = new CancellationTokenSource();
+        int reports = 0;
+        var progress = new SynchronousProgress<(int Percent, string Message)>(_ =>
+        {
+            // 第二次回報時（Alpha 已搬移且原位置殘留）要求取消，下一輪迴圈擲出並觸發復原
+            if (++reports == 2)
+            {
+                cts.Cancel();
+            }
+        });
+
+        using (new FileStream(lockedFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            Assert.Throws<OperationCanceledException>(() => ServersRootRelocator.RelocateAllContent(oldRoot, newRoot, progress, cts.Token));
+        }
+
+        Assert.Equal("data", File.ReadAllText(Path.Combine(alpha, "world.txt")));
+        Assert.Equal("locked", File.ReadAllText(lockedFile));
+        Assert.Equal("beta", File.ReadAllText(Path.Combine(oldRoot, "Beta", "beta.txt")));
+        Assert.False(Directory.Exists(Path.Combine(newRoot, "Alpha")));
+    }
+
+    [Fact]
     public void RelocateAllContent_RejectsNonEmptyTarget()
     {
         string oldRoot = Root("old");

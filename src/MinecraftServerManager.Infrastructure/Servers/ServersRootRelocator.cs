@@ -162,15 +162,15 @@ public static class ServersRootRelocator
             for (int i = movedItems.Count - 1; i >= 0; i--)
             {
                 var (DestPath, SourcePath, IsDirectory) = movedItems[i];
-                if (leftovers.Contains(SourcePath))
-                {
-                    // 原位置已半刪且仍被占用，搬回會覆寫失敗；完整副本留在新位置
-                    Logger.Warning("項目無法復原至原位置，完整副本保留於: {DestPath}", DestPath);
-                    continue;
-                }
-
                 try
                 {
+                    if (leftovers.Contains(SourcePath))
+                    {
+                        // 原位置已半刪且仍被占用，不能整個搬回；只補回已被刪除的檔案
+                        RestoreLeftoverDirectory(DestPath, SourcePath);
+                        continue;
+                    }
+
                     if (IsDirectory ? SafeFileSystem.DirectoryExists(DestPath) : SafeFileSystem.FileExists(DestPath))
                     {
                         // 復原不可沿用可能已取消的權杖，否則跨磁碟項目會留在新位置
@@ -185,6 +185,30 @@ public static class ServersRootRelocator
 
             throw;
         }
+    }
+
+    /// <summary>將新位置的完整副本補回半刪的原目錄（已存在者不覆寫），完成後刪除新位置</summary>
+    private static void RestoreLeftoverDirectory(string destPath, string sourcePath)
+    {
+        if (!SafeFileSystem.DirectoryExists(destPath))
+        {
+            return;
+        }
+
+        foreach (var entry in SafeFileSystem.EnumerateBoundedTree(destPath, rejectReparse: true).ToList())
+        {
+            string target = Path.Combine(sourcePath, Path.GetRelativePath(destPath, entry.FullPath));
+            if (entry.IsDirectory)
+            {
+                SafeFileSystem.ResolveStableDirectory(target, create: true);
+            }
+            else if (!SafeFileSystem.FileExists(target))
+            {
+                SafeFileSystem.CopyFile(entry.FullPath, target, overwrite: false);
+            }
+        }
+
+        SafeFileSystem.DeleteDirectory(destPath, recursive: true);
     }
 
     /// <summary>原根目錄已空則刪除</summary>

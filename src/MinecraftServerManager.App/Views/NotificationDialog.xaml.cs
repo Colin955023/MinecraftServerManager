@@ -5,7 +5,7 @@ using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>具備自主倒數、滑鼠暫停功能的 錯誤對話方塊</summary>
+/// <summary>具備自主倒數、滑鼠暫停功能的錯誤對話方塊</summary>
 public sealed partial class NotificationDialog : ContentDialog, INotifyPropertyChanged
 {
     private static readonly PropertyChangedEventArgs ButtonTextChangedArgs = new(nameof(ButtonText));
