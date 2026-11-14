@@ -3,12 +3,11 @@ using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Servers;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-/// <summary>伺服器監控視窗 ViewModel 測試（驗證紀錄限制、重新整理清空後重新載入與玩家名單解析）</summary>
-public sealed partial class ServerMonitorViewModelTests : IDisposable
+/// <summary>監控視窗 ViewModel 測試</summary>
+public sealed class ServerMonitorViewModelTests : IDisposable
 {
     private readonly TempDirectory _tempRootTemp = new("msm-monitor-test-");
     private readonly string _tempRoot;

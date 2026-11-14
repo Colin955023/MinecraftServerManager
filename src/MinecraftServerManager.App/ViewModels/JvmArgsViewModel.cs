@@ -104,7 +104,7 @@ public sealed partial class JvmArgsViewModel : ObservableObject
         CustomArgsText = string.Empty;
     }
 
-    /// <summary>最近一次 <see cref="GetFinalJvmArgs"/> 因可執行外部命令而被排除的自訂參數</summary>
+    /// <summary>上次 <see cref="GetFinalJvmArgs"/> 排除的自訂參數</summary>
     public IReadOnlyList<string> RejectedArgs { get; private set; } = [];
 
     /// <summary>取得使用者勾選與自訂的最終 JVM 參數清單（排除可執行外部命令的選項）</summary>

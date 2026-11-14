@@ -95,18 +95,12 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         string? savedAccent = _settingsManager.GetCustomAccentColor();
         if (!string.IsNullOrWhiteSpace(savedAccent) && AccentColorService.ParseColor(savedAccent) is Windows.UI.Color parsed)
         {
-            CustomAccentColor = savedAccent;
-            CurrentAccentColor = parsed;
-            IsCustomAccentColor = true;
-            AccentColorSummaryText = $"自訂顏色：{savedAccent}";
-            AccentColorService.ApplyAccentColor(savedAccent);
+            // 強調色已於啟動時套用，此處只同步顯示狀態
+            ApplyAccentState(savedAccent, parsed);
         }
         else
         {
-            CustomAccentColor = null;
-            CurrentAccentColor = AccentColorService.GetSystemAccentColor();
-            IsCustomAccentColor = false;
-            AccentColorSummaryText = "使用 Windows 系統強調色（預設）";
+            ApplyAccentState(null, AccentColorService.GetSystemAccentColor());
         }
     }
 
@@ -131,9 +125,9 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     private static readonly string[] ThemeModesCache = ["依照系統設定", "淺色", "深色"];
     public static IReadOnlyList<string> ThemeModes => ThemeModesCache;
 
-    partial void OnIsAutoUpdateEnabledChanged(bool value) => _settingsManager.SetAutoUpdateEnabled(value);
+    partial void OnIsAutoUpdateEnabledChanged(bool value) => TrySave(() => _settingsManager.SetAutoUpdateEnabled(value));
 
-    partial void OnIsAutoBackupBeforeStartEnabledChanged(bool value) => _settingsManager.SetAutoBackupBeforeStartEnabled(value);
+    partial void OnIsAutoBackupBeforeStartEnabledChanged(bool value) => TrySave(() => _settingsManager.SetAutoBackupBeforeStartEnabled(value));
 
     partial void OnBackupRetentionCountChanged(double value)
     {
@@ -150,7 +144,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
             return;
         }
 
-        _settingsManager.SetBackupRetentionCount(rounded);
+        TrySave(() => _settingsManager.SetBackupRetentionCount(rounded));
     }
 
     partial void OnSelectedThemeModeIndexChanged(int value)
@@ -162,7 +156,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
             _ => "system",
         };
 
-        _settingsManager.SetThemeMode(mode);
+        TrySave(() => _settingsManager.SetThemeMode(mode));
         _onThemeModeChanged(mode);
     }
 
@@ -333,8 +327,8 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         SelectedThemeModeIndex = 0;
         ResetAccentColor();
 
-        _settingsManager.SetAutoUpdateEnabled(true);
-        _settingsManager.SetThemeMode("system");
+        TrySave(() => _settingsManager.SetAutoUpdateEnabled(true));
+        TrySave(() => _settingsManager.SetThemeMode("system"));
         _onThemeModeChanged("system");
         _onResetWindowSizeRequested();
     }
@@ -342,23 +336,39 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     public void SelectAccentColor(Windows.UI.Color color)
     {
         string hex = AccentColorService.ToHex(color);
-        CustomAccentColor = hex;
-        CurrentAccentColor = color;
-        IsCustomAccentColor = true;
-        AccentColorSummaryText = $"自訂顏色：{hex}";
-        _settingsManager.SetCustomAccentColor(hex);
+        ApplyAccentState(hex, color);
+        TrySave(() => _settingsManager.SetCustomAccentColor(hex));
         AccentColorService.ApplyAccentColor(hex);
     }
 
     [RelayCommand]
     public void ResetAccentColor()
     {
-        CustomAccentColor = null;
-        CurrentAccentColor = AccentColorService.GetSystemAccentColor();
-        IsCustomAccentColor = false;
-        AccentColorSummaryText = "使用 Windows 系統強調色（預設）";
-        _settingsManager.SetCustomAccentColor(null);
+        ApplyAccentState(null, AccentColorService.GetSystemAccentColor());
+        TrySave(() => _settingsManager.SetCustomAccentColor(null));
         AccentColorService.ApplyAccentColor(null);
     }
 
+    /// <summary>寫入設定；失敗時記錄並通知</summary>
+    private void TrySave(Action save)
+    {
+        try
+        {
+            save();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.Error(ex, "儲存設定失敗");
+            _ui.Notify($"儲存設定失敗：{ex.Message}", NotificationType.Error);
+        }
+    }
+
+    /// <summary>更新強調色顯示狀態；hex 為 null 表示使用系統色</summary>
+    private void ApplyAccentState(string? hex, Windows.UI.Color color)
+    {
+        CustomAccentColor = hex;
+        CurrentAccentColor = color;
+        IsCustomAccentColor = hex is not null;
+        AccentColorSummaryText = hex is null ? "使用 Windows 系統強調色（預設）" : $"自訂顏色：{hex}";
+    }
 }

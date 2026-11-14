@@ -10,7 +10,7 @@ public sealed record SourceViolation(
     string RuleId,
     string Message);
 
-/// <summary>提供原始碼文字掃描、註解/字串清洗與架構違規偵測之共用工具</summary>
+/// <summary>原始碼文字掃描、註解/字串清洗與架構違規偵測之共用工具</summary>
 public static class SourceScanner
 {
     private static readonly Lazy<string> SolutionRootLazy = new(ResolveSolutionRoot);
@@ -41,7 +41,7 @@ public static class SourceScanner
         throw new InvalidOperationException($"無法自路徑 '{AppContext.BaseDirectory}' 向上定位專案儲存庫根目錄。");
     }
 
-    /// <summary>取得指定相對目錄下所有 C# 原始碼檔案（排除 bin、obj 及產生之原始碼）</summary>
+    /// <summary>取得目錄下的 C# 原始碼（排除 bin、obj 與產生碼）</summary>
     public static IReadOnlyList<(string RelativePath, string FullPath)> GetSourceFiles(string relativeDirectory)
     {
         string fullDirectory = Path.Combine(SolutionRoot, relativeDirectory);
@@ -111,347 +111,146 @@ public static class SourceScanner
 
         while (i < len)
         {
+            int start = i;
             char c = chars[i];
             char next = i + 1 < len ? chars[i + 1] : '\0';
 
-            // 1. 單行註解 //
-            if (c == '/' && next == '/')
+            // 註解：單行 // 止於換行，多行 /* */ 止於 */（未結束則至檔尾）
+            if (c == '/' && next is '/' or '*')
             {
-                int commentStart = i;
-                chars[i] = ' ';
-                chars[i + 1] = ' ';
-                i += 2;
-                while (i < len && chars[i] != '\n')
-                {
-                    if (chars[i] != '\r')
-                    {
-                        chars[i] = ' ';
-                    }
-
-                    i++;
-                }
-
-                commentRanges?.Add((commentStart, i));
+                int end = sourceCode.IndexOf(next == '/' ? "\n" : "*/", next == '/' ? i : i + 2, StringComparison.Ordinal);
+                end = end >= 0 && next == '*' ? end + 2 : end;
+                i = end < 0 ? len : end;
+                Blank(chars, start, i);
+                commentRanges?.Add((start, i));
                 continue;
             }
 
-            // 2. 多行註解 /* ... */
-            if (c == '/' && next == '*')
-            {
-                int commentStart = i;
-                chars[i] = ' ';
-                chars[i + 1] = ' ';
-                i += 2;
-                while (i < len)
-                {
-                    if (chars[i] == '*' && i + 1 < len && chars[i + 1] == '/')
-                    {
-                        chars[i] = ' ';
-                        chars[i + 1] = ' ';
-                        i += 2;
-                        break;
-                    }
-
-                    if (chars[i] is not '\r' and not '\n')
-                    {
-                        chars[i] = ' ';
-                    }
-
-                    i++;
-                }
-
-                commentRanges?.Add((commentStart, i));
-                continue;
-            }
-
-            // 3. 原始字串字面值（Raw string literals C# 11+）：以至少三個引號開頭（可前綴 $）
-            bool isRawInterpolated = c == '$' && next == '"' && i + 2 < len && chars[i + 2] == '"';
-            bool isRawNormal = c == '"' && next == '"' && i + 2 < len && chars[i + 2] == '"';
-
-            if (isRawInterpolated || isRawNormal)
-            {
-                int startQuotePos = isRawInterpolated ? i + 1 : i;
-                int quoteCount = 0;
-                while (startQuotePos + quoteCount < len && chars[startQuotePos + quoteCount] == '"')
-                {
-                    quoteCount++;
-                }
-
-                for (int k = i; k < startQuotePos + quoteCount; k++)
-                {
-                    chars[k] = ' ';
-                }
-
-                i = startQuotePos + quoteCount;
-
-                while (i < len)
-                {
-                    if (chars[i] == '"')
-                    {
-                        int endCount = 0;
-                        while (i + endCount < len && chars[i + endCount] == '"')
-                        {
-                            endCount++;
-                        }
-
-                        if (endCount >= quoteCount)
-                        {
-                            for (int k = 0; k < endCount; k++)
-                            {
-                                chars[i + k] = ' ';
-                            }
-
-                            i += endCount;
-                            break;
-                        }
-
-                        for (int k = 0; k < endCount; k++)
-                        {
-                            chars[i + k] = ' ';
-                        }
-
-                        i += endCount;
-                        continue;
-                    }
-
-                    if (chars[i] is not '\r' and not '\n')
-                    {
-                        chars[i] = ' ';
-                    }
-
-                    i++;
-                }
-
-                continue;
-            }
-
-            // 4. 逐字字串：@"..." 或 $@"... / @$"..."
-            bool isVerbatimInterpolated = (c == '$' && next == '@' && i + 2 < len && chars[i + 2] == '"') ||
-                                         (c == '@' && next == '$' && i + 2 < len && chars[i + 2] == '"');
-            bool isVerbatimNormal = c == '@' && next == '"';
-
-            if (isVerbatimInterpolated || isVerbatimNormal)
-            {
-                int quotePos = isVerbatimInterpolated ? i + 2 : i + 1;
-                bool isInterpolated = isVerbatimInterpolated;
-                for (int k = i; k <= quotePos; k++)
-                {
-                    chars[k] = ' ';
-                }
-
-                i = quotePos + 1;
-
-                while (i < len)
-                {
-                    if (chars[i] == '"')
-                    {
-                        if (i + 1 < len && chars[i + 1] == '"')
-                        {
-                            chars[i] = ' ';
-                            chars[i + 1] = ' ';
-                            i += 2;
-                            continue;
-                        }
-
-                        chars[i] = ' ';
-                        i++;
-                        break;
-                    }
-
-                    // 逐字插值字串中的運算式處理
-                    if (isInterpolated && chars[i] == '{')
-                    {
-                        if (i + 1 < len && chars[i + 1] == '{')
-                        {
-                            chars[i] = ' ';
-                            chars[i + 1] = ' ';
-                            i += 2;
-                            continue;
-                        }
-
-                        chars[i] = ' ';
-                        i++;
-                        int braceLevel = 1;
-                        while (i < len && braceLevel > 0)
-                        {
-                            if (chars[i] == '{')
-                            {
-                                braceLevel++;
-                            }
-                            else if (chars[i] == '}')
-                            {
-                                braceLevel--;
-                                if (braceLevel == 0)
-                                {
-                                    chars[i] = ' ';
-                                    i++;
-                                    break;
-                                }
-                            }
-
-                            i++;
-                        }
-
-                        continue;
-                    }
-
-                    if (chars[i] is not '\r' and not '\n')
-                    {
-                        chars[i] = ' ';
-                    }
-
-                    i++;
-                }
-
-                continue;
-            }
-
-            // 5. 一般插值字串：$"..."
-            if (c == '$' && next == '"')
-            {
-                chars[i] = ' ';
-                chars[i + 1] = ' ';
-                i += 2;
-
-                while (i < len)
-                {
-                    if (chars[i] == '\\' && i + 1 < len)
-                    {
-                        chars[i] = ' ';
-                        chars[i + 1] = ' ';
-                        i += 2;
-                        continue;
-                    }
-
-                    if (chars[i] == '"')
-                    {
-                        chars[i] = ' ';
-                        i++;
-                        break;
-                    }
-
-                    if (chars[i] == '{')
-                    {
-                        if (i + 1 < len && chars[i + 1] == '{')
-                        {
-                            chars[i] = ' ';
-                            chars[i + 1] = ' ';
-                            i += 2;
-                            continue;
-                        }
-
-                        chars[i] = ' ';
-                        i++;
-                        int braceLevel = 1;
-                        while (i < len && braceLevel > 0)
-                        {
-                            if (chars[i] == '{')
-                            {
-                                braceLevel++;
-                            }
-                            else if (chars[i] == '}')
-                            {
-                                braceLevel--;
-                                if (braceLevel == 0)
-                                {
-                                    chars[i] = ' ';
-                                    i++;
-                                    break;
-                                }
-                            }
-
-                            i++;
-                        }
-
-                        continue;
-                    }
-
-                    if (chars[i] is not '\r' and not '\n')
-                    {
-                        chars[i] = ' ';
-                    }
-
-                    i++;
-                }
-
-                continue;
-            }
-
-            // 6. 一般字串字面值："..."
-            if (c == '"')
-            {
-                chars[i] = ' ';
-                i++;
-                while (i < len)
-                {
-                    if (chars[i] == '\\' && i + 1 < len)
-                    {
-                        chars[i] = ' ';
-                        chars[i + 1] = ' ';
-                        i += 2;
-                        continue;
-                    }
-
-                    if (chars[i] == '"')
-                    {
-                        chars[i] = ' ';
-                        i++;
-                        break;
-                    }
-
-                    if (chars[i] is not '\r' and not '\n')
-                    {
-                        chars[i] = ' ';
-                    }
-
-                    i++;
-                }
-
-                continue;
-            }
-
-            // 7. 字元字面值：'...'
+            // 字元字面值
             if (c == '\'')
             {
-                chars[i] = ' ';
-                i++;
-                while (i < len)
-                {
-                    if (chars[i] == '\\' && i + 1 < len)
-                    {
-                        chars[i] = ' ';
-                        chars[i + 1] = ' ';
-                        i += 2;
-                        continue;
-                    }
-
-                    if (chars[i] == '\'')
-                    {
-                        chars[i] = ' ';
-                        i++;
-                        break;
-                    }
-
-                    if (chars[i] is not '\r' and not '\n')
-                    {
-                        chars[i] = ' ';
-                    }
-
-                    i++;
-                }
-
+                i = SkipQuoted(chars, i + 1, '\'', verbatim: false, interpolated: false);
+                Blank(chars, start, start + 1);
                 continue;
             }
 
-            i++;
+            // 字串：前綴 $ 與 @ 任意組合，另含原始字串（三個以上引號）
+            int quote = i;
+            while (quote < len && quote < i + 2 && chars[quote] is '$' or '@')
+            {
+                quote++;
+            }
+
+            if (quote >= len || chars[quote] != '"')
+            {
+                i++;
+                continue;
+            }
+
+            ReadOnlySpan<char> prefix = chars.AsSpan(i, quote - i);
+            bool verbatim = prefix.Contains('@');
+            bool interpolated = prefix.Contains('$');
+            int quoteRun = CountRun(chars, quote);
+            if (!verbatim && quoteRun >= 3)
+            {
+                i = quote + quoteRun;
+                while (i < len)
+                {
+                    int run = chars[i] == '"' ? CountRun(chars, i) : 0;
+                    i += Math.Max(run, 1);
+                    if (run >= quoteRun)
+                    {
+                        break;
+                    }
+                }
+
+                Blank(chars, start, i);
+                continue;
+            }
+
+            Blank(chars, start, quote + 1);
+            i = SkipQuoted(chars, quote + 1, '"', verbatim, interpolated);
         }
 
         return new string(chars);
     }
 
+    /// <summary>將範圍內除換行外的字元改為空白</summary>
+    private static void Blank(char[] chars, int start, int end)
+    {
+        for (int k = start; k < end; k++)
+        {
+            if (chars[k] is not '\r' and not '\n')
+            {
+                chars[k] = ' ';
+            }
+        }
+    }
+
+    private static int CountRun(char[] chars, int index)
+    {
+        int count = 0;
+        while (index + count < chars.Length && chars[index + count] == chars[index])
+        {
+            count++;
+        }
+
+        return count;
+    }
+
+    /// <summary>清除自開頭引號之後至結尾引號（含）的內容，回傳其後位置；插值運算式 {…} 保留原文</summary>
+    private static int SkipQuoted(char[] chars, int i, char quote, bool verbatim, bool interpolated)
+    {
+        int len = chars.Length;
+        while (i < len)
+        {
+            char c = chars[i];
+            bool doubled = i + 1 < len && chars[i + 1] == c;
+            if (!verbatim && c == '\\' && i + 1 < len)
+            {
+                Blank(chars, i, i + 2);
+                i += 2;
+            }
+            else if (c == quote && verbatim && doubled)
+            {
+                Blank(chars, i, i + 2);
+                i += 2;
+            }
+            else if (c == quote)
+            {
+                chars[i] = ' ';
+                return i + 1;
+            }
+            else if (interpolated && c == '{' && doubled)
+            {
+                Blank(chars, i, i + 2);
+                i += 2;
+            }
+            else if (interpolated && c == '{')
+            {
+                chars[i++] = ' ';
+                for (int depth = 1; i < len && depth > 0; i++)
+                {
+                    depth += chars[i] == '{' ? 1 : chars[i] == '}' ? -1 : 0;
+                    if (depth == 0)
+                    {
+                        chars[i] = ' ';
+                    }
+                }
+            }
+            else
+            {
+                Blank(chars, i, i + 1);
+                i++;
+            }
+        }
+
+        return i;
+    }
+
     private static readonly ConcurrentDictionary<(string Path, bool PreserveStrings), (string[] Original, string[] Stripped)> LineCache = new();
 
-    /// <summary>對目標檔案清單進行正規表示式違規掃描（preserveStrings=true 時僅移除註解並保留字串內容）</summary>
+    /// <summary>以正規表示式掃描違規</summary>
     public static List<SourceViolation> ScanViolations(
         IEnumerable<(string RelativePath, string FullPath)> files,
         Regex pattern,

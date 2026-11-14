@@ -17,7 +17,7 @@ internal static class ServerSetupHelpers
         "start", "run", "server", "launch", "startserver", "serverstart", "minecraft_server", "play"
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>在伺服器目錄中只保留標準 start_server.bat，清理其他多餘的 .bat、.ps1 與 .sh 啟動腳本。</summary>
+    /// <summary>只保留 start_server.bat，清除其他啟動腳本</summary>
     internal static void CleanupRedundantStartupScripts(string directory)
     {
         if (!SafeFileSystem.DirectoryExists(directory))
@@ -70,7 +70,7 @@ internal static class ServerSetupHelpers
         }
     }
 
-    /// <summary>依偵測結果建立伺服器設定；無法辨識 Minecraft 版本時沿用預設 1.20.4</summary>
+    /// <summary>依偵測結果建立伺服器設定；無法辨識版本時用預設值</summary>
     internal static ServerConfig CreateConfigFromInspection(ServerName name, LoaderKind loader, ServerInspection inspection, string path) => new(
         name: name,
         minecraftVersion: MinecraftVersion.TryParse(inspection.MinecraftVersion, out var version) ? version : MinecraftVersion.Parse("1.20.4"),
@@ -80,7 +80,7 @@ internal static class ServerSetupHelpers
         memoryMinMb: inspection.MemoryMinMb,
         path: path);
 
-    /// <summary>檢查目標磁碟可用空間是否足夠。</summary>
+    /// <summary>目標磁碟可用空間是否足夠</summary>
     internal static string? CheckFreeSpace(string directory, long requiredBytes)
     {
         long? freeSpace = SafeFileSystem.GetAvailableFreeSpace(directory);

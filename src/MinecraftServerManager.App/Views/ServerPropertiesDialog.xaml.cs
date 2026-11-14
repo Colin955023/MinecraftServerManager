@@ -5,7 +5,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>伺服器屬性設定視窗（原生模態視窗，透過 ModalWindowHost 裝載）</summary>
+/// <summary>伺服器屬性設定視窗</summary>
 public sealed partial class ServerPropertiesDialog : Window
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerPropertiesDialog));
@@ -22,7 +22,7 @@ public sealed partial class ServerPropertiesDialog : Window
         ViewModel.RequestClose += success =>
         {
             DialogResult = success;
-            // 延後至 async 命令完成後再關閉，避免命令結束時更新已關閉視窗的按鈕狀態造成原生閃退
+            // 延後關閉，避免命令結束時更新已關閉視窗而閃退
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, CloseAfterSave);
         };
 
@@ -34,7 +34,7 @@ public sealed partial class ServerPropertiesDialog : Window
             Logger);
     }
 
-    /// <summary>先停止 x:Bind 追蹤並解除清單資料來源，再關閉視窗，避免拆除視覺樹時繫結回寫已釋放的控制項</summary>
+    /// <summary>先解除繫結與清單資料來源再關閉視窗</summary>
     private void CloseAfterSave()
     {
         try

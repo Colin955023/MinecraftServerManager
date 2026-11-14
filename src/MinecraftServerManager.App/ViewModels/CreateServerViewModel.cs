@@ -7,16 +7,23 @@ using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Core.Loaders;
 
 namespace MinecraftServerManager.App.ViewModels;
 
 /// <summary>建立伺服器頁面 ViewModel</summary>
-public sealed partial class CreateServerViewModel : PageViewModel
+public sealed partial class CreateServerViewModel : PageViewModel, IDisposable
 {
     private readonly IUiService _ui;
 
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(CreateServerViewModel));
-    private static readonly string[] NoAvailableVersions = ["無可用版本"];
+    private const string NoAvailableVersion = "無可用版本";
+    private static readonly string[] NoAvailableVersions = [NoAvailableVersion];
+    private const string DefaultLoader = "Paper";
+    private const string VersionOperationCancelled = "版本與參數設定操作已取消";
+    private static readonly string DefaultMinMemoryText = ServerDefaults.DefaultMemoryMinMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    private static readonly string DefaultMaxMemoryText = ServerDefaults.DefaultMemoryMaxMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    private readonly SerialCancellation _versionFetch = new();
     private readonly IJavaRuntimeDetector _javaDetector;
     private readonly IMinecraftJavaRequirementService _javaRequirementService;
     private readonly IJavaInstaller _javaInstaller;
@@ -41,10 +48,10 @@ public sealed partial class CreateServerViewModel : PageViewModel
     public partial string JavaPath { get; set; } = string.Empty;
 
     [ObservableProperty]
-    public partial string SelectedLoader { get; set; } = "Paper";
+    public partial string SelectedLoader { get; set; } = DefaultLoader;
 
     [ObservableProperty]
-    public partial string SelectedLoaderVersion { get; set; } = "最新穩定版 (Paper)";
+    public partial string SelectedLoaderVersion { get; set; } = LatestStableVersionText(DefaultLoader);
 
     [ObservableProperty]
     public partial bool IsLoaderVersionEnabled { get; set; } = true;
@@ -62,10 +69,10 @@ public sealed partial class CreateServerViewModel : PageViewModel
     public partial string SelectedMinecraftVersion { get; set; } = string.Empty;
 
     [ObservableProperty]
-    public partial string MinMemoryMb { get; set; } = ServerDefaults.DefaultMemoryMinMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    public partial string MinMemoryMb { get; set; } = DefaultMinMemoryText;
 
     [ObservableProperty]
-    public partial string MaxMemoryMb { get; set; } = ServerDefaults.DefaultMemoryMaxMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    public partial string MaxMemoryMb { get; set; } = DefaultMaxMemoryText;
 
     [ObservableProperty]
     public partial string MemoryWarningText { get; set; } = string.Empty;
@@ -74,7 +81,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
     public partial bool IsMemoryError { get; set; }
 
     [ObservableProperty]
-    public partial string JvmArgsSummary { get; set; } = "使用系統建議 JVM 參數 (G1GC)";
+    public partial string JvmArgsSummary { get; set; } = string.Empty;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(CreateServerCommand))]
@@ -124,13 +131,12 @@ public sealed partial class CreateServerViewModel : PageViewModel
         _navigateCallback = navigateCallback;
         _systemMemoryMb = systemMemoryMb;
 
-        AvailableLoaders = ["Paper", "Fabric", "Quilt", "Forge", "NeoForge"];
+        AvailableLoaders = [DefaultLoader, "Fabric", "Quilt", "Forge", "NeoForge"];
         AvailableMinecraftVersions = [];
         SetServerNameProgrammatically(DefaultServerName);
         LoaderVersions = [SelectedLoaderVersion];
 
-        int? cachedMajor = _javaRequirementService.GetCachedJavaMajor(SelectedMinecraftVersion);
-        JvmArgsSummary = RecommendedJvmSummary(cachedMajor);
+        ApplyCachedJvmSummary();
         IsMinecraftVersionReloadEnabled = !IsPaperSelected;
 
         UpdateLoaderStateSync();
@@ -212,18 +218,23 @@ public sealed partial class CreateServerViewModel : PageViewModel
         }
     }
 
+    /// <summary>於 UI 執行緒套用背景取得的版本清單；已被較新請求取代則捨棄</summary>
+    private void ApplyFetchedMinecraftVersions(IReadOnlyList<LoaderVersion> versions, CancellationToken token) =>
+        _ui.RunOnUi(() =>
+        {
+            if (!token.IsCancellationRequested && versions.Count > 0)
+            {
+                ApplyMinecraftVersions(versions.Select(static v => v.Version), keepUserSelection: true);
+            }
+        });
+
     private async Task UpdateMinecraftVersionsForLoaderAsync(LoaderKind loaderKind)
     {
+        var token = _versionFetch.Next();
         try
         {
             var versions = await _loaderCatalog.GetMinecraftVersionsForLoaderAsync(loaderKind).ConfigureAwait(false);
-            _ui.RunOnUi(() =>
-            {
-                if (versions.Count > 0)
-                {
-                    ApplyMinecraftVersions(versions.Select(static v => v.Version), keepUserSelection: true);
-                }
-            });
+            ApplyFetchedMinecraftVersions(versions, token);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -263,7 +274,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
         }
         catch (OperationCanceledException)
         {
-            Logger.Information("版本與參數設定操作已取消");
+            Logger.Information(VersionOperationCancelled);
         }
         catch (Exception ex)
         {
@@ -314,26 +325,17 @@ public sealed partial class CreateServerViewModel : PageViewModel
 
     private async Task InitializeVersionsAsync()
     {
-        _ui.RunOnUi(() =>
-        {
-            IsLoadingVersions = true;
-            LoadingStatusText = "正在載入可用版本清單...";
-        });
+        _ui.RunOnUi(() => SetLoading("正在載入可用版本清單..."));
+        var token = _versionFetch.Next();
         try
         {
             var loaderKind = LoaderKinds.ParseOrDefault(SelectedLoader, LoaderKind.Paper);
             var versions = await _loaderCatalog.GetMinecraftVersionsForLoaderAsync(loaderKind).ConfigureAwait(false);
-            _ui.RunOnUi(() =>
-            {
-                if (versions.Count > 0)
-                {
-                    ApplyMinecraftVersions(versions.Select(static v => v.Version), keepUserSelection: true);
-                }
-            });
+            ApplyFetchedMinecraftVersions(versions, token);
         }
         catch (OperationCanceledException)
         {
-            Logger.Information("版本與參數設定操作已取消");
+            Logger.Information(VersionOperationCancelled);
         }
         catch (Exception ex)
         {
@@ -352,11 +354,14 @@ public sealed partial class CreateServerViewModel : PageViewModel
                 Logger.Warning(ex, "背景預載 Java 需求失敗，沿用既有快取");
             }
         }), "背景預載 Java 需求", Logger);
-        _ui.RunOnUi(() =>
-        {
-            IsLoadingVersions = false;
-            LoadingStatusText = string.Empty;
-        });
+        _ui.RunOnUi(() => SetLoading(null));
+    }
+
+    /// <summary>設定版本載入狀態；傳入 null 表示載入結束</summary>
+    private void SetLoading(string? statusText)
+    {
+        IsLoadingVersions = statusText is not null;
+        LoadingStatusText = statusText ?? string.Empty;
     }
 
     private async Task RefreshLoaderVersionsAsync()
@@ -373,7 +378,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
             return;
         }
 
-        // 切換載入器或版本會重疊觸發多次查詢；只套用仍符合目前選取的結果，避免較慢的舊查詢覆蓋新結果
+        // 只套用仍符合目前選取的結果，避免舊查詢覆蓋新結果
         string requestedLoader = SelectedLoader;
         string requestedMinecraftVersion = SelectedMinecraftVersion;
 
@@ -397,7 +402,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
                 else
                 {
                     LoaderVersions.ReplaceAll(NoAvailableVersions);
-                    SelectedLoaderVersion = "無可用版本";
+                    SelectedLoaderVersion = NoAvailableVersion;
                     IsLoaderVersionEnabled = false;
                 }
             });
@@ -415,7 +420,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
 
     private void UpdateLoaderStateSync()
     {
-        LoaderVersions.ReplaceAll((string[])[$"最新穩定版 ({SelectedLoader})"]);
+        LoaderVersions.ReplaceAll((string[])[LatestStableVersionText(SelectedLoader)]);
         SelectedLoaderVersion = LoaderVersions[0];
         IsLoaderVersionEnabled = LoaderKinds.TryParse(SelectedLoader, out var lk) &&
                                  lk is LoaderKind.Forge or LoaderKind.NeoForge;
@@ -451,16 +456,19 @@ public sealed partial class CreateServerViewModel : PageViewModel
             return;
         }
 
-        IsLoadingVersions = true;
-        LoadingStatusText = "正在向網路重新整理 Minecraft 版本清單...";
+        SetLoading("正在向網路重新整理 Minecraft 版本清單...");
         try
         {
             var lk = LoaderKinds.ParseOrDefault(SelectedLoader);
+            var token = _versionFetch.Next();
             // 命令由 UI 執行緒觸發，續延維持於 UI 執行緒以安全更新繫結屬性
             var versions = await _loaderCatalog.GetMinecraftVersionsForLoaderAsync(lk, forceReload: true).ConfigureAwait(true);
             if (versions.Count > 0)
             {
-                ApplyMinecraftVersions(versions.Select(static v => v.Version), keepUserSelection: false);
+                if (!token.IsCancellationRequested)
+                {
+                    ApplyMinecraftVersions(versions.Select(static v => v.Version), keepUserSelection: false);
+                }
 
                 await Task.Run(_javaRequirementService.ReloadCache).ConfigureAwait(true);
                 await UpdateJvmArgsSummaryAsync(SelectedMinecraftVersion).ConfigureAwait(true);
@@ -474,25 +482,24 @@ public sealed partial class CreateServerViewModel : PageViewModel
         }
         finally
         {
-            IsLoadingVersions = false;
-            LoadingStatusText = string.Empty;
+            SetLoading(null);
         }
     }
 
     [RelayCommand]
     public async Task ReloadLoaderVersions()
     {
-        IsLoadingVersions = true;
-        LoadingStatusText = "正在向網路重新整理載入器版本清單...";
+        SetLoading("正在向網路重新整理載入器版本清單...");
         try
         {
             if (IsPaperSelected)
             {
                 try
                 {
-                    // 命令由 UI 執行緒觸發，續延維持於 UI 執行緒以安全更新繫結屬性（JvmArgsSummary 等）
+                    var token = _versionFetch.Next();
+                    // 續延維持在 UI 執行緒以更新繫結屬性
                     var versions = await _loaderCatalog.GetPaperMinecraftVersionsAsync(forceReload: true).ConfigureAwait(true);
-                    if (versions.Count > 0)
+                    if (versions.Count > 0 && !token.IsCancellationRequested)
                     {
                         ApplyMinecraftVersions(versions.Select(static v => v.Version), keepUserSelection: false);
                     }
@@ -514,11 +521,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
         }
         finally
         {
-            _ui.RunOnUi(() =>
-            {
-                IsLoadingVersions = false;
-                LoadingStatusText = string.Empty;
-            });
+            _ui.RunOnUi(() => SetLoading(null));
         }
     }
 
@@ -551,17 +554,16 @@ public sealed partial class CreateServerViewModel : PageViewModel
             return;
         }
 
-        SelectedLoader = "Paper";
+        SelectedLoader = DefaultLoader;
         IsMinecraftVersionReloadEnabled = false;
         SelectedMinecraftVersion = AvailableMinecraftVersions.Count > 0 ? AvailableMinecraftVersions[0] : string.Empty;
-        SelectedLoaderVersion = $"最新穩定版 ({SelectedLoader})";
+        SelectedLoaderVersion = LatestStableVersionText(SelectedLoader);
         ServerName = DefaultServerName;
-        MinMemoryMb = ServerDefaults.DefaultMemoryMinMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        MaxMemoryMb = ServerDefaults.DefaultMemoryMaxMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        MinMemoryMb = DefaultMinMemoryText;
+        MaxMemoryMb = DefaultMaxMemoryText;
         JavaPath = string.Empty;
         _customJvmArgs = null;
-        int? javaMajor = _javaRequirementService.GetCachedJavaMajor(SelectedMinecraftVersion);
-        JvmArgsSummary = RecommendedJvmSummary(javaMajor);
+        ApplyCachedJvmSummary();
         UpdateLoaderStateSync();
         UpdateMemoryWarning();
         Logger.Information("建立伺服器表單已重設為預設值 (Paper {Version})", SelectedMinecraftVersion);
@@ -635,7 +637,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
             int maxMem = ParsedMaxMemoryMb;
 
             string loaderVer = SelectedLoaderVersion;
-            if (loaderVer is "無" or "無可用版本")
+            if (loaderVer is "無" or NoAvailableVersion)
             {
                 loaderVer = string.Empty;
             }
@@ -712,6 +714,11 @@ public sealed partial class CreateServerViewModel : PageViewModel
 
     private int ParsedMaxMemoryMb => int.TryParse(MaxMemoryMb.AsSpan().Trim(), out int max) ? max : ServerDefaults.DefaultMemoryMaxMb;
 
+    private static string LatestStableVersionText(string loader) => $"最新穩定版 ({loader})";
+
+    private void ApplyCachedJvmSummary() =>
+        JvmArgsSummary = RecommendedJvmSummary(_javaRequirementService.GetCachedJavaMajor(SelectedMinecraftVersion));
+
     private static string RecommendedJvmSummary(int? javaMajor) =>
         javaMajor is null or >= 21 ? "使用系統建議 JVM 參數 (ZGC)" : "使用系統建議 JVM 參數 (G1GC)";
 
@@ -721,4 +728,6 @@ public sealed partial class CreateServerViewModel : PageViewModel
         MemoryWarningText = check.Level == Core.Utilities.MemoryCheckLevel.Ok ? string.Empty : $"⚠️ 警告：{check.Message}";
         IsMemoryError = check.Level == Core.Utilities.MemoryCheckLevel.Error;
     }
+
+    public void Dispose() => _versionFetch.Dispose();
 }

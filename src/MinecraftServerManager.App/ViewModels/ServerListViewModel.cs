@@ -13,8 +13,7 @@ namespace MinecraftServerManager.App.ViewModels;
 /// <summary>伺服器清單項目展示模型</summary>
 public sealed partial class ServerRowItem : ObservableObject
 {
-    [ObservableProperty]
-    public partial string Name { get; set; } = string.Empty;
+    public string Name { get; init; } = string.Empty;
 
     [ObservableProperty]
     public partial string Version { get; set; } = string.Empty;
@@ -112,8 +111,7 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
          string.Equals(SelectedServer.Status, "執行中", StringComparison.OrdinalIgnoreCase) ||
          string.Equals(SelectedServer.Status, StoppingStatusText, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>選取伺服器或其詳細資訊變更時觸發（供兄弟子 ViewModel 更新命令可用狀態）</summary>
-    public event Action? SelectionStateChanged;
+    private readonly List<IRelayCommand> _dependentCommands = [];
 
     public ServerListViewModel(
         SettingsManager settingsManager,
@@ -201,8 +199,14 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(CanStartOrMonitorServer));
         OnPropertyChanged(nameof(CanManagePlayers));
         OnPropertyChanged(nameof(IsSelectedServerActive));
-        SelectionStateChanged?.Invoke();
+        foreach (IRelayCommand command in _dependentCommands)
+        {
+            command.NotifyCanExecuteChanged();
+        }
     }
+
+    /// <summary>登記選取狀態變更時須重新評估可否執行的命令</summary>
+    public void RegisterDependentCommands(params IRelayCommand[] commands) => _dependentCommands.AddRange(commands);
 
     [RelayCommand]
     public void AddServer() => _navigateCallback("create");
@@ -299,7 +303,7 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>低資源消耗即時更新各伺服器的執行與重要檔案狀態：UI 執行緒僅讀寫集合，檔案檢查於背景執行，不重新掃描目錄大小。</summary>
+    /// <summary>更新各伺服器的執行與檔案狀態，不重新計算目錄大小</summary>
     public async Task UpdateServerStatusInPlaceAsync()
     {
         try
@@ -346,7 +350,7 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
     private ServerRowItem? FindServer(string name) =>
         Servers.FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>差分增量對齊（Reconciliation）：保留既有物件與選取狀態，避免捲動跳轉</summary>
+    /// <summary>增量對齊清單，保留既有物件與選取狀態</summary>
     private void ReconcileRows(IReadOnlyList<ServerRowSnapshot> snapshots)
     {
         var existingByName = Servers.ToDictionary(static s => s.Name, StringComparer.OrdinalIgnoreCase);

@@ -33,9 +33,6 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
     private bool _serverReadyNotified;
     private int _logSessionId;
 
-    /// <summary>取得目前監控之伺服器名稱</summary>
-    public string ServerName => _serverName;
-
     // 日誌前綴僅由方括號群組組成（如 "[12:00:00] [Server thread/INFO]:"），聊天內容無法偽造
     private const string LogPrefixPattern = @"^\s*(?:\[[^\]]*\]\s*)+:\s*";
 
@@ -48,8 +45,7 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
     [GeneratedRegex(LogPrefixPattern + @"(\S+) left the game\s*$", RegexOptions.IgnoreCase)]
     private static partial Regex PlayerLeaveRegex();
 
-    [ObservableProperty]
-    public partial string WindowTitle { get; set; }
+    public string WindowTitle { get; }
 
     [ObservableProperty]
     public partial string CommandText { get; set; } = string.Empty;
@@ -79,7 +75,6 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
 
     public BulkObservableCollection<string> OnlinePlayers { get; } = [];
 
-    /// <summary>是否無線上玩家</summary>
     public bool HasNoOnlinePlayers => OnlinePlayers.Count == 0;
 
     /// <summary>伺服器啟動委派</summary>
@@ -139,7 +134,7 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
 
     private bool _disposed;
 
-    /// <summary>啟動畫面更新計時器；視窗關閉（已處置）後不可再啟動，否則計時器會無人停止而持續執行</summary>
+    /// <summary>啟動畫面更新計時器；已處置後不再啟動</summary>
     private void StartTimers()
     {
         if (_disposed)
@@ -151,7 +146,7 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
         _statsTimer.StartTimer();
     }
 
-    /// <summary>於背景執行緒讀取 latest.log 尾端內容，回到 UI 執行緒後合併至主控台（保留載入期間已收到的即時輸出）</summary>
+    /// <summary>背景讀取 latest.log 尾端並合併至主控台</summary>
     private async Task LoadLatestLogHistoryAsync()
     {
         if (string.IsNullOrWhiteSpace(_serverPath))
@@ -168,7 +163,7 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
 
         if (currentSession != _logSessionId || IsServerRunning)
         {
-            // 若在載入歷史紀錄期間伺服器已啟動或使用者已清理日誌，丟棄舊歷史紀錄，避免覆蓋清空後的輸出
+            // 載入期間伺服器已啟動或日誌已清除時，丟棄舊歷史
             return;
         }
 
@@ -276,7 +271,7 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
     private int _historyIndex = -1;
     private string _draftText = string.Empty;
 
-    /// <summary>以方向鍵上下瀏覽本次開啟期間傳送過的指令；離開歷史時還原尚未送出的草稿。無歷史時回傳 null</summary>
+    /// <summary>瀏覽已傳送的指令；離開歷史時還原草稿，無歷史回傳 null</summary>
     public string? NavigateHistory(bool previous)
     {
         if (_commandHistory.Count == 0)
@@ -472,7 +467,7 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>經由 server.properties 存取服務讀取 server-ip 與 server-port，未設定或讀取失敗時使用預設值</summary>
+    /// <summary>讀取 server-ip 與 server-port，失敗時用預設值</summary>
     private async Task<(string ServerIp, string ServerPort)> ReadServerAddressAsync()
     {
         string serverPort = ServerDefaults.DefaultPort;

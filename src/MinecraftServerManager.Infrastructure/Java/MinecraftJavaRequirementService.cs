@@ -8,11 +8,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Java;
 
-/// <summary>
-/// Minecraft 版本 Java major 需求服務實作。
-/// 完全依據 Mojang 官方 version package JSON 的 javaVersion.majorVersion 動態取得並快取，
-/// 嚴格禁止依據版本號做寫死推算。
-/// </summary>
+/// <summary>依 Mojang 官方 version package 取得並快取 Java major 需求，不以版本號推算</summary>
 public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementService
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(MinecraftJavaRequirementService));
@@ -31,7 +27,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         _cacheDirectory = SafeFileSystem.ResolveStableDirectory(cacheDirectory, create: true);
     }
 
-    /// <summary>依 Mojang 官方資料取得指定 Minecraft 版本所需的 Java 主版本號（優先使用快取）</summary>
+    /// <summary>取得指定 Minecraft 版本所需的 Java major（優先快取）</summary>
     public async Task<int> GetRequiredJavaMajorAsync(
         string minecraftVersion,
         LoaderKind loader = LoaderKind.Unknown,
@@ -100,7 +96,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         return null;
     }
 
-    /// <summary>取得快取中出現過的 Java 主版本號（8 以上，由小到大）；無快取時回傳預設常見版本</summary>
+    /// <summary>快取中出現過的 Java major（由小到大）；無快取回傳預設值</summary>
     public IReadOnlyList<int> GetCachedAvailableJavaMajors()
     {
         EnsureCacheLoaded();
@@ -113,7 +109,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         return majors.Count > 0 ? majors : [8, 11, 16, 17, 21];
     }
 
-    /// <summary>預先載入所有 Minecraft 版本的 Java 需求至快取，<paramref name="force"/> 為 true 時忽略既有快取重新查詢</summary>
+    /// <summary>預載所有版本的 Java 需求；<paramref name="force"/> 為 true 時忽略快取</summary>
     public async Task<IReadOnlyDictionary<string, int>> PreloadAllJavaRequirementsAsync(
         bool force = false,
         CancellationToken cancellationToken = default)
@@ -150,10 +146,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         return new Dictionary<string, int>(_memoryCache, StringComparer.OrdinalIgnoreCase);
     }
 
-    /// <summary>
-    /// 取得所有 Stable == true 且具備官方 server.jar 下載連結的 Minecraft 版本及其 package URL。
-    /// 本機版本快取為空時改自 Mojang 官方 Manifest 取得並寫回快取。
-    /// </summary>
+    /// <summary>取得有官方 server.jar 的穩定版本及其 package URL；快取為空時改抓官方 Manifest</summary>
     private async Task<Dictionary<string, string>> GetMinecraftVersionsWithServerAsync(CancellationToken cancellationToken)
     {
         var result = MojangVersionCatalog.GetCachedReleasePackageUrls(_cacheDirectory);
@@ -266,7 +259,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
                     return mcChanged ? updatedMc : null;
                 });
 
-                // 2. 同步更新 Paper 快取 paper_mc_versions_cache.json（檔案不存在代表尚未建立 Paper 清單，不由此處建立）
+                // 2. 同步更新 Paper 快取（檔案不存在時不建立）
                 string paperCachePath = MojangVersionCatalog.GetPaperVersionsCachePath(_cacheDirectory);
                 if (SafeFileSystem.FileExists(paperCachePath))
                 {
@@ -302,7 +295,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         string minecraftVersion,
         CancellationToken cancellationToken)
     {
-        // 1. 優先從本地版本快取尋找 package URL；2. 找不到時向 Mojang 官方 Manifest 查詢
+        // 先查本地快取的 package URL，找不到再查官方 Manifest
         string? targetUrl = MojangVersionCatalog.TryGetCachedPackageUrl(_cacheDirectory, minecraftVersion);
         if (string.IsNullOrWhiteSpace(targetUrl))
         {

@@ -3,7 +3,7 @@ using MinecraftServerManager.Core.Servers;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>以 <see cref="ServersRootRelocator"/> 實作之伺服器存放根目錄檢查與遷移服務（耗時作業一律於背景執行緒執行）</summary>
+/// <summary>伺服器根目錄檢查與遷移服務</summary>
 public sealed class ServersRootService : IServersRootService
 {
     public ServersRootCheck ValidateTargetRoot(string? currentRoot, string? newRoot)
@@ -18,7 +18,7 @@ public sealed class ServersRootService : IServersRootService
     public Task<bool> IsTargetDirectoryEmptyAsync(string? targetRoot, CancellationToken cancellationToken = default) =>
         Task.Run(() => ServersRootRelocator.IsTargetDirectoryEmpty(targetRoot), cancellationToken);
 
-    public Task RelocateAllContentAsync(
+    public Task<IReadOnlyList<string>> RelocateAllContentAsync(
         string currentRoot,
         string newRoot,
         IProgress<(int Percent, string Message)>? progress = null,

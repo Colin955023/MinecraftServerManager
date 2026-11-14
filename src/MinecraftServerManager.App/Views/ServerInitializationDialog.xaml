@@ -19,20 +19,17 @@
                     Style="{ThemeResource TitleTextBlockStyle}" />
                 <StackPanel Orientation="Horizontal"
                     Spacing="8">
-                    <ProgressBar IsIndeterminate="True"
-                        Width="80"
-                        Height="4"
+                    <ProgressBar Style="{StaticResource BusyProgressBarStyle}"
                         VerticalAlignment="Center"
                         Visibility="{x:Bind ViewModel.IsProgressVisible, Mode=OneWay}" />
                     <TextBlock Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{ThemeResource CaptionTextBlockStyle}"
+                        Style="{StaticResource SecondaryCaptionTextStyle}"
                         VerticalAlignment="Center" />
                 </StackPanel>
             </StackPanel>
 
             <Border Grid.Row="1"
-                Background="{ThemeResource ConsoleBackgroundBrush}"
+                Background="{StaticResource ConsoleBackgroundBrush}"
                 BorderBrush="{ThemeResource BorderBrush}"
                 BorderThickness="1"
                 CornerRadius="8"
@@ -40,8 +37,8 @@
                 <TextBox x:Name="ConsoleBox"
                     Text="{x:Bind ViewModel.ConsoleText, Mode=OneWay}"
                     TextChanged="ConsoleBox_TextChanged"
-                    Background="{ThemeResource ConsoleBackgroundBrush}"
-                    Foreground="{ThemeResource ConsoleForegroundBrush}"
+                    Background="{StaticResource ConsoleBackgroundBrush}"
+                    Foreground="{StaticResource ConsoleForegroundBrush}"
                     FontFamily="Consolas, Cascadia Code, Courier New"
                     FontSize="12"
                     BorderThickness="0"

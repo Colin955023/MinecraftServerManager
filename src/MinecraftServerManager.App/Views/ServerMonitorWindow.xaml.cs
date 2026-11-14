@@ -3,6 +3,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using MinecraftServerManager.App.Controls;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Infrastructure.Logging;
@@ -75,8 +76,7 @@ public sealed partial class ServerMonitorWindow : Window
 
                 try
                 {
-                    // 主控台常有重複內容（空行、相同提示），ScrollIntoView(字串) 會以第一個相同字串定位，
-                    // 導致清單先跳回上方再跳回底部而看似整個重刷；改為直接捲動內部 ScrollViewer 至底部
+                    // ScrollIntoView(字串) 會定位到第一個相同字串而造成跳動，改為直接捲動內部 ScrollViewer
                     _logScrollViewer ??= FindDescendant<ScrollViewer>(LogListView);
                     if (_logScrollViewer is not null)
                     {
@@ -115,24 +115,16 @@ public sealed partial class ServerMonitorWindow : Window
         return null;
     }
 
-    private async void CommandInputBox_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    private void CommandInputBox_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
         if (e.Key == Windows.System.VirtualKey.Enter)
         {
-            // 須在 await 前標記，事件路由於第一個 await 後即已完成
             e.Handled = true;
-            try
-            {
-                await _viewModel.SendCommandAsync().ConfigureAwait(true);
-            }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, "傳送主控台指令時發生例外");
-            }
+            _viewModel.SendCommandCommand.TryExecute();
         }
     }
 
-    /// <summary>方向鍵上下瀏覽歷史指令；用 PreviewKeyDown 是因為 TextBox 會自行處理方向鍵而不引發 KeyDown</summary>
+    /// <summary>方向鍵瀏覽歷史指令（TextBox 會自行處理方向鍵，故用 PreviewKeyDown）</summary>
     private void CommandInputBox_PreviewKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
         if (e.Key is not (Windows.System.VirtualKey.Up or Windows.System.VirtualKey.Down) || sender is not TextBox box)
@@ -165,7 +157,6 @@ public sealed partial class ServerMonitorWindow : Window
             notify.CollectionChanged -= OnLogsCollectionChanged;
         }
         Bindings.StopTracking();
-        _viewModel.Dispose();
         Logger.Information("伺服器監控視窗已關閉");
     }
 }

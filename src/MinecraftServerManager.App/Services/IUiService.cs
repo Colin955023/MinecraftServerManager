@@ -22,13 +22,13 @@ public enum ServerDeleteDecision
     DeleteServerAndBackups,
 }
 
-/// <summary>進度視窗工作階段：提供進度回報器；<see cref="IDisposable.Dispose"/> 時關閉視窗（可重複呼叫）</summary>
+/// <summary>進度視窗工作階段；Dispose 時關閉視窗</summary>
 public interface IProgressSession<TReport> : IDisposable
 {
     public IProgress<TReport> Progress { get; }
 }
 
-/// <summary>通用作業進度視窗控制點；<see cref="IDisposable.Dispose"/> 時關閉視窗（可重複呼叫）</summary>
+/// <summary>作業進度視窗；Dispose 時關閉視窗</summary>
 public interface IOperationProgress : IDisposable
 {
     public void UpdateProgress(int current, int total, string message);
@@ -54,7 +54,7 @@ public interface IUiService
     /// <summary>顯示兩鍵確認對話方塊；主要按鈕回傳 true，次要按鈕或關閉回傳 false</summary>
     public Task<bool> ConfirmChoiceAsync(string message, string title, string primaryText, string closeText, UiMessageLevel level = UiMessageLevel.Question);
 
-    /// <summary>顯示三鍵確認對話方塊；是回傳 true、否回傳 false、取消或關閉回傳 null</summary>
+    /// <summary>三鍵確認：是 true、否 false、取消或關閉 null</summary>
     public Task<bool?> ConfirmYesNoCancelAsync(
         string message,
         string title,
@@ -63,7 +63,7 @@ public interface IUiService
         string cancelText = "取消",
         UiMessageLevel level = UiMessageLevel.Question);
 
-    /// <summary>通知提示唯一入口：資訊、成功與警告以右上角 InfoBar 顯示並自動關閉；錯誤以對話方塊顯示</summary>
+    /// <summary>通知入口：資訊、成功與警告用 InfoBar，錯誤用對話方塊</summary>
     public void ShowNotification(string message, string? title = null, NotificationType type = NotificationType.Info);
 
     public Task ShowErrorAsync(string message, string title);
@@ -79,7 +79,7 @@ public interface IUiService
     /// <summary>以非阻塞方式於 UI 執行緒執行動作；非 UI 環境時不執行</summary>
     public void PostToUi(Action action, bool afterLayout = false);
 
-    /// <summary>已在 UI 執行緒則直接執行，否則派送至 UI 執行緒；非 UI 環境時直接執行</summary>
+    /// <summary>在 UI 執行緒執行；已在 UI 執行緒或非 UI 環境時直接執行</summary>
     public void RunOnUi(Action action);
 
     public IUiTimer CreateUiTimer(TimeSpan interval, Action tick);

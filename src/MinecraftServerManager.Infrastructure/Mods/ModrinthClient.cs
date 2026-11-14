@@ -50,13 +50,13 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         string indexParam = Uri.EscapeDataString(string.IsNullOrWhiteSpace(index) ? "relevance" : index.Trim());
         string url = $"{BaseUrl}/search?query={queryParam}&facets={facetsParam}&index={indexParam}&limit={Math.Clamp(limit, 1, 100)}&offset={Math.Max(0, offset)}";
 
-        string? json = await httpPort.GetTextAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(json))
+        using var searchDoc = await GetDocumentAsync(url, cancellationToken).ConfigureAwait(false);
+        if (searchDoc is null)
         {
             return [];
         }
 
-        var results = ParseSearchResults(json);
+        var results = ParseSearchResults(searchDoc.RootElement);
         if (results.Count == 0)
         {
             return results;
@@ -94,13 +94,12 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
             {
                 string idsParam = Uri.EscapeDataString(JsonCodec.Serialize(chunk));
                 string url = $"{BaseUrl}/versions?ids={idsParam}";
-                string? json = await httpPort.GetTextAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
-                if (string.IsNullOrWhiteSpace(json))
+                using var doc = await GetDocumentAsync(url, cancellationToken).ConfigureAwait(false);
+                if (doc is null)
                 {
                     continue;
                 }
 
-                using var doc = JsonCodec.ParseDocument(json);
                 if (doc.RootElement.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var elem in doc.RootElement.EnumerateArray())
@@ -149,13 +148,8 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         string queryString = queryParams.Count > 0 ? $"?{string.Join("&", queryParams)}" : string.Empty;
         string url = $"{BaseUrl}/project/{Uri.EscapeDataString(projectIdOrSlug.Trim())}/version{queryString}";
 
-        string? json = await httpPort.GetTextAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return [];
-        }
-
-        return ParseVersionList(json);
+        using var doc = await GetDocumentAsync(url, cancellationToken).ConfigureAwait(false);
+        return doc is null ? [] : ParseVersionList(doc.RootElement);
     }
 
     public async Task<IReadOnlyDictionary<string, string>> GetProjectTitlesAsync(
@@ -184,14 +178,8 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
             try
             {
                 string idsParam = Uri.EscapeDataString(JsonCodec.Serialize(chunk));
-                string? json = await httpPort.GetTextAsync(new Uri($"{BaseUrl}/projects?ids={idsParam}"), cancellationToken).ConfigureAwait(false);
-                if (string.IsNullOrWhiteSpace(json))
-                {
-                    continue;
-                }
-
-                using var doc = JsonCodec.ParseDocument(json);
-                if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                using var doc = await GetDocumentAsync($"{BaseUrl}/projects?ids={idsParam}", cancellationToken).ConfigureAwait(false);
+                if (doc is null || doc.RootElement.ValueKind != JsonValueKind.Array)
                 {
                     continue;
                 }
@@ -271,20 +259,42 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         return result;
     }
 
-    private static List<OnlineModInfo> ParseSearchResults(string json)
+    /// <summary>GET 並解析 JSON；非成功回應或內容無效回傳 null（無效內容記錄警告）</summary>
+    private async Task<JsonDocument?> GetDocumentAsync(string url, CancellationToken cancellationToken)
+    {
+        var response = await httpPort.GetJsonDocumentAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
+        if (response.IsSuccess)
+        {
+            return response.Payload;
+        }
+
+        if (response.ErrorKind == "invalid_response")
+        {
+            Logger.Warning("Modrinth 回應內容無效: {Url}", url);
+        }
+
+        return null;
+    }
+
+    private static List<OnlineModInfo> ParseSearchResults(JsonElement root)
     {
         var list = new List<OnlineModInfo>();
         try
         {
-            using var doc = JsonCodec.ParseDocument(json);
-            if (!doc.RootElement.TryGetProperty("hits", out var hitsElem))
+            if (!root.TryGetProperty("hits", out var hitsElem))
             {
                 return list;
             }
 
             foreach (var hit in hitsElem.EnumerateArray())
             {
-                string projectId = hit.GetProperty("project_id").GetString() ?? string.Empty;
+                // 單筆格式異常只略過該筆
+                string projectId = GetStringOrEmpty(hit, "project_id");
+                if (projectId.Length == 0)
+                {
+                    continue;
+                }
+
                 string slug = GetStringOrEmpty(hit, "slug");
                 string title = GetStringOrEmpty(hit, "title");
                 string author = GetStringOrEmpty(hit, "author");
@@ -308,18 +318,17 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         return list;
     }
 
-    private static List<OnlineModVersion> ParseVersionList(string json)
+    private static List<OnlineModVersion> ParseVersionList(JsonElement root)
     {
         var list = new List<OnlineModVersion>();
         try
         {
-            using var doc = JsonCodec.ParseDocument(json);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            if (root.ValueKind != JsonValueKind.Array)
             {
                 return list;
             }
 
-            foreach (var elem in doc.RootElement.EnumerateArray())
+            foreach (var elem in root.EnumerateArray())
             {
                 try
                 {

@@ -1,7 +1,6 @@
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
@@ -47,7 +46,7 @@ public sealed class ModsViewModelTests
     public async Task SearchOnlineModsWithCurseForgeShouldNotCallModrinth()
     {
         bool modrinthCalled = false;
-        var fakeModrinth = new FakeModrinthClient(() => modrinthCalled = true);
+        var fakeModrinth = new StubModrinthClient { OnSearchCalled = () => modrinthCalled = true };
         var vm = CreateTestViewModel(modrinthClient: fakeModrinth);
         vm.Online.SelectedPlatform = "CurseForge";
 
@@ -55,37 +54,5 @@ public sealed class ModsViewModelTests
 
         Assert.False(modrinthCalled);
         Assert.Equal("CurseForge 模組搜尋即將推出，敬請期待", vm.Online.OnlineResultHint);
-    }
-
-    private sealed class FakeModrinthClient(Action onSearchCalled) : IModrinthClient
-    {
-        public Task<IReadOnlyList<OnlineModInfo>> SearchModsAsync(
-            string query,
-            string? loader = null,
-            string? minecraftVersion = null,
-            int limit = 20,
-            int offset = 0,
-            string index = "relevance",
-            CancellationToken cancellationToken = default)
-        {
-            onSearchCalled();
-            return Task.FromResult<IReadOnlyList<OnlineModInfo>>([]);
-        }
-
-        public Task<IReadOnlyList<OnlineModVersion>> GetProjectVersionsAsync(
-            string projectIdOrSlug,
-            string? loader = null,
-            string? minecraftVersion = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<OnlineModVersion>>([]);
-
-        public Task<IReadOnlyDictionary<string, ModrinthVersionLookupResult>> LookupVersionsByHashesAsync(
-            IReadOnlyList<string> hashes,
-            string algorithm = "sha512",
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyDictionary<string, ModrinthVersionLookupResult>>(new Dictionary<string, ModrinthVersionLookupResult>());
-
-        public Task<IReadOnlyDictionary<string, string>> GetProjectTitlesAsync(IReadOnlyCollection<string> projectIdsOrSlugs, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>());
     }
 }

@@ -70,10 +70,10 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
 
     public BulkObservableCollection<ModVersionDisplayItem> Versions { get; }
 
-    /// <summary>使用者選擇「加入安裝清單」時所挑定的版本。</summary>
+    /// <summary>使用者選擇「加入安裝清單」時所挑定的版本</summary>
     public ModVersionDisplayItem? QueuedVersion { get; private set; }
 
-    /// <summary>使用者是否選擇立即安裝（false 代表僅加入安裝清單）。</summary>
+    /// <summary>使用者是否選擇立即安裝（false 代表僅加入安裝清單）</summary>
     public bool InstallImmediately { get; private set; }
 
     public event Action<bool>? RequestClose;

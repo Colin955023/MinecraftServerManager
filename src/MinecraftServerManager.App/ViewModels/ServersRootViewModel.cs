@@ -72,7 +72,7 @@ public sealed partial class ServersRootViewModel : ViewModelBase
         string normalizedCurrent = check.NormalizedCurrent;
         string normalizedNew = check.NormalizedNew;
 
-        // 新路徑一律為「所選資料夾\servers」；位於原路徑內時無法遷移，僅修改設定並保留原處資料
+        // 新路徑一律為「所選資料夾\servers」；位於原路徑內時只改設定
         bool hasContent = await _rootService.HasStoredContentAsync(normalizedCurrent).ConfigureAwait(true);
         if (!hasContent || check.Result == RelocationPathCheckResult.SubdirectoryOfCurrent)
         {
@@ -110,19 +110,23 @@ public sealed partial class ServersRootViewModel : ViewModelBase
 
         try
         {
+            IReadOnlyList<string> leftovers;
             using (var progressDialog = _ui.ShowModOperationProgress("遷移伺服器存放資料", "正在準備遷移伺服器資料..."))
             {
                 var progress = new Progress<(int Percent, string Message)>(report =>
                     progressDialog.UpdateProgress(report.Percent, 100, report.Message));
 
-                await _rootService.RelocateAllContentAsync(normalizedCurrent, normalizedNew, progress).ConfigureAwait(true);
+                leftovers = await _rootService.RelocateAllContentAsync(normalizedCurrent, normalizedNew, progress).ConfigureAwait(true);
             }
 
             _settingsManager.SetExactServersRoot(normalizedNew);
             _list.DetectPath = normalizedNew;
 
+            string leftoverNote = leftovers.Count == 0
+                ? string.Empty
+                : $"\n\n下列原位置項目已複製到新路徑，但無法刪除（可能被其他程式占用），請自行移除：\n{string.Join('\n', leftovers)}";
             await _ui.ConfirmAsync(
-                $"伺服器資料已成功遷移至新路徑：\n{normalizedNew}\n\n應用程式將重新啟動以套用新路徑設定。",
+                $"伺服器資料已成功遷移至新路徑：\n{normalizedNew}{leftoverNote}\n\n應用程式將重新啟動以套用新路徑設定。",
                 "遷移完成",
                 UiMessageLevel.Information).ConfigureAwait(true);
             await RestartAfterRootChangeAsync().ConfigureAwait(true);
@@ -151,7 +155,7 @@ public sealed partial class ServersRootViewModel : ViewModelBase
         }
     }
 
-    /// <summary>路徑設定（含資料遷移）已完成後重新啟動；重新啟動失敗不代表遷移失敗，需明確告知使用者手動重新開啟</summary>
+    /// <summary>路徑設定完成後重新啟動；失敗時請使用者手動重新開啟</summary>
     private async Task RestartAfterRootChangeAsync()
     {
         try

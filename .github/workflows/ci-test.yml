@@ -16,6 +16,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: pwsh
+
 jobs:
   gitleaks:
     name: 隱私與機密資訊檢查 (Gitleaks)
@@ -34,7 +38,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   quality:
-    name: C# Quality & Tests (.NET 10)
+    name: C# Quality & Tests
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -44,12 +48,8 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Setup .NET 10 SDK
-        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
-        with:
-          global-json-file: global.json
-          cache: true
-          cache-dependency-path: "**/packages.lock.json"
+      - name: Setup .NET SDK
+        uses: ./.github/actions/setup-dotnet
 
       - name: C# 品質門禁 (Restore, Format, Build, Tests)
         run: pwsh -NoProfile -File scripts/dotnet_quality_gate.ps1
@@ -75,7 +75,7 @@ jobs:
           retention-days: 7
 
   publish-check:
-    name: 單一執行檔發布驗證 (.NET 10)
+    name: 單一執行檔發布驗證
     runs-on: windows-latest
     timeout-minutes: 20
     permissions:
@@ -87,19 +87,14 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Setup .NET 10 SDK
-        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
-        with:
-          global-json-file: global.json
-          cache: true
-          cache-dependency-path: "**/packages.lock.json"
+      - name: Setup .NET SDK
+        uses: ./.github/actions/setup-dotnet
 
       - name: 發布單一執行檔（裁剪檢查）
         run: pwsh -NoProfile -File scripts/dotnet_publish.ps1
 
       - name: 啟動煙霧測試（實驗性）
         continue-on-error: true
-        shell: pwsh
         run: |
           . scripts/lib/Common.ps1
           Initialize-ScriptEnvironment

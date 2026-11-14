@@ -18,7 +18,7 @@ public abstract class ViewModelBase : ObservableObject
             : Task.FromResult(true);
     }
 
-    /// <summary>安全執行背景非同步工作（fire-and-forget 呼叫端使用）：取消記錄為資訊，其餘例外完整記錄為錯誤</summary>
+    /// <summary>執行背景非同步工作：取消記錄為資訊，其餘例外記錄為錯誤</summary>
     /// <param name="work">非同步工作委派</param>
     /// <param name="operationName">操作名稱描述（用於記錄）</param>
     /// <param name="logger">專屬元件記錄器（為空時使用 ViewModelBase 預設 Logger）</param>

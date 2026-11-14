@@ -1,0 +1,331 @@
+using MinecraftServerManager.Core.Servers;
+using MinecraftServerManager.Domain.Servers;
+using MinecraftServerManager.Domain.ValueObjects;
+using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Servers;
+
+namespace MinecraftServerManager.UnitTests.Servers;
+
+public sealed class ServerManagerTests : IDisposable
+{
+    private readonly TempDirectory _testRootTemp = new("msm-servermgr-tests-");
+    private readonly string _testRoot;
+    private readonly ServerManager _manager;
+
+    public ServerManagerTests()
+    {
+        _testRoot = _testRootTemp.FullName;
+        _manager = TestServerManagers.Create(_testRoot);
+    }
+
+    public void Dispose() => _testRootTemp.Dispose();
+
+    [Fact]
+    public async Task CreatesServerWithDefaultFilesAndRegistry()
+    {
+        var plan = ServerCreationPlan.Create(
+            name: ServerName.Parse("Survival-1"),
+            minecraftVersion: MinecraftVersion.Parse("1.20.4"),
+            loaderType: LoaderKind.Vanilla,
+            memoryMaxMb: 4096,
+            memoryMinMb: 2048);
+
+        var result = await _manager.CreateServerAsync(plan);
+
+        Assert.True(result.Completed);
+        Assert.NotNull(result.Config);
+        Assert.Equal("Survival-1", result.Config.Name.Value);
+
+        string serverDir = Path.Combine(_testRoot, "Survival-1");
+        Assert.True(Directory.Exists(serverDir));
+        Assert.True(File.Exists(Path.Combine(serverDir, "eula.txt")));
+        Assert.True(File.Exists(Path.Combine(serverDir, "server.properties")));
+
+        var all = await _manager.GetAllServersAsync();
+        Assert.Contains(all, static s => s.Name.Value == "Survival-1");
+    }
+
+    [Fact]
+    public async Task RejectsDuplicateServerCreation()
+    {
+        var plan = ServerCreationPlan.Create(
+            name: ServerName.Parse("DuplicateServer"),
+            minecraftVersion: MinecraftVersion.Parse("1.20.4"),
+            loaderType: LoaderKind.Vanilla,
+            memoryMaxMb: 2048);
+
+        var first = await _manager.CreateServerAsync(plan);
+        Assert.True(first.Completed);
+
+        var second = await _manager.CreateServerAsync(plan);
+        Assert.False(second.Completed);
+        Assert.Contains("已存在同名的伺服器", second.Message);
+    }
+
+    [Fact]
+    public async Task UpdatesServerConfiguration()
+    {
+        var plan = ServerCreationPlan.Create(
+            name: ServerName.Parse("UpdateTarget"),
+            minecraftVersion: MinecraftVersion.Parse("1.20.4"),
+            loaderType: LoaderKind.Vanilla,
+            memoryMaxMb: 2048);
+
+        var creation = await _manager.CreateServerAsync(plan);
+        Assert.True(creation.Completed);
+
+        var updatedConfig = new ServerConfig(
+            name: creation.Config!.Name,
+            minecraftVersion: creation.Config.MinecraftVersion,
+            loaderType: creation.Config.LoaderType,
+            loaderVersion: "new-loader-ver",
+            memoryMaxMb: 8192,
+            memoryMinMb: 4096,
+            path: creation.Config.Path,
+            jvmArgs: ["-XX:+UseG1GC"]);
+
+        var updateResult = await _manager.UpdateServerAsync(updatedConfig);
+        Assert.True(updateResult.Success);
+
+        var fetched = await _manager.GetServerAsync("UpdateTarget");
+        Assert.NotNull(fetched);
+        Assert.Equal(8192, fetched.MemoryMaxMb);
+        Assert.Equal(4096, fetched.MemoryMinMb);
+        Assert.Contains("-XX:+UseG1GC", fetched.JvmArgs);
+
+        string scriptPath = Path.Combine(creation.Config.Path, "start_server.bat");
+        Assert.True(File.Exists(scriptPath));
+        string script = await File.ReadAllTextAsync(scriptPath);
+        Assert.Contains("-Xms4096M", script);
+        Assert.Contains("-Xmx8192M", script);
+    }
+
+    [Fact]
+    public void UpdateStartScriptMemory_UpdatesExistingScriptCorrectly()
+    {
+        string dir = Path.Combine(_testRoot, "ScriptTest");
+        Directory.CreateDirectory(dir);
+        string batPath = Path.Combine(dir, "start_server.bat");
+        File.WriteAllText(batPath, "@echo off\r\n\"java.exe\" -Xms1024M -Xmx2048M -jar server.jar nogui %*");
+
+        var config = new ServerConfig(
+            name: ServerName.Parse("ScriptTest"),
+            minecraftVersion: MinecraftVersion.Parse("1.20.4"),
+            loaderType: LoaderKind.Vanilla,
+            loaderVersion: "",
+            memoryMaxMb: 16384,
+            memoryMinMb: 8192,
+            path: dir);
+
+        StartScriptWriter.UpdateMemory(dir, config);
+
+        string updated = File.ReadAllText(batPath);
+        Assert.Contains("-Xms8192M", updated);
+        Assert.Contains("-Xmx16384M", updated);
+    }
+
+    [Fact]
+    public void UpdateStartScriptMemory_WhenNoXms_InsertsXmsBeforeXmx()
+    {
+        string dir = Path.Combine(_testRoot, "ScriptTestNoXms");
+        Directory.CreateDirectory(dir);
+        string batPath = Path.Combine(dir, "start_server.bat");
+        File.WriteAllText(batPath, "@echo off\r\n\"java.exe\" -Xmx2G -jar server.jar nogui %*");
+
+        var config = new ServerConfig(
+            name: ServerName.Parse("ScriptTestNoXms"),
+            minecraftVersion: MinecraftVersion.Parse("1.20.4"),
+            loaderType: LoaderKind.Vanilla,
+            loaderVersion: "",
+            memoryMaxMb: 8192,
+            memoryMinMb: 4096,
+            path: dir);
+
+        StartScriptWriter.UpdateMemory(dir, config);
+
+        string updated = File.ReadAllText(batPath);
+        Assert.Contains("-Xms4096M -Xmx8192M", updated);
+    }
+
+    [Fact]
+    public async Task DeletesServerSafely()
+    {
+        var plan = ServerCreationPlan.Create(
+            name: ServerName.Parse("ToDelete"),
+            minecraftVersion: MinecraftVersion.Parse("1.20.4"),
+            loaderType: LoaderKind.Vanilla,
+            memoryMaxMb: 2048);
+
+        var creation = await _manager.CreateServerAsync(plan);
+        Assert.True(creation.Completed);
+
+        var deleteResult = await _manager.DeleteServerAsync("ToDelete");
+        Assert.True(deleteResult.Success);
+
+        var fetched = await _manager.GetServerAsync("ToDelete");
+        Assert.Null(fetched);
+
+        string toDeleteDir = Path.Combine(_testRoot, "ToDelete");
+        Assert.False(Directory.Exists(toDeleteDir));
+    }
+
+    [Fact]
+    public async Task ImportsExistingServerDirectory()
+    {
+        using var externalDirTemp = new TempDirectory("msm-external-server-");
+        string externalDir = Path.Combine(externalDirTemp.FullName, "root");
+        Directory.CreateDirectory(externalDir);
+        File.WriteAllText(Path.Combine(externalDir, "server.jar"), "dummy jar");
+        File.WriteAllText(Path.Combine(externalDir, "eula.txt"), "eula=true\n");
+        File.WriteAllText(Path.Combine(externalDir, "server.properties"), "server-port=25565\n");
+
+        var importResult = await _manager.ImportServerAsync(externalDir, "ImportedServer", ImportTransferMode.Copy);
+
+        Assert.True(importResult.Completed);
+        Assert.NotNull(importResult.Config);
+        Assert.Equal("ImportedServer", importResult.Config.Name.Value);
+
+        string importedDir = Path.Combine(_testRoot, "ImportedServer");
+        Assert.True(Directory.Exists(importedDir));
+        Assert.True(File.Exists(Path.Combine(importedDir, "server.jar")));
+        Assert.True(Directory.Exists(externalDir));
+    }
+
+    [Fact]
+    public async Task ImportsExistingServerDirectoryWithMoveModeRemovesSource()
+    {
+        using var externalDirTemp = new TempDirectory("msm-external-move-");
+        string externalDir = Path.Combine(externalDirTemp.FullName, "root");
+        Directory.CreateDirectory(externalDir);
+        File.WriteAllText(Path.Combine(externalDir, "server.jar"), "dummy jar");
+        File.WriteAllText(Path.Combine(externalDir, "eula.txt"), "eula=true\n");
+        File.WriteAllText(Path.Combine(externalDir, "server.properties"), "server-port=25565\n");
+
+        var importResult = await _manager.ImportServerAsync(externalDir, "MovedServer", ImportTransferMode.Move);
+
+        Assert.True(importResult.Completed);
+        string importedDir = Path.Combine(_testRoot, "MovedServer");
+        Assert.True(Directory.Exists(importedDir));
+        Assert.True(File.Exists(Path.Combine(importedDir, "server.jar")));
+        Assert.False(Directory.Exists(externalDir));
+    }
+
+    [Theory]
+    [InlineData(ImportTransferMode.Move, false)]
+    [InlineData(ImportTransferMode.Move, true)]
+    [InlineData(ImportTransferMode.Copy, true)]
+    public async Task ImportRejectsServersRootOrItsAncestorAsSource(ImportTransferMode mode, bool useAncestor)
+    {
+        string parent = Path.Combine(_testRoot, "parent");
+        string serversRoot = Path.Combine(parent, "servers");
+        Directory.CreateDirectory(Path.Combine(serversRoot, "Existing"));
+        File.WriteAllText(Path.Combine(serversRoot, "Existing", "world.dat"), "data");
+        string source = useAncestor ? parent : serversRoot;
+        File.WriteAllText(Path.Combine(source, "server.jar"), "dummy jar");
+        var manager = TestServerManagers.Create(serversRoot);
+
+        var result = await manager.ImportServerAsync(source + Path.DirectorySeparatorChar, "Imported", mode);
+
+        Assert.False(result.Completed);
+        Assert.Contains("根目錄", result.Message);
+        Assert.True(File.Exists(Path.Combine(source, "server.jar")));
+        Assert.True(File.Exists(Path.Combine(serversRoot, "Existing", "world.dat")));
+        Assert.False(Directory.Exists(Path.Combine(serversRoot, "Imported")));
+    }
+
+    [Fact]
+    public async Task ImportRejectsDriveRootAsSource()
+    {
+        string driveRoot = Path.GetPathRoot(_testRoot)!;
+
+        var result = await _manager.ImportServerAsync(driveRoot, "FromDriveRoot", ImportTransferMode.Move);
+
+        Assert.False(result.Completed);
+        Assert.Contains("磁碟根目錄", result.Message);
+    }
+
+    [Fact]
+    public async Task ServersRootRelocator_ValidatesAndRelocatesAllContent()
+    {
+        var plan = ServerCreationPlan.Create(
+            name: ServerName.Parse("RelocateSrv"),
+            minecraftVersion: MinecraftVersion.Parse("1.20.4"),
+            loaderType: LoaderKind.Vanilla,
+            memoryMaxMb: 2048);
+        var created = await _manager.CreateServerAsync(plan);
+        Assert.True(created.Completed);
+
+        string subDir = Path.Combine(_testRoot, "sub");
+        string serversRoot = Path.Combine(_testRoot, "servers");
+        Assert.Equal(RelocationPathCheckResult.SameAsCurrent, ServersRootRelocator.ValidateTargetRoot(serversRoot, _testRoot, out _, out _));
+        Assert.Equal(RelocationPathCheckResult.SubdirectoryOfCurrent, ServersRootRelocator.ValidateTargetRoot(_testRoot, _testRoot, out _, out string forcedNew));
+        Assert.Equal(serversRoot, forcedNew);
+        Assert.Equal(RelocationPathCheckResult.SubdirectoryOfCurrent, ServersRootRelocator.ValidateTargetRoot(_testRoot, subDir, out _, out _));
+
+        using var newRootTemp = new TempDirectory("msm-relocated-root-");
+        string newRoot = Path.Combine(newRootTemp.FullName, "root");
+        Assert.True(ServersRootRelocator.HasStoredContent(_testRoot));
+        Assert.True(ServersRootRelocator.IsTargetDirectoryEmpty(newRoot));
+
+        ServersRootRelocator.RelocateAllContent(_testRoot, newRoot);
+
+        Assert.True(Directory.Exists(Path.Combine(newRoot, "servers", "RelocateSrv")));
+        Assert.True(File.Exists(Path.Combine(newRoot, "servers", "servers.json")));
+        string registryJson = await File.ReadAllTextAsync(Path.Combine(newRoot, "servers", "servers.json"));
+        Assert.Contains(newRoot.Replace("\\", "\\\\", StringComparison.Ordinal), registryJson);
+    }
+
+    [Fact]
+    public async Task UpdatesForgeUserJvmArgsCorrectly()
+    {
+        var plan = ServerCreationPlan.Create(
+            name: ServerName.Parse("ForgeTest"),
+            minecraftVersion: MinecraftVersion.Parse("1.20.1"),
+            loaderType: LoaderKind.Forge,
+            memoryMaxMb: 4096,
+            memoryMinMb: 2048,
+            jvmArgs: ["-Dcustom.flag=true"]);
+
+        var creation = await _manager.CreateServerAsync(plan);
+        Assert.True(creation.Completed);
+
+        string serverDir = Path.Combine(_testRoot, "ForgeTest");
+        string jvmArgsFile = Path.Combine(serverDir, "user_jvm_args.txt");
+        Assert.True(File.Exists(jvmArgsFile));
+
+        string content = await File.ReadAllTextAsync(jvmArgsFile);
+        Assert.Contains("-Xms2048M", content);
+        Assert.Contains("-Xmx4096M", content);
+        Assert.Contains("-Dcustom.flag=true", content);
+        Assert.Contains("-XX:+UseG1GC", content);
+    }
+
+    [Fact]
+    public async Task GetAllServersAsync_RecoversInterruptedDeletionBeforeListing()
+    {
+        using var tempDir = new TempDirectory("msm-tombstone-manager-");
+        string serverPath = Path.Combine(tempDir.FullName, "Survival2");
+        Directory.CreateDirectory(serverPath);
+        File.WriteAllText(Path.Combine(serverPath, "world.txt"), "data");
+        new ServerRegistryStore(tempDir.FullName).Set("Survival2", new ServerConfig(
+            ServerName.Parse("Survival2"),
+            MinecraftVersion.Parse("1.21.4"),
+            LoaderKind.Vanilla,
+            string.Empty,
+            2048,
+            null,
+            path: serverPath));
+        var registered = new ServerRegistryStore(tempDir.FullName).Find("Survival2");
+        Assert.NotNull(registered);
+
+        // 模擬刪除進行到一半：伺服器目錄已被搬入墓碑，但登錄檔仍保留
+        ServerTombstoneManager.PrepareDeleteTombstone(tempDir.FullName, "Survival2", registered.Path);
+        Assert.False(Directory.Exists(registered.Path));
+
+        var manager = TestServerManagers.Create(tempDir.FullName);
+        var servers = await manager.GetAllServersAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains(servers, static s => s.Name.Value == "Survival2");
+        Assert.True(Directory.Exists(registered.Path));
+    }
+}

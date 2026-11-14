@@ -12,7 +12,7 @@ public static class HashCalculator
     /// <summary>十六進位雜湊字元集合（大小寫皆可）</summary>
     private static readonly SearchValues<char> HexDigits = SearchValues.Create("0123456789abcdefABCDEF");
 
-    /// <summary>雜湊演算法名稱的唯一解析入口：支援 sha1／sha256／sha512（不分大小寫），並回傳對應十六進位摘要長度。</summary>
+    /// <summary>解析雜湊演算法名稱（sha1／sha256／sha512）與摘要長度</summary>
     [SuppressMessage(
         "Security",
         "CA5350",
@@ -46,7 +46,7 @@ public static class HashCalculator
         return false;
     }
 
-    /// <summary>判斷文字是否為指定演算法長度之十六進位摘要</summary>
+    /// <summary>文字是否為指定演算法長度之十六進位摘要</summary>
     public static bool IsHexDigest(ReadOnlySpan<char> value, int expectedHexLength) =>
         expectedHexLength > 0 && value.Length == expectedHexLength && !value.ContainsAnyExcept(HexDigits);
 

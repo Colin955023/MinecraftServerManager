@@ -1,11 +1,10 @@
 using MinecraftServerManager.Core.Ports;
-using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>執行中伺服器行程登記：寫入 <c>running_servers.json</c>，以 PID 加啟動時間辨識上次遺留之行程</summary>
+/// <summary>執行中伺服器行程登記，以 PID 與啟動時間辨識遺留行程</summary>
 public sealed class RunningServerRegistry(string userDataDirectory, IProcessInspector inspector) : IRunningServerRegistry
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(RunningServerRegistry));
@@ -102,33 +101,14 @@ public sealed class RunningServerRegistry(string userDataDirectory, IProcessInsp
         return start is not null && Math.Abs(start.Value.Ticks - entry.StartTimeUtcTicks) <= StartTimeToleranceTicks;
     }
 
-    private List<TrackedServerProcess> ReadFile()
-    {
-        try
-        {
-            if (!SafeFileSystem.FileExists(_filePath))
-            {
-                return [];
-            }
-
-            return JsonCodec.ReadFile<List<TrackedServerProcess>>(_filePath) ?? [];
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
-        {
-            Logger.Warning(ex, "讀取伺服器行程登記檔失敗");
-            return [];
-        }
-    }
+    private List<TrackedServerProcess> ReadFile() =>
+        JsonCodec.TryReadFile<List<TrackedServerProcess>>(_filePath) ?? [];
 
     private void PersistLocked(List<TrackedServerProcess> entries)
     {
-        try
+        if (!AtomicFileWriter.WriteJson(_filePath, entries))
         {
-            AtomicFileWriter.WriteJson(_filePath, entries);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Logger.Warning(ex, "寫入伺服器行程登記檔失敗");
+            Logger.Warning("寫入伺服器行程登記檔失敗: {Path}", _filePath);
         }
     }
 

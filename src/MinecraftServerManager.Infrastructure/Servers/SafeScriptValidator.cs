@@ -57,7 +57,7 @@ public static class SafeScriptValidator
         }
     }
 
-    /// <summary>驗證啟動參數所引用的 JAR 與引數檔（如 @args.txt）是否完全位於伺服器目錄內且非 Reparse Point。</summary>
+    /// <summary>驗證啟動參數引用的 JAR 與引數檔位於伺服器目錄內</summary>
     public static bool ValidateCommandInputs(string serverDirectory, IReadOnlyList<string> arguments)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
@@ -109,7 +109,7 @@ public static class SafeScriptValidator
         return true;
     }
 
-    /// <summary>檢查批次腳本內容是否安全合規（防範批次注入、路徑超出邊界、任意命令執行）。</summary>
+    /// <summary>批次腳本內容是否安全合規（防範批次注入、路徑超出邊界、任意命令執行）</summary>
     public static bool ValidateScriptContent(string scriptPath, string serverDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(scriptPath);
@@ -147,7 +147,7 @@ public static class SafeScriptValidator
                     lineToCheck = safeStripped;
                 }
 
-                // 1. 禁止未受信任之命令串接、管線、重新導向與逸出符號（除上述安全的 chcp > nul 特例除外）
+                // 1. 禁止命令串接、管線、重新導向與逸出符號
                 if (lineToCheck.AsSpan().ContainsAny(StrictForbiddenBatchChars))
                 {
                     Logger.Warning("啟動腳本包含不安全之命令串接或重新導向字元: {Line}", line);
@@ -161,7 +161,7 @@ public static class SafeScriptValidator
                     return false;
                 }
 
-                // 3. 檢查變數展開 %，僅允許相容之合法位置參數（例如 %*、%~dp0、%1 等）
+                // 3. 變數展開只允許位置參數（%*、%~dp0、%1 等）
                 if (HasUnsafePercentUsage(lineToCheck))
                 {
                     Logger.Warning("啟動腳本包含未受信任之環境變數展開語法: {Line}", line);
@@ -247,7 +247,7 @@ public static class SafeScriptValidator
                    cdArg.Equals("%~dp0", StringComparison.OrdinalIgnoreCase);
         }
 
-        // Java 啟動指令：依規範嚴格排除純 java 或 java.exe，只接受合規之絕對路徑
+        // Java 啟動指令只接受絕對路徑
         if (TryExtractLaunchExecutable(line, out string exePath))
         {
             if (Path.IsPathFullyQualified(exePath))
@@ -262,7 +262,7 @@ public static class SafeScriptValidator
                     string fileName = Path.GetFileName(exePath);
                     if (ValidJavaExecutables.Contains(fileName))
                     {
-                        // Java 路徑合規後仍須排除可執行任意外部命令的 JVM 選項（不需要 & | 等字元即可生效）
+                        // 仍須排除可執行外部命令的 JVM 選項
                         return !JvmOptionPolicy.ContainsCommandExecutionOption(line);
                     }
                 }

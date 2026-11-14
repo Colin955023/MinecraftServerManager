@@ -22,14 +22,9 @@ public sealed partial class ManageServerView : UserControl
     {
         DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
-            if (ViewModel.Lifecycle.MonitorServerCommand.CanExecute(null))
-            {
-                ViewModel.Lifecycle.MonitorServerCommand.Execute(null);
-            }
+            ViewModel.Lifecycle.MonitorServerCommand.TryExecute();
         });
     }
 
-    private void OnHeaderSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.List.Servers.SortBy(TableSortKeys.Servers, e);
-
-    private void OnHeaderAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.List.Servers, TableSortKeys.Servers);
+    public ITableSortTarget HeaderSort => field ??= new TableSortTarget<ServerRowItem>(() => ViewModel.List.Servers, TableSortKeys.Servers);
 }

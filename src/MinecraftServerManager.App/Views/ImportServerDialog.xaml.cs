@@ -3,7 +3,7 @@ using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>匯入伺服器 WinUI 3 原生 ContentDialog</summary>
+/// <summary>匯入伺服器對話方塊</summary>
 public sealed partial class ImportServerDialog : ContentDialog
 {
     public ImportServerViewModel ViewModel { get; }

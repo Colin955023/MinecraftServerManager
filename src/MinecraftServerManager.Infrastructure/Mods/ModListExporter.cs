@@ -10,7 +10,7 @@ using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
-/// <summary>模組清單匯出實作（純文字、JSON、HTML、XLSX），內容組裝與檔案寫入皆於背景執行緒完成</summary>
+/// <summary>模組清單匯出（純文字、JSON、HTML、XLSX）</summary>
 public sealed class ModListExporter : IModListExporter
 {
     private const string EmptyPlaceholder = "-";

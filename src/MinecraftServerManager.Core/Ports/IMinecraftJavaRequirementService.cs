@@ -1,15 +1,15 @@
 namespace MinecraftServerManager.Core.Ports;
 
-/// <summary>依據 Mojang 官方 version package 中的 javaVersion.majorVersion 動態取得並快取 Java 主要版本需求</summary>
+/// <summary>依 Mojang 官方資料取得並快取 Java major 需求</summary>
 public interface IMinecraftJavaRequirementService
 {
-    /// <summary>依據 Minecraft 版本與載入器非同步取得官方或載入器指定的 Java 主要版本</summary>
+    /// <summary>取得指定 Minecraft 版本與載入器所需的 Java major</summary>
     public Task<int> GetRequiredJavaMajorAsync(string minecraftVersion, Domain.Servers.LoaderKind loader = Domain.Servers.LoaderKind.Unknown, CancellationToken cancellationToken = default);
 
     /// <summary>從快取同步取得指定的 Java 主要版本；未快取時回傳 null</summary>
     public int? GetCachedJavaMajor(string minecraftVersion, Domain.Servers.LoaderKind loader = Domain.Servers.LoaderKind.Unknown);
 
-    /// <summary>平行非同步預載入官方 Manifest 中所有 release 版本的 Java major 需求至快取檔案</summary>
+    /// <summary>預載所有正式版的 Java major 需求至快取</summary>
     public Task<IReadOnlyDictionary<string, int>> PreloadAllJavaRequirementsAsync(bool force = false, CancellationToken cancellationToken = default);
 
     /// <summary>取得本地版本快取中排序後不重複的 Java 主要版本清單</summary>

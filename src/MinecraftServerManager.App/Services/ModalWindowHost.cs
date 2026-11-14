@@ -7,7 +7,7 @@ using WinRT.Interop;
 
 namespace MinecraftServerManager.App.Services;
 
-/// <summary>模態視窗宿主：管理 WinUI 3 原生 Window 的父子繫結、視窗置中、OverlappedPresenter 模態行為、前景焦點與非同步工作階段。</summary>
+/// <summary>模態視窗宿主：父子繫結、置中、模態行為與前景焦點</summary>
 public static partial class ModalWindowHost
 {
     private const int GWLP_HWNDPARENT = -8;
@@ -26,7 +26,7 @@ public static partial class ModalWindowHost
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool SetForegroundWindow(IntPtr hWnd);
 
-    /// <summary>統一設定模態對話視窗標題、DIP 尺寸，並於視窗關閉時自動解除 x:Bind 追蹤</summary>
+    /// <summary>設定對話視窗標題與尺寸，關閉時解除 x:Bind 追蹤</summary>
     public static void ConfigureDialogWindow(
         Window window,
         string title,
@@ -42,10 +42,7 @@ public static partial class ModalWindowHost
         window.Closed += (_, _) => stopBindings();
     }
 
-    /// <summary>
-    /// 延後至目前的命令處理完成後再關閉視窗。ViewModel 於命令內要求關閉時一律使用：
-    /// 同步關閉會讓命令結束時更新已關閉視窗的按鈕狀態，造成原生閃退
-    /// </summary>
+    /// <summary>延後關閉視窗；命令內同步關閉會造成原生閃退</summary>
     public static void CloseDeferred(Window window)
     {
         ArgumentNullException.ThrowIfNull(window);
@@ -53,6 +50,18 @@ public static partial class ModalWindowHost
         {
             window.Close();
         }
+    }
+
+    /// <summary>建立 RequestClose 處理常式：先記錄結果，再延後關閉視窗</summary>
+    public static Action<bool> CloseWithResult(Window window, Action<bool> setResult)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        ArgumentNullException.ThrowIfNull(setResult);
+        return success =>
+        {
+            setResult(success);
+            CloseDeferred(window);
+        };
     }
 
     /// <summary>為具備未儲存變更之對話視窗登錄統一的關閉確認攔截邏輯</summary>
@@ -90,7 +99,7 @@ public static partial class ModalWindowHost
         };
     }
 
-    /// <summary>將子視窗相對於父視窗置中；若無父視窗則置中於主顯示器工作區，並確保視窗座標夾在螢幕可視工作區內。</summary>
+    /// <summary>相對父視窗置中（無父視窗則置中於主螢幕），並夾限於工作區內</summary>
     public static void CenterOnParent(Window childWindow, Window? parentWindow)
     {
         ArgumentNullException.ThrowIfNull(childWindow);

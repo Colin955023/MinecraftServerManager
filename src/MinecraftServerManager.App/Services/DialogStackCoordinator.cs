@@ -1,10 +1,6 @@
 namespace MinecraftServerManager.App.Services;
 
-/// <summary>
-/// 對話框堆疊協調器：處理同一 UI 執行緒中巢狀對話框的中斷、自動隱藏、重現與狀態恢復。
-/// WinUI 同一執行緒同時只能開啟一個 ContentDialog，因此新對話框必須等待前一個對話框真正隱藏後才顯示。
-/// 此類別不直接相依 UI 框架型別，具備完整的執行緒安全與單元測試支援。
-/// </summary>
+/// <summary>對話框堆疊協調器：同一執行緒同時只能開一個 ContentDialog，巢狀時先隱藏上層、關閉後重現</summary>
 public sealed class DialogStackCoordinator
 {
     /// <summary>等待前一個對話框隱藏的逾時上限；對話框拒絕隱藏時避免永久卡住</summary>
@@ -13,7 +9,7 @@ public sealed class DialogStackCoordinator
     private readonly Stack<DialogEntry> _stack = new();
     private readonly Lock _lock = new();
 
-    /// <summary>以非同步方式排隊並顯示對話框；若已有顯示中之對話框，自動中斷並暫存其狀態，待本對話框關閉後自動喚醒恢復。</summary>
+    /// <summary>排隊顯示對話框；已有顯示中的對話框時先暫時隱藏，本對話框關閉後恢復</summary>
     /// <typeparam name="TResult">對話框傳回之結果型別</typeparam>
     /// <param name="showAsync">呼叫顯示對話框之委派</param>
     /// <param name="hideAction">要求對話框暫時隱藏之委派</param>
@@ -42,7 +38,7 @@ public sealed class DialogStackCoordinator
         {
             if (previousActive is not null)
             {
-                // 要求前一個對話框隱藏，並等待其真正關閉後才顯示本對話框，避免「同時只能開啟一個 ContentDialog」例外
+                // 等前一個對話框真正關閉後才顯示（同時只能開一個 ContentDialog）
                 previousActive.RequestHide();
                 await Task.WhenAny(previousActive.HiddenTask, Task.Delay(PreviousHideTimeout)).ConfigureAwait(true);
             }

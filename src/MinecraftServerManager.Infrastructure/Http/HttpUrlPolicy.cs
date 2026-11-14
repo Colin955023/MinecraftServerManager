@@ -3,7 +3,7 @@ using System.Net.Sockets;
 
 namespace MinecraftServerManager.Infrastructure.Http;
 
-/// <summary>HTTP 連線安全原則：只允許 HTTPS 公開位址，並於連線當下再次驗證 DNS 解析結果（防 DNS rebinding）</summary>
+/// <summary>HTTP 連線安全原則：只允許 HTTPS 公開位址，連線時再驗證 DNS 解析結果</summary>
 public static class HttpUrlPolicy
 {
     /// <summary>單一位址的連線逾時；逾時即改試下一個位址，避免首個位址不通時耗盡整體逾時</summary>
@@ -39,7 +39,7 @@ public static class HttpUrlPolicy
         IPNetwork.Parse("100::/64"),
     ];
 
-    /// <summary>供 <see cref="SocketsHttpHandler.ConnectCallback"/> 使用的連線進入點</summary>
+    /// <summary><see cref="SocketsHttpHandler.ConnectCallback"/> 的連線進入點</summary>
     public static async ValueTask<Stream> ConnectAsync(
         SocketsHttpConnectionContext context,
         CancellationToken cancellationToken)
@@ -48,7 +48,7 @@ public static class HttpUrlPolicy
         return await ConnectAsync(context.DnsEndPoint, resolver: null, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>解析主機並只連線至公開位址；<paramref name="resolver"/> 為 null 時使用系統 DNS</summary>
+    /// <summary>解析主機並只連線至公開位址</summary>
     public static async ValueTask<Stream> ConnectAsync(
         DnsEndPoint endpoint,
         Func<string, CancellationToken, Task<IPAddress[]>>? resolver,
@@ -68,7 +68,7 @@ public static class HttpUrlPolicy
         SocketException? lastException = null;
         foreach (IPAddress address in addresses)
         {
-            // 與 SocketsHttpHandler 預設連線一致啟用 NoDelay，避免小型 API 請求受 Nagle 演算法延遲
+            // 啟用 NoDelay，與 SocketsHttpHandler 預設一致
             var socket = (Socket?)new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
             using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             attemptCts.CancelAfter(PerAddressConnectTimeout);
@@ -97,7 +97,7 @@ public static class HttpUrlPolicy
         throw new HttpRequestException("無法連線至已驗證的公開主機", lastException);
     }
 
-    /// <summary>不需連線即可判定的靜態檢查：HTTPS、無帳密、非 localhost、非私有 IP 字面值</summary>
+    /// <summary>靜態檢查：HTTPS、無帳密、非 localhost、非私有 IP</summary>
     public static void ValidateStatic(Uri uri)
     {
         ArgumentNullException.ThrowIfNull(uri);
@@ -128,7 +128,7 @@ public static class HttpUrlPolicy
         }
     }
 
-    /// <summary>解析主機名稱（或 IP 字面值）並確認所有位址皆為公開位址，否則擲出 HttpSecurityException</summary>
+    /// <summary>解析主機並確認所有位址皆為公開位址，否則擲出</summary>
     private static async Task<IPAddress[]> ResolvePublicAddressesAsync(
         string host,
         Func<string, CancellationToken, Task<IPAddress[]>>? resolver,
@@ -165,8 +165,8 @@ public static class HttpUrlPolicy
         host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
         || host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>判斷位址是否為可路由的公開位址（排除迴路、私有、保留、多點傳送與內嵌私有 IPv4 的轉換位址）</summary>
-    public static bool IsPublicAddress(IPAddress address)
+    /// <summary>是否為可路由的公開位址</summary>
+    internal static bool IsPublicAddress(IPAddress address)
     {
         var normalized = address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
         if (IPAddress.IsLoopback(normalized)
@@ -196,7 +196,7 @@ public static class HttpUrlPolicy
             return IsPublicAddress(ipv4);
         }
 
-        // 6to4（2002::/16）與 NAT64（64:ff9b::/96）內嵌 IPv4，需以內嵌位址判定是否為公開位址
+        // 6to4 與 NAT64 內嵌 IPv4，以內嵌位址判定
         if (span[0] == 0x20 && span[1] == 0x02)
         {
             return IsPublicAddress(new IPAddress(span.Slice(2, 4)));

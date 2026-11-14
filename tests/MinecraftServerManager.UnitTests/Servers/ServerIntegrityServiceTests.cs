@@ -1,10 +1,9 @@
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Servers;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.Servers;
 
-public sealed partial class ServerIntegrityServiceTests : IDisposable
+public sealed class ServerIntegrityServiceTests : IDisposable
 {
     private readonly TempDirectory _testDirTemp = new("msm-integrity-tests-");
     private readonly string _testDir;

@@ -2,7 +2,7 @@ using MinecraftServerManager.Core.Ports;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>多伺服器執行階段管理：每台伺服器各自持有一個 <see cref="ServerRuntime"/>，並同步行程登記</summary>
+/// <summary>多伺服器執行階段管理</summary>
 public sealed class ServerRuntimeHost(IProcessRunner processRunner, IRunningServerRegistry registry) : IServerRuntimeHost
 {
     private readonly Dictionary<string, ServerRuntime> _runtimes = new(StringComparer.OrdinalIgnoreCase);

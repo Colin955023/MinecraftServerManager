@@ -205,7 +205,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher, I
                 throw new FileNotFoundException("找不到系統命令解譯器 (cmd.exe)", comSpec);
             }
 
-            // cmd.exe 會在引號內仍解譯部分中繼字元，路徑或參數含中繼字元一律拒絕以防指令串接
+            // cmd.exe 在引號內仍會解譯部分中繼字元，含中繼字元一律拒絕
             if (resolvedFileName.AsSpan().ContainsAny(CmdMetaChars) ||
                 specification.Arguments.Any(static a => a.AsSpan().ContainsAny(CmdMetaChars)))
             {
@@ -323,18 +323,18 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher, I
         string basePath = specification.WorkingDirectory ?? Environment.CurrentDirectory;
         string candidatePath = Path.GetFullPath(fileName, basePath);
 
-        // 純檔名不在工作目錄內解析（避免伺服器資料夾內被植入同名執行檔），交由 PATH／系統目錄搜尋
+        // 純檔名不在工作目錄內解析，交由 PATH 搜尋
         if (Path.IsPathFullyQualified(fileName) ||
             fileName.Contains(Path.DirectorySeparatorChar) ||
             fileName.Contains(Path.AltDirectorySeparatorChar))
         {
-            // winget 的 App Execution Alias 本身即為 reparse point，須先判斷，否則會被 FileExists 視為不存在
+            // winget 別名本身是 reparse point，須先判斷
             if (IsTrustedWindowsAppAliasFile(candidatePath))
             {
                 return candidatePath;
             }
 
-            // FileExists 對 reparse point 一律回傳 false，因此不可信任的 reparse point 亦會在此被拒絕
+            // FileExists 對 reparse point 回傳 false，不可信任者在此被拒絕
             if (!SafeFileSystem.FileExists(candidatePath))
             {
                 throw new FileNotFoundException("找不到指定的執行檔", fileName);
@@ -361,7 +361,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher, I
         return fileName;
     }
 
-    /// <summary>判斷是否為 %LOCALAPPDATA%\Microsoft\WindowsApps 下實際存在的 winget.exe 別名（不擲出例外）</summary>
+    /// <summary>是否為 WindowsApps 下的 winget.exe 別名</summary>
     private static bool IsTrustedWindowsAppAliasFile(string filePath) =>
         IsTrustedWindowsAppAlias(filePath) &&
         SafeFileSystem.DirectoryExists(Path.GetDirectoryName(filePath)!) &&
@@ -612,7 +612,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher, I
             _process.Dispose();
         }
 
-        /// <summary>等待標準輸出／錯誤管線讀完並結束分派；孫行程可能繼承管線而使其永不關閉，故設逾時</summary>
+        /// <summary>等待輸出管線讀完；孫行程可能佔用管線，故設逾時</summary>
         private async Task DrainOutputAsync()
         {
             try
@@ -701,7 +701,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher, I
         "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1A\x1B\x1C\x1D\x1E\x1F\x7F");
 
     /// <summary>清洗行程輸出單行文字，過濾 ANSI 逸出序列與非列印控制字元並限制單行上限</summary>
-    public static string SanitizeOutputLine(string line)
+    internal static string SanitizeOutputLine(string line)
     {
         if (string.IsNullOrEmpty(line))
         {

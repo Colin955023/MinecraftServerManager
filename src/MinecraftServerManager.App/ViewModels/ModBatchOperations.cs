@@ -40,7 +40,7 @@ public abstract class ModQueueWorkflowViewModelBase : ViewModelBase
 /// <summary>模組批次作業共用流程：非官方下載來源確認與有限平行度進度回報</summary>
 internal static class ModBatchOperations
 {
-    /// <summary>下載來源含非官方 Modrinth CDN 時要求使用者確認；全部為官方來源或使用者同意時回傳 true</summary>
+    /// <summary>下載來源含非官方 Modrinth CDN 時要求確認</summary>
     public static Task<bool> ConfirmUnofficialSourcesAsync<T>(
         IUiService ui,
         IModFileService modFileService,
@@ -62,7 +62,7 @@ internal static class ModBatchOperations
         return ui.ConfirmAsync(message, "非官方下載來源警告", UiMessageLevel.Warning);
     }
 
-    /// <summary>以有限平行度執行批次工作並逐項回報進度；單項例外由 <paramref name="body"/> 自行處理，不中斷其餘項目</summary>
+    /// <summary>以有限平行度執行批次工作並回報進度</summary>
     public static Task RunWithProgressAsync<T>(
         IReadOnlyList<T> items,
         int maxParallelism,

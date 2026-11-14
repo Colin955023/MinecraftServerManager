@@ -15,7 +15,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.App;
 
-/// <summary>應用程式組合根（Composition Root）：負責相依性注入、服務生命週期管理與背景預熱</summary>
+/// <summary>組合根：相依性注入、服務生命週期與背景預熱</summary>
 public sealed class AppCompositionRoot : IAsyncDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AppCompositionRoot));

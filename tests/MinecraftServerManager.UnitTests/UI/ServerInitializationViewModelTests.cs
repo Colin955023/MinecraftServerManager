@@ -2,11 +2,10 @@ using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.Servers;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-/// <summary>初次啟動初始化視窗 ViewModel 測試（啟動檔解析、輸出彙整、就緒判定、倒數關閉與關閉攔截）</summary>
+/// <summary>初始化視窗 ViewModel 測試</summary>
 public sealed class ServerInitializationViewModelTests : IDisposable
 {
     private readonly TempDirectory _serverDirTemp = new("msm-init-vm-");

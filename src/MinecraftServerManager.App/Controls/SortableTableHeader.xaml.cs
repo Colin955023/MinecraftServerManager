@@ -3,10 +3,11 @@ using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 
 namespace MinecraftServerManager.App.Controls;
 
-/// <summary>支援自然排序、方向指示、右側垂直分隔線、拖曳手動調整欄寬與按兩下自動對齊最寬項目之表頭控制項</summary>
+/// <summary>表頭控制項：排序、方向指示、拖曳調欄寬、按兩下自動對齊</summary>
 public sealed partial class SortableTableHeader : UserControl
 {
     public const double DefaultMinColumnWidth = 48.0;
@@ -60,8 +61,6 @@ public sealed partial class SortableTableHeader : UserControl
     private long _lastDoubleTapTick;
     private double? _initialPixelWidth;
 
-    public event EventHandler<SortRequestedEventArgs>? SortRequested;
-    public event EventHandler<string>? AutoFitRequested;
 
     public SortableTableHeader()
     {
@@ -118,7 +117,7 @@ public sealed partial class SortableTableHeader : UserControl
         string.Equals(SortPropertyName, CurrentSortProperty, StringComparison.OrdinalIgnoreCase) &&
         SortDirection.HasValue;
 
-    /// <summary>計算對齊該欄最寬項目（包含表頭與所有資料列內容）所需之欄位像素寬度。</summary>
+    /// <summary>計算對齊該欄最寬項目（包含表頭與所有資料列內容）所需之欄位像素寬度</summary>
     public static double CalculateAutoFitWidth(
         double minOrDefaultWidth,
         IEnumerable<string?> values,
@@ -152,7 +151,7 @@ public sealed partial class SortableTableHeader : UserControl
         return Math.Min(maxEstimatedWidth, DefaultMaxColumnWidth);
     }
 
-    /// <summary>依資料列顯示文字自動對齊欄寬（不小於欄位初始寬度），經 ColumnWidth 雙向繫結回寫欄寬設定</summary>
+    /// <summary>依顯示文字自動對齊欄寬（不小於初始寬度）</summary>
     public void FitToContent(IEnumerable<string?> values) =>
         ColumnWidth = new GridLength(CalculateAutoFitWidth(_initialPixelWidth ?? DefaultMinColumnWidth, values, Text));
 
@@ -204,7 +203,21 @@ public sealed partial class SortableTableHeader : UserControl
 
         SortDirection = nextDirection;
         CurrentSortProperty = SortPropertyName;
-        SortRequested?.Invoke(this, new SortRequestedEventArgs(SortPropertyName, nextDirection));
+        FindSortTarget()?.Sort(SortPropertyName, nextDirection);
+    }
+
+    /// <summary>取得所屬 TableFrame 的排序對象</summary>
+    private ITableSortTarget? FindSortTarget()
+    {
+        for (DependencyObject? node = this; node is not null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is TableFrame frame)
+            {
+                return frame.SortTarget;
+            }
+        }
+
+        return null;
     }
 
     private void OnButtonDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
@@ -213,7 +226,7 @@ public sealed partial class SortableTableHeader : UserControl
         _lastDoubleTapTick = Environment.TickCount64;
         if (!string.IsNullOrEmpty(SortPropertyName))
         {
-            AutoFitRequested?.Invoke(this, SortPropertyName);
+            FindSortTarget()?.AutoFit(this);
         }
     }
 
@@ -225,7 +238,7 @@ public sealed partial class SortableTableHeader : UserControl
         SplitterGrip.ReleasePointerCaptures();
         if (!string.IsNullOrEmpty(SortPropertyName))
         {
-            AutoFitRequested?.Invoke(this, SortPropertyName);
+            FindSortTarget()?.AutoFit(this);
         }
     }
 
@@ -311,11 +324,4 @@ public sealed partial class SortableTableHeader : UserControl
             header.Bindings.Update();
         }
     }
-}
-
-/// <summary>欄位排序請求事件參數</summary>
-public sealed class SortRequestedEventArgs(string propertyName, ListSortDirection direction) : EventArgs
-{
-    public string PropertyName { get; } = propertyName;
-    public ListSortDirection Direction { get; } = direction;
 }

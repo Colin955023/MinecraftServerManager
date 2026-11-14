@@ -2,7 +2,7 @@ using MinecraftServerManager.Domain.Mods;
 
 namespace MinecraftServerManager.Core.Ports;
 
-/// <summary>模組檔案異動、啟停、刪除與交易安裝抽象介面</summary>
+/// <summary>模組檔案異動、啟停、刪除與交易安裝介面</summary>
 public interface IModFileInstaller
 {
     /// <summary>切換本地模組啟用或停用狀態</summary>

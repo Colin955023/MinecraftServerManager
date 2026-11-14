@@ -25,7 +25,7 @@ public static class AppLogging
     /// <summary>取得指定類別名稱之 ILogger</summary>
     public static ILogger CreateLogger(string categoryName)
     {
-        // 初始化檢查與建立記錄器必須在同一把鎖內完成，避免與 Shutdown 競態而使用到已釋放的工廠
+        // 檢查與建立記錄器須在同一把鎖內完成
         lock (SyncRoot)
         {
             EnsureInitialized();

@@ -7,7 +7,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>伺服器名單管理視窗（原生模態視窗，透過 ModalWindowHost 裝載）</summary>
+/// <summary>伺服器名單管理視窗</summary>
 public sealed partial class PlayerManagementDialog : Window
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(PlayerManagementDialog));
@@ -36,11 +36,7 @@ public sealed partial class PlayerManagementDialog : Window
             };
         }
 
-        ViewModel.RequestClose += success =>
-        {
-            DialogResult = success;
-            ModalWindowHost.CloseDeferred(this);
-        };
+        ViewModel.RequestClose += ModalWindowHost.CloseWithResult(this, success => DialogResult = success);
 
         ModalWindowHost.RegisterUnsavedChangesPrompt(
             this,
@@ -74,19 +70,11 @@ public sealed partial class PlayerManagementDialog : Window
         }
     }
 
-    private void OnOperatorSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.OperatorRows.SortBy(TableSortKeys.Operators, e);
+    public ITableSortTarget OperatorSort => field ??= new TableSortTarget<OperatorRowItem>(() => ViewModel.OperatorRows, TableSortKeys.Operators);
 
-    private void OnOperatorAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.OperatorRows, TableSortKeys.Operators);
+    public ITableSortTarget WhitelistSort => field ??= new TableSortTarget<ServerWhitelistEntry>(() => ViewModel.Whitelist, TableSortKeys.Whitelist);
 
-    private void OnWhitelistSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.Whitelist.SortBy(TableSortKeys.Whitelist, e);
+    public ITableSortTarget BannedPlayerSort => field ??= new TableSortTarget<ServerBannedPlayerEntry>(() => ViewModel.BannedPlayers, TableSortKeys.BannedPlayers);
 
-    private void OnWhitelistAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.Whitelist, TableSortKeys.Whitelist);
-
-    private void OnBannedPlayerSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.BannedPlayers.SortBy(TableSortKeys.BannedPlayers, e);
-
-    private void OnBannedPlayerAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.BannedPlayers, TableSortKeys.BannedPlayers);
-
-    private void OnBannedIpSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.BannedIps.SortBy(TableSortKeys.BannedIps, e);
-
-    private void OnBannedIpAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.BannedIps, TableSortKeys.BannedIps);
+    public ITableSortTarget BannedIpSort => field ??= new TableSortTarget<ServerBannedIpEntry>(() => ViewModel.BannedIps, TableSortKeys.BannedIps);
 }

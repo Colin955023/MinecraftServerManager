@@ -4,7 +4,7 @@ using System.Net;
 
 namespace MinecraftServerManager.Core.Servers;
 
-/// <summary>提供 Minecraft server.properties 設定項目數值合法性驗證</summary>
+/// <summary>server.properties 數值驗證</summary>
 public static class ServerPropertiesValidator
 {
     private static readonly SearchValues<char> IpLiteralChars = SearchValues.Create("0123456789.");

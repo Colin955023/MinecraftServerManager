@@ -18,7 +18,4 @@
     <ProjectReference
       Include="..\..\src\MinecraftServerManager.App\MinecraftServerManager.App.csproj" />
   </ItemGroup>
-  <ItemGroup>
-    <Compile Include="..\Shared\*.cs" Link="Shared\%(Filename)%(Extension)" />
-  </ItemGroup>
 </Project>

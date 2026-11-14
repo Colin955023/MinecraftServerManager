@@ -8,28 +8,19 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-public sealed partial class JavaItemViewModel : ObservableObject
+public sealed class JavaItemViewModel
 {
-    [ObservableProperty]
-    public partial string DisplayName { get; set; } = string.Empty;
+    public string DisplayName { get; init; } = string.Empty;
 
-    [ObservableProperty]
-    public partial int MajorVersion { get; set; }
+    public int MajorVersion { get; init; }
 
-    [ObservableProperty]
-    public partial string ExecutablePath { get; set; } = string.Empty;
+    public string ExecutablePath { get; init; } = string.Empty;
 
-    [ObservableProperty]
-    public partial string Vendor { get; set; } = "未知廠商";
+    public string Vendor { get; init; } = "未知廠商";
 
-    [ObservableProperty]
-    public partial bool Is64Bit { get; set; } = true;
+    public bool IsRecommended { get; init; }
 
-    [ObservableProperty]
-    public partial bool IsRecommended { get; set; }
-
-    [ObservableProperty]
-    public partial string StatusText { get; set; } = string.Empty;
+    public string StatusText { get; init; } = string.Empty;
 }
 
 /// <summary>Java 主要版本選項</summary>
@@ -277,7 +268,6 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
                     MajorVersion = 0,
                     ExecutablePath = path,
                     Vendor = "自訂路徑",
-                    Is64Bit = true,
                     StatusText = "使用者手動指定"
                 };
                 InstalledJavas.Insert(0, customItem);
@@ -342,7 +332,6 @@ public sealed partial class ManageJavaViewModel : ViewModelBase
                     MajorVersion = j.MajorVersion,
                     ExecutablePath = j.ExecutablePath,
                     Vendor = string.IsNullOrWhiteSpace(j.Vendor) ? "OpenJDK / Oracle" : j.Vendor,
-                    Is64Bit = j.Is64Bit,
                     IsRecommended = isMatch,
                     StatusText = status
                 };

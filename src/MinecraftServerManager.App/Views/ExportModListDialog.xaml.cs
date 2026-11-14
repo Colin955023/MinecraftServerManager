@@ -3,10 +3,7 @@ using MinecraftServerManager.Domain.Mods;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>
-/// 模組清單匯出格式選擇對話方塊。只負責選擇格式；對話方塊關閉後才由 <see cref="ViewModels.ExportModListViewModel"/>
-/// 執行儲存位置選取、匯出與開啟確認，避免在 ContentDialog 開啟期間疊加其他 ContentDialog（WinUI 同時只允許一個）。
-/// </summary>
+/// <summary>模組清單匯出格式選擇對話方塊；後續流程由 <see cref="ViewModels.ExportModListViewModel"/> 執行</summary>
 public sealed partial class ExportModListDialog : ContentDialog
 {
     public ExportModListDialog()

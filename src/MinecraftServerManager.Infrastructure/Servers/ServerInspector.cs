@@ -435,7 +435,7 @@ public sealed partial class ServerInspector : IServerInspector
 
         public string Source { get; set; } = "未偵測到";
 
-        public bool IsSet => Value is not null;
+        internal bool IsSet => Value is not null;
 
         public void Set(string value, string source)
         {
@@ -443,7 +443,7 @@ public sealed partial class ServerInspector : IServerInspector
             Source = source;
         }
 
-        public void SetIfUnset(string value, string source)
+        internal void SetIfUnset(string value, string source)
         {
             if (!IsSet)
             {
@@ -605,59 +605,44 @@ public sealed partial class ServerInspector : IServerInspector
         }
     }
 
+    private static IEnumerable<string> RootThenSubdirectories(string directory)
+    {
+        yield return directory;
+        foreach (string subDirectory in SafeFileSystem.EnumerateDirectories(directory))
+        {
+            yield return subDirectory;
+        }
+    }
+
     private static (int MaxMb, int? MinMb) InspectMemory(string directory)
     {
-        int maxMb = ServerDefaults.DefaultMemoryMaxMb;
-        int? minMb = null;
-        bool found = false;
-
-        foreach (string candidate in MemoryCandidateScriptNames)
+        try
         {
-            string candidatePath = Path.Combine(directory, candidate);
-            var (parsedMax, parsedMin) = TryExtractMemoryFromFile(candidatePath);
-            if (parsedMax.HasValue)
+            // 先找根目錄，再找第一層子目錄
+            foreach (string folder in RootThenSubdirectories(directory))
             {
-                maxMb = parsedMax.Value;
-                minMb = parsedMin;
-                found = true;
-                Logger.Information("從來源檔案「{File}」解析到記憶體設定: Max={Max}MB, Min={Min}MB", candidate, maxMb, minMb);
-                break;
-            }
-        }
-
-        if (!found)
-        {
-            try
-            {
-                foreach (string subDir in SafeFileSystem.EnumerateDirectories(directory))
+                foreach (string candidate in MemoryCandidateScriptNames)
                 {
-                    foreach (string candidate in MemoryCandidateScriptNames)
+                    string candidatePath = Path.Combine(folder, candidate);
+                    var (parsedMax, parsedMin) = TryExtractMemoryFromFile(candidatePath);
+                    if (parsedMax.HasValue)
                     {
-                        string candidatePath = Path.Combine(subDir, candidate);
-                        var (parsedMax, parsedMin) = TryExtractMemoryFromFile(candidatePath);
-                        if (parsedMax.HasValue)
-                        {
-                            maxMb = parsedMax.Value;
-                            minMb = parsedMin;
-                            found = true;
-                            Logger.Information("從子目錄檔案「{File}」解析到記憶體設定: Max={Max}MB, Min={Min}MB", Path.GetRelativePath(directory, candidatePath), maxMb, minMb);
-                            break;
-                        }
-                    }
-
-                    if (found)
-                    {
-                        break;
+                        Logger.Information(
+                            "從檔案「{File}」解析到記憶體設定: Max={Max}MB, Min={Min}MB",
+                            Path.GetRelativePath(directory, candidatePath),
+                            parsedMax.Value,
+                            parsedMin);
+                        return (parsedMax.Value, parsedMin);
                     }
                 }
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                Logger.Warning(ex, "掃描子目錄記憶體設定失敗");
-            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.Warning(ex, "掃描子目錄記憶體設定失敗");
         }
 
-        return (maxMb, minMb);
+        return (ServerDefaults.DefaultMemoryMaxMb, null);
     }
 
     [GeneratedRegex(@"forge[-_](\d+\.\d+(?:\.\d+)?)[-_](\d+\.\d+(?:\.\d+)?).*\.jar", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]

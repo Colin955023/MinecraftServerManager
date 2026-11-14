@@ -1,13 +1,8 @@
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.Architecture;
-/// <summary>
-/// 原生架構測試（A1～A31 規則）：
-/// 規定「共用工具入口」與架構分層界線；規則編號與 docs/TECHNICAL_OVERVIEW.md 第 11 節對照表一一對應。
-/// 零額外第三方相依、純原生靜態原始碼掃描與專案結構檢查。
-/// </summary>
+/// <summary>架構規則測試（A1～A31），對應技術手冊第 11 節</summary>
 public sealed partial class SharedEntryArchitectureTests
 {
     #region 輔助方法
@@ -50,7 +45,7 @@ public sealed partial class SharedEntryArchitectureTests
 
     private static readonly string[] Src = ["src"];
 
-    /// <summary>架構規則：掃描範圍、違規正規式、說明、白名單判定與是否保留字串常值（僅清除註解）</summary>
+    /// <summary>架構規則：範圍、違規正規式、說明、白名單與是否保留字串</summary>
     private sealed record Rule(
         string Id,
         string[] Scopes,
@@ -67,7 +62,7 @@ public sealed partial class SharedEntryArchitectureTests
 
     private static readonly Func<string, bool> AllowNone = static _ => false;
 
-    /// <summary>規則編號與 docs/TECHNICAL_OVERVIEW.md 第 11 節對照表一一對應</summary>
+    /// <summary>規則表</summary>
     private static readonly Dictionary<string, Rule> Rules = new Rule[]
     {
         new("A1", Src, A1Regex(), "檔案系統 I/O 必須統一透過 SafeFileSystem 或 AtomicFileWriter",
@@ -159,7 +154,7 @@ public sealed partial class SharedEntryArchitectureTests
 
     #region 架構規則測試（A1～A31）
 
-    /// <summary>依規則表掃描原始碼並要求零違規；規則編號與技術手冊第 11 節對照表一一對應（A9 見 <see cref="A9_LayerDependencies_ShouldRespectArchitectureBoundaries"/>）</summary>
+    /// <summary>依規則表掃描並要求零違規</summary>
     [Theory]
     [InlineData("A1")]
     [InlineData("A2")]
@@ -206,12 +201,36 @@ public sealed partial class SharedEntryArchitectureTests
         AssertNoViolations(violations, rule.Id);
     }
 
-    /// <summary>
-    /// A9：專案相依性與命名空間界線
-    /// 1. 檢查專案參照（Project References）
-    /// 2. 檢查 Domain 與 Core 之 using 命名空間界線
-    /// 規範：專案規範「架構與專案結構」（相依方向）；對照表：docs/TECHNICAL_OVERVIEW.md 第 11 節 A9。
-    /// </summary>
+    /// <summary>技術手冊規則表的編號須與測試規則一致</summary>
+    [Fact]
+    public void RuleTable_ShouldMatchTestedRules()
+    {
+        string doc = File.ReadAllText(Path.Combine(SourceScanner.SolutionRoot, "docs", "TECHNICAL_OVERVIEW.md"));
+        var documented = doc.Split('\n')
+            .Where(line => line.StartsWith("| A", StringComparison.Ordinal))
+            .Select(line => line.Split('|')[1].Trim())
+            .Order(StringComparer.Ordinal);
+
+        Assert.Equal(Rules.Keys.Append("A9").Order(StringComparer.Ordinal), documented);
+    }
+
+    /// <summary>每條規則都須列入 InlineData</summary>
+    [Fact]
+    public void InlineData_ShouldCoverAllRules()
+    {
+        string source = File.ReadAllText(Path.Combine(
+            SourceScanner.SolutionRoot, "tests", "MinecraftServerManager.UnitTests", "Architecture", "SharedEntryArchitectureTests.cs"));
+        const string Marker = "[InlineData(\"A";
+        var listed = source.Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => line.StartsWith(Marker, StringComparison.Ordinal))
+            .Select(line => line[(Marker.Length - 1)..line.IndexOf("\")", StringComparison.Ordinal)])
+            .Order(StringComparer.Ordinal);
+
+        Assert.Equal(Rules.Keys.Order(StringComparer.Ordinal), listed);
+    }
+
+    /// <summary>A9：專案參照與 using 命名空間界線</summary>
     [Fact]
     public void A9_LayerDependencies_ShouldRespectArchitectureBoundaries()
     {

@@ -6,7 +6,7 @@ using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>發現模組更新對話視窗（原生模態視窗，透過 ModalWindowHost 裝載）</summary>
+/// <summary>模組更新視窗</summary>
 public sealed partial class ModUpdatesDialog : Window
 {
     private readonly IUiService _ui;
@@ -60,7 +60,5 @@ public sealed partial class ModUpdatesDialog : Window
         Close();
     }
 
-    private void OnHeaderSortRequested(object? sender, SortRequestedEventArgs e) => CandidateItems.SortBy(TableSortKeys.UpdateCandidates, e);
-
-    private void OnHeaderAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(CandidateItems, TableSortKeys.UpdateCandidates);
+    public ITableSortTarget HeaderSort => field ??= new TableSortTarget<ModUpdateCandidateItem>(() => CandidateItems, TableSortKeys.UpdateCandidates);
 }

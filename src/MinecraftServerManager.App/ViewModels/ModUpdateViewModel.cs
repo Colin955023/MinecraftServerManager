@@ -49,8 +49,7 @@ public sealed partial class ModUpdateViewModel(
         try
         {
             progressDialog.UpdateProgress(0, targets.Count, $"正在向 Modrinth 批次查詢 {targets.Count} 個模組雜湊資訊...");
-            // 本機掃描不含平台專案識別碼，而相依資訊以 Modrinth 專案識別碼表示；
-            // 先以雜湊反查所有已安裝模組的專案識別碼，才能正確判定相依是否已安裝（同 Prism Launcher）
+            // 本機掃描不含專案識別碼，先以雜湊反查，才能判定相依是否已安裝
             List<(string Hash, string Algorithm)> hashedFiles =
             [
                 .. installedMods.Select(static m => (m.CurrentHash, m.HashAlgorithm)),
@@ -161,7 +160,7 @@ public sealed partial class ModUpdateViewModel(
         return projectMapByHash;
     }
 
-    /// <summary>階段 2：依雜湊反查 ProjectId、模組 Id、名稱搜尋的順序取得相容版本清單</summary>
+    /// <summary>依雜湊、模組 Id、名稱搜尋的順序取得相容版本清單</summary>
     private static async Task<IReadOnlyList<OnlineModVersion>> FindProjectVersionsAsync(
         IModrinthClient client,
         LocalModRowItem mod,
@@ -194,7 +193,7 @@ public sealed partial class ModUpdateViewModel(
         return versions;
     }
 
-    /// <summary>篩選相容且版本較新、雜湊不同之最新版本，建立更新候選；無可用更新時回傳 null</summary>
+    /// <summary>選出相容且較新的版本建立更新候選；無可用更新回傳 null</summary>
     private UpdateProposal? BuildProposal(
         LocalModRowItem mod,
         IReadOnlyList<OnlineModVersion> versions,
@@ -211,7 +210,7 @@ public sealed partial class ModUpdateViewModel(
                 continue;
             }
 
-            // 僅排除環境不相容版本（伺服器端、載入器、Minecraft 版本）；缺少相依與衝突交由後續解析與回報
+            // 只排除環境不相容版本；缺少相依與衝突交由後續解析
             var report = _dependencyPlanner.EvaluateCompatibility(ver, mcVer, loader, installedMods);
             if (!report.HasEnvironmentErrors &&
                 (compatibleLatest is null || FlexVersion.Compare(ver.VersionNumber, compatibleLatest.VersionNumber) > 0))
@@ -247,11 +246,7 @@ public sealed partial class ModUpdateViewModel(
         return new UpdateProposal(candidate, compatibleLatest, latestReport!);
     }
 
-    /// <summary>
-    /// 新版本與已安裝模組衝突者標記為無法更新；
-    /// 缺少的必要相依模組（不論是否為遞迴相依）補入同一次更新清單，已安裝的相依一律視為已滿足而不升級；
-    /// 找不到相容版本的必要相依則封鎖該候選並回報原因。
-    /// </summary>
+    /// <summary>標記衝突者為無法更新、補入缺少的必要相依；找不到相容相依則封鎖該候選</summary>
     private async Task<List<ModUpdateCandidateItem>> ResolveProposalsAsync(
         List<UpdateProposal> proposals,
         string mcVer,

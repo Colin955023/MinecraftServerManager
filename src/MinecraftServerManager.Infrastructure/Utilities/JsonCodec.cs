@@ -7,10 +7,7 @@ using MinecraftServerManager.Infrastructure.Serialization;
 
 namespace MinecraftServerManager.Infrastructure.Utilities;
 
-/// <summary>
-/// JSON 共用入口：一律經 <see cref="AppJsonSerializerContext"/> 來源產生器序列化；內容無法解析時回傳預設值而不擲出
-/// （<see cref="ReadFile{T}"/> 系列於檔案不存在或無法開啟時仍會擲出 I/O 例外）
-/// </summary>
+/// <summary>JSON 共用入口；無法解析時回傳預設值</summary>
 public static class JsonCodec
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(JsonCodec));
@@ -75,7 +72,7 @@ public static class JsonCodec
     public static T? Deserialize<T>(string? json) =>
         string.IsNullOrWhiteSpace(json) ? default : TrySerialize(json, static j => JsonSerializer.Deserialize(j, GetTypeInfo<T>(DefaultContext)));
 
-    /// <summary>經 SafeFileSystem 安全以串流讀取檔案並反序列化（超過預設大小上限或無法解析時回傳 null）</summary>
+    /// <summary>讀檔並反序列化；超過大小上限或無法解析回傳 null，檔案不存在則擲出</summary>
     public static T? ReadFile<T>(string filePath, long maxBytes = DefaultMaxBytes)
     {
         using var stream = SafeFileSystem.OpenRead(filePath);
@@ -87,11 +84,25 @@ public static class JsonCodec
         return TrySerialize(stream, static s => JsonSerializer.Deserialize(s, GetTypeInfo<T>(DefaultContext)));
     }
 
+    /// <summary>檔案不存在回傳 null；超過上限、無法解析或讀取失敗回傳 null 並記錄警告</summary>
+    public static T? TryReadFile<T>(string filePath, long maxBytes = DefaultMaxBytes)
+    {
+        try
+        {
+            return SafeFileSystem.FileExists(filePath) ? ReadFile<T>(filePath, maxBytes) : default;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Warning(ex, "讀取 JSON 檔案失敗: {Path}", filePath);
+            return default;
+        }
+    }
+
     /// <summary><see cref="ReadFile{T}"/> 的非同步版本</summary>
     public static Task<T?> ReadFileAsync<T>(string filePath, CancellationToken cancellationToken = default) =>
         ReadFileAsync<T>(filePath, DefaultMaxBytes, cancellationToken);
 
-    /// <summary><see cref="ReadFile{T}"/> 的非同步版本（可指定檔案大小上限）</summary>
+    /// <summary><see cref="ReadFile{T}"/> 的非同步版本</summary>
     public static async Task<T?> ReadFileAsync<T>(string filePath, long maxBytes, CancellationToken cancellationToken = default)
     {
         using var stream = SafeFileSystem.OpenRead(filePath, options: FileOptions.Asynchronous | FileOptions.SequentialScan);
@@ -131,7 +142,7 @@ public static class JsonCodec
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
-            // 含型別未登錄於 AppJsonSerializerContext 的情形，不得無聲失敗
+            // 含型別未登錄的情形，不得無聲失敗
             Logger.Warning(ex, "JSON 序列化／反序列化失敗");
             return default;
         }

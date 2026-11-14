@@ -8,7 +8,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>模組管理頁面 ViewModel：負責伺服器選取與分頁導覽，並組合本地、線上、安裝佇列與更新子 ViewModel</summary>
+/// <summary>模組管理頁面：伺服器選取、分頁導覽與各子 ViewModel</summary>
 public sealed partial class ModsViewModel : PageViewModel, IDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModsViewModel));
@@ -17,6 +17,7 @@ public sealed partial class ModsViewModel : PageViewModel, IDisposable
     private readonly IServerManager _serverManager;
     private readonly IUiService _ui;
     private bool _isLoadingServers;
+    private bool _reloadPending;
 
     [ObservableProperty]
     public partial string SelectedServer { get; set; } = NoServerPlaceholder;
@@ -120,6 +121,8 @@ public sealed partial class ModsViewModel : PageViewModel, IDisposable
     {
         if (_isLoadingServers)
         {
+            // 載入中再收到請求：結束後補跑一次，避免漏掉最新狀態
+            _reloadPending = true;
             return;
         }
 
@@ -171,6 +174,11 @@ public sealed partial class ModsViewModel : PageViewModel, IDisposable
         finally
         {
             _isLoadingServers = false;
+            if (_reloadPending)
+            {
+                _reloadPending = false;
+                await LoadServersInternalAsync();
+            }
         }
     }
 

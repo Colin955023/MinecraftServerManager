@@ -5,9 +5,7 @@
         xmlns:views="using:MinecraftServerManager.App.Views"
         xmlns:vm="using:MinecraftServerManager.App.ViewModels">
 
-        <Grid Background="{ThemeResource WindowBrush}"
-                Padding="20"
-                RowSpacing="12">
+        <Grid Style="{StaticResource DialogRootGridStyle}">
                 <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
@@ -21,14 +19,11 @@
 
                 <TextBlock Grid.Row="1"
                         Text="目前已排入安裝佇列的模組與相依項目如下："
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{ThemeResource CaptionTextBlockStyle}" />
+                        Style="{StaticResource SecondaryCaptionTextStyle}" />
 
                 <Border Grid.Row="2"
-                        Style="{StaticResource CardBorderStyle}"
-                        CornerRadius="8"
-                        Padding="12">
-                        <controls:TableFrame>
+                        Style="{StaticResource PanelCardStyle}">
+                        <controls:TableFrame SortTarget="{x:Bind HeaderSort}">
                                 <controls:TableFrame.Header>
                                         <Grid>
                                                 <Grid.ColumnDefinitions>
@@ -46,33 +41,23 @@
                                                 <controls:SortableTableHeader Grid.Column="0"
                                                         Text="動作"
                                                         SortPropertyName="ActionText"
-                                                        ColumnWidth="{x:Bind views:ModQueueListColumns.Current.ActionWidth, Mode=TwoWay}"
-                                                        SortRequested="OnHeaderSortRequested"
-                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                        ColumnWidth="{x:Bind views:ModQueueListColumns.Current.ActionWidth, Mode=TwoWay}" />
                                                 <controls:SortableTableHeader Grid.Column="1"
                                                         Text="模組名稱"
                                                         SortPropertyName="Title"
-                                                        ColumnWidth="{x:Bind views:ModQueueListColumns.Current.TitleWidth, Mode=TwoWay}"
-                                                        SortRequested="OnHeaderSortRequested"
-                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                        ColumnWidth="{x:Bind views:ModQueueListColumns.Current.TitleWidth, Mode=TwoWay}" />
                                                 <controls:SortableTableHeader Grid.Column="2"
                                                         Text="版本"
                                                         SortPropertyName="VersionDisplay"
-                                                        ColumnWidth="{x:Bind views:ModQueueListColumns.Current.VersionWidth, Mode=TwoWay}"
-                                                        SortRequested="OnHeaderSortRequested"
-                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                        ColumnWidth="{x:Bind views:ModQueueListColumns.Current.VersionWidth, Mode=TwoWay}" />
                                                 <controls:SortableTableHeader Grid.Column="3"
                                                         Text="檔案名稱"
                                                         SortPropertyName="FileName"
-                                                        ColumnWidth="{x:Bind views:ModQueueListColumns.Current.FileNameWidth, Mode=TwoWay}"
-                                                        SortRequested="OnHeaderSortRequested"
-                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                        ColumnWidth="{x:Bind views:ModQueueListColumns.Current.FileNameWidth, Mode=TwoWay}" />
                                                 <controls:SortableTableHeader Grid.Column="4"
                                                         Text="原因 / 說明"
                                                         SortPropertyName="Reason"
-                                                        ColumnWidth="{x:Bind views:ModQueueListColumns.Current.ReasonWidth, Mode=TwoWay}"
-                                                        SortRequested="OnHeaderSortRequested"
-                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                        ColumnWidth="{x:Bind views:ModQueueListColumns.Current.ReasonWidth, Mode=TwoWay}" />
                                         </Grid>
                                 </controls:TableFrame.Header>
                                 <controls:TableFrame.Body>

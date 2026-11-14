@@ -30,8 +30,8 @@ public sealed record HttpDownloadOptions
 public sealed class HttpDownloadClient : IHttpPort
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(HttpDownloadClient));
-    public const long MaxJsonBytes = 16L * 1024 * 1024;
-    public const long MaxTextBytes = 64L * 1024 * 1024;
+    internal const long MaxJsonBytes = 16L * 1024 * 1024;
+    internal const long MaxTextBytes = 64L * 1024 * 1024;
 
     private static readonly HttpStatusCode[] RetryableStatusesSource =
     [
@@ -57,7 +57,7 @@ public sealed class HttpDownloadClient : IHttpPort
         _client = client;
     }
 
-    /// <summary>IHttpPort 介面實作：安全下載檔案（使用預設下載選項）</summary>
+    /// <summary>安全下載檔案（使用預設下載選項）</summary>
     Task<HttpResult> IHttpPort.DownloadAsync(
         Uri uri,
         string targetPath,
@@ -199,7 +199,7 @@ public sealed class HttpDownloadClient : IHttpPort
             cancellationToken);
     }
 
-    /// <summary>IHttpPort 介面實作：安全取得 JSON 文件並以串流解析（呼叫端負責處置 JsonDocument）</summary>
+    /// <summary>取得 JSON 文件（呼叫端負責處置）</summary>
     public Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentAsync(
         Uri uri,
         CancellationToken cancellationToken = default)
@@ -214,7 +214,7 @@ public sealed class HttpDownloadClient : IHttpPort
             cancellationToken);
     }
 
-    /// <summary>IHttpPort 介面實作：安全取得文字內容</summary>
+    /// <summary>安全取得文字內容</summary>
     public Task<string?> GetTextAsync(
         Uri uri,
         CancellationToken cancellationToken = default)
@@ -239,7 +239,7 @@ public sealed class HttpDownloadClient : IHttpPort
             failureFactory: (_, _) => null,
             cancellationToken);
     }
-    /// <summary>IHttpPort 介面實作：安全傳送 POST JSON 請求並取得文字回應</summary>
+    /// <summary>安全傳送 POST JSON 請求並取得文字回應</summary>
     public Task<string?> PostJsonAsync(
         Uri uri,
         string jsonPayload,
@@ -311,7 +311,7 @@ public sealed class HttpDownloadClient : IHttpPort
         string temporary = SafeFileSystem.ResolveStablePath(
             target + ".part",
             createParent: true);
-        // 前次呼叫遺留之 .part 無 ETag 可比對，僅在有預期雜湊可驗證最終結果時才沿用
+        // 遺留的 .part 無 ETag 可比對，有預期雜湊時才沿用
         if ((!options.EnableRangeResumption || normalizedHash is null) && SafeFileSystem.FileExists(temporary))
         {
             SafeFileSystem.TryDeleteFile(temporary);
@@ -387,7 +387,7 @@ public sealed class HttpDownloadClient : IHttpPort
             }
         }
 
-        // 既無預期雜湊可驗證結果、也無 ETag 可確認遠端版本時，續傳可能拼接出不同版本的內容，一律重新下載
+        // 無雜湊也無 ETag 時不續傳，避免拼接出不同版本的內容
         if (existingBytes > 0 && normalizedHash is null && knownETag is null)
         {
             SafeFileSystem.TryDeleteFile(temporary);

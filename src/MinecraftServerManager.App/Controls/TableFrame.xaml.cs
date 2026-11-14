@@ -14,6 +14,9 @@ public sealed partial class TableFrame : UserControl
     public static readonly DependencyProperty BodyProperty =
         DependencyProperty.Register(nameof(Body), typeof(UIElement), typeof(TableFrame), new PropertyMetadata(null));
 
+    public static readonly DependencyProperty SortTargetProperty =
+        DependencyProperty.Register(nameof(SortTarget), typeof(ITableSortTarget), typeof(TableFrame), new PropertyMetadata(null));
+
     public TableFrame()
     {
         InitializeComponent();
@@ -24,6 +27,13 @@ public sealed partial class TableFrame : UserControl
     {
         get => (UIElement?)GetValue(HeaderProperty);
         set => SetValue(HeaderProperty, value);
+    }
+
+    /// <summary>表頭排序與自動欄寬的對象</summary>
+    public ITableSortTarget? SortTarget
+    {
+        get => (ITableSortTarget?)GetValue(SortTargetProperty);
+        set => SetValue(SortTargetProperty, value);
     }
 
     /// <summary>清單內容</summary>

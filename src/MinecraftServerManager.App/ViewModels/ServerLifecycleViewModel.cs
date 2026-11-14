@@ -72,12 +72,11 @@ public sealed partial class ServerLifecycleViewModel : ViewModelBase, IDisposabl
         _javaDetector = javaDetector;
         _javaRequirementService = javaRequirementService;
         _list = list;
-        _list.SelectionStateChanged += OnSelectionStateChanged;
+        _list.RegisterDependentCommands(StartServerCommand, StopServerCommand, MonitorServerCommand);
     }
 
     public void Dispose()
     {
-        _list.SelectionStateChanged -= OnSelectionStateChanged;
         foreach (var (window, viewModel) in _monitors.Values.ToArray())
         {
             window.Close();
@@ -90,13 +89,6 @@ public sealed partial class ServerLifecycleViewModel : ViewModelBase, IDisposabl
     private bool CanStartOrMonitorServer() => _list.CanStartOrMonitorServer;
 
     private bool HasSelectedServer() => _list.HasSelectedServer;
-
-    private void OnSelectionStateChanged()
-    {
-        StartServerCommand.NotifyCanExecuteChanged();
-        StopServerCommand.NotifyCanExecuteChanged();
-        MonitorServerCommand.NotifyCanExecuteChanged();
-    }
 
     [RelayCommand(CanExecute = nameof(CanStartOrMonitorServer))]
     public async Task StartServer()
@@ -258,7 +250,7 @@ public sealed partial class ServerLifecycleViewModel : ViewModelBase, IDisposabl
         };
     }
 
-    /// <summary>驗證啟動 JAR 或腳本是否確實存在，存在則回傳 null，缺失則回傳檔名。</summary>
+    /// <summary>驗證啟動 JAR 或腳本是否確實存在，存在則回傳 null，缺失則回傳檔名</summary>
     private string? ResolveMissingLaunchTarget(string serverPath, string launchTarget)
     {
         string target = string.IsNullOrWhiteSpace(launchTarget) ? "server.jar" : launchTarget.Trim();
@@ -279,7 +271,7 @@ public sealed partial class ServerLifecycleViewModel : ViewModelBase, IDisposabl
         }
     }
 
-    /// <summary>依據 Minecraft 版本與載入器解析所需的 Java 實體執行檔路徑。</summary>
+    /// <summary>依據 Minecraft 版本與載入器解析所需的 Java 實體執行檔路徑</summary>
     /// <returns>成功時回傳 (路徑, null)；失敗時回傳 (null, 錯誤訊息)。</returns>
     private async Task<(string? JavaPath, string? Error)> ResolveJavaExecutableAsync(string minecraftVersion, LoaderKind loader)
     {
@@ -333,7 +325,7 @@ public sealed partial class ServerLifecycleViewModel : ViewModelBase, IDisposabl
         return (runtime.ExecutablePath, null);
     }
 
-    /// <summary>啟動後等待一段時間，若子行程已異常結束則回傳錯誤訊息。</summary>
+    /// <summary>啟動後等待一段時間，若子行程已異常結束則回傳錯誤訊息</summary>
     private static async Task<string?> DetectEarlyExitAsync(IServerRuntime runtime)
     {
         await Task.Delay(EarlyExitProbeDelay).ConfigureAwait(true);

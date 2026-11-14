@@ -18,7 +18,7 @@ public sealed class SortKeyMap<T>
         _selectors = entries.ToFrozenDictionary(static e => e.Column, static e => e.Selector, StringComparer.OrdinalIgnoreCase);
     }
 
-    /// <summary>登錄排序鍵非顯示文字之欄位（如原始位元組數）所對應的顯示文字選擇器，供自動欄寬計算</summary>
+    /// <summary>登錄欄位的顯示文字選擇器，供自動欄寬計算</summary>
     public SortKeyMap<T> WithDisplay(params (string Column, Func<T, string?> Display)[] entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
@@ -26,7 +26,7 @@ public sealed class SortKeyMap<T>
         return this;
     }
 
-    /// <summary>取得指定欄位各列之顯示文字：優先使用顯示文字選擇器，否則採字串型別之排序鍵，其餘欄位僅以表頭文字計算</summary>
+    /// <summary>取得欄位各列的顯示文字</summary>
     public IEnumerable<string?> GetDisplayTexts(IEnumerable<T> items, string column)
     {
         if (_displays.TryGetValue(column, out var display))
@@ -51,12 +51,12 @@ public sealed class SortKeyMap<T>
     }
 }
 
-/// <summary>表格欄位排序的唯一共用入口：以型別化排序鍵與 Windows 自然排序規則重新排列可觀察集合</summary>
+/// <summary>表格排序共用入口</summary>
 public static class TableSortExtensions
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(TableSortExtensions));
 
-    /// <summary>依欄位名稱與方向排序集合；BulkObservableCollection 以單次 Reset 通知整批替換。欄位未登錄時不排序並記錄警告</summary>
+    /// <summary>依欄位名稱與方向排序；欄位未登錄時不排序並記錄警告</summary>
     public static void SortBy<T>(this ObservableCollection<T> items, SortKeyMap<T> keys, string column, ListSortDirection direction)
     {
         ArgumentNullException.ThrowIfNull(items);
@@ -88,7 +88,7 @@ public static class TableSortExtensions
         }
     }
 
-    /// <summary>表頭按兩下自動欄寬的唯一共用入口：依欄位顯示文字對齊最寬項目；集合為空時不調整</summary>
+    /// <summary>表頭按兩下自動欄寬共用入口：依欄位顯示文字對齊最寬項目；集合為空時不調整</summary>
     public static void AutoFit<T>(this SortableTableHeader header, IReadOnlyCollection<T> items, SortKeyMap<T> keys)
     {
         ArgumentNullException.ThrowIfNull(header);
@@ -99,11 +99,22 @@ public static class TableSortExtensions
             header.FitToContent(keys.GetDisplayTexts(items, header.SortPropertyName));
         }
     }
+}
 
-    /// <summary>依表頭排序事件參數排序集合</summary>
-    public static void SortBy<T>(this ObservableCollection<T> items, SortKeyMap<T> keys, SortRequestedEventArgs request)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        items.SortBy(keys, request.PropertyName, request.Direction);
-    }
+/// <summary>表頭排序與自動欄寬的對象</summary>
+public interface ITableSortTarget
+{
+    /// <summary>依欄位與方向排序</summary>
+    public void Sort(string column, ListSortDirection direction);
+
+    /// <summary>依內容調整表頭欄寬</summary>
+    public void AutoFit(SortableTableHeader header);
+}
+
+/// <summary>以集合與排序鍵實作的排序對象</summary>
+public sealed class TableSortTarget<T>(Func<ObservableCollection<T>> items, SortKeyMap<T> keys) : ITableSortTarget
+{
+    public void Sort(string column, ListSortDirection direction) => items().SortBy(keys, column, direction);
+
+    public void AutoFit(SortableTableHeader header) => header.AutoFit(items(), keys);
 }

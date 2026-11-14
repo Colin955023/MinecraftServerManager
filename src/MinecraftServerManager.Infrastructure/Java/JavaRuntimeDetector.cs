@@ -44,9 +44,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 return _inFlightDetection.WaitAsync(cancellationToken);
             }
 
-            // 偵測由多個呼叫端共用，不繫結任一呼叫端的取消權杖（否則首位呼叫端取消會使其他等待者一併失敗）；
-            // 各呼叫端自行以 WaitAsync 套用自己的取消
-            // 以 Task.Run 確保候選列舉與快取讀取等檔案 I/O 不會在呼叫端（可能是 UI 執行緒）上同步執行
+            // 偵測由多個呼叫端共用，不繫結任一呼叫端的取消權杖；以 Task.Run 避免在 UI 執行緒做檔案 I/O
             var task = Task.Run(() => DetectInternalAsync(forceRefresh, CancellationToken.None), CancellationToken.None);
             _inFlightDetection = task;
             return task.WaitAsync(cancellationToken);
@@ -178,7 +176,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 }
             }
 
-            // 探測逾時：避免異常 java.exe 卡住整體偵測；逾時後由 DisposeAsync 強制終止行程
+            // 探測逾時，避免異常 java.exe 卡住偵測
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(ProbeTimeout);
 
@@ -199,7 +197,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 ? new JavaRuntimeInfo(
                     ExecutablePath: probeExecutable,
                     MajorVersion: parsed.MajorVersion,
-                    // 以 PE 標頭判定位元數最準確（32 位元 HotSpot 輸出常不含 "32-Bit" 字樣）
+                    // 以 PE 標頭判定位元數（32 位元 HotSpot 輸出常不含 "32-Bit"）
                     Is64Bit: PortableExecutableInspector.TryReadMachine(probeExecutable) is { } machine
                         ? PortableExecutableInspector.Is64Bit(machine)
                         : parsed.Is64Bit,
@@ -307,53 +305,17 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             return;
         }
 
-        // 已排除 reparse point，路徑即為實體檔案，無需再解析連結目標
-        if (!IsIgnoredJavaPath(path) && !IsReparseOrJunctionPath(path) && !IsShimLauncher(path) && SafeFileSystem.FileExists(path))
+        // FileExists 經穩定路徑檢查，路徑或任一上層為 reparse point 時回傳 false，路徑即為實體檔案
+        if (!IsIgnoredJavaPath(path) && !IsShimLauncher(path) && SafeFileSystem.FileExists(path))
         {
             candidates.Add(Path.GetFullPath(path));
         }
     }
 
-    private static bool IsIgnoredJavaPath(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return true;
-        }
-
-        if (path.Contains(@"\Oracle\Java\javapath", StringComparison.OrdinalIgnoreCase) ||
-            path.Contains(@"\Oracle\Java\java8path", StringComparison.OrdinalIgnoreCase) ||
-            path.Contains(@"\Common Files\Oracle\Java\", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool IsReparseOrJunctionPath(string path)
-    {
-        try
-        {
-            if (SafeFileSystem.IsReparsePoint(path))
-            {
-                return true;
-            }
-
-            string? dir = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(dir) && SafeFileSystem.IsReparsePoint(dir))
-            {
-                return true;
-            }
-
-            return false;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning(ex, "檢查 Java 路徑重解析點失敗，視為不安全路徑");
-            return true;
-        }
-    }
+    private static bool IsIgnoredJavaPath(string path) =>
+        path.Contains(@"\Oracle\Java\javapath", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains(@"\Oracle\Java\java8path", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains(@"\Common Files\Oracle\Java\", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsShimLauncher(string path)
     {
@@ -412,8 +374,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 if (!string.IsNullOrWhiteSpace(item.Path) &&
                     Path.IsPathFullyQualified(item.Path) &&
                     SafeFileSystem.FileExists(item.Path) &&
-                    !IsIgnoredJavaPath(item.Path) &&
-                    !IsReparseOrJunctionPath(item.Path))
+                    !IsIgnoredJavaPath(item.Path))
                 {
                     try
                     {

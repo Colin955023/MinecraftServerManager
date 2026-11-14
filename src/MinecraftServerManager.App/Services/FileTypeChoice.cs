@@ -2,7 +2,7 @@ using MinecraftServerManager.Core.Mods;
 
 namespace MinecraftServerManager.App.Services;
 
-/// <summary>檔案選取器可選的單一檔案類型：所有選取器一律從下列預設集合挑選，建構子私有以避免各處自訂格式</summary>
+/// <summary>檔案選取器可選的檔案類型，只能使用預設集合</summary>
 public sealed class FileTypeChoice
 {
     private FileTypeChoice(string label, string extension)

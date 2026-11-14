@@ -21,8 +21,7 @@
         <TextBlock Grid.Row="0"
             Text="{x:Bind ViewModel.DescriptionText}"
             TextWrapping="Wrap"
-            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-            Style="{ThemeResource CaptionTextBlockStyle}" />
+            Style="{StaticResource SecondaryCaptionTextStyle}" />
 
         <!-- 建議參數清單卡片 -->
         <Border Grid.Row="1"

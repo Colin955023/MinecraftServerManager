@@ -7,7 +7,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>伺服器登錄檔（servers.json）存取：負責載入、快取、損毀保護與原子寫入，所有公開方法皆自行持鎖</summary>
+/// <summary>伺服器登錄檔（servers.json）存取</summary>
 internal sealed class ServerRegistryStore
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerRegistryStore));
@@ -30,7 +30,7 @@ internal sealed class ServerRegistryStore
         lock (_lock)
         {
             var result = new List<ServerConfig>();
-            foreach (var payload in LoadRegistry().Values)
+            foreach (var payload in ReadRegistry().Values)
             {
                 if (TryCreateServerConfig(payload, _serversRoot, out var config))
                 {
@@ -47,7 +47,7 @@ internal sealed class ServerRegistryStore
     {
         lock (_lock)
         {
-            return LoadRegistry().TryGetValue(name, out var payload) && TryCreateServerConfig(payload, _serversRoot, out var config)
+            return ReadRegistry().TryGetValue(name, out var payload) && TryCreateServerConfig(payload, _serversRoot, out var config)
                 ? config
                 : null;
         }
@@ -58,7 +58,7 @@ internal sealed class ServerRegistryStore
     {
         lock (_lock)
         {
-            return LoadRegistry().TryGetValue(name, out var cfg) ? cfg.Path : null;
+            return ReadRegistry().TryGetValue(name, out var cfg) ? cfg.Path : null;
         }
     }
 
@@ -128,12 +128,17 @@ internal sealed class ServerRegistryStore
         return false;
     }
 
-    private Dictionary<string, ServerConfigPayload> LoadRegistry()
+    /// <summary>鎖內取得可修改的登錄檔複本</summary>
+    private Dictionary<string, ServerConfigPayload> LoadRegistry() =>
+        new(ReadRegistry(), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>鎖內取得登錄檔內容；快取命中時直接回傳快取本體（不複製），呼叫端只能唯讀使用且不得外洩</summary>
+    private Dictionary<string, ServerConfigPayload> ReadRegistry()
     {
         if (!SafeFileSystem.FileExists(_registryFilePath))
         {
             _cachedRegistry = new Dictionary<string, ServerConfigPayload>(StringComparer.OrdinalIgnoreCase);
-            return new Dictionary<string, ServerConfigPayload>(_cachedRegistry, StringComparer.OrdinalIgnoreCase);
+            return _cachedRegistry;
         }
 
         try
@@ -141,7 +146,7 @@ internal sealed class ServerRegistryStore
             DateTime lastWrite = SafeFileSystem.GetFileLastWriteTimeUtc(_registryFilePath);
             if (_cachedRegistry is not null && lastWrite == _lastRegistryWriteTimeUtc)
             {
-                return new Dictionary<string, ServerConfigPayload>(_cachedRegistry, StringComparer.OrdinalIgnoreCase);
+                return _cachedRegistry;
             }
 
             var loaded = JsonCodec.ReadFile<Dictionary<string, ServerConfigPayload>>(_registryFilePath);
@@ -155,7 +160,7 @@ internal sealed class ServerRegistryStore
 
             _cachedRegistry = new Dictionary<string, ServerConfigPayload>(loaded, StringComparer.OrdinalIgnoreCase);
             _lastRegistryWriteTimeUtc = lastWrite;
-            return new Dictionary<string, ServerConfigPayload>(_cachedRegistry, StringComparer.OrdinalIgnoreCase);
+            return _cachedRegistry;
         }
         catch (Exception ex)
         {
@@ -165,7 +170,7 @@ internal sealed class ServerRegistryStore
         }
     }
 
-    /// <summary>登錄檔無法讀取時保留原檔為 <c>.bad</c>，避免下次儲存以空白清單覆寫而永久遺失</summary>
+    /// <summary>登錄檔無法讀取時另存為 <c>.bad</c></summary>
     private void PreserveUnreadableRegistry()
     {
         if (_unreadableRegistryPreserved)

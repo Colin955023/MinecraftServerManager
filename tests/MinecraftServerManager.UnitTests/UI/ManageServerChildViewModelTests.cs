@@ -6,11 +6,10 @@ using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Servers;
 using MinecraftServerManager.Infrastructure.Settings;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-/// <summary>伺服器管理頁子 ViewModel 測試（清單格式化、選取連動命令、生命週期、備份與釋放）</summary>
+/// <summary>伺服器管理頁子 ViewModel 測試</summary>
 public sealed class ManageServerChildViewModelTests : IDisposable
 {
     private readonly TempDirectory _rootTemp = new("msm-manage-child-");

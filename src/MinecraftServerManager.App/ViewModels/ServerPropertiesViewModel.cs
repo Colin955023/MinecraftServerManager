@@ -27,7 +27,7 @@ public sealed partial class PropertyEditItem : ObservableObject
     public PropertyEditorType EditorType { get; }
     public IReadOnlyList<string> Options { get; }
 
-    /// <summary>屬性值；ComboBox 於清單回收或視窗關閉時可能雙向寫回 null，一律正規化為空字串</summary>
+    /// <summary>屬性值；null 一律正規化為空字串</summary>
     public string Value
     {
         get;

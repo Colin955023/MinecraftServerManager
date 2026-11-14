@@ -11,10 +11,10 @@ public enum NotificationType
     Error,
 }
 
-/// <summary>通知提示呈現規則：資訊、成功與警告使用 WinUI 原生 InfoBar，錯誤使用對話方塊</summary>
+/// <summary>通知呈現規則</summary>
 public static class NotificationPresentation
 {
-    /// <summary>將提示類型轉為 InfoBar 嚴重性（錯誤改走對話方塊，不會以 InfoBar 呈現）</summary>
+    /// <summary>轉為 InfoBar 嚴重性</summary>
     public static InfoBarSeverity ToSeverity(NotificationType type) => type switch
     {
         NotificationType.Success => InfoBarSeverity.Success,
@@ -22,7 +22,7 @@ public static class NotificationPresentation
         _ => InfoBarSeverity.Informational,
     };
 
-    /// <summary>是否以對話方塊顯示（錯誤需使用者確認；資訊、成功與警告以 InfoBar 浮動顯示）</summary>
+    /// <summary>是否以對話方塊顯示（僅錯誤）</summary>
     public static bool UsesDialog(NotificationType type) => type == NotificationType.Error;
 
     /// <summary>InfoBar 自動關閉秒數：警告停留較久以便閱讀</summary>

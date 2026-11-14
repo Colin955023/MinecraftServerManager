@@ -2,7 +2,6 @@ using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 

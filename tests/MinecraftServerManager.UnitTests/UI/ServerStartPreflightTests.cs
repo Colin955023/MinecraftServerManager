@@ -3,7 +3,6 @@ using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.Servers;
 using MinecraftServerManager.Infrastructure.Settings;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 

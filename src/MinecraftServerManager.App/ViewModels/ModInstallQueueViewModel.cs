@@ -62,7 +62,7 @@ public sealed partial class ModInstallQueueViewModel(
     [ObservableProperty]
     public partial string InstallQueueHint { get; set; } = "安裝清單：0 個項目";
 
-    /// <summary>待安裝模組佇列。</summary>
+    /// <summary>待安裝模組佇列</summary>
     public BulkObservableCollection<ModInstallQueueItem> InstallQueue { get; } = [];
 
     /// <summary>彈出版本選擇對話方塊，將選定版本與必要相依模組加入安裝清單</summary>
@@ -342,7 +342,7 @@ public sealed partial class ModInstallQueueViewModel(
         }
     }
 
-    /// <summary>清空安裝清單。</summary>
+    /// <summary>清空安裝清單</summary>
     [RelayCommand]
     public void ClearInstallQueue()
     {

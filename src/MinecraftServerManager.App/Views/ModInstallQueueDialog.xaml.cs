@@ -6,7 +6,7 @@ using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>待安裝模組清單視窗（原生模態視窗，透過 ModalWindowHost 裝載）</summary>
+/// <summary>待安裝模組清單視窗</summary>
 public sealed partial class ModInstallQueueDialog : Window
 {
     public ObservableCollection<ModInstallQueueItem> Queue { get; }
@@ -33,7 +33,5 @@ public sealed partial class ModInstallQueueDialog : Window
         Close();
     }
 
-    private void OnHeaderSortRequested(object? sender, SortRequestedEventArgs e) => Queue.SortBy(TableSortKeys.InstallQueue, e);
-
-    private void OnHeaderAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(Queue, TableSortKeys.InstallQueue);
+    public ITableSortTarget HeaderSort => field ??= new TableSortTarget<ModInstallQueueItem>(() => Queue, TableSortKeys.InstallQueue);
 }

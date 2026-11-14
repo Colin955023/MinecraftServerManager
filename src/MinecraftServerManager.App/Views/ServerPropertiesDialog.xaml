@@ -4,9 +4,7 @@
     xmlns:vm="using:MinecraftServerManager.App.ViewModels"
     xmlns:helpers="using:MinecraftServerManager.App.Controls">
 
-    <Grid Background="{ThemeResource WindowBrush}"
-        Padding="20"
-        RowSpacing="12">
+    <Grid Style="{StaticResource DialogRootGridStyle}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -21,8 +19,7 @@
             <TextBlock Text="編輯伺服器屬性"
                 Style="{ThemeResource TitleTextBlockStyle}" />
             <TextBlock Text="修改 server.properties 設定檔，支援 60+ 項官方設定、中文說明與預設值還原"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Style="{ThemeResource CaptionTextBlockStyle}" />
+                Style="{StaticResource SecondaryCaptionTextStyle}" />
         </StackPanel>
 
         <!-- 搜尋與分類過濾列 -->
@@ -78,8 +75,7 @@
                                     TextTrimming="CharacterEllipsis"
                                     ToolTipService.ToolTip="{x:Bind Description}" />
                                 <TextBlock Text="{x:Bind Description}"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Style="{ThemeResource CaptionTextBlockStyle}"
+                                    Style="{StaticResource SecondaryCaptionTextStyle}"
                                     TextTrimming="CharacterEllipsis"
                                     ToolTipService.ToolTip="{x:Bind Description}" />
                             </StackPanel>

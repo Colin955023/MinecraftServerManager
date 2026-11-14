@@ -5,9 +5,7 @@
     xmlns:views="using:MinecraftServerManager.App.Views"
     xmlns:vm="using:MinecraftServerManager.App.ViewModels">
 
-    <Grid Background="{ThemeResource WindowBrush}"
-        Padding="20"
-        RowSpacing="12">
+    <Grid Style="{StaticResource DialogRootGridStyle}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -21,15 +19,12 @@
             <TextBlock Text="備份還原與管理"
                 Style="{ThemeResource TitleTextBlockStyle}" />
             <TextBlock Text="選擇備份存檔進行還原（具備 Staging 交易安全防護與自動復原機制）"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Style="{ThemeResource CaptionTextBlockStyle}" />
+                Style="{StaticResource SecondaryCaptionTextStyle}" />
         </StackPanel>
 
         <Border Grid.Row="1"
-            Style="{StaticResource CardBorderStyle}"
-            CornerRadius="8"
-            Padding="12">
-            <controls:TableFrame>
+            Style="{StaticResource PanelCardStyle}">
+            <controls:TableFrame SortTarget="{x:Bind HeaderSort}">
                 <controls:TableFrame.Header>
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -43,21 +38,15 @@
                         <controls:SortableTableHeader Grid.Column="0"
                             Text="備份檔案名稱"
                             SortPropertyName="FileName"
-                            ColumnWidth="{x:Bind views:BackupListColumns.Current.FileNameWidth, Mode=TwoWay}"
-                            SortRequested="OnHeaderSortRequested"
-                            AutoFitRequested="OnHeaderAutoFitRequested" />
+                            ColumnWidth="{x:Bind views:BackupListColumns.Current.FileNameWidth, Mode=TwoWay}" />
                         <controls:SortableTableHeader Grid.Column="1"
                             Text="檔案大小"
                             SortPropertyName="SizeFormatted"
-                            ColumnWidth="{x:Bind views:BackupListColumns.Current.SizeWidth, Mode=TwoWay}"
-                            SortRequested="OnHeaderSortRequested"
-                            AutoFitRequested="OnHeaderAutoFitRequested" />
+                            ColumnWidth="{x:Bind views:BackupListColumns.Current.SizeWidth, Mode=TwoWay}" />
                         <controls:SortableTableHeader Grid.Column="2"
                             Text="建立時間"
                             SortPropertyName="CreatedAtFormatted"
-                            ColumnWidth="{x:Bind views:BackupListColumns.Current.CreatedWidth, Mode=TwoWay}"
-                            SortRequested="OnHeaderSortRequested"
-                            AutoFitRequested="OnHeaderAutoFitRequested" />
+                            ColumnWidth="{x:Bind views:BackupListColumns.Current.CreatedWidth, Mode=TwoWay}" />
                     </Grid>
                 </controls:TableFrame.Header>
 
@@ -93,8 +82,7 @@
         <!-- 狀態提示 -->
         <TextBlock Grid.Row="2"
             Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
-            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-            Style="{ThemeResource CaptionTextBlockStyle}" />
+            Style="{StaticResource SecondaryCaptionTextStyle}" />
 
         <!-- 底部按鈕區 -->
         <Grid Grid.Row="3">

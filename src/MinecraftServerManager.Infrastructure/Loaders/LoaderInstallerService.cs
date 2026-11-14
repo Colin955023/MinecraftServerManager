@@ -20,7 +20,10 @@ public sealed partial class LoaderInstallerService(
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(LoaderInstallerService));
     private static readonly SearchValues<char> HashSeparators = SearchValues.Create(" \t\r\n");
-    private static readonly TimeSpan InstallerTimeout = TimeSpan.FromMinutes(30);
+
+    /// <summary>安裝器整體逾時；測試可縮短</summary>
+    internal TimeSpan InstallerTimeout { get; init; } = TimeSpan.FromMinutes(30);
+
     private readonly string _cacheDir = SafeFileSystem.ResolveStableDirectory(installerCacheDirectory, create: true);
 
     public async Task<string> InstallLoaderAsync(
@@ -50,7 +53,7 @@ public sealed partial class LoaderInstallerService(
             progress?.Report(new LoaderInstallProgress(phase, message, Math.Clamp(lastPct, 0, 100)));
         }
 
-        // 僅 Fabric 與 Quilt 安裝前需預先準備官方原版 server.jar（Forge 與 NeoForge 內建原版下載流程，無需此步驟）
+        // 只有 Fabric 與 Quilt 需先準備原版 server.jar
         if (loader is LoaderKind.Fabric or LoaderKind.Quilt)
         {
             SafeReport("vanilla_prepare", "正在準備原版伺服器檔案...", 5);
@@ -240,7 +243,7 @@ public sealed partial class LoaderInstallerService(
             targetJar,
             new SynchronousProgress<HttpProgress>(p =>
             {
-                int pct = p.TotalBytes > 0 ? (int)(30 + ((double)p.BytesDownloaded / p.TotalBytes * 65)) : 30;
+                int pct = ProgressMapping.Map(p.BytesDownloaded, p.TotalBytes, 30, 95);
                 progress?.Report(new LoaderInstallProgress("downloading", $"正在下載原版 server.jar ({UnitFormatter.FormatBytes(p.BytesDownloaded)})...", pct));
             }),
             expectedHash: expectedSha1,
@@ -279,32 +282,18 @@ public sealed partial class LoaderInstallerService(
         // 快取安裝器執行前須與下載當下記錄之 SHA-256 相符，否則重新下載
         if (!await IsCachedInstallerIntactAsync(destination, hashSidecar, cancellationToken).ConfigureAwait(false))
         {
-            string? expectedHash = null;
+            // 安裝器會以 java 執行：取不到雜湊即拒絕，不做未驗證下載
             string expectedAlgorithm = "sha256";
-
-            try
+            string? expectedHash = await TryFetchInstallerHashAsync(installerUrl + ".sha256", 64, cancellationToken).ConfigureAwait(false);
+            if (expectedHash is null)
             {
-                string? sha256Text = await httpPort.GetTextAsync(new Uri(installerUrl + ".sha256"), cancellationToken).ConfigureAwait(false);
-                string? hash256 = ExtractValidHexHash(sha256Text, 64);
-                if (hash256 is not null)
-                {
-                    expectedHash = hash256;
-                    expectedAlgorithm = "sha256";
-                }
-                else
-                {
-                    string? sha1Text = await httpPort.GetTextAsync(new Uri(installerUrl + ".sha1"), cancellationToken).ConfigureAwait(false);
-                    string? hash1 = ExtractValidHexHash(sha1Text, 40);
-                    if (hash1 is not null)
-                    {
-                        expectedHash = hash1;
-                        expectedAlgorithm = "sha1";
-                    }
-                }
+                expectedAlgorithm = "sha1";
+                expectedHash = await TryFetchInstallerHashAsync(installerUrl + ".sha1", 40, cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+
+            if (expectedHash is null)
             {
-                Logger.Warning(ex, "遠端 Maven 若無雜湊檔或網路異常，容許降級為一般下載");
+                throw new InvalidOperationException($"無法取得 {loader} 安裝器的雜湊檔，已拒絕下載與執行");
             }
 
             var result = await httpPort.DownloadAsync(
@@ -322,6 +311,20 @@ public sealed partial class LoaderInstallerService(
         }
 
         return destination;
+    }
+
+    /// <summary>取得遠端雜湊檔內容；無檔、格式不符或連線失敗回傳 null</summary>
+    private async Task<string?> TryFetchInstallerHashAsync(string hashUrl, int hexLength, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return ExtractValidHexHash(await httpPort.GetTextAsync(new Uri(hashUrl), cancellationToken).ConfigureAwait(false), hexLength);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Warning(ex, "取得安裝器雜湊檔失敗: {Url}", hashUrl);
+            return null;
+        }
     }
 
     private static async Task<bool> IsCachedInstallerIntactAsync(string jarPath, string hashSidecar, CancellationToken cancellationToken)
@@ -440,7 +443,7 @@ public sealed partial class LoaderInstallerService(
 
         private int _current = 30;
 
-        public int FeedOutput(string line)
+        internal int FeedOutput(string line)
         {
             if (string.IsNullOrWhiteSpace(line))
             {

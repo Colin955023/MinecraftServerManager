@@ -46,7 +46,7 @@ public static class RuntimePaths
     }
 
     /// <summary>取得快取資料目錄</summary>
-    public static string GetCacheDir() => Path.Combine(GetUserDataDir(), "Cache");
+    internal static string GetCacheDir() => Path.Combine(GetUserDataDir(), "Cache");
 
     /// <summary>取得版本清單快取目錄（確保目錄安全存在）</summary>
     public static string GetVersionCacheDir()
@@ -65,7 +65,7 @@ public static class RuntimePaths
     /// <summary>取得記錄檔存放目錄</summary>
     public static string GetLogDir() => Path.Combine(GetUserDataDir(), "Logs");
 
-    /// <summary>清理單一執行檔解壓母目錄（%TEMP%\.net\MinecraftServerManager）下非目前執行個體的舊版殘留目錄</summary>
+    /// <summary>清除單檔解壓目錄下非目前執行個體的殘留</summary>
     public static int CleanupStaleSingleFileExtractDirectories(string? currentBaseDirectory = null)
     {
         try

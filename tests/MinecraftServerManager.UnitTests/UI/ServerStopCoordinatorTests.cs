@@ -1,6 +1,5 @@
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Ports;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 

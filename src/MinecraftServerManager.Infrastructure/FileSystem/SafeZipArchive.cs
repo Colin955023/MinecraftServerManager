@@ -16,6 +16,7 @@ public static class SafeZipArchive
     private const long DefaultMaxTotalBytes = 32L * 1024 * 1024 * 1024; // 32 GB
     private const long DefaultMaxArchiveBytes = DefaultMaxTotalBytes + (64L * 1024 * 1024);
     private const int DefaultMaxCompressionRatio = 200;
+    private const long RatioCheckMinMemberBytes = 64L * 1024 * 1024;
 
     public static void WriteArchive(
         string archivePath,
@@ -103,7 +104,7 @@ public static class SafeZipArchive
         }
     }
 
-    /// <summary>受限讀取單一壓縮檔成員之位元組陣列（若超過 <paramref name="maxBytes"/> 則回傳 <see langword="null"/>，防止記憶體解壓縮炸彈）。</summary>
+    /// <summary>讀取壓縮檔成員；超過 <paramref name="maxBytes"/> 回傳 null</summary>
     public static byte[]? ReadEntryBytesBounded(ZipArchiveEntry entry, int maxBytes)
     {
         ArgumentNullException.ThrowIfNull(entry);
@@ -115,7 +116,7 @@ public static class SafeZipArchive
             return null;
         }
 
-        // 依中央目錄宣告長度精確讀取；實際解壓量與宣告不符（含宣告 0 卻有資料）一律拒絕，防止長度造假之解壓縮炸彈
+        // 依宣告長度精確讀取；實際解壓量不符一律拒絕
         int targetLength = (int)declaredLength;
         byte[] buffer = targetLength == 0 ? [] : new byte[targetLength];
         using var stream = entry.Open();
@@ -123,7 +124,7 @@ public static class SafeZipArchive
         return read == targetLength && stream.ReadByte() == -1 ? buffer : null;
     }
 
-    /// <summary>受限讀取單一壓縮檔成員之 UTF-8 文字（自動剝除 UTF-8 BOM；若超過 <paramref name="maxBytes"/> 則回傳 <see langword="null"/>）。</summary>
+    /// <summary>讀取壓縮檔成員為 UTF-8 文字；超過 <paramref name="maxBytes"/> 回傳 null</summary>
     public static string? ReadEntryTextBounded(ZipArchiveEntry entry, int maxBytes) =>
         ReadEntryBytesBounded(entry, maxBytes) is { } bytes ? SafeFileSystem.DecodeUtf8WithoutBom(bytes) : null;
 
@@ -160,7 +161,7 @@ public static class SafeZipArchive
 
         string destination = SafeFileSystem.ResolveStableDirectory(destinationDirectory, create: true);
 
-        // OpenRead 已完成成員數、總量、單檔大小、壓縮比、符號連結與路徑衝突驗證，這裡只需正規化成員相對路徑
+        // OpenRead 已完成驗證，這裡只正規化成員路徑
         using var archive = OpenRead(archivePath);
         var members = new List<PreparedMember>(archive.Entries.Count);
         foreach (ZipArchiveEntry entry in archive.Entries)
@@ -245,7 +246,7 @@ public static class SafeZipArchive
         progress?.Invoke(totalBytes > 0 ? totalBytes : extractedBytes, totalBytes);
     }
 
-    /// <summary>檢查目標磁碟實際剩餘空間，只要剩餘空間充足即允許解壓縮（保留 5% 或 512 MB 安全水位）。</summary>
+    /// <summary>檢查剩餘空間（保留 5% 或 512 MB）</summary>
     private static void EnsureSufficientDiskSpace(string destination, long requiredBytes)
     {
         if (requiredBytes <= 0)
@@ -292,12 +293,15 @@ public static class SafeZipArchive
             throw new SafeArchiveException($"壓縮檔成員過大： {entry.FullName}");
         }
 
-        if (entry.Length > 0)
+        if (entry.Length > 0 && entry.CompressedLength <= 0)
         {
-            if (entry.CompressedLength <= 0 || entry.Length / (double)entry.CompressedLength > DefaultMaxCompressionRatio)
-            {
-                throw new SafeArchiveException($"壓縮檔成員壓縮比例過高： {entry.FullName}");
-            }
+            throw new SafeArchiveException($"壓縮檔成員大小資訊無效： {entry.FullName}");
+        }
+
+        // 小檔的高壓縮比無害（如其他工具壓出的全零 region 檔可達 300 以上），只對大型成員把關
+        if (entry.Length > RatioCheckMinMemberBytes && entry.Length / (double)entry.CompressedLength > DefaultMaxCompressionRatio)
+        {
+            throw new SafeArchiveException($"壓縮檔成員壓縮比例過高： {entry.FullName}");
         }
     }
 
@@ -345,7 +349,7 @@ public static class SafeZipArchive
 
         public int Count => _paths.Count;
 
-        /// <summary>登錄已正規化（以 <see cref="Path.DirectorySeparatorChar"/> 分隔）的成員路徑；衝突時擲出</summary>
+        /// <summary>登錄已正規化的成員路徑；衝突時擲出</summary>
         public void Add(string relativePath, bool isDirectory, string displayName)
         {
             if (_paths.TryGetValue(relativePath, out bool existingIsDirectory))

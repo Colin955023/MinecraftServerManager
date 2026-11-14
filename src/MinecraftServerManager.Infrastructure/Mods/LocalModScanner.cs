@@ -433,7 +433,7 @@ public sealed class LocalModScanner : ILocalModScanner
 
     private readonly record struct ManifestInfo(string? EmbeddedPath, string? Title, string? Vendor, string? Version);
 
-    /// <summary>讀取 META-INF/MANIFEST.MF 中與模組中繼資料相關的欄位（未展開之 <c>${projectversion}</c> 視為無版本）</summary>
+    /// <summary>讀取 MANIFEST.MF 的模組中繼資料</summary>
     private static ManifestInfo ReadManifest(ZipArchive archive)
     {
         string? embeddedPath = null;
@@ -594,7 +594,7 @@ public sealed class LocalModScanner : ILocalModScanner
         public string Description { get; set; } = string.Empty;
         public ModPlatform Platform { get; set; } = ModPlatform.Local;
 
-        public void SetMinecraftVersionIfValid(string? raw)
+        internal void SetMinecraftVersionIfValid(string? raw)
         {
             if (!string.IsNullOrWhiteSpace(raw))
             {
@@ -618,7 +618,7 @@ public sealed class LocalModScanner : ILocalModScanner
             ["platform"] = Platform.ToString(),
         };
 
-        public static LocalModMetadataBuilder FromDictionary(IReadOnlyDictionary<string, string> dict, string fallbackName) => new()
+        internal static LocalModMetadataBuilder FromDictionary(IReadOnlyDictionary<string, string> dict, string fallbackName) => new()
         {
             Id = dict.GetValueOrDefault("id", string.Empty),
             Name = dict.GetValueOrDefault("name", fallbackName),
@@ -640,7 +640,7 @@ public sealed class LocalModScanner : ILocalModScanner
             return value.Trim();
         }
 
-        public LocalModInfo ToModInfo(
+        internal LocalModInfo ToModInfo(
             string filePath,
             string fileName,
             string baseStem,

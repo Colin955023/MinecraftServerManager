@@ -31,7 +31,6 @@ public sealed partial class MainViewModel : ViewModelBase
 
     public event Action? ResetWindowSizeRequested;
 
-    /// <summary>主題模式變更事件，通知 MainWindow 切換 WinUI 3 原生 ElementTheme</summary>
     public event Action<string>? ThemeModeChanged;
 
     /// <summary>偵測到新版本時觸發，由視窗負責詢問使用者</summary>
@@ -80,7 +79,7 @@ public sealed partial class MainViewModel : ViewModelBase
 
         _pageFactories["about_preferences"] = () =>
         {
-            var about = pages.CreateAboutPage(SetThemeMode, () => ResetWindowSizeRequested?.Invoke());
+            var about = pages.CreateAboutPage(ApplyThemeMode, () => ResetWindowSizeRequested?.Invoke());
             if (_windowMetrics is { } metrics)
             {
                 about.UpdateWindowMetrics(metrics);
@@ -179,7 +178,7 @@ public sealed partial class MainViewModel : ViewModelBase
         }
     }
 
-    /// <summary>啟動時依設定檢查更新，有新版本時觸發 <see cref="UpdateAvailable"/></summary>
+    /// <summary>依設定檢查更新，有新版本時觸發 <see cref="UpdateAvailable"/></summary>
     public async Task CheckForUpdateOnStartupAsync(CancellationToken cancellationToken = default)
     {
         if (!_settingsManager.IsAutoUpdateEnabled())
@@ -222,7 +221,7 @@ public sealed partial class MainViewModel : ViewModelBase
         }
     }
 
-    /// <summary>切換頁面並於伺服器管理頁選取指定伺服器；重新整理僅執行一次（不與 <see cref="Navigate"/> 的重新整理重複）</summary>
+    /// <summary>切換頁面並於管理頁選取指定伺服器</summary>
     private void NavigateAndSelectServer(string pageKey, string serverName)
     {
         if (ShowPage(pageKey) is ManageServerViewModel manageVm)
@@ -280,13 +279,13 @@ public sealed partial class MainViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    public Task OpenServersFolder()
+    public void OpenServersFolder()
     {
         string path = _settingsManager.GetServersRoot();
         if (string.IsNullOrWhiteSpace(path))
         {
             ShowNotification("尚未設定伺服器資料夾", NotificationType.Warning);
-            return Task.CompletedTask;
+            return;
         }
 
         try
@@ -297,31 +296,25 @@ public sealed partial class MainViewModel : ViewModelBase
         {
             Logger.Error(ex, "建立伺服器資料夾失敗");
             ShowNotification($"無法建立伺服器資料夾：{ex.Message}", NotificationType.Error);
-            return Task.CompletedTask;
+            return;
         }
 
         if (!_launcher.OpenFolder(path))
         {
             ShowNotification($"無法開啟資料夾：{path}", NotificationType.Warning);
         }
-
-        return Task.CompletedTask;
     }
 
     public void ShowNotification(string message, NotificationType type = NotificationType.Info) => _ui.Notify(message, type);
 
-    public void SetThemeMode(string mode)
+    /// <summary>套用主題（不寫入設定）</summary>
+    public void ApplyThemeMode(string mode)
     {
         ThemeMode = mode;
-        _settingsManager.SetThemeMode(mode);
         ThemeModeChanged?.Invoke(mode);
     }
 
-    private void ApplyInitialTheme()
-    {
-        string themeMode = _settingsManager.GetThemeMode();
-        SetThemeMode(themeMode);
-    }
+    private void ApplyInitialTheme() => ApplyThemeMode(_settingsManager.GetThemeMode());
 
     public void DisposePages()
     {
@@ -332,5 +325,7 @@ public sealed partial class MainViewModel : ViewModelBase
                 d.Dispose();
             }
         }
+
+        _pages.Clear();
     }
 }

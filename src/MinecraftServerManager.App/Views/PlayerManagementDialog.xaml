@@ -6,9 +6,7 @@
     xmlns:vm="using:MinecraftServerManager.App.ViewModels"
     xmlns:servers="using:MinecraftServerManager.Domain.Servers">
 
-    <Grid Background="{ThemeResource WindowBrush}"
-        Padding="20"
-        RowSpacing="12">
+    <Grid Style="{StaticResource DialogRootGridStyle}">
         <Grid.Resources>
             <DataTemplate x:Key="CandidateNameTemplate"
                 x:DataType="servers:ServerUserCacheEntry">
@@ -28,8 +26,7 @@
                 Style="{ThemeResource TitleTextBlockStyle}" />
             <TextBlock
                 Text="管理 Minecraft 伺服器之營運管理員 (ops.json)、白名單 (whitelist.json) 及封鎖清單 (banned-players.json / banned-ips.json)"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Style="{ThemeResource CaptionTextBlockStyle}" />
+                Style="{StaticResource SecondaryCaptionTextStyle}" />
         </StackPanel>
 
         <!-- 主內容雙側區域 -->
@@ -42,9 +39,7 @@
 
             <!-- 左側：曾連線玩家名冊 (usercache.json) 唯讀參考清單 -->
             <Border Grid.Column="0"
-                Style="{StaticResource CardBorderStyle}"
-                CornerRadius="8"
-                Padding="12">
+                Style="{StaticResource PanelCardStyle}">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -73,8 +68,7 @@
                                         FontWeight="Bold"
                                         Style="{ThemeResource BodyTextBlockStyle}" />
                                     <TextBlock Text="{x:Bind Uuid}"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Style="{ThemeResource CaptionTextBlockStyle}"
+                                        Style="{StaticResource SecondaryCaptionTextStyle}"
                                         TextTrimming="CharacterEllipsis"
                                         ToolTipService.ToolTip="{x:Bind Uuid}" />
                                     <TextBlock Text="{x:Bind FormattedExpiresOn}"
@@ -87,8 +81,7 @@
 
                     <TextBlock Grid.Row="3"
                         Text="提示：左側為本地快取玩家，右側各分頁可直接選取加入名單"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{ThemeResource CaptionTextBlockStyle}"
+                        Style="{StaticResource SecondaryCaptionTextStyle}"
                         TextWrapping="Wrap" />
                 </Grid>
             </Border>
@@ -112,37 +105,29 @@
 
                             <!-- 說明指南區 -->
                             <Border Grid.Row="0"
-                                Style="{StaticResource CardBorderStyle}"
-                                CornerRadius="6"
-                                Padding="10">
+                                Style="{StaticResource InfoCardStyle}">
                                 <StackPanel Spacing="3">
                                     <TextBlock Text="【管理員權限等級（Level）指南】"
                                         FontWeight="Bold"
                                         Style="{ThemeResource BodyTextBlockStyle}" />
                                     <TextBlock
                                         Text="• Level 4：完整控制權限，可使用 /stop、/save-all、/save-off 等伺服器維護指令。"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Style="{ThemeResource CaptionTextBlockStyle}" />
+                                        Style="{StaticResource SecondaryCaptionTextStyle}" />
                                     <TextBlock
                                         Text="• Level 3：玩家管理權限，可使用 /op、/deop、/kick、/ban、/pardon 等名單管理指令。"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Style="{ThemeResource CaptionTextBlockStyle}" />
+                                        Style="{StaticResource SecondaryCaptionTextStyle}" />
                                     <TextBlock
                                         Text="• Level 2：基礎管理員與指令方塊，可使用 /gamemode、/tp、/give、/gamerule 等指令。"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Style="{ThemeResource CaptionTextBlockStyle}" />
+                                        Style="{StaticResource SecondaryCaptionTextStyle}" />
                                     <TextBlock Text="• Level 1：僅略過出生點方塊保護，無任何作弊指令權限。"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Style="{ThemeResource CaptionTextBlockStyle}" />
+                                        Style="{StaticResource SecondaryCaptionTextStyle}" />
                                 </StackPanel>
                             </Border>
 
                             <!-- 全玩家可控管理員名單 ListView -->
                             <Border Grid.Row="1"
-                                Style="{StaticResource CardBorderStyle}"
-                                CornerRadius="6"
-                                Padding="10">
-                                <controls:TableFrame>
+                                Style="{StaticResource InfoCardStyle}">
+                                <controls:TableFrame SortTarget="{x:Bind OperatorSort}">
                                     <controls:TableFrame.Header>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
@@ -160,33 +145,23 @@
                                             <controls:SortableTableHeader Grid.Column="0"
                                                 Text="管理員"
                                                 SortPropertyName="IsOp"
-                                                ColumnWidth="{x:Bind views:OperatorListColumns.Current.IsOpWidth, Mode=TwoWay}"
-                                                SortRequested="OnOperatorSortRequested"
-                                                AutoFitRequested="OnOperatorAutoFitRequested" />
+                                                ColumnWidth="{x:Bind views:OperatorListColumns.Current.IsOpWidth, Mode=TwoWay}" />
                                             <controls:SortableTableHeader Grid.Column="1"
                                                 Text="玩家名稱"
                                                 SortPropertyName="Name"
-                                                ColumnWidth="{x:Bind views:OperatorListColumns.Current.NameWidth, Mode=TwoWay}"
-                                                SortRequested="OnOperatorSortRequested"
-                                                AutoFitRequested="OnOperatorAutoFitRequested" />
+                                                ColumnWidth="{x:Bind views:OperatorListColumns.Current.NameWidth, Mode=TwoWay}" />
                                             <controls:SortableTableHeader Grid.Column="2"
                                                 Text="權限等級"
                                                 SortPropertyName="Level"
-                                                ColumnWidth="{x:Bind views:OperatorListColumns.Current.LevelWidth, Mode=TwoWay}"
-                                                SortRequested="OnOperatorSortRequested"
-                                                AutoFitRequested="OnOperatorAutoFitRequested" />
+                                                ColumnWidth="{x:Bind views:OperatorListColumns.Current.LevelWidth, Mode=TwoWay}" />
                                             <controls:SortableTableHeader Grid.Column="3"
                                                 Text="略過人數限制"
                                                 SortPropertyName="BypassesPlayerLimit"
-                                                ColumnWidth="{x:Bind views:OperatorListColumns.Current.BypassWidth, Mode=TwoWay}"
-                                                SortRequested="OnOperatorSortRequested"
-                                                AutoFitRequested="OnOperatorAutoFitRequested" />
+                                                ColumnWidth="{x:Bind views:OperatorListColumns.Current.BypassWidth, Mode=TwoWay}" />
                                             <controls:SortableTableHeader Grid.Column="4"
                                                 Text="UUID"
                                                 SortPropertyName="Uuid"
-                                                ColumnWidth="{x:Bind views:OperatorListColumns.Current.UuidWidth, Mode=TwoWay}"
-                                                SortRequested="OnOperatorSortRequested"
-                                                AutoFitRequested="OnOperatorAutoFitRequested" />
+                                                ColumnWidth="{x:Bind views:OperatorListColumns.Current.UuidWidth, Mode=TwoWay}" />
                                         </Grid>
                                     </controls:TableFrame.Header>
                                     <ListView
@@ -209,8 +184,7 @@
                                                             Width="{x:Bind views:OperatorListColumns.Current.UuidWidth, Mode=OneWay}" />
                                                     </Grid.ColumnDefinitions>
                                                     <Border Grid.Column="0"
-                                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                        BorderThickness="0,0,1,0"
+                                                        Style="{StaticResource TableCellBorderStyle}"
                                                         Padding="4,2">
                                                         <CheckBox
                                                             IsChecked="{x:Bind IsOp, Mode=TwoWay}"
@@ -221,8 +195,7 @@
                                                     <controls:TableCell Grid.Column="1"
                                                         Text="{x:Bind Name}" />
                                                     <Border Grid.Column="2"
-                                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                        BorderThickness="0,0,1,0"
+                                                        Style="{StaticResource TableCellBorderStyle}"
                                                         Padding="6,2">
                                                         <ComboBox
                                                             ItemsSource="{x:Bind AvailableLevels}"
@@ -232,8 +205,7 @@
                                                             HorizontalAlignment="Stretch" />
                                                     </Border>
                                                     <Border Grid.Column="3"
-                                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                        BorderThickness="0,0,1,0"
+                                                        Style="{StaticResource TableCellBorderStyle}"
                                                         Padding="4,2">
                                                         <CheckBox
                                                             IsChecked="{x:Bind BypassesPlayerLimit, Mode=TwoWay}"
@@ -265,13 +237,10 @@
                             </Grid.RowDefinitions>
 
                             <Border Grid.Row="0"
-                                Style="{StaticResource CardBorderStyle}"
-                                CornerRadius="6"
-                                Padding="10">
+                                Style="{StaticResource InfoCardStyle}">
                                 <TextBlock
                                     Text="白名單用途：當伺服器屬性 (server.properties) 開啟 white-list=true 時，只有被加入白名單的玩家才能連入伺服器。"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Style="{ThemeResource CaptionTextBlockStyle}"
+                                    Style="{StaticResource SecondaryCaptionTextStyle}"
                                     TextWrapping="Wrap" />
                             </Border>
 
@@ -293,10 +262,8 @@
                             </StackPanel>
 
                             <Border Grid.Row="2"
-                                Style="{StaticResource CardBorderStyle}"
-                                CornerRadius="6"
-                                Padding="10">
-                                <controls:TableFrame>
+                                Style="{StaticResource InfoCardStyle}">
+                                <controls:TableFrame SortTarget="{x:Bind WhitelistSort}">
                                     <controls:TableFrame.Header>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
@@ -310,15 +277,11 @@
                                             <controls:SortableTableHeader Grid.Column="0"
                                                 Text="玩家名稱"
                                                 SortPropertyName="Name"
-                                                ColumnWidth="{x:Bind views:WhitelistListColumns.Current.NameWidth, Mode=TwoWay}"
-                                                SortRequested="OnWhitelistSortRequested"
-                                                AutoFitRequested="OnWhitelistAutoFitRequested" />
+                                                ColumnWidth="{x:Bind views:WhitelistListColumns.Current.NameWidth, Mode=TwoWay}" />
                                             <controls:SortableTableHeader Grid.Column="1"
                                                 Text="UUID"
                                                 SortPropertyName="Uuid"
-                                                ColumnWidth="{x:Bind views:WhitelistListColumns.Current.UuidWidth, Mode=TwoWay}"
-                                                SortRequested="OnWhitelistSortRequested"
-                                                AutoFitRequested="OnWhitelistAutoFitRequested" />
+                                                ColumnWidth="{x:Bind views:WhitelistListColumns.Current.UuidWidth, Mode=TwoWay}" />
                                             <controls:SortableTableHeader Grid.Column="2"
                                                 Text="操作"
                                                 ShowSplitter="False" />
@@ -372,12 +335,9 @@
                             </Grid.RowDefinitions>
 
                             <Border Grid.Row="0"
-                                Style="{StaticResource CardBorderStyle}"
-                                CornerRadius="6"
-                                Padding="10">
+                                Style="{StaticResource InfoCardStyle}">
                                 <TextBlock Text="封鎖玩家用途：將指定的玩家帳號加入黑名單，連線時將顯示封鎖原因並予以拒絕連線。"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Style="{ThemeResource CaptionTextBlockStyle}"
+                                    Style="{StaticResource SecondaryCaptionTextStyle}"
                                     TextWrapping="Wrap" />
                             </Border>
 
@@ -404,10 +364,8 @@
                             </StackPanel>
 
                             <Border Grid.Row="2"
-                                Style="{StaticResource CardBorderStyle}"
-                                CornerRadius="6"
-                                Padding="10">
-                                <controls:TableFrame>
+                                Style="{StaticResource InfoCardStyle}">
+                                <controls:TableFrame SortTarget="{x:Bind BannedPlayerSort}">
                                     <controls:TableFrame.Header>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
@@ -425,27 +383,19 @@
                                             <controls:SortableTableHeader Grid.Column="0"
                                                 Text="玩家名稱"
                                                 SortPropertyName="Name"
-                                                ColumnWidth="{x:Bind views:BannedPlayerListColumns.Current.NameWidth, Mode=TwoWay}"
-                                                SortRequested="OnBannedPlayerSortRequested"
-                                                AutoFitRequested="OnBannedPlayerAutoFitRequested" />
+                                                ColumnWidth="{x:Bind views:BannedPlayerListColumns.Current.NameWidth, Mode=TwoWay}" />
                                             <controls:SortableTableHeader Grid.Column="1"
                                                 Text="封鎖原因"
                                                 SortPropertyName="Reason"
-                                                ColumnWidth="{x:Bind views:BannedPlayerListColumns.Current.ReasonWidth, Mode=TwoWay}"
-                                                SortRequested="OnBannedPlayerSortRequested"
-                                                AutoFitRequested="OnBannedPlayerAutoFitRequested" />
+                                                ColumnWidth="{x:Bind views:BannedPlayerListColumns.Current.ReasonWidth, Mode=TwoWay}" />
                                             <controls:SortableTableHeader Grid.Column="2"
                                                 Text="封鎖時間"
                                                 SortPropertyName="FormattedCreated"
-                                                ColumnWidth="{x:Bind views:BannedPlayerListColumns.Current.CreatedWidth, Mode=TwoWay}"
-                                                SortRequested="OnBannedPlayerSortRequested"
-                                                AutoFitRequested="OnBannedPlayerAutoFitRequested" />
+                                                ColumnWidth="{x:Bind views:BannedPlayerListColumns.Current.CreatedWidth, Mode=TwoWay}" />
                                             <controls:SortableTableHeader Grid.Column="3"
                                                 Text="UUID"
                                                 SortPropertyName="Uuid"
-                                                ColumnWidth="{x:Bind views:BannedPlayerListColumns.Current.UuidWidth, Mode=TwoWay}"
-                                                SortRequested="OnBannedPlayerSortRequested"
-                                                AutoFitRequested="OnBannedPlayerAutoFitRequested" />
+                                                ColumnWidth="{x:Bind views:BannedPlayerListColumns.Current.UuidWidth, Mode=TwoWay}" />
                                             <controls:SortableTableHeader Grid.Column="4"
                                                 Text="操作"
                                                 ShowSplitter="False" />
@@ -507,24 +457,19 @@
                             </Grid.RowDefinitions>
 
                             <Border Grid.Row="0"
-                                Style="{StaticResource CardBorderStyle}"
-                                CornerRadius="6"
-                                Padding="10">
+                                Style="{StaticResource InfoCardStyle}">
                                 <StackPanel Spacing="3">
                                     <TextBlock Text="【封鎖 IP 用途與官方查詢指引】"
                                         FontWeight="Bold"
                                         Style="{ThemeResource BodyTextBlockStyle}" />
                                     <TextBlock Text="• 封鎖指定的 IPv4 或 IPv6 位址，來自該網路位址的所有玩家均無法連線至此伺服器。"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Style="{ThemeResource CaptionTextBlockStyle}" />
+                                        Style="{StaticResource SecondaryCaptionTextStyle}" />
                                     <TextBlock
                                         Text="• 主控台指令：於伺服器主控台輸入 /ban-ip &lt;玩家名稱&gt;，伺服器會自動查詢最後登入 IP 並加入封鎖。"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Style="{ThemeResource CaptionTextBlockStyle}" />
+                                        Style="{StaticResource SecondaryCaptionTextStyle}" />
                                     <TextBlock
                                         Text="• 記錄檔查詢：開啟 logs/latest.log 搜尋玩家名稱，尋找「logged in」紀錄即可取得真實 IP。"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Style="{ThemeResource CaptionTextBlockStyle}" />
+                                        Style="{StaticResource SecondaryCaptionTextStyle}" />
                                 </StackPanel>
                             </Border>
 
@@ -549,10 +494,8 @@
                             </StackPanel>
 
                             <Border Grid.Row="2"
-                                Style="{StaticResource CardBorderStyle}"
-                                CornerRadius="6"
-                                Padding="10">
-                                <controls:TableFrame>
+                                Style="{StaticResource InfoCardStyle}">
+                                <controls:TableFrame SortTarget="{x:Bind BannedIpSort}">
                                     <controls:TableFrame.Header>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
@@ -568,21 +511,15 @@
                                             <controls:SortableTableHeader Grid.Column="0"
                                                 Text="IP 位址"
                                                 SortPropertyName="Ip"
-                                                ColumnWidth="{x:Bind views:BannedIpListColumns.Current.IpWidth, Mode=TwoWay}"
-                                                SortRequested="OnBannedIpSortRequested"
-                                                AutoFitRequested="OnBannedIpAutoFitRequested" />
+                                                ColumnWidth="{x:Bind views:BannedIpListColumns.Current.IpWidth, Mode=TwoWay}" />
                                             <controls:SortableTableHeader Grid.Column="1"
                                                 Text="封鎖原因"
                                                 SortPropertyName="Reason"
-                                                ColumnWidth="{x:Bind views:BannedIpListColumns.Current.ReasonWidth, Mode=TwoWay}"
-                                                SortRequested="OnBannedIpSortRequested"
-                                                AutoFitRequested="OnBannedIpAutoFitRequested" />
+                                                ColumnWidth="{x:Bind views:BannedIpListColumns.Current.ReasonWidth, Mode=TwoWay}" />
                                             <controls:SortableTableHeader Grid.Column="2"
                                                 Text="封鎖時間"
                                                 SortPropertyName="FormattedCreated"
-                                                ColumnWidth="{x:Bind views:BannedIpListColumns.Current.CreatedWidth, Mode=TwoWay}"
-                                                SortRequested="OnBannedIpSortRequested"
-                                                AutoFitRequested="OnBannedIpAutoFitRequested" />
+                                                ColumnWidth="{x:Bind views:BannedIpListColumns.Current.CreatedWidth, Mode=TwoWay}" />
                                             <controls:SortableTableHeader Grid.Column="3"
                                                 Text="操作"
                                                 ShowSplitter="False" />
@@ -640,8 +577,7 @@
 
             <TextBlock Grid.Column="0"
                 Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Style="{ThemeResource CaptionTextBlockStyle}"
+                Style="{StaticResource SecondaryCaptionTextStyle}"
                 VerticalAlignment="Center"
                 TextTrimming="CharacterEllipsis" />
 

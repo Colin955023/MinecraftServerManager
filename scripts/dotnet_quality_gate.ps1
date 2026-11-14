@@ -9,7 +9,7 @@ Initialize-ScriptEnvironment
 $solutionPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\MinecraftServerManager.slnx"))
 $solutionDir = Split-Path -Parent $solutionPath
 
-$isCiEnvironment = ($env:CI -eq 'true' -or $env:GITHUB_ACTIONS -eq 'true')
+$isCiEnvironment = Test-CiEnvironment
 
 function Invoke-DotnetStep
 {
@@ -61,14 +61,12 @@ function Test-VersionConsistency
     $version = Get-ProjectVersion -RepoRoot $solutionDir
     Write-Host "專案版本 (Directory.Build.props): $version"
 
-    $appProjectPath = Join-Path $solutionDir "src\MinecraftServerManager.App\MinecraftServerManager.App.csproj"
-    if (Test-Path -LiteralPath $appProjectPath)
+    foreach ($project in Get-ChildItem -LiteralPath $solutionDir -Filter "*.csproj" -Recurse -File)
     {
-        [xml]$appProject = Get-Content -Raw -Encoding UTF8 $appProjectPath
-        $versionNode = $appProject.SelectSingleNode("//Version")
-        if ($null -ne $versionNode)
+        [xml]$projectXml = Get-Content -Raw -Encoding UTF8 $project.FullName
+        if ($null -ne $projectXml.SelectSingleNode("//Version"))
         {
-            throw "C# 門禁失敗：App.csproj 不得重複定義 <Version>，版本應統一由 Directory.Build.props 管理"
+            throw "C# 門禁失敗：$($project.Name) 不得定義 <Version>，版本統一由 Directory.Build.props 管理"
         }
     }
 }

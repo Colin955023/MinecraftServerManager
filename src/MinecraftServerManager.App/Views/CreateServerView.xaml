@@ -19,18 +19,14 @@
         </Grid.ColumnDefinitions>
         <TextBlock Grid.Column="0"
           Text="建立新伺服器"
-          FontSize="26"
-          FontWeight="Bold"
-          Foreground="{ThemeResource TextBrush}"
+          Style="{StaticResource PageTitleTextStyle}"
           Margin="0,0,16,0"
           VerticalAlignment="Center" />
         <StackPanel Grid.Column="1"
           Orientation="Horizontal"
           VerticalAlignment="Center"
           Spacing="8">
-          <ProgressBar IsIndeterminate="True"
-            Width="80"
-            Height="4"
+          <ProgressBar Style="{StaticResource BusyProgressBarStyle}"
             VerticalAlignment="Center"
             Visibility="{x:Bind ViewModel.IsLoadingVersions, Mode=OneWay}" />
           <TextBlock Text="{x:Bind ViewModel.LoadingStatusText, Mode=OneWay}"

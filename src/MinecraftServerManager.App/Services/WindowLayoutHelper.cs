@@ -5,7 +5,7 @@ using WinRT.Interop;
 
 namespace MinecraftServerManager.App.Services;
 
-/// <summary>視窗版面配置的唯一共用入口：DPI 縮放比例查詢（GetDpiForWindow）與視窗置中／工作區夾限計算</summary>
+/// <summary>視窗版面共用入口：DPI 查詢、置中與工作區夾限</summary>
 public static partial class WindowLayoutHelper
 {
     private const double DefaultDpi = 96.0;
@@ -22,7 +22,7 @@ public static partial class WindowLayoutHelper
         return dpi > 0 ? dpi / DefaultDpi : 1.0;
     }
 
-    /// <summary>依視窗所在螢幕的 DPI 縮放比例，將視窗調整為指定的邏輯尺寸（AppWindow.Resize 的單位為實體像素）</summary>
+    /// <summary>依視窗 DPI 調整為指定的邏輯尺寸</summary>
     public static void ResizeToDip(Window window, int widthDip, int heightDip)
     {
         double scale = GetScale(window);

@@ -10,6 +10,7 @@
     <WindowsSdkPackageVersion>10.0.26100.87</WindowsSdkPackageVersion>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <Version>2.2.0</Version>
+    <IsTrimmable Condition="!$(MSBuildProjectName.EndsWith('Tests'))">true</IsTrimmable>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -29,7 +30,6 @@
       Condition="'$(CsWinRTWindowsMetadata)' == '' and '$(WindowsSdkDir)' == ''">local</CsWinRTWindowsMetadata>
   </PropertyGroup>
   <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('Tests'))">
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <NoWarn>$(NoWarn);CsWinRT1032;CA1859</NoWarn>
   </PropertyGroup>
   <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">

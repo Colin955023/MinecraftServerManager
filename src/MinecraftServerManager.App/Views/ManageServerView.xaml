@@ -21,9 +21,7 @@
         <!-- 頂部標題 -->
         <TextBlock Grid.Row="0"
             Text="⚙️ 管理伺服器"
-            FontSize="26"
-            FontWeight="Bold"
-            Foreground="{ThemeResource TextBrush}"
+            Style="{StaticResource PageTitleTextStyle}"
             Margin="0,0,0,16" />
 
         <!-- 頂部控制區 -->
@@ -48,17 +46,10 @@
                     Command="{x:Bind ViewModel.ServersRoot.ChangeServersRootCommand}"
                     Height="32"
                     ToolTipService.ToolTip="修改伺服器存放主資料夾路徑">
-                    <StackPanel Orientation="Horizontal"
-                        Spacing="6"
-                        VerticalAlignment="Center">
-                        <ContentPresenter ContentTemplate="{StaticResource IconFolder}"
-                            Width="15"
-                            Height="15"
-                            VerticalAlignment="Center" />
-                        <TextBlock Text="修改路徑"
-                            VerticalAlignment="Center"
-                            Foreground="{ThemeResource TextBrush}" />
-                    </StackPanel>
+                    <controls:IconLabel Icon="{StaticResource IconFolder}"
+                        Text="修改路徑"
+                        Foreground="{ThemeResource TextBrush}"
+                        VerticalAlignment="Center" />
                 </Button>
             </Grid>
 
@@ -66,54 +57,31 @@
                 Spacing="8">
                 <Button Command="{x:Bind ViewModel.List.DetectServersCommand}"
                     Height="32">
-                    <StackPanel Orientation="Horizontal"
-                        Spacing="6"
-                        VerticalAlignment="Center">
-                        <ContentPresenter ContentTemplate="{StaticResource IconSearch}"
-                            Width="15"
-                            Height="15"
-                            VerticalAlignment="Center" />
-                        <TextBlock Text="偵測現有伺服器"
-                            VerticalAlignment="Center"
-                            Foreground="{ThemeResource TextBrush}" />
-                    </StackPanel>
+                    <controls:IconLabel Icon="{StaticResource IconSearch}"
+                        Text="偵測現有伺服器"
+                        Foreground="{ThemeResource TextBrush}"
+                        VerticalAlignment="Center" />
                 </Button>
                 <Button Command="{x:Bind ViewModel.List.AddServerCommand}"
                     Height="32">
-                    <StackPanel Orientation="Horizontal"
-                        Spacing="6"
-                        VerticalAlignment="Center">
-                        <ContentPresenter ContentTemplate="{StaticResource IconCreateServer}"
-                            Width="15"
-                            Height="15"
-                            VerticalAlignment="Center" />
-                        <TextBlock Text="手動新增"
-                            VerticalAlignment="Center"
-                            Foreground="{ThemeResource TextBrush}" />
-                    </StackPanel>
+                    <controls:IconLabel Icon="{StaticResource IconCreateServer}"
+                        Text="手動新增"
+                        Foreground="{ThemeResource TextBrush}"
+                        VerticalAlignment="Center" />
                 </Button>
                 <Button Command="{x:Bind ViewModel.List.RefreshServersCommand}"
                     Height="32">
-                    <StackPanel Orientation="Horizontal"
-                        Spacing="6"
-                        VerticalAlignment="Center">
-                        <ContentPresenter ContentTemplate="{StaticResource IconRefresh}"
-                            Width="15"
-                            Height="15"
-                            VerticalAlignment="Center" />
-                        <TextBlock Text="重新整理"
-                            VerticalAlignment="Center"
-                            Foreground="{ThemeResource TextBrush}" />
-                    </StackPanel>
+                    <controls:IconLabel Icon="{StaticResource IconRefresh}"
+                        Text="重新整理"
+                        Foreground="{ThemeResource TextBrush}"
+                        VerticalAlignment="Center" />
                 </Button>
 
                 <StackPanel Orientation="Horizontal"
                     Margin="16,0,0,0"
                     VerticalAlignment="Center"
                     Spacing="8">
-                    <ProgressBar IsIndeterminate="True"
-                        Width="80"
-                        Height="4"
+                    <ProgressBar Style="{StaticResource BusyProgressBarStyle}"
                         VerticalAlignment="Center"
                         Visibility="{x:Bind ViewModel.List.IsBusy, Mode=OneWay}" />
                     <TextBlock Text="{x:Bind ViewModel.List.BusyStatusText, Mode=OneWay}"
@@ -143,7 +111,7 @@
                     Foreground="{ThemeResource TextBrush}"
                     Margin="0,0,0,12" />
 
-                <controls:TableFrame Grid.Row="1">
+                <controls:TableFrame Grid.Row="1" SortTarget="{x:Bind HeaderSort}">
                     <controls:TableFrame.Header>
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -168,51 +136,35 @@
                             <controls:SortableTableHeader Grid.Column="0"
                                 Text="名稱"
                                 SortPropertyName="Name"
-                                ColumnWidth="{x:Bind views:ServerListColumns.Current.NameWidth, Mode=TwoWay}"
-                                SortRequested="OnHeaderSortRequested"
-                                AutoFitRequested="OnHeaderAutoFitRequested" />
+                                ColumnWidth="{x:Bind views:ServerListColumns.Current.NameWidth, Mode=TwoWay}" />
                             <controls:SortableTableHeader Grid.Column="1"
                                 Text="版本"
                                 SortPropertyName="Version"
-                                ColumnWidth="{x:Bind views:ServerListColumns.Current.VersionWidth, Mode=TwoWay}"
-                                SortRequested="OnHeaderSortRequested"
-                                AutoFitRequested="OnHeaderAutoFitRequested" />
+                                ColumnWidth="{x:Bind views:ServerListColumns.Current.VersionWidth, Mode=TwoWay}" />
                             <controls:SortableTableHeader Grid.Column="2"
                                 Text="載入器"
                                 SortPropertyName="Loader"
-                                ColumnWidth="{x:Bind views:ServerListColumns.Current.LoaderWidth, Mode=TwoWay}"
-                                SortRequested="OnHeaderSortRequested"
-                                AutoFitRequested="OnHeaderAutoFitRequested" />
+                                ColumnWidth="{x:Bind views:ServerListColumns.Current.LoaderWidth, Mode=TwoWay}" />
                             <controls:SortableTableHeader Grid.Column="3"
                                 Text="狀態"
                                 SortPropertyName="Status"
-                                ColumnWidth="{x:Bind views:ServerListColumns.Current.StatusWidth, Mode=TwoWay}"
-                                SortRequested="OnHeaderSortRequested"
-                                AutoFitRequested="OnHeaderAutoFitRequested" />
+                                ColumnWidth="{x:Bind views:ServerListColumns.Current.StatusWidth, Mode=TwoWay}" />
                             <controls:SortableTableHeader Grid.Column="4"
                                 Text="目錄大小"
                                 SortPropertyName="Size"
-                                ColumnWidth="{x:Bind views:ServerListColumns.Current.SizeWidth, Mode=TwoWay}"
-                                SortRequested="OnHeaderSortRequested"
-                                AutoFitRequested="OnHeaderAutoFitRequested" />
+                                ColumnWidth="{x:Bind views:ServerListColumns.Current.SizeWidth, Mode=TwoWay}" />
                             <controls:SortableTableHeader Grid.Column="5"
                                 Text="修改日期"
                                 SortPropertyName="LastModified"
-                                ColumnWidth="{x:Bind views:ServerListColumns.Current.ModifiedWidth, Mode=TwoWay}"
-                                SortRequested="OnHeaderSortRequested"
-                                AutoFitRequested="OnHeaderAutoFitRequested" />
+                                ColumnWidth="{x:Bind views:ServerListColumns.Current.ModifiedWidth, Mode=TwoWay}" />
                             <controls:SortableTableHeader Grid.Column="6"
                                 Text="備份狀態"
                                 SortPropertyName="BackupStatus"
-                                ColumnWidth="{x:Bind views:ServerListColumns.Current.BackupWidth, Mode=TwoWay}"
-                                SortRequested="OnHeaderSortRequested"
-                                AutoFitRequested="OnHeaderAutoFitRequested" />
+                                ColumnWidth="{x:Bind views:ServerListColumns.Current.BackupWidth, Mode=TwoWay}" />
                             <controls:SortableTableHeader Grid.Column="7"
                                 Text="相對路徑"
                                 SortPropertyName="RelativePath"
-                                ColumnWidth="{x:Bind views:ServerListColumns.Current.PathWidth, Mode=TwoWay}"
-                                SortRequested="OnHeaderSortRequested"
-                                AutoFitRequested="OnHeaderAutoFitRequested" />
+                                ColumnWidth="{x:Bind views:ServerListColumns.Current.PathWidth, Mode=TwoWay}" />
                         </Grid>
                     </controls:TableFrame.Header>
 
@@ -266,8 +218,7 @@
                                     <controls:TableCell Grid.Column="2"
                                         Text="{x:Bind Loader, Mode=OneWay}" />
                                     <Border Grid.Column="3"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="0,0,1,0"
+                                        Style="{StaticResource TableCellBorderStyle}"
                                         Padding="8,6">
                                         <TextBlock Text="{x:Bind Status, Mode=OneWay}"
                                             controls:ThemeBrush.ForegroundKey="{x:Bind controls:UiBindHelpers.ErrorBrushKey(HasMissingFiles), Mode=OneWay}"
@@ -281,15 +232,9 @@
                                         Text="{x:Bind LastModified, Mode=OneWay}" />
                                     <controls:TableCell Grid.Column="6"
                                         Text="{x:Bind BackupStatus, Mode=OneWay}" />
-                                    <Border Grid.Column="7"
-                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                        BorderThickness="0,0,1,0"
-                                        Padding="8,6">
-                                        <TextBlock Text="{x:Bind RelativePath, Mode=OneWay}"
-                                            TextTrimming="CharacterEllipsis"
-                                            ToolTipService.ToolTip="{x:Bind Path, Mode=OneWay}"
-                                            VerticalAlignment="Center" />
-                                    </Border>
+                                    <controls:TableCell Grid.Column="7"
+                                        Text="{x:Bind RelativePath, Mode=OneWay}"
+                                        ToolTipText="{x:Bind Path, Mode=OneWay}" />
                                 </Grid>
                             </DataTemplate>
                         </ListView.ItemTemplate>
@@ -328,128 +273,83 @@
                 </Grid.RowDefinitions>
 
                 <!-- 第 1 列：基本識別資訊 -->
-                <TextBlock Grid.Row="0"
+                <controls:LabeledValue Grid.Row="0"
                     Grid.Column="0"
                     Margin="0,0,8,4"
-                    TextTrimming="CharacterEllipsis">
-                    <Run Text="伺服器名稱："
-                        Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.List.SelectedServer.Name, Mode=OneWay}"
-                        Foreground="{ThemeResource TextBrush}"
-                        FontWeight="SemiBold" />
-                </TextBlock>
+                    Label="伺服器名稱："
+                    Value="{x:Bind ViewModel.List.SelectedServer.Name, Mode=OneWay}"
+                    ValueWeight="SemiBold" />
 
-                <TextBlock Grid.Row="0"
+                <controls:LabeledValue Grid.Row="0"
                     Grid.Column="1"
                     Margin="0,0,8,4"
-                    TextTrimming="CharacterEllipsis">
-                    <Run Text="Minecraft 版本："
-                        Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.List.SelectedServer.Version, Mode=OneWay}"
-                        Foreground="{ThemeResource TextBrush}"
-                        FontWeight="SemiBold" />
-                </TextBlock>
+                    Label="Minecraft 版本："
+                    Value="{x:Bind ViewModel.List.SelectedServer.Version, Mode=OneWay}"
+                    ValueWeight="SemiBold" />
 
-                <TextBlock Grid.Row="0"
+                <controls:LabeledValue Grid.Row="0"
                     Grid.Column="2"
                     Margin="0,0,8,4"
-                    TextTrimming="CharacterEllipsis">
-                    <Run Text="載入器類型："
-                        Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.List.SelectedServer.Loader, Mode=OneWay}"
-                        Foreground="{ThemeResource TextBrush}"
-                        FontWeight="SemiBold" />
-                </TextBlock>
+                    Label="載入器類型："
+                    Value="{x:Bind ViewModel.List.SelectedServer.Loader, Mode=OneWay}"
+                    ValueWeight="SemiBold" />
 
-                <TextBlock Grid.Row="0"
+                <controls:LabeledValue Grid.Row="0"
                     Grid.Column="3"
                     Margin="0,0,0,4"
-                    TextTrimming="CharacterEllipsis">
-                    <Run Text="目前狀態："
-                        Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.List.SelectedServer.Status, Mode=OneWay}"
-                        Foreground="{ThemeResource TextBrush}"
-                        FontWeight="SemiBold" />
-                </TextBlock>
+                    Label="目前狀態："
+                    Value="{x:Bind ViewModel.List.SelectedServer.Status, Mode=OneWay}"
+                    ValueWeight="SemiBold" />
 
                 <!-- 第 2 列：資源與備份資訊 -->
-                <TextBlock Grid.Row="1"
+                <controls:LabeledValue Grid.Row="1"
                     Grid.Column="0"
                     Margin="0,0,8,4"
-                    TextTrimming="CharacterEllipsis">
-                    <Run Text="目錄大小："
-                        Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.List.SelectedServer.Size, Mode=OneWay}"
-                        Foreground="{ThemeResource TextBrush}" />
-                </TextBlock>
+                    Label="目錄大小："
+                    Value="{x:Bind ViewModel.List.SelectedServer.Size, Mode=OneWay}" />
 
-                <TextBlock Grid.Row="1"
+                <controls:LabeledValue Grid.Row="1"
                     Grid.Column="1"
                     Margin="0,0,8,4"
-                    TextTrimming="CharacterEllipsis">
-                    <Run Text="記憶體配置："
-                        Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.List.SelectedServerMemory, Mode=OneWay}"
-                        Foreground="{ThemeResource TextBrush}" />
-                </TextBlock>
+                    Label="記憶體配置："
+                    Value="{x:Bind ViewModel.List.SelectedServerMemory, Mode=OneWay}" />
 
-                <TextBlock Grid.Row="1"
+                <controls:LabeledValue Grid.Row="1"
                     Grid.Column="2"
                     Margin="0,0,8,4"
-                    TextTrimming="CharacterEllipsis">
-                    <Run Text="備份狀況："
-                        Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.List.SelectedServer.BackupStatus, Mode=OneWay}"
-                        Foreground="{ThemeResource TextBrush}" />
-                </TextBlock>
+                    Label="備份狀況："
+                    Value="{x:Bind ViewModel.List.SelectedServer.BackupStatus, Mode=OneWay}" />
 
-                <TextBlock Grid.Row="1"
+                <controls:LabeledValue Grid.Row="1"
                     Grid.Column="3"
                     Margin="0,0,0,4"
-                    TextTrimming="CharacterEllipsis"
-                    ToolTipService.ToolTip="{x:Bind ViewModel.List.SelectedServerBackupPath, Mode=OneWay}">
-                    <Run Text="外部備份路徑："
-                        Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.List.SelectedServerBackupPath, Mode=OneWay}"
-                        Foreground="{ThemeResource TextBrush}" />
-                </TextBlock>
+                    ToolTipService.ToolTip="{x:Bind ViewModel.List.SelectedServerBackupPath, Mode=OneWay}"
+                    Label="外部備份路徑："
+                    Value="{x:Bind ViewModel.List.SelectedServerBackupPath, Mode=OneWay}" />
 
                 <!-- 第 3 列：實體路徑 -->
-                <TextBlock Grid.Row="2"
+                <controls:LabeledValue Grid.Row="2"
                     Grid.Column="0"
                     Grid.ColumnSpan="4"
                     Margin="0,0,0,4"
-                    TextTrimming="CharacterEllipsis"
-                    ToolTipService.ToolTip="{x:Bind ViewModel.List.SelectedServer.Path, Mode=OneWay}">
-                    <Run Text="實體路徑："
-                        Foreground="{ThemeResource MutedTextBrush}" />
-                    <Run Text="{x:Bind ViewModel.List.SelectedServer.Path, Mode=OneWay}"
-                        Foreground="{ThemeResource TextBrush}" />
-                </TextBlock>
+                    ToolTipService.ToolTip="{x:Bind ViewModel.List.SelectedServer.Path, Mode=OneWay}"
+                    Label="實體路徑："
+                    Value="{x:Bind ViewModel.List.SelectedServer.Path, Mode=OneWay}" />
             </Grid>
 
             <controls:WrapPanel ItemSpacing="8"
                 LineSpacing="8">
                 <Button Command="{x:Bind ViewModel.Lifecycle.StartServerCommand}"
-                    IsEnabled="{x:Bind ViewModel.List.CanStartOrMonitorServer, Mode=OneWay}"
                     Visibility="{x:Bind controls:UiBindHelpers.InverseBoolToVis(ViewModel.List.IsSelectedServerActive), Mode=OneWay}"
                     Style="{StaticResource PrimaryButtonStyle}"
                     Width="120"
                     Height="32">
-                    <StackPanel Orientation="Horizontal"
-                        Spacing="6"
-                        VerticalAlignment="Center">
-                        <ContentPresenter ContentTemplate="{StaticResource IconStart}"
-                            Width="15"
-                            Height="15"
-                            VerticalAlignment="Center" />
-                        <TextBlock Text="啟動"
-                            VerticalAlignment="Center" />
-                    </StackPanel>
+                    <controls:IconLabel Icon="{StaticResource IconStart}"
+                        Text="啟動"
+                        VerticalAlignment="Center" />
                 </Button>
 
                 <Button Command="{x:Bind ViewModel.Lifecycle.StopServerCommand}"
-                    IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Visibility="{x:Bind ViewModel.List.IsSelectedServerActive, Mode=OneWay}"
                     Style="{StaticResource DangerButtonStyle}"
                     Width="120"
@@ -468,35 +368,19 @@
                 </Button>
 
                 <Button Command="{x:Bind ViewModel.Lifecycle.MonitorServerCommand}"
-                    IsEnabled="{x:Bind ViewModel.List.CanStartOrMonitorServer, Mode=OneWay}"
                     Width="120"
                     Height="32">
-                    <StackPanel Orientation="Horizontal"
-                        Spacing="6"
-                        VerticalAlignment="Center">
-                        <ContentPresenter ContentTemplate="{StaticResource IconConsole}"
-                            Width="15"
-                            Height="15"
-                            VerticalAlignment="Center" />
-                        <TextBlock Text="監控"
-                            VerticalAlignment="Center" />
-                    </StackPanel>
+                    <controls:IconLabel Icon="{StaticResource IconConsole}"
+                        Text="監控"
+                        VerticalAlignment="Center" />
                 </Button>
 
                 <Button Command="{x:Bind ViewModel.ConfigureServerCommand}"
-                    IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Width="120"
                     Height="32">
-                    <StackPanel Orientation="Horizontal"
-                        Spacing="6"
-                        VerticalAlignment="Center">
-                        <ContentPresenter ContentTemplate="{StaticResource IconServerSettings}"
-                            Width="15"
-                            Height="15"
-                            VerticalAlignment="Center" />
-                        <TextBlock Text="設定"
-                            VerticalAlignment="Center" />
-                    </StackPanel>
+                    <controls:IconLabel Icon="{StaticResource IconServerSettings}"
+                        Text="設定"
+                        VerticalAlignment="Center" />
                 </Button>
 
                 <Button Command="{x:Bind ViewModel.ManagePlayersCommand}"
@@ -504,81 +388,42 @@
                     ToolTipService.ToolTip="管理伺服器管理員 (ops)、白名單 (whitelist) 與封鎖名單 (bans)"
                     Width="120"
                     Height="32">
-                    <StackPanel Orientation="Horizontal"
-                        Spacing="6"
-                        VerticalAlignment="Center">
-                        <ContentPresenter ContentTemplate="{StaticResource IconUserGroup}"
-                            Width="15"
-                            Height="15"
-                            VerticalAlignment="Center" />
-                        <TextBlock Text="名單管理"
-                            VerticalAlignment="Center" />
-                    </StackPanel>
+                    <controls:IconLabel Icon="{StaticResource IconUserGroup}"
+                        Text="名單管理"
+                        VerticalAlignment="Center" />
                 </Button>
 
                 <Button Command="{x:Bind ViewModel.OpenServerFolderCommand}"
-                    IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Width="120"
                     Height="32">
-                    <StackPanel Orientation="Horizontal"
-                        Spacing="6"
-                        VerticalAlignment="Center">
-                        <ContentPresenter ContentTemplate="{StaticResource IconFolder}"
-                            Width="15"
-                            Height="15"
-                            VerticalAlignment="Center" />
-                        <TextBlock Text="開啟資料夾"
-                            VerticalAlignment="Center" />
-                    </StackPanel>
+                    <controls:IconLabel Icon="{StaticResource IconFolder}"
+                        Text="開啟資料夾"
+                        VerticalAlignment="Center" />
                 </Button>
 
                 <Button Command="{x:Bind ViewModel.Backup.BackupServerCommand}"
-                    IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Width="120"
                     Height="32">
-                    <StackPanel Orientation="Horizontal"
-                        Spacing="6"
-                        VerticalAlignment="Center">
-                        <ContentPresenter ContentTemplate="{StaticResource IconBackup}"
-                            Width="15"
-                            Height="15"
-                            VerticalAlignment="Center" />
-                        <TextBlock Text="備份伺服器"
-                            VerticalAlignment="Center" />
-                    </StackPanel>
+                    <controls:IconLabel Icon="{StaticResource IconBackup}"
+                        Text="備份伺服器"
+                        VerticalAlignment="Center" />
                 </Button>
 
                 <Button Command="{x:Bind ViewModel.Backup.RestoreBackupCommand}"
-                    IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Width="120"
                     Height="32">
-                    <StackPanel Orientation="Horizontal"
-                        Spacing="6"
-                        VerticalAlignment="Center">
-                        <ContentPresenter ContentTemplate="{StaticResource IconRestore}"
-                            Width="15"
-                            Height="15"
-                            VerticalAlignment="Center" />
-                        <TextBlock Text="還原備份"
-                            VerticalAlignment="Center" />
-                    </StackPanel>
+                    <controls:IconLabel Icon="{StaticResource IconRestore}"
+                        Text="還原備份"
+                        VerticalAlignment="Center" />
                 </Button>
 
                 <Button Command="{x:Bind ViewModel.DeleteServerCommand}"
-                    IsEnabled="{x:Bind ViewModel.List.HasSelectedServer, Mode=OneWay}"
                     Style="{StaticResource DangerButtonStyle}"
                     Width="120"
                     Height="32">
-                    <StackPanel Orientation="Horizontal"
-                        Spacing="6"
-                        VerticalAlignment="Center">
-                        <ContentPresenter ContentTemplate="{StaticResource IconDelete}"
-                            Width="15"
-                            Height="15"
-                            VerticalAlignment="Center" />
-                        <TextBlock Text="刪除"
-                            VerticalAlignment="Center" />
-                    </StackPanel>
+                    <controls:IconLabel Icon="{StaticResource IconDelete}"
+                        Text="刪除"
+                        VerticalAlignment="Center" />
                 </Button>
             </controls:WrapPanel>
         </StackPanel>

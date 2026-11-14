@@ -1,9 +1,8 @@
 using MinecraftServerManager.Infrastructure.Servers;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.Servers;
 
-public sealed partial class ServerDirectorySizeServiceTests : IDisposable
+public sealed class ServerDirectorySizeServiceTests : IDisposable
 {
     private readonly TempDirectory _testDirTemp = new("msm-dirsize-tests-");
     private readonly string _testDir;

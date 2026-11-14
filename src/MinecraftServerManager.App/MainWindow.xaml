@@ -38,9 +38,7 @@
             FontWeight="Bold"
             Foreground="{ThemeResource TextBrush}" />
           <TextBlock Text="Server Manager"
-            FontSize="16"
-            FontWeight="SemiBold"
-            Foreground="{ThemeResource TextBrush}"
+            Style="{StaticResource SectionHeaderTextStyle}"
             Margin="0,1,0,0" />
         </StackPanel>
 
@@ -48,54 +46,42 @@
         <StackPanel Grid.Row="1"
           Spacing="4">
           <!-- 建立伺服器 -->
-          <Button Click="OnNavigateCreateClicked"
+          <Button Click="OnNavigateClicked"
+            Tag="create"
             Style="{StaticResource NavButtonStyle}">
-            <StackPanel Orientation="Horizontal"
-              VerticalAlignment="Center"
-              Spacing="12">
-              <ContentPresenter ContentTemplate="{StaticResource IconCreateServer}"
-                Width="18"
-                Height="18"
-                VerticalAlignment="Center" />
-              <TextBlock Text="建立伺服器"
-                FontSize="14"
-                VerticalAlignment="Center"
-                Foreground="{ThemeResource TextBrush}" />
-            </StackPanel>
+            <controls:IconLabel Icon="{StaticResource IconCreateServer}"
+              Text="建立伺服器"
+              IconSize="18"
+              Spacing="12"
+              FontSize="14"
+              Foreground="{ThemeResource TextBrush}"
+              VerticalAlignment="Center" />
           </Button>
 
           <!-- 管理伺服器 -->
-          <Button Click="OnNavigateManageClicked"
+          <Button Click="OnNavigateClicked"
+            Tag="manage"
             Style="{StaticResource NavButtonStyle}">
-            <StackPanel Orientation="Horizontal"
-              VerticalAlignment="Center"
-              Spacing="12">
-              <ContentPresenter ContentTemplate="{StaticResource IconManageServer}"
-                Width="18"
-                Height="18"
-                VerticalAlignment="Center" />
-              <TextBlock Text="管理伺服器"
-                FontSize="14"
-                VerticalAlignment="Center"
-                Foreground="{ThemeResource TextBrush}" />
-            </StackPanel>
+            <controls:IconLabel Icon="{StaticResource IconManageServer}"
+              Text="管理伺服器"
+              IconSize="18"
+              Spacing="12"
+              FontSize="14"
+              Foreground="{ThemeResource TextBrush}"
+              VerticalAlignment="Center" />
           </Button>
 
           <!-- 模組管理 -->
-          <Button Click="OnNavigateModsClicked"
+          <Button Click="OnNavigateClicked"
+            Tag="mods"
             Style="{StaticResource NavButtonStyle}">
-            <StackPanel Orientation="Horizontal"
-              VerticalAlignment="Center"
-              Spacing="12">
-              <ContentPresenter ContentTemplate="{StaticResource IconMods}"
-                Width="18"
-                Height="18"
-                VerticalAlignment="Center" />
-              <TextBlock Text="模組管理"
-                FontSize="14"
-                VerticalAlignment="Center"
-                Foreground="{ThemeResource TextBrush}" />
-            </StackPanel>
+            <controls:IconLabel Icon="{StaticResource IconMods}"
+              Text="模組管理"
+              IconSize="18"
+              Spacing="12"
+              FontSize="14"
+              Foreground="{ThemeResource TextBrush}"
+              VerticalAlignment="Center" />
           </Button>
 
           <!-- 分隔線 -->
@@ -106,35 +92,25 @@
           <!-- 匯入伺服器 -->
           <Button Click="OnImportServerClicked"
             Style="{StaticResource NavButtonStyle}">
-            <StackPanel Orientation="Horizontal"
-              VerticalAlignment="Center"
-              Spacing="12">
-              <ContentPresenter ContentTemplate="{StaticResource IconImport}"
-                Width="18"
-                Height="18"
-                VerticalAlignment="Center" />
-              <TextBlock Text="匯入伺服器"
-                FontSize="14"
-                VerticalAlignment="Center"
-                Foreground="{ThemeResource TextBrush}" />
-            </StackPanel>
+            <controls:IconLabel Icon="{StaticResource IconImport}"
+              Text="匯入伺服器"
+              IconSize="18"
+              Spacing="12"
+              FontSize="14"
+              Foreground="{ThemeResource TextBrush}"
+              VerticalAlignment="Center" />
           </Button>
 
           <!-- 開啟資料夾 -->
           <Button Click="OnOpenFolderClicked"
             Style="{StaticResource NavButtonStyle}">
-            <StackPanel Orientation="Horizontal"
-              VerticalAlignment="Center"
-              Spacing="12">
-              <ContentPresenter ContentTemplate="{StaticResource IconFolder}"
-                Width="18"
-                Height="18"
-                VerticalAlignment="Center" />
-              <TextBlock Text="開啟資料夾"
-                FontSize="14"
-                VerticalAlignment="Center"
-                Foreground="{ThemeResource TextBrush}" />
-            </StackPanel>
+            <controls:IconLabel Icon="{StaticResource IconFolder}"
+              Text="開啟資料夾"
+              IconSize="18"
+              Spacing="12"
+              FontSize="14"
+              Foreground="{ThemeResource TextBrush}"
+              VerticalAlignment="Center" />
           </Button>
         </StackPanel>
 
@@ -143,20 +119,16 @@
           <Border Height="1"
             Background="{ThemeResource BorderBrush}"
             Margin="8,8,8,12" />
-          <Button Click="OnNavigateAboutClicked"
+          <Button Click="OnNavigateClicked"
+            Tag="about_preferences"
             Style="{StaticResource NavButtonStyle}">
-            <StackPanel Orientation="Horizontal"
-              VerticalAlignment="Center"
-              Spacing="12">
-              <ContentPresenter ContentTemplate="{StaticResource IconAbout}"
-                Width="18"
-                Height="18"
-                VerticalAlignment="Center" />
-              <TextBlock Text="關於與設定"
-                FontSize="14"
-                VerticalAlignment="Center"
-                Foreground="{ThemeResource TextBrush}" />
-            </StackPanel>
+            <controls:IconLabel Icon="{StaticResource IconAbout}"
+              Text="關於與設定"
+              IconSize="18"
+              Spacing="12"
+              FontSize="14"
+              Foreground="{ThemeResource TextBrush}"
+              VerticalAlignment="Center" />
           </Button>
         </StackPanel>
       </Grid>

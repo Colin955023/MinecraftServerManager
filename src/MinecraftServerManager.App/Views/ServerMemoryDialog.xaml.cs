@@ -1,9 +1,10 @@
+using MinecraftServerManager.App.Controls;
 using Microsoft.UI.Xaml.Controls;
 using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>伺服器記憶體設定 WinUI 3 原生 ContentDialog</summary>
+/// <summary>伺服器記憶體設定對話方塊</summary>
 public sealed partial class ServerMemoryDialog : ContentDialog
 {
     public ServerMemoryViewModel ViewModel { get; }
@@ -23,11 +24,5 @@ public sealed partial class ServerMemoryDialog : ContentDialog
         };
     }
 
-    private void Dialog_PrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)
-    {
-        if (ViewModel.SaveCommand.CanExecute(null))
-        {
-            ViewModel.SaveCommand.Execute(null);
-        }
-    }
+    private void Dialog_PrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args) => ViewModel.SaveCommand.TryExecute();
 }

@@ -3,7 +3,7 @@ using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Core.Servers;
 
-/// <summary>Minecraft server.properties 屬性說明、分類與預設值中繼資料</summary>
+/// <summary>server.properties 屬性說明、分類與預設值</summary>
 public static class ServerPropertiesMetadata
 {
     private static readonly FrozenDictionary<string, string> DescriptionsMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)

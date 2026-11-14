@@ -34,7 +34,7 @@ public static partial class MemoryUtils
         return memoryBytes > 0 ? (int)(memoryBytes / (1024L * 1024L)) : 0;
     }
 
-    /// <summary>解析 Java 記憶體參數（-Xmx 或 -Xms）。若同一段文字出現多次相同參數，依 JVM 規範以最後一個為準。</summary>
+    /// <summary>解析 -Xmx 或 -Xms；出現多次時以最後一個為準</summary>
     public static int? ParseMemorySetting(string? text, string settingType = "Xmx")
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -94,7 +94,7 @@ public static partial class MemoryUtils
     public static int ResolveEffectiveMinMemoryMb(int? memoryMinMb, int memoryMaxMb) =>
         memoryMinMb ?? Math.Min(ServerDefaults.DefaultMemoryMinMb, memoryMaxMb);
 
-    /// <summary>將啟動腳本內容中的 -Xmx／-Xms 參數改寫為指定 MB 值；缺少 -Xms 時插入於第一個 -Xmx 之前。</summary>
+    /// <summary>改寫啟動腳本的 -Xmx／-Xms；缺少 -Xms 時插入於第一個 -Xmx 前</summary>
     public static string ApplyMemoryFlags(string content, int minMb, int maxMb)
     {
         ArgumentNullException.ThrowIfNull(content);
@@ -119,10 +119,7 @@ public static partial class MemoryUtils
         return content;
     }
 
-    /// <summary>
-    /// 檢查伺服器記憶體設定文字（建立伺服器與調整記憶體共用同一套規則）；
-    /// <paramref name="clampToSystem"/> 為 true 時超出系統總記憶體之數值自動調降為上限並回傳警告，否則視為錯誤
-    /// </summary>
+    /// <summary>檢查記憶體設定文字；<paramref name="clampToSystem"/> 為 true 時超出系統記憶體者自動調降並回傳警告</summary>
     public static MemoryCheckResult CheckServerMemory(string? maxMemoryText, string? minMemoryText, long systemMemoryMb, bool clampToSystem = false)
     {
         if (!int.TryParse(maxMemoryText?.Trim(), CultureInfo.InvariantCulture, out int maxMb) || maxMb <= 0)

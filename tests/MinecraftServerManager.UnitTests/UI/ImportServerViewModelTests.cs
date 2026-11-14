@@ -3,7 +3,6 @@ using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Domain.ValueObjects;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 

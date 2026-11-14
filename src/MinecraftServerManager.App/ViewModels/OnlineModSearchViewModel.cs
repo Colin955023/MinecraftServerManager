@@ -263,7 +263,7 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase, IDisposabl
         OnlineMods.ReplaceAll(sorted);
     }
 
-    /// <summary>於瀏覽器開啟選取模組的線上專案頁面。</summary>
+    /// <summary>於瀏覽器開啟選取模組的線上專案頁面</summary>
     [RelayCommand]
     public void OpenModPlatformPage()
     {

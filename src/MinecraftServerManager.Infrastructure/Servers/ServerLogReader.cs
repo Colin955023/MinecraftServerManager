@@ -5,7 +5,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>伺服器 latest.log 尾端讀取服務（限制讀取位元組與行數，去除 ANSI 色碼與 BOM）</summary>
+/// <summary>latest.log 尾端讀取</summary>
 public sealed class ServerLogReader(int maxBytesToRead = ServerLogReader.DefaultMaxBytes, int maxLines = ServerLogReader.DefaultMaxLines) : IServerLogReader
 {
     /// <summary>預設讀取尾端位元組上限（2 MB）</summary>
@@ -48,7 +48,7 @@ public sealed class ServerLogReader(int maxBytesToRead = ServerLogReader.Default
         }
     }
 
-    /// <summary>切割尾端文字為行；截斷讀取時捨棄第一行（可能為不完整行），並僅保留最後 maxLines 行</summary>
+    /// <summary>切行；截斷讀取時捨棄第一行，只保留最後 maxLines 行</summary>
     private List<string> SplitTail(string text, bool truncated)
     {
         // 先計數、再只為保留的行配置字串，避免對 2 MB 尾端的每一行都建立字串
@@ -79,7 +79,7 @@ public sealed class ServerLogReader(int maxBytesToRead = ServerLogReader.Default
 
             if (index >= first)
             {
-                result.Add(ModHelpers.StripColorAndFormattingCodes(lineSpan.ToString()).TrimStart('﻿'));
+                result.Add(ModHelpers.StripColorAndFormattingCodes(lineSpan.ToString()).TrimStart('\uFEFF'));
             }
 
             index++;

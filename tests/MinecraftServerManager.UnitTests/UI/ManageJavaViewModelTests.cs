@@ -1,10 +1,9 @@
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-public sealed partial class ManageJavaViewModelTests : IDisposable
+public sealed class ManageJavaViewModelTests : IDisposable
 {
     private readonly TempDirectory _tempDirTemp = new("msm_java_vm_test_");
     private readonly string _tempDir;

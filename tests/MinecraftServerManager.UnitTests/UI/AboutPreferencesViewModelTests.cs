@@ -3,11 +3,10 @@ using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Settings;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-public sealed partial class AboutPreferencesViewModelTests : IDisposable
+public sealed class AboutPreferencesViewModelTests : IDisposable
 {
     private readonly TempDirectory _testDirTemp = new("msm_test_");
     private readonly string _testDir;

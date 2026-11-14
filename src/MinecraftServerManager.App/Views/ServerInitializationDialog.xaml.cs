@@ -8,7 +8,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>伺服器初次啟動初始化視窗（原生模態視窗，透過 ModalWindowHost 裝載）；流程與狀態由 <see cref="ServerInitializationViewModel"/> 管理</summary>
+/// <summary>伺服器初次啟動初始化視窗</summary>
 public sealed partial class ServerInitializationDialog : Window, IDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerInitializationDialog));

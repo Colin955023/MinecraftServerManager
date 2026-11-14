@@ -13,14 +13,11 @@ namespace MinecraftServerManager.Infrastructure.Logging;
 /// <param name="LogTail">上次記錄檔最後數行內容</param>
 public sealed record UncleanExitReport(string ProcessId, string StartedAt, string? LogFilePath, IReadOnlyList<string> LogTail);
 
-/// <summary>
-/// 當機診斷：以工作階段標記偵測上次異常結束，並記錄 UI 執行緒擲出的例外，
-/// 讓原生層級閃退（例如 WinUI 0xC000027B 快速失敗，不會經過任何受控例外處理常式）仍能從記錄檔追查最後動作。
-/// </summary>
+/// <summary>當機診斷：以工作階段標記偵測上次異常結束，並記錄 UI 執行緒例外</summary>
 public static class CrashDiagnostics
 {
     /// <summary>工作階段標記檔名（位於記錄檔目錄，正常結束時刪除）</summary>
-    public const string SessionMarkerFileName = "session.marker";
+    internal const string SessionMarkerFileName = "session.marker";
 
     private const int MaxFirstChanceRecords = 300;
     private const int MaxStackLines = 12;
@@ -67,7 +64,7 @@ public static class CrashDiagnostics
     }
 
     /// <summary>讀取上次工作階段標記；標記存在代表上次執行未正常結束</summary>
-    public static UncleanExitReport? CheckPreviousSession(string logDir)
+    internal static UncleanExitReport? CheckPreviousSession(string logDir)
     {
         if (ReadMarker(logDir) is not { } parts)
         {
@@ -102,7 +99,7 @@ public static class CrashDiagnostics
     }
 
     /// <summary>寫入本次工作階段標記</summary>
-    public static void WriteSessionMarker(string logDir, int processId, string? logFilePath)
+    internal static void WriteSessionMarker(string logDir, int processId, string? logFilePath)
     {
         string startedAt = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
         string content = string.Create(CultureInfo.InvariantCulture, $"{processId}|{startedAt}|{logFilePath}");
@@ -112,8 +109,8 @@ public static class CrashDiagnostics
         }
     }
 
-    /// <summary>清除工作階段標記（代表本次執行正常結束）；標記若已由其他行程（例如重新啟動後的新行程）改寫則保留</summary>
-    public static void ClearSessionMarker(string logDir, int processId)
+    /// <summary>清除工作階段標記；已被其他行程改寫則保留</summary>
+    internal static void ClearSessionMarker(string logDir, int processId)
     {
         if (ReadMarker(logDir) is not { } parts ||
             !string.Equals(parts[0], processId.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal))
@@ -163,7 +160,7 @@ public static class CrashDiagnostics
     }
 
     /// <summary>將例外與目前呼叫堆疊整理為單筆診斷文字</summary>
-    public static string FormatFirstChance(Exception exception, string stackTrace)
+    internal static string FormatFirstChance(Exception exception, string stackTrace)
     {
         ArgumentNullException.ThrowIfNull(exception);
         var sb = new StringBuilder(256);

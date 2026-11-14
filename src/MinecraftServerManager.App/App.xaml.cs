@@ -105,7 +105,7 @@ public partial class App : Application
         AppLogging.Initialize();
         Logger.Information("Minecraft Server Manager 啟動中 (版本 {Version})", AppInfo.Version);
 
-        // 原生層級閃退（WinUI 快速失敗）不會經過受控例外處理常式，改以工作階段標記與 UI 執行緒例外追蹤留下線索
+        // 原生閃退不經受控例外處理，改以工作階段標記與 UI 例外追蹤留線索
         CrashDiagnostics.Install(Environment.CurrentManagedThreadId);
 
         try
@@ -119,8 +119,7 @@ public partial class App : Application
             var uiService = new WinUiService(mainWindow.DispatcherQueue, processRunner);
             uiService.RegisterMainWindow(mainWindow);
 
-            // 5. 伺服器存放目錄檢查與引導
-            // 維持於 UI 執行緒繼續，確保後續組合根與 ViewModel 皆於 UI 執行緒建立
+            // 5. 伺服器存放目錄檢查與引導（維持在 UI 執行緒）
             string? serversRoot = await EnsureServersRootConfiguredAsync(settingsManager, uiService).ConfigureAwait(true);
             if (string.IsNullOrWhiteSpace(serversRoot))
             {
