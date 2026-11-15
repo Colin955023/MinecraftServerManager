@@ -18,12 +18,12 @@ public enum InitializationCountdownState
     Warning,
 }
 
-/// <summary>伺服器初次啟動初始化視窗 ViewModel：執行初始化流程、彙整主控台輸出與倒數自動關閉</summary>
+/// <summary>伺服器初次啟動初始化視窗 ViewModel</summary>
 public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerInitializationViewModel));
 
-    /// <summary>主控台文字長度上限，超過時修剪至 <see cref="TrimmedConsoleChars"/></summary>
+    /// <summary>主控台文字長度上限</summary>
     public const int MaxConsoleChars = 50000;
 
     /// <summary>主控台修剪後保留字元數</summary>
@@ -45,8 +45,7 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
     private bool _isStopping;
     private bool _subscribed;
 
-    [ObservableProperty]
-    public partial string TitleText { get; set; }
+    public string TitleText { get; }
 
     [ObservableProperty]
     public partial string StatusText { get; set; } = "狀態：正在準備啟動伺服器執行初次世界生成與設定...";
@@ -72,10 +71,8 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
     [ObservableProperty]
     public partial bool IsCompleteEnabled { get; set; }
 
-    /// <summary>初始化是否成功完成</summary>
     public bool IsSuccess { get; private set; }
 
-    /// <summary>要求視窗關閉</summary>
     public event Action? CloseRequested;
 
     public ServerInitializationViewModel(
@@ -136,7 +133,6 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
         }
     }
 
-    /// <summary>使用者取消初始化</summary>
     public void Cancel()
     {
         IsSuccess = false;
@@ -150,7 +146,7 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
         CloseRequested?.Invoke();
     }
 
-    /// <summary>視窗即將關閉時呼叫；伺服器仍在執行時回傳 true 以攔截關閉，並於平順停止後再次要求關閉</summary>
+    /// <summary>視窗關閉前呼叫；伺服器仍在執行時回傳 true 攔截關閉，停止後再關閉</summary>
     public bool HandleClosing()
     {
         StopTimersAndUnsubscribe();
@@ -257,7 +253,7 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
 
     private void AppendLog(string text) => ConsoleText = AppendWithLimit(ConsoleText, text);
 
-    /// <summary>附加主控台文字；總長超過上限時僅保留尾端 <see cref="TrimmedConsoleChars"/> 字元</summary>
+    /// <summary>附加主控台文字，超過上限時只保留尾端</summary>
     public static string AppendWithLimit(string current, string text)
     {
         ArgumentNullException.ThrowIfNull(current);

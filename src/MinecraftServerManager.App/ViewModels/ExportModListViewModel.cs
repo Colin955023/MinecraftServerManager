@@ -5,7 +5,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>模組清單匯出流程：選擇儲存位置、執行匯出並詢問是否開啟檔案；所有互動皆經由 <see cref="IUiService"/></summary>
+/// <summary>模組清單匯出流程：選擇位置、匯出並詢問是否開啟</summary>
 public sealed class ExportModListViewModel(
     string serverName,
     IReadOnlyList<ModListExportRow> rows,

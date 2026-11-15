@@ -17,6 +17,6 @@ public sealed record ServerLaunchPlan(
 /// <summary>伺服器啟動規劃器契約介面</summary>
 public interface IServerLaunchPlanner
 {
-    /// <summary>依據伺服器設定與啟動目標（相對伺服器目錄之 jar、bat 或 @argfile）建立啟動計畫</summary>
+    /// <summary>依伺服器設定與啟動目標建立啟動計畫</summary>
     public ServerLaunchPlan CreatePlan(ServerConfig config, string launchTarget, string? javaPath = null);
 }

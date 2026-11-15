@@ -2,7 +2,6 @@ using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Domain.ValueObjects;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 

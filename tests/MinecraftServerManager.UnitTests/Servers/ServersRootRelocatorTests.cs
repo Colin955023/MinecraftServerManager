@@ -1,8 +1,8 @@
 using MinecraftServerManager.Core.Servers;
+using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Servers;
 using MinecraftServerManager.Infrastructure.Utilities;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.Servers;
 
@@ -15,11 +15,6 @@ public sealed class ServersRootRelocatorTests : IDisposable
     private string Root(string name) => Path.Combine(_temp.FullName, name);
 
     private static string ToJson(string path) => "\"" + path.Replace("\\", "\\\\") + "\"";
-
-    private sealed class CallbackProgress(Action<(int Percent, string Message)> onReport) : IProgress<(int Percent, string Message)>
-    {
-        public void Report((int Percent, string Message) value) => onReport(value);
-    }
 
     [Fact]
     public void ValidateTargetRoot_RejectsEmptyAndFileTargets()
@@ -89,7 +84,7 @@ public sealed class ServersRootRelocatorTests : IDisposable
         File.WriteAllText(Path.Combine(oldRoot, ServerDefaults.RegistryFileName), registry);
         var reports = new List<int>();
 
-        ServersRootRelocator.RelocateAllContent(oldRoot, newRoot, new CallbackProgress(r => reports.Add(r.Percent)));
+        ServersRootRelocator.RelocateAllContent(oldRoot, newRoot, new SynchronousProgress<(int Percent, string Message)>(r => reports.Add(r.Percent)));
 
         Assert.Equal("data", File.ReadAllText(Path.Combine(newRoot, "Alpha", "world.txt")));
         Assert.False(Directory.Exists(oldRoot));
@@ -97,6 +92,71 @@ public sealed class ServersRootRelocatorTests : IDisposable
         Assert.Contains(Path.Combine(newRoot, "Alpha").Replace("\\", "\\\\"), registryText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(Path.Combine(newRoot, "backups", "Alpha").Replace("\\", "\\\\"), registryText, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(100, reports[^1]);
+    }
+
+    [Fact]
+    public void RelocateAllContent_WhenSourceCannotBeDeleted_CompletesAndReportsLeftover()
+    {
+        string oldRoot = Root("old");
+        string newRoot = Path.Combine(Root("new"), "servers");
+        string serverDir = Path.Combine(oldRoot, "Alpha");
+        Directory.CreateDirectory(serverDir);
+        File.WriteAllText(Path.Combine(serverDir, "world.txt"), "data");
+        string lockedFile = Path.Combine(serverDir, "locked.txt");
+        File.WriteAllText(lockedFile, "locked");
+        string registry = """{"Alpha":{"name":"Alpha","minecraftVersion":"1.21.4","loaderType":"Vanilla","loaderVersion":"","memoryMaxMb":1024,"memoryMinMb":null,"path":SERVERDIR,"jvmArgs":[],"backupPath":""}}"""
+            .Replace("SERVERDIR", ToJson(serverDir), StringComparison.Ordinal);
+        File.WriteAllText(Path.Combine(oldRoot, ServerDefaults.RegistryFileName), registry);
+
+        IReadOnlyList<string> leftovers;
+        using (new FileStream(lockedFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            // 檔案被占用：目錄無法直接移動，改走複製後刪除，刪除失敗不得讓整個遷移失敗
+            leftovers = ServersRootRelocator.RelocateAllContent(oldRoot, newRoot);
+        }
+
+        Assert.Equal(serverDir, Assert.Single(leftovers));
+        Assert.Equal("data", File.ReadAllText(Path.Combine(newRoot, "Alpha", "world.txt")));
+        Assert.Equal("locked", File.ReadAllText(Path.Combine(newRoot, "Alpha", "locked.txt")));
+        Assert.True(File.Exists(lockedFile));
+        string registryText = File.ReadAllText(Path.Combine(newRoot, ServerDefaults.RegistryFileName));
+        Assert.Contains(Path.Combine(newRoot, "Alpha").Replace("\\", "\\\\"), registryText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RelocateAllContent_WhenLaterItemCanceledAfterLeftover_RestoresDeletedFilesToSource()
+    {
+        string oldRoot = Root("old");
+        string newRoot = Path.Combine(Root("new"), "servers");
+        string alpha = Path.Combine(oldRoot, "Alpha");
+        string lockedFile = Path.Combine(alpha, "z-sub", "locked.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(lockedFile)!);
+        File.WriteAllText(Path.Combine(alpha, "world.txt"), "data");
+        File.WriteAllText(lockedFile, "locked");
+        Directory.CreateDirectory(Path.Combine(oldRoot, "Beta"));
+        File.WriteAllText(Path.Combine(oldRoot, "Beta", "beta.txt"), "beta");
+        Directory.CreateDirectory(Path.Combine(oldRoot, "Gamma"));
+
+        using var cts = new CancellationTokenSource();
+        int reports = 0;
+        var progress = new SynchronousProgress<(int Percent, string Message)>(_ =>
+        {
+            // 第二次回報時（Alpha 已搬移且原位置殘留）要求取消，下一輪迴圈擲出並觸發復原
+            if (++reports == 2)
+            {
+                cts.Cancel();
+            }
+        });
+
+        using (new FileStream(lockedFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            Assert.Throws<OperationCanceledException>(() => ServersRootRelocator.RelocateAllContent(oldRoot, newRoot, progress, cts.Token));
+        }
+
+        Assert.Equal("data", File.ReadAllText(Path.Combine(alpha, "world.txt")));
+        Assert.Equal("locked", File.ReadAllText(lockedFile));
+        Assert.Equal("beta", File.ReadAllText(Path.Combine(oldRoot, "Beta", "beta.txt")));
+        Assert.False(Directory.Exists(Path.Combine(newRoot, "Alpha")));
     }
 
     [Fact]
@@ -125,7 +185,7 @@ public sealed class ServersRootRelocatorTests : IDisposable
 
         using var cts = new CancellationTokenSource();
         int reports = 0;
-        var progress = new CallbackProgress(_ =>
+        var progress = new SynchronousProgress<(int Percent, string Message)>(_ =>
         {
             // 第二次回報時（已搬移第一個項目）要求取消，下一輪迴圈會擲出並觸發復原
             if (++reports == 2)

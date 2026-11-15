@@ -5,9 +5,7 @@
         xmlns:views="using:MinecraftServerManager.App.Views"
         xmlns:vm="using:MinecraftServerManager.App.ViewModels">
 
-        <Grid Background="{ThemeResource WindowBrush}"
-                Padding="20"
-                RowSpacing="12">
+        <Grid Style="{StaticResource DialogRootGridStyle}">
                 <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
@@ -20,15 +18,12 @@
                         <TextBlock Text="{x:Bind ViewModel.ProjectTitle}"
                                 Style="{ThemeResource TitleTextBlockStyle}" />
                         <TextBlock Text="選擇要安裝的模組版本（已依伺服器的 Minecraft 版本與載入器篩選）"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Style="{ThemeResource CaptionTextBlockStyle}" />
+                                Style="{StaticResource SecondaryCaptionTextStyle}" />
                 </StackPanel>
 
                 <Border Grid.Row="1"
-                        Style="{StaticResource CardBorderStyle}"
-                        CornerRadius="8"
-                        Padding="12">
-                        <controls:TableFrame>
+                        Style="{StaticResource PanelCardStyle}">
+                        <controls:TableFrame SortTarget="{x:Bind HeaderSort}">
                                 <controls:TableFrame.Header>
                                         <Grid>
                                                 <Grid.ColumnDefinitions>
@@ -46,33 +41,23 @@
                                                 <controls:SortableTableHeader Grid.Column="0"
                                                         Text="版本號碼"
                                                         SortPropertyName="VersionNumber"
-                                                        ColumnWidth="{x:Bind views:ModVersionListColumns.Current.VersionWidth, Mode=TwoWay}"
-                                                        SortRequested="OnHeaderSortRequested"
-                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                        ColumnWidth="{x:Bind views:ModVersionListColumns.Current.VersionWidth, Mode=TwoWay}" />
                                                 <controls:SortableTableHeader Grid.Column="1"
                                                         Text="支援 MC"
                                                         SortPropertyName="GameVersions"
-                                                        ColumnWidth="{x:Bind views:ModVersionListColumns.Current.GameVersionWidth, Mode=TwoWay}"
-                                                        SortRequested="OnHeaderSortRequested"
-                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                        ColumnWidth="{x:Bind views:ModVersionListColumns.Current.GameVersionWidth, Mode=TwoWay}" />
                                                 <controls:SortableTableHeader Grid.Column="2"
                                                         Text="載入器"
                                                         SortPropertyName="Loaders"
-                                                        ColumnWidth="{x:Bind views:ModVersionListColumns.Current.LoaderWidth, Mode=TwoWay}"
-                                                        SortRequested="OnHeaderSortRequested"
-                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                        ColumnWidth="{x:Bind views:ModVersionListColumns.Current.LoaderWidth, Mode=TwoWay}" />
                                                 <controls:SortableTableHeader Grid.Column="3"
                                                         Text="發布時間"
                                                         SortPropertyName="DatePublished"
-                                                        ColumnWidth="{x:Bind views:ModVersionListColumns.Current.DateWidth, Mode=TwoWay}"
-                                                        SortRequested="OnHeaderSortRequested"
-                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                        ColumnWidth="{x:Bind views:ModVersionListColumns.Current.DateWidth, Mode=TwoWay}" />
                                                 <controls:SortableTableHeader Grid.Column="4"
                                                         Text="檔案"
                                                         SortPropertyName="FileName"
-                                                        ColumnWidth="{x:Bind views:ModVersionListColumns.Current.FileNameWidth, Mode=TwoWay}"
-                                                        SortRequested="OnHeaderSortRequested"
-                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                        ColumnWidth="{x:Bind views:ModVersionListColumns.Current.FileNameWidth, Mode=TwoWay}" />
                                         </Grid>
                                 </controls:TableFrame.Header>
 
@@ -123,8 +108,7 @@
                 <!-- 狀態訊息 -->
                 <TextBlock Grid.Row="2"
                         Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{ThemeResource CaptionTextBlockStyle}" />
+                        Style="{StaticResource SecondaryCaptionTextStyle}" />
 
                 <!-- 底部按鈕 -->
                 <StackPanel Grid.Row="3"

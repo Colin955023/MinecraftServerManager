@@ -5,7 +5,7 @@ using MinecraftServerManager.Infrastructure.Settings;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>頁面組裝所需之服務集合，僅供組合根與 <see cref="PageViewModelFactory"/> 使用</summary>
+/// <summary>頁面組裝所需的服務集合，僅供組合根與 <see cref="PageViewModelFactory"/> 使用</summary>
 public sealed record PageServices(
     SettingsManager SettingsManager,
     IServerManager ServerManager,

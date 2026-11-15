@@ -1,10 +1,9 @@
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-public sealed partial class MainViewModelTests : IDisposable
+public sealed class MainViewModelTests : IDisposable
 {
     private readonly TempDirectory _testDirTemp = new("msm_test_");
     private readonly string _testDir;

@@ -274,10 +274,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         {
             string stableModsDir = SafeFileSystem.ResolveStableDirectory(modsDirectory);
             string stagingDir = Path.Combine(stableModsDir, ".download_staging");
-            if (SafeFileSystem.DirectoryExists(stagingDir))
-            {
-                SafeFileSystem.DeleteWithin(stableModsDir, stagingDir);
-            }
+            SafeFileSystem.DeleteWithin(stableModsDir, stagingDir);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -317,7 +314,10 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
             }
             if (backupPath is not null && SafeFileSystem.FileExists(backupPath))
             {
-                SafeFileSystem.MoveWithin(stableModsDir, backupPath, targetPath);
+                if (!SafeFileSystem.MoveWithin(stableModsDir, backupPath, targetPath))
+                {
+                    Logger.Error("模組安裝復原失敗，原檔保留於: {BackupPath}", backupPath);
+                }
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -346,37 +346,47 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
             return (enabledPath, disabledPath);
         }
 
-        var matched = SafeFileSystem.ListBoundedDirectory(stableModsDir)
-            .FirstOrDefault(f =>
-            {
-                if (f.IsDirectory)
-                {
-                    return false;
-                }
-
-                ReadOnlySpan<char> fileName = Path.GetFileName(f.FullPath.AsSpan());
-                if (!ModHelpers.IsModFileName(fileName))
-                {
-                    return false;
-                }
-
-                ReadOnlySpan<char> stem = ModHelpers.ModFilenameStem(fileName);
-                return stem.Equals(cleanModId, StringComparison.OrdinalIgnoreCase)
-                    || (stem.Length > cleanModId.Length
-                        && stem.StartsWith(cleanModId, StringComparison.OrdinalIgnoreCase)
-                        && stem[cleanModId.Length] is '-' or '_');
-            });
-
-        if (matched is not null)
+        // 完全相符優先；前綴相符須唯一，避免 sodium 誤中 sodium-extra
+        string? exact = null;
+        var prefixed = new List<string>();
+        foreach (FileSystemEntry entry in SafeFileSystem.ListBoundedDirectory(stableModsDir))
         {
-            ReadOnlySpan<char> stem = ModHelpers.ModFilenameStem(Path.GetFileName(matched.FullPath.AsSpan()));
-            return (Path.Combine(stableModsDir, ModHelpers.ToEnabledModFileName(stem)), Path.Combine(stableModsDir, ModHelpers.ToDisabledModFileName(stem)));
+            ReadOnlySpan<char> fileName = Path.GetFileName(entry.FullPath.AsSpan());
+            if (entry.IsDirectory || !ModHelpers.IsModFileName(fileName))
+            {
+                continue;
+            }
+
+            ReadOnlySpan<char> stem = ModHelpers.ModFilenameStem(fileName);
+            if (stem.Equals(cleanModId, StringComparison.OrdinalIgnoreCase))
+            {
+                exact = stem.ToString();
+                break;
+            }
+
+            if (stem.Length > cleanModId.Length
+                && stem.StartsWith(cleanModId, StringComparison.OrdinalIgnoreCase)
+                && stem[cleanModId.Length] is '-' or '_')
+            {
+                prefixed.Add(stem.ToString());
+            }
+        }
+
+        string? matchedStem = exact ?? (prefixed.Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1 ? prefixed[0] : null);
+        if (matchedStem is not null)
+        {
+            return (Path.Combine(stableModsDir, ModHelpers.ToEnabledModFileName(matchedStem)), Path.Combine(stableModsDir, ModHelpers.ToDisabledModFileName(matchedStem)));
+        }
+
+        if (prefixed.Count > 1)
+        {
+            Logger.Warning("模組識別碼對應到多個檔案，略過以免誤動: {ModId}", cleanModId);
         }
 
         return (enabledPath, disabledPath);
     }
 
-    /// <summary>檢查指定的模組下載 URL 是否為官方 Modrinth CDN 來源</summary>
+    /// <summary>指定的模組下載 URL 是否為官方 Modrinth CDN 來源</summary>
     public static bool IsOfficialModrinthSource(string? url)
     {
         if (string.IsNullOrWhiteSpace(url))

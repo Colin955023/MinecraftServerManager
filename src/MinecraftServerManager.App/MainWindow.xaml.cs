@@ -14,9 +14,12 @@ using Windows.UI;
 
 namespace MinecraftServerManager.App;
 
-/// <summary>應用程式主視窗 (WinUI 3 原生視窗)</summary>
+/// <summary>應用程式主視窗</summary>
 public sealed partial class MainWindow : Window, IAsyncDisposable
 {
+    private const int DefaultWidthDip = 1350;
+    private const int DefaultHeightDip = 820;
+
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(MainWindow));
 
     private AppCompositionRoot? _compositionRoot;
@@ -138,7 +141,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
     }
 
 
-    /// <summary>以 InfoBar 顯示資訊、成功與警告通知（錯誤由 WinUiService 以對話方塊顯示）</summary>
+    /// <summary>以 InfoBar 顯示資訊、成功與警告通知</summary>
     public void ShowNotification(string message, string? title = null, NotificationType type = NotificationType.Info, int? durationSeconds = null) =>
         ShowInfoBar(
             title ?? NotificationPresentation.GetDefaultTitle(type),
@@ -163,7 +166,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         return new SolidColorBrush(fallbackColor);
     }
 
-    /// <summary>於右上角以 WinUI 原生 InfoBar 顯示浮動通知：滑鼠停留時暫停自動關閉，最多同時顯示 4 則</summary>
+    /// <summary>於右上角顯示 InfoBar 通知：滑鼠停留時暫停關閉，最多 4 則</summary>
     private void ShowInfoBar(string title, string message, NotificationType type, int durationSeconds)
     {
         bool isLight = RootGrid.ActualTheme == ElementTheme.Light;
@@ -238,8 +241,8 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
 
         var winSettings = _viewModel.Settings.GetMainWindowSettings();
 
-        int targetWidth = winSettings.Width > 0 ? (int)(winSettings.Width * scale) : (int)(1350 * scale);
-        int targetHeight = winSettings.Height > 0 ? (int)(winSettings.Height * scale) : (int)(820 * scale);
+        int targetWidth = winSettings.Width > 0 ? (int)(winSettings.Width * scale) : (int)(DefaultWidthDip * scale);
+        int targetHeight = winSettings.Height > 0 ? (int)(winSettings.Height * scale) : (int)(DefaultHeightDip * scale);
 
         AppWindow.Resize(new SizeInt32(targetWidth, targetHeight));
 
@@ -321,7 +324,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         var state = (AppWindow.Presenter as OverlappedPresenter)?.State;
         bool isMax = state == OverlappedPresenterState.Maximized;
 
-        // 最大化或最小化時改存先前記錄的還原範圍，避免下次還原時視窗變成近乎全螢幕或位於螢幕外
+        // 最大化或最小化時改存先前的還原範圍
         RectInt32 bounds = state is OverlappedPresenterState.Maximized or OverlappedPresenterState.Minimized && _restoredBounds is { } restored
             ? restored
             : new RectInt32(AppWindow.Position.X, AppWindow.Position.Y, AppWindow.Size.Width, AppWindow.Size.Height);
@@ -338,8 +341,8 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
     {
         double scale = WindowLayoutHelper.GetScale(this);
 
-        int width = (int)(1350 * scale);
-        int height = (int)(820 * scale);
+        int width = (int)(DefaultWidthDip * scale);
+        int height = (int)(DefaultHeightDip * scale);
 
         if (AppWindow.Presenter is OverlappedPresenter presenter &&
             presenter.State == OverlappedPresenterState.Maximized)
@@ -449,31 +452,10 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         }
     }
 
-    private void OnNavigateCreateClicked(object sender, RoutedEventArgs e) =>
-        _viewModel?.Navigate("create");
+    private void OnNavigateClicked(object sender, RoutedEventArgs e) =>
+        _viewModel?.Navigate((string)((FrameworkElement)sender).Tag);
 
-    private void OnNavigateManageClicked(object sender, RoutedEventArgs e) =>
-        _viewModel?.Navigate("manage");
+    private void OnImportServerClicked(object sender, RoutedEventArgs e) => _viewModel?.ImportServerCommand.TryExecute();
 
-    private void OnNavigateModsClicked(object sender, RoutedEventArgs e) =>
-        _viewModel?.Navigate("mods");
-
-    private void OnNavigateAboutClicked(object sender, RoutedEventArgs e) =>
-        _viewModel?.Navigate("about_preferences");
-
-    private void OnImportServerClicked(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel?.ImportServerCommand.CanExecute(null) == true)
-        {
-            _viewModel.ImportServerCommand.Execute(null);
-        }
-    }
-
-    private void OnOpenFolderClicked(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel?.OpenServersFolderCommand.CanExecute(null) == true)
-        {
-            _viewModel.OpenServersFolderCommand.Execute(null);
-        }
-    }
+    private void OnOpenFolderClicked(object sender, RoutedEventArgs e) => _viewModel?.OpenServersFolderCommand.TryExecute();
 }

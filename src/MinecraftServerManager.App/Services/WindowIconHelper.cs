@@ -5,7 +5,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.Services;
 
-/// <summary>視窗圖示載入輔助工具：直接讀取內嵌於 EXE 之圖示資源並指派至 AppWindow</summary>
+/// <summary>載入內嵌圖示並指派至 AppWindow</summary>
 public static partial class WindowIconHelper
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(WindowIconHelper));

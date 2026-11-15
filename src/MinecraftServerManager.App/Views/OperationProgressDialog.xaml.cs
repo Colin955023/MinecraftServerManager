@@ -4,7 +4,7 @@ using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>通用非同步作業進度 WinUI 3 原生 ContentDialog</summary>
+/// <summary>通用非同步作業進度對話方塊</summary>
 public sealed partial class OperationProgressDialog : ContentDialog, INotifyPropertyChanged
 {
     private static readonly PropertyChangedEventArgs PhaseMessageChangedArgs = new(nameof(PhaseMessage));
@@ -33,7 +33,7 @@ public sealed partial class OperationProgressDialog : ContentDialog, INotifyProp
         DialogHeading = heading;
         PhaseMessage = initialMessage;
 
-        // 作業在對話框真正顯示（或被巢狀對話框中斷後重新顯示）之前就已完成時，開啟後立即關閉，避免殘留卡住主視窗
+        // 作業在對話框顯示前就已完成時，開啟後立即關閉
         Opened += (_, _) =>
         {
             if (_completed)

@@ -24,6 +24,13 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
             throw new SafeFileSystemException($"偵測到非法的啟動目標路徑超出邊界：{targetFile}");
         }
 
+        // 腳本啟動會把自訂參數寫入 user_jvm_args.txt，故兩種啟動方式都先檢查
+        var customArgs = config.JvmArgs ?? [];
+        if (customArgs.FirstOrDefault(static arg => JvmOptionPolicy.IsCommandExecutionOption(arg)) is { } blockedArg)
+        {
+            throw new InvalidOperationException($"JVM 參數「{blockedArg}」可執行外部命令，已阻擋啟動");
+        }
+
         bool isScript = targetFile.EndsWith(".bat", StringComparison.OrdinalIgnoreCase);
 
         if (isScript)
@@ -60,7 +67,7 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
             ? javaPath
             : "java";
 
-        // 指定的 Java 路徑須為實體 java 執行檔（拒絕 reparse point 與非 java 檔名）；純檔名僅接受 java 系列名稱並交由 PATH 搜尋
+        // Java 路徑須為實體 java 執行檔；純檔名只接受 java 系列名稱
         if (!string.IsNullOrWhiteSpace(javaPath))
         {
             string trimmedJava = javaPath.Trim();
@@ -79,16 +86,10 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
         };
 
         // 注入推薦 GC 與 JVM 參數
-        var customArgs = config.JvmArgs ?? [];
         if (!JvmOptionPolicy.HasGcOption(customArgs))
         {
             var recommendedGc = JvmOptionPolicy.RecommendGcArgs(config.MemoryMaxMb, loaderType: config.LoaderType.ToString());
             args.AddRange(recommendedGc);
-        }
-
-        if (customArgs.FirstOrDefault(static arg => JvmOptionPolicy.IsCommandExecutionOption(arg)) is { } blockedArg)
-        {
-            throw new InvalidOperationException($"JVM 參數「{blockedArg}」可執行外部命令，已阻擋啟動");
         }
 
         args.AddRange(customArgs);
@@ -124,8 +125,8 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
             ServerName: config.Name.Value);
     }
 
-    /// <summary>為指定的 Java 執行檔建置注入用的環境變數（設定 JAVA_HOME 並將 java bin 目錄置於 PATH 最前端）</summary>
-    public static IReadOnlyDictionary<string, string?> BuildJavaEnvironment(string javaExecutablePath)
+    /// <summary>建立 Java 環境變數（JAVA_HOME 與 PATH）</summary>
+    private static Dictionary<string, string?> BuildJavaEnvironment(string javaExecutablePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(javaExecutablePath);
 

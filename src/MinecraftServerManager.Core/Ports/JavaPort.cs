@@ -8,7 +8,7 @@ public sealed record JavaRuntimeInfo(
     string? JavawPath = null,
     string? Vendor = null);
 
-/// <summary>Java 執行環境偵測器抽象介面</summary>
+/// <summary>Java 執行環境偵測器介面</summary>
 public interface IJavaRuntimeDetector
 {
     /// <summary>偵測本機已安裝的 Java 執行環境清單</summary>
@@ -22,7 +22,7 @@ public interface IJavaRuntimeDetector
         CancellationToken cancellationToken = default);
 }
 
-/// <summary>Java 自動安裝器抽象介面</summary>
+/// <summary>Java 自動安裝器介面</summary>
 public interface IJavaInstaller
 {
     /// <summary>透過 winget 安裝指定主要版本的 Java</summary>

@@ -97,7 +97,7 @@ public sealed class JavaWingetInstaller(IProcessRunner processRunner) : IJavaIns
         }
     }
 
-    public static string ResolvePackageId(int majorVersion)
+    internal static string ResolvePackageId(int majorVersion)
     {
         if (majorVersion == 8)
         {

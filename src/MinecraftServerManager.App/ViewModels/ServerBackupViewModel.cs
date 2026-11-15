@@ -6,7 +6,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 namespace MinecraftServerManager.App.ViewModels;
 
 /// <summary>伺服器管理頁：建立備份、還原備份與外部備份資料夾設定</summary>
-public sealed partial class ServerBackupViewModel : ViewModelBase, IDisposable
+public sealed partial class ServerBackupViewModel : ViewModelBase
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerBackupViewModel));
 
@@ -42,20 +42,10 @@ public sealed partial class ServerBackupViewModel : ViewModelBase, IDisposable
         _fileSystem = fileSystem;
         _launcher = launcher;
         _list = list;
-        _list.SelectionStateChanged += OnSelectionStateChanged;
+        _list.RegisterDependentCommands(BackupServerCommand, RestoreBackupCommand, OpenBackupFolderCommand, EditBackupPathCommand);
     }
-
-    public void Dispose() => _list.SelectionStateChanged -= OnSelectionStateChanged;
 
     private bool HasSelectedServer() => _list.HasSelectedServer;
-
-    private void OnSelectionStateChanged()
-    {
-        BackupServerCommand.NotifyCanExecuteChanged();
-        RestoreBackupCommand.NotifyCanExecuteChanged();
-        OpenBackupFolderCommand.NotifyCanExecuteChanged();
-        EditBackupPathCommand.NotifyCanExecuteChanged();
-    }
 
     [RelayCommand(CanExecute = nameof(HasSelectedServer))]
     public async Task BackupServer()

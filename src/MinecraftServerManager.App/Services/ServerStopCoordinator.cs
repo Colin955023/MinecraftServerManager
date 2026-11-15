@@ -18,7 +18,7 @@ public sealed class ServerStopCoordinator(IUiService ui, IServerRuntimeHost runt
     /// <summary>指定伺服器是否正在執行平順停止流程</summary>
     public bool IsStopping(string serverName) => _stopping.ContainsKey(serverName);
 
-    /// <summary>平順停止單一伺服器；已停止（或原本未執行）回傳 true，重複呼叫回傳 false</summary>
+    /// <summary>平順停止伺服器；已停止回傳 true，重複呼叫回傳 false</summary>
     public async Task<bool> StopAsync(string serverName)
     {
         var runtime = runtimeHost.GetRuntime(serverName);

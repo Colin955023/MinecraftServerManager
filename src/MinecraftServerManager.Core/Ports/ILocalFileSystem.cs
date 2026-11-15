@@ -1,12 +1,12 @@
 namespace MinecraftServerManager.Core.Ports;
 
-/// <summary>呈現層使用之本機檔案系統存在性檢查與目錄建立抽象介面</summary>
+/// <summary>呈現層使用之本機檔案系統存在性檢查與目錄建立介面</summary>
 public interface ILocalFileSystem
 {
-    /// <summary>檢查檔案是否存在</summary>
+    /// <summary>檔案是否存在</summary>
     public bool FileExists(string? path);
 
-    /// <summary>檢查目錄是否存在</summary>
+    /// <summary>目錄是否存在</summary>
     public bool DirectoryExists(string? path);
 
     /// <summary>建立目錄（已存在時不做任何事）</summary>

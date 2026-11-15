@@ -45,8 +45,7 @@ public sealed partial class LocalModRowItem : ObservableObject
     [ObservableProperty]
     public partial bool IsEnabled { get; set; } = true;
 
-    [ObservableProperty]
-    public partial string SourcePlatform { get; set; } = "-";
+    public string SourcePlatform { get; init; } = "-";
 }
 
 /// <summary>模組頁：本地模組清單載入、篩選、啟用／停用、刪除、匯入與匯出</summary>
@@ -377,12 +376,12 @@ public sealed partial class LocalModsViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    public Task OpenModsFolderAsync()
+    public void OpenModsFolder()
     {
         if (_context.Server is not { } server)
         {
             _ui.Notify("請先選擇伺服器", NotificationType.Warning);
-            return Task.CompletedTask;
+            return;
         }
 
         string modsDir;
@@ -394,7 +393,7 @@ public sealed partial class LocalModsViewModel : ViewModelBase
         {
             Logger.Error(ex, "建立模組資料夾失敗");
             _ui.Notify($"無法建立模組資料夾：{ex.Message}", NotificationType.Error);
-            return Task.CompletedTask;
+            return;
         }
 
         Logger.Information("開啟模組資料夾: {Path}", modsDir);
@@ -402,8 +401,6 @@ public sealed partial class LocalModsViewModel : ViewModelBase
         {
             _ui.Notify($"無法開啟資料夾：{modsDir}", NotificationType.Warning);
         }
-
-        return Task.CompletedTask;
     }
 
     [RelayCommand]

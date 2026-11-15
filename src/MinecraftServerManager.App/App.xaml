@@ -13,7 +13,7 @@
                         </ResourceDictionary.MergedDictionaries>
 
                         <ResourceDictionary.ThemeDictionaries>
-                                <!-- 深色主題（WinUI 3 預設以 Default 代表 Dark） -->
+                                <!-- 深色主題（Default 即 Dark） -->
                                 <ResourceDictionary x:Key="Default">
                                         <SolidColorBrush x:Key="WindowBrush"
                                                 Color="#101114" />
@@ -39,16 +39,10 @@
                                                 Color="#3FB950" />
                                         <SolidColorBrush x:Key="DangerTextBrush"
                                                 Color="#F85149" />
-                                        <SolidColorBrush x:Key="ConsoleBackgroundBrush"
-                                                Color="#0C0C0C" />
-                                        <SolidColorBrush x:Key="ConsoleForegroundBrush"
-                                                Color="#00FF66" />
-                                        <SolidColorBrush x:Key="ConsoleMutedTextBrush"
-                                                Color="#8B949E" />
                                         <SolidColorBrush x:Key="DataGridGridLineBrush"
                                                 Color="#3F4552" />
 
-                                        <!-- WinUI 3 原生強調色控制項筆刷覆蓋 -->
+                                        <!-- 強調色控制項筆刷覆蓋 -->
                                         <Color x:Key="SystemAccentColor">#4F6FD8</Color>
                                         <SolidColorBrush x:Key="AccentFillColorDefaultBrush"
                                                 Color="#4F6FD8" />
@@ -86,16 +80,10 @@
                                                 Color="#1A7F37" />
                                         <SolidColorBrush x:Key="DangerTextBrush"
                                                 Color="#CF222E" />
-                                        <SolidColorBrush x:Key="ConsoleBackgroundBrush"
-                                                Color="#0C0C0C" />
-                                        <SolidColorBrush x:Key="ConsoleForegroundBrush"
-                                                Color="#00FF66" />
-                                        <SolidColorBrush x:Key="ConsoleMutedTextBrush"
-                                                Color="#8B949E" />
                                         <SolidColorBrush x:Key="DataGridGridLineBrush"
                                                 Color="#D1D5DB" />
 
-                                        <!-- WinUI 3 原生強調色控制項筆刷覆蓋 -->
+                                        <!-- 強調色控制項筆刷覆蓋 -->
                                         <Color x:Key="SystemAccentColor">#4F6FD8</Color>
                                         <SolidColorBrush x:Key="AccentFillColorDefaultBrush"
                                                 Color="#4F6FD8" />
@@ -207,6 +195,37 @@
                                         Value="1" />
                         </Style>
 
+                        <!-- 區塊卡片 -->
+                        <Style x:Key="PanelCardStyle"
+                                TargetType="Border"
+                                BasedOn="{StaticResource CardBorderStyle}">
+                                <Setter Property="CornerRadius"
+                                        Value="8" />
+                                <Setter Property="Padding"
+                                        Value="12" />
+                        </Style>
+
+                        <!-- 說明卡片 -->
+                        <Style x:Key="InfoCardStyle"
+                                TargetType="Border"
+                                BasedOn="{StaticResource CardBorderStyle}">
+                                <Setter Property="CornerRadius"
+                                        Value="6" />
+                                <Setter Property="Padding"
+                                        Value="10" />
+                        </Style>
+
+                        <!-- 忙碌進度列 -->
+                        <Style x:Key="BusyProgressBarStyle"
+                                TargetType="ProgressBar">
+                                <Setter Property="IsIndeterminate"
+                                        Value="True" />
+                                <Setter Property="Width"
+                                        Value="80" />
+                                <Setter Property="Height"
+                                        Value="4" />
+                        </Style>
+
                         <!-- 共用多欄表格列樣式：零內距、拉伸對齊並帶底部水平分隔線 -->
                         <Style x:Key="TableListViewItemStyle"
                                 TargetType="ListViewItem">
@@ -226,6 +245,73 @@
                                         Value="0,0,0,1" />
                                 <Setter Property="CornerRadius"
                                         Value="0" />
+                        </Style>
+
+                        <!-- 主控台配色（深淺色相同） -->
+                        <SolidColorBrush x:Key="ConsoleBackgroundBrush"
+                                Color="#0C0C0C" />
+                        <SolidColorBrush x:Key="ConsoleForegroundBrush"
+                                Color="#00FF66" />
+                        <SolidColorBrush x:Key="ConsoleMutedTextBrush"
+                                Color="#8B949E" />
+
+                        <!-- 頁面標題 -->
+                        <Style x:Key="PageTitleTextStyle"
+                                TargetType="TextBlock">
+                                <Setter Property="FontSize"
+                                        Value="26" />
+                                <Setter Property="FontWeight"
+                                        Value="Bold" />
+                                <Setter Property="Foreground"
+                                        Value="{ThemeResource TextBrush}" />
+                        </Style>
+
+                        <!-- 條列文字 -->
+                        <Style x:Key="BulletTextStyle"
+                                TargetType="TextBlock">
+                                <Setter Property="Foreground"
+                                        Value="{ThemeResource TextBrush}" />
+                                <Setter Property="Margin"
+                                        Value="0,2" />
+                        </Style>
+
+                        <!-- 區段標題 -->
+                        <Style x:Key="SectionHeaderTextStyle"
+                                TargetType="TextBlock">
+                                <Setter Property="FontSize"
+                                        Value="16" />
+                                <Setter Property="FontWeight"
+                                        Value="SemiBold" />
+                                <Setter Property="Foreground"
+                                        Value="{ThemeResource TextBrush}" />
+                        </Style>
+
+                        <!-- 表格儲存格：右側垂直分隔線 -->
+                        <Style x:Key="TableCellBorderStyle"
+                                TargetType="Border">
+                                <Setter Property="BorderBrush"
+                                        Value="{ThemeResource DataGridGridLineBrush}" />
+                                <Setter Property="BorderThickness"
+                                        Value="0,0,1,0" />
+                        </Style>
+
+                        <!-- 次要說明文字 -->
+                        <Style x:Key="SecondaryCaptionTextStyle"
+                                TargetType="TextBlock"
+                                BasedOn="{StaticResource CaptionTextBlockStyle}">
+                                <Setter Property="Foreground"
+                                        Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </Style>
+
+                        <!-- 對話視窗根版面 -->
+                        <Style x:Key="DialogRootGridStyle"
+                                TargetType="Grid">
+                                <Setter Property="Background"
+                                        Value="{ThemeResource WindowBrush}" />
+                                <Setter Property="Padding"
+                                        Value="20" />
+                                <Setter Property="RowSpacing"
+                                        Value="12" />
                         </Style>
                 </ResourceDictionary>
         </Application.Resources>

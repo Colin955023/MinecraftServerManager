@@ -1,6 +1,6 @@
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>頁面 ViewModel 工廠：集中依 <see cref="PageServices"/> 組裝各頁面及其子 ViewModel</summary>
+/// <summary>頁面 ViewModel 工廠</summary>
 public sealed class PageViewModelFactory(PageServices services)
 {
     /// <summary>建立「建立新伺服器」頁面</summary>

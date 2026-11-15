@@ -6,7 +6,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>伺服器玩家設定與快取檔案儲存實作，支援 SafeFileSystem 與不可分割安全寫入</summary>
+/// <summary>伺服器名單檔案存取</summary>
 public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerPlayerConfigStore));

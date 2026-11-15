@@ -7,10 +7,7 @@ using Microsoft.UI.Xaml.Media;
 
 namespace MinecraftServerManager.App.Controls;
 
-/// <summary>
-/// 清單附加行為：點選清單以外的非互動區域（或清單內空白處）時自動取消選取。
-/// 以指標按下事件判斷而非失去焦點，避免按下工具列按鈕、開啟右鍵選單或對話方塊時選取被先清除。
-/// </summary>
+/// <summary>點選清單外的非互動區域或清單空白處時取消選取（以指標按下判斷，不受焦點轉移影響）</summary>
 public static class ListSelectionBehavior
 {
     public static readonly DependencyProperty ClearOnOutsidePressProperty =
@@ -28,7 +25,7 @@ public static class ListSelectionBehavior
     public static void SetClearOnOutsidePress(DependencyObject obj, bool value) =>
         obj.SetValue(ClearOnOutsidePressProperty, value);
 
-    /// <summary>判斷點選目標是否為會自行處理點選的互動控制項（按下時不應取消清單選取）</summary>
+    /// <summary>點選目標是否為會自行處理點選的互動控制項（按下時不應取消清單選取）</summary>
     internal static bool IsInteractive(DependencyObject element) =>
         element is ButtonBase or TextBox or PasswordBox or RichEditBox or AutoSuggestBox or ComboBox
             or RangeBase or Thumb or ToggleSwitch or SelectorBarItem or NumberBox or SortableTableHeader;

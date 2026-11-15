@@ -2,7 +2,7 @@ using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Core.Ports;
 
-/// <summary>伺服器 CRUD、建立與匯入管理抽象介面</summary>
+/// <summary>伺服器 CRUD、建立與匯入管理介面</summary>
 public interface IServerManager
 {
     /// <summary>取得所有已登錄之伺服器設定清單</summary>
@@ -31,7 +31,7 @@ public interface IServerManager
         IProgress<ServerImportProgressReport>? progress = null,
         CancellationToken cancellationToken = default);
 
-    /// <summary>掃描 servers 根目錄之一級子目錄，將符合伺服器結構但尚未註冊者自動註冊加入伺服器清單</summary>
+    /// <summary>掃描根目錄並註冊尚未登錄的伺服器</summary>
     public Task<ServerScanReport> ScanAndRegisterAsync(CancellationToken cancellationToken = default);
 }
 

@@ -96,7 +96,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
             progress.Report((percent, msg));
         });
 
-        // 下載端已於寫入時以 expectedHash 驗證 SHA-256，失敗即視為整體失敗，不再重複計算雜湊
+        // 下載時已驗證 SHA-256，不再重複計算
         var downloadResult = await _httpPort.DownloadAsync(
             downloadUri,
             targetFilePath,

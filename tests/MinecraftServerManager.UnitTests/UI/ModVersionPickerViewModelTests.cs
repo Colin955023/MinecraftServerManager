@@ -1,7 +1,6 @@
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
@@ -21,7 +20,7 @@ public sealed class ModVersionPickerViewModelTests
                 files: [new ModFile("test-1.0.0.jar", "https://example.com/test.jar", IsPrimary: true)])
         };
 
-        var client = new FakeModrinthClient(versions);
+        var client = new StubModrinthClient { Versions = { ["proj-1"] = versions } };
         var vm = new ModVersionPickerViewModel(client, "proj-1", "Test Mod", loader: "fabric", minecraftVersion: "1.20.4");
 
         await vm.LoadVersionsAsync();
@@ -52,7 +51,7 @@ public sealed class ModVersionPickerViewModelTests
                 ])
         };
 
-        var vm = new ModVersionPickerViewModel(new FakeModrinthClient(versions), "proj-1", "Test Mod");
+        var vm = new ModVersionPickerViewModel(new StubModrinthClient { Versions = { ["proj-1"] = versions } }, "proj-1", "Test Mod");
         await vm.LoadVersionsAsync();
 
         Assert.Equal(["req-lib"], Assert.Single(vm.Versions).Dependencies);
@@ -61,7 +60,7 @@ public sealed class ModVersionPickerViewModelTests
     [Fact]
     public async Task LoadVersionsAsync_WhenNoVersions_SetsEmptyStatusMessage()
     {
-        var client = new FakeModrinthClient([]);
+        var client = new StubModrinthClient();
         var vm = new ModVersionPickerViewModel(client, "proj-empty", "Empty Mod");
 
         await vm.LoadVersionsAsync();
@@ -83,7 +82,7 @@ public sealed class ModVersionPickerViewModelTests
                 files: [new ModFile("test.jar", "https://example.com/test.jar", IsPrimary: true)])
         };
 
-        var client = new FakeModrinthClient(versions);
+        var client = new StubModrinthClient { Versions = { ["proj-1"] = versions } };
         var vm = new ModVersionPickerViewModel(client, "proj-1", "Test Mod");
         await vm.LoadVersionsAsync();
 
@@ -96,34 +95,5 @@ public sealed class ModVersionPickerViewModelTests
         Assert.True(vm.InstallImmediately);
         Assert.NotNull(vm.QueuedVersion);
         Assert.Equal("v1", vm.QueuedVersion.VersionId);
-    }
-
-    private sealed class FakeModrinthClient(IReadOnlyList<OnlineModVersion> versions) : IModrinthClient
-    {
-        public Task<IReadOnlyList<OnlineModInfo>> SearchModsAsync(
-            string query,
-            string? loader = null,
-            string? minecraftVersion = null,
-            int limit = 20,
-            int offset = 0,
-            string index = "relevance",
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<OnlineModInfo>>([]);
-
-        public Task<IReadOnlyList<OnlineModVersion>> GetProjectVersionsAsync(
-            string projectIdOrSlug,
-            string? loader = null,
-            string? minecraftVersion = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(versions);
-
-        public Task<IReadOnlyDictionary<string, ModrinthVersionLookupResult>> LookupVersionsByHashesAsync(
-            IReadOnlyList<string> hashes,
-            string algorithm = "sha512",
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyDictionary<string, ModrinthVersionLookupResult>>(new Dictionary<string, ModrinthVersionLookupResult>());
-
-        public Task<IReadOnlyDictionary<string, string>> GetProjectTitlesAsync(IReadOnlyCollection<string> projectIdsOrSlugs, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>());
     }
 }

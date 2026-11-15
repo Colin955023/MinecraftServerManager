@@ -2,7 +2,7 @@ using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>模組頁共用狀態：目前選取伺服器之唯讀快照與變更通知，避免子 ViewModel 互相參照</summary>
+/// <summary>模組頁共用狀態：目前選取伺服器的快照與變更通知</summary>
 public sealed class ModsContext
 {
     private readonly List<Func<Task>> _modsChangedHandlers = [];

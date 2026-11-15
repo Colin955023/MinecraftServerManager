@@ -23,7 +23,7 @@ public static class PropertiesDocumentCodec
             ReadOnlySpan<char> trimmed = rawLine.TrimStart();
             bool isContinuation = logicalLine.Length > 0;
 
-            // 依 Java Properties 規則：註解與空白行僅在邏輯行開頭才有意義；延續行即使以 # 開頭也屬於值的一部分
+            // 註解與空白行只在邏輯行開頭有意義；延續行以 # 開頭仍屬於值
             if (!isContinuation && (trimmed.IsEmpty || trimmed[0] == '#' || trimmed[0] == '!'))
             {
                 continue;

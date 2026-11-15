@@ -33,7 +33,7 @@ public static class AccentColorService
         }
     }
 
-    /// <summary>設定 UI 執行緒派送委派（由 WinUiService 提供），供系統強調色變更時回到 UI 執行緒套用</summary>
+    /// <summary>設定 UI 執行緒派送委派</summary>
     public static void SetUiDispatcher(Action<Action> postToUi) =>
         s_postToUi = postToUi ?? throw new ArgumentNullException(nameof(postToUi));
 
@@ -54,7 +54,7 @@ public static class AccentColorService
         }
     }
 
-    /// <summary>取得 Windows 系統強調色及其原生明暗色階（AccentLight1 / AccentDark1），失敗時改用計算值</summary>
+    /// <summary>取得系統強調色及其明暗色階，失敗時改用計算值</summary>
     private static (Color Accent, Color Hover, Color Pressed) GetSystemAccentShades()
     {
         Color accent = GetSystemAccentColor();

@@ -21,7 +21,7 @@ public sealed class UpdateCheckerService(IHttpPort httpPort) : IUpdateCheckerSer
     private static string BuildTrustedAssetPathPrefix() =>
         $"/{RepositoryPath}/releases/download/";
 
-    /// <summary>更新資產僅接受本專案 GitHub Release 的 HTTPS 下載位址，避免遭竄改的 API 回應導向其他來源</summary>
+    /// <summary>更新資產只接受本專案 GitHub Release 的 HTTPS 位址</summary>
     private static bool IsTrustedAssetUrl(string url) =>
         Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)
         && uri.Scheme == Uri.UriSchemeHttps
@@ -61,7 +61,7 @@ public sealed class UpdateCheckerService(IHttpPort httpPort) : IUpdateCheckerSer
                 VersionValue.TryParse(currentVersionStr, out var currentVer) &&
                 latestVer > currentVer;
 
-            // 僅接受可信來源的附件：標準單一執行檔 MinecraftServerManager.exe 與其精準配對的 .sha256
+            // 只接受 MinecraftServerManager.exe 與其 .sha256
             List<GitHubReleaseAsset> assets = release.Assets ?? [];
             string? FindTrustedAssetUrl(string name) => assets
                 .FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase)

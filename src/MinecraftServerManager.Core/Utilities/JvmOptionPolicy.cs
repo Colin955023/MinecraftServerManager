@@ -5,7 +5,7 @@ public static class JvmOptionPolicy
 {
     private const string GcOptionPrefix = "-XX:+Use";
 
-    // 可在 JVM 內執行任意外部命令或載入原生程式庫的選項；Minecraft 伺服器不需要
+    // 可執行外部命令或載入原生程式庫的選項
     private static readonly string[] CommandExecutionOptionPrefixes =
     [
         "-XX:OnError",
@@ -44,11 +44,7 @@ public static class JvmOptionPolicy
         return false;
     }
 
-    /// <summary>
-    /// 將使用者自訂 JVM 參數正規化為清單（依據標準命令列殼層引號規則，
-    /// 讓含空白的引號路徑，例如 -Dlog4j.configurationFile="C:\Program Files\x\log4j2.xml"，
-    /// 能正確視為單一參數而不被空白截斷）
-    /// </summary>
+    /// <summary>將自訂 JVM 參數依引號規則切為清單（含空白的引號路徑視為單一參數）</summary>
     public static IReadOnlyList<string> NormalizeJvmArgs(string? rawArgs)
     {
         if (string.IsNullOrWhiteSpace(rawArgs))
@@ -124,7 +120,7 @@ public static class JvmOptionPolicy
             tokens.Add(current.ToString());
         }
 
-        // 引號未閉合時（等同 shlex.split 的 ValueError），退回單純以空白切割
+        // 引號未閉合時退回以空白切割
         if (inSingleQuote || inDoubleQuote)
         {
             return rawArgs.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
@@ -133,7 +129,7 @@ public static class JvmOptionPolicy
         return [.. tokens.Where(static token => token.Length > 0)];
     }
 
-    /// <summary>檢查參數中是否已包含 GC 選項</summary>
+    /// <summary>參數中是否已包含 GC 選項</summary>
     public static bool HasGcOption(IEnumerable<string> args) => args.Any(static arg => arg.StartsWith(GcOptionPrefix, StringComparison.OrdinalIgnoreCase) && arg.EndsWith("GC", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>取得建議的 JVM 參數與其對應的繁體中文說明</summary>

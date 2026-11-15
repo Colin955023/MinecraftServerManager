@@ -6,9 +6,7 @@
     xmlns:vm="using:MinecraftServerManager.App.ViewModels"
     xmlns:helpers="using:MinecraftServerManager.App.Controls">
 
-    <Grid Background="{ThemeResource WindowBrush}"
-        Padding="20"
-        RowSpacing="12">
+    <Grid Style="{StaticResource DialogRootGridStyle}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -111,10 +109,8 @@
         </Border>
 
         <Border Grid.Row="2"
-            Style="{StaticResource CardBorderStyle}"
-            CornerRadius="8"
-            Padding="12">
-            <controls:TableFrame>
+            Style="{StaticResource PanelCardStyle}">
+            <controls:TableFrame SortTarget="{x:Bind HeaderSort}">
                 <controls:TableFrame.Header>
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -130,27 +126,19 @@
                         <helpers:SortableTableHeader Grid.Column="0"
                             Text="主要版本"
                             SortPropertyName="MajorVersion"
-                            ColumnWidth="{x:Bind views:JavaListColumns.Current.VersionWidth, Mode=TwoWay}"
-                            SortRequested="OnHeaderSortRequested"
-                            AutoFitRequested="OnHeaderAutoFitRequested" />
+                            ColumnWidth="{x:Bind views:JavaListColumns.Current.VersionWidth, Mode=TwoWay}" />
                         <helpers:SortableTableHeader Grid.Column="1"
                             Text="發行廠商"
                             SortPropertyName="Vendor"
-                            ColumnWidth="{x:Bind views:JavaListColumns.Current.VendorWidth, Mode=TwoWay}"
-                            SortRequested="OnHeaderSortRequested"
-                            AutoFitRequested="OnHeaderAutoFitRequested" />
+                            ColumnWidth="{x:Bind views:JavaListColumns.Current.VendorWidth, Mode=TwoWay}" />
                         <helpers:SortableTableHeader Grid.Column="2"
                             Text="相容狀態"
                             SortPropertyName="StatusText"
-                            ColumnWidth="{x:Bind views:JavaListColumns.Current.StatusWidth, Mode=TwoWay}"
-                            SortRequested="OnHeaderSortRequested"
-                            AutoFitRequested="OnHeaderAutoFitRequested" />
+                            ColumnWidth="{x:Bind views:JavaListColumns.Current.StatusWidth, Mode=TwoWay}" />
                         <helpers:SortableTableHeader Grid.Column="3"
                             Text="執行檔路徑"
                             SortPropertyName="ExecutablePath"
-                            ColumnWidth="{x:Bind views:JavaListColumns.Current.PathWidth, Mode=TwoWay}"
-                            SortRequested="OnHeaderSortRequested"
-                            AutoFitRequested="OnHeaderAutoFitRequested" />
+                            ColumnWidth="{x:Bind views:JavaListColumns.Current.PathWidth, Mode=TwoWay}" />
                     </Grid>
                 </controls:TableFrame.Header>
 
@@ -173,47 +161,25 @@
                                     <ColumnDefinition
                                         Width="{x:Bind views:JavaListColumns.Current.PathWidth, Mode=OneWay}" />
                                 </Grid.ColumnDefinitions>
-                                <Border Grid.Column="0"
-                                    BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                    BorderThickness="0,0,1,0"
-                                    Padding="8,6">
-                                    <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}"
-                                        Foreground="{ThemeResource TextBrush}"
-                                        TextTrimming="CharacterEllipsis"
-                                        ToolTipService.ToolTip="{x:Bind DisplayName, Mode=OneWay}"
-                                        VerticalAlignment="Center" />
-                                </Border>
-                                <Border Grid.Column="1"
-                                    BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                    BorderThickness="0,0,1,0"
-                                    Padding="8,6">
-                                    <TextBlock Text="{x:Bind Vendor, Mode=OneWay}"
-                                        Foreground="{ThemeResource TextBrush}"
-                                        TextTrimming="CharacterEllipsis"
-                                        ToolTipService.ToolTip="{x:Bind Vendor, Mode=OneWay}"
-                                        VerticalAlignment="Center" />
-                                </Border>
+                                <helpers:TableCell Grid.Column="0"
+                                    Text="{x:Bind DisplayName, Mode=OneTime}"
+                                    Foreground="{ThemeResource TextBrush}" />
+                                <helpers:TableCell Grid.Column="1"
+                                    Text="{x:Bind Vendor, Mode=OneTime}"
+                                    Foreground="{ThemeResource TextBrush}" />
                                 <Border Grid.Column="2"
-                                    BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                    BorderThickness="0,0,1,0"
+                                    Style="{StaticResource TableCellBorderStyle}"
                                     Padding="8,6">
-                                    <TextBlock Text="{x:Bind StatusText, Mode=OneWay}"
-                                        FontWeight="{x:Bind helpers:UiBindHelpers.FormatStatusWeight(IsRecommended), Mode=OneWay}"
-                                        helpers:ThemeBrush.ForegroundKey="{x:Bind helpers:UiBindHelpers.FormatStatusBrushKey(IsRecommended), Mode=OneWay}"
+                                    <TextBlock Text="{x:Bind StatusText, Mode=OneTime}"
+                                        FontWeight="{x:Bind helpers:UiBindHelpers.FormatStatusWeight(IsRecommended), Mode=OneTime}"
+                                        helpers:ThemeBrush.ForegroundKey="{x:Bind helpers:UiBindHelpers.FormatStatusBrushKey(IsRecommended), Mode=OneTime}"
                                         TextTrimming="CharacterEllipsis"
-                                        ToolTipService.ToolTip="{x:Bind StatusText, Mode=OneWay}"
+                                        ToolTipService.ToolTip="{x:Bind StatusText, Mode=OneTime}"
                                         VerticalAlignment="Center" />
                                 </Border>
-                                <Border Grid.Column="3"
-                                    BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                    BorderThickness="0,0,1,0"
-                                    Padding="8,6">
-                                    <TextBlock Text="{x:Bind ExecutablePath, Mode=OneWay}"
-                                        Foreground="{ThemeResource TextBrush}"
-                                        TextTrimming="CharacterEllipsis"
-                                        ToolTipService.ToolTip="{x:Bind ExecutablePath, Mode=OneWay}"
-                                        VerticalAlignment="Center" />
-                                </Border>
+                                <helpers:TableCell Grid.Column="3"
+                                    Text="{x:Bind ExecutablePath, Mode=OneTime}"
+                                    Foreground="{ThemeResource TextBrush}" />
                             </Grid>
                         </DataTemplate>
                     </ListView.ItemTemplate>
@@ -226,9 +192,7 @@
             Orientation="Horizontal"
             Spacing="8"
             VerticalAlignment="Center">
-            <ProgressBar IsIndeterminate="True"
-                Width="80"
-                Height="4"
+            <ProgressBar Style="{StaticResource BusyProgressBarStyle}"
                 Visibility="{x:Bind ViewModel.IsBusy, Mode=OneWay}"
                 VerticalAlignment="Center" />
             <TextBlock Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"

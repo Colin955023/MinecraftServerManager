@@ -22,7 +22,7 @@
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
-    <!-- 頂部標題列：原生 TitleBar 控制項，負責拖曳區域與標題文字；負邊界抵銷根格線的左右內距使其貼齊視窗邊緣 -->
+    <!-- 頂部標題列：負邊界抵銷根格線的左右內距使其貼齊視窗邊緣 -->
     <TitleBar x:Name="AppTitleBar"
       Grid.Row="0"
       Margin="-16,0,-16,0"
@@ -103,7 +103,6 @@
             Foreground="{ThemeResource TextBrush}"
             VerticalAlignment="Center" />
           <Button Command="{x:Bind ViewModel.StartServerCommand}"
-            IsEnabled="{x:Bind ViewModel.CanStartServer, Mode=OneWay}"
             Style="{StaticResource SuccessButtonStyle}"
             Height="32"
             Padding="12,4"
@@ -112,7 +111,6 @@
               VerticalAlignment="Center" />
           </Button>
           <Button Command="{x:Bind ViewModel.StopServerCommand}"
-            IsEnabled="{x:Bind ViewModel.IsServerRunning, Mode=OneWay}"
             Style="{StaticResource DangerButtonStyle}"
             Height="32"
             Padding="12,4"
@@ -149,7 +147,7 @@
 
       <!-- 終端機紀錄檢視區 (黑底綠字) -->
       <Border Grid.Column="0"
-        Background="{ThemeResource ConsoleBackgroundBrush}"
+        Background="{StaticResource ConsoleBackgroundBrush}"
         BorderBrush="{ThemeResource BorderBrush}"
         BorderThickness="1"
         CornerRadius="8"
@@ -167,7 +165,7 @@
             <TextBlock Text="📜 伺服器終端輸出"
               FontSize="13"
               FontWeight="SemiBold"
-              Foreground="{ThemeResource ConsoleMutedTextBrush}"
+              Foreground="{StaticResource ConsoleMutedTextBrush}"
               VerticalAlignment="Center" />
             <Button HorizontalAlignment="Right"
               Content="📋 複製全部紀錄"
@@ -197,7 +195,7 @@
                 <TextBlock Text="{x:Bind}"
                   FontFamily="Consolas, Cascadia Code, Courier New"
                   FontSize="12"
-                  Foreground="{ThemeResource ConsoleForegroundBrush}"
+                  Foreground="{StaticResource ConsoleForegroundBrush}"
                   TextWrapping="NoWrap"
                   IsTextSelectionEnabled="True"
                   Padding="2,1" />

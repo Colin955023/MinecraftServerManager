@@ -9,8 +9,7 @@
     <StackPanel Spacing="16"
         MinWidth="380">
         <TextBlock Text="請選擇欲匯出的模組清單檔案格式："
-            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-            Style="{ThemeResource CaptionTextBlockStyle}" />
+            Style="{StaticResource SecondaryCaptionTextStyle}" />
 
         <StackPanel Spacing="10">
             <RadioButton Content="純文字格式 (*.txt) — 適合快速檢閱與純文字備份"

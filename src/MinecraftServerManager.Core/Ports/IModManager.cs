@@ -2,7 +2,7 @@ using MinecraftServerManager.Domain.Mods;
 
 namespace MinecraftServerManager.Core.Ports;
 
-/// <summary>模組管理外觀服務抽象介面</summary>
+/// <summary>模組管理外觀服務介面</summary>
 public interface IModManager
 {
     /// <summary>取得指定伺服器的模組清單</summary>

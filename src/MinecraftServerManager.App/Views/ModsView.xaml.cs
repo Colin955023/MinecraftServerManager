@@ -39,52 +39,25 @@ public sealed partial class ModsView : UserControl
         }
     }
 
-    private void OnLocalSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.Local.LocalMods.SortBy(TableSortKeys.LocalMods, e);
+    public ITableSortTarget LocalSort => field ??= new TableSortTarget<LocalModRowItem>(() => ViewModel.Local.LocalMods, TableSortKeys.LocalMods);
 
-    private void OnLocalAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.Local.LocalMods, TableSortKeys.LocalMods);
+    public ITableSortTarget OnlineSort => field ??= new TableSortTarget<OnlineModRowItem>(() => ViewModel.Online.OnlineMods, TableSortKeys.OnlineMods);
 
-    private void OnOnlineSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.Online.OnlineMods.SortBy(TableSortKeys.OnlineMods, e);
-
-    private void OnOnlineAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.Online.OnlineMods, TableSortKeys.OnlineMods);
-
-    private void OnOnlineModsDoubleTapped(object sender, Microsoft.UI.Xaml.Input.DoubleTappedRoutedEventArgs e)
-    {
-        if (ViewModel.PickOnlineModVersionCommand.CanExecute(null))
-        {
-            ViewModel.PickOnlineModVersionCommand.Execute(null);
-        }
-    }
+    private void OnOnlineModsDoubleTapped(object sender, Microsoft.UI.Xaml.Input.DoubleTappedRoutedEventArgs e) => ViewModel.PickOnlineModVersionCommand.TryExecute();
 
     private void OnlineSearchBox_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
-        if (e.Key == Windows.System.VirtualKey.Enter && ViewModel.Online.SearchOnlineModsCommand.CanExecute(null))
+        if (e.Key == Windows.System.VirtualKey.Enter && ViewModel.Online.SearchOnlineModsCommand.TryExecute())
         {
-            ViewModel.Online.SearchOnlineModsCommand.Execute(null);
             e.Handled = true;
-        }
-    }
-
-    private void OnCopyLocalModInfoClicked(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel.Local.SelectedLocalMod is not null && ViewModel.Local.CopyModInfoCommand.CanExecute(ViewModel.Local.SelectedLocalMod))
-        {
-            ViewModel.Local.CopyModInfoCommand.Execute(ViewModel.Local.SelectedLocalMod);
-        }
-    }
-
-    private void OnShowInFolderClicked(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel.Local.SelectedLocalMod is not null && ViewModel.Local.ShowInFolderCommand.CanExecute(ViewModel.Local.SelectedLocalMod))
-        {
-            ViewModel.Local.ShowInFolderCommand.Execute(ViewModel.Local.SelectedLocalMod);
         }
     }
 
     private void OnModToggleClicked(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: LocalModRowItem item } && ViewModel.Local.ToggleModCommand.CanExecute(item))
+        if (sender is FrameworkElement { DataContext: LocalModRowItem item })
         {
-            ViewModel.Local.ToggleModCommand.Execute(item);
+            ViewModel.Local.ToggleModCommand.TryExecute(item);
         }
     }
 

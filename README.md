@@ -8,21 +8,21 @@
 [![CodeQL Analysis (C#)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/codeql.yml/badge.svg)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Colin955023/MinecraftServerManager/badge)](https://scorecard.dev/viewer/?uri=github.com/Colin955023/MinecraftServerManager)
 
-Windows 11（21H2 以上，64 位元）的 Minecraft 伺服器管理工具，以 C#、.NET 10 與 WinUI 3 開發。
+Windows 11 的 Minecraft 伺服器管理工具，以 C#、.NET 10 與 WinUI 3 開發。系統需求見[使用手冊](docs/USER_GUIDE.md#系統需求)。
 
 **[下載最新版 MinecraftServerManager.exe](https://github.com/Colin955023/MinecraftServerManager/releases/latest/download/MinecraftServerManager.exe)**（[所有版本與更新紀錄](https://github.com/Colin955023/MinecraftServerManager/releases)）
 
 ## 主要特色
 
-- **建立與匯入**：支援 Paper、Fabric、Quilt、Forge、NeoForge 建立與 Vanilla 等既有伺服器匯入（複製或遷移），依官方版本動態配對與安裝 Java（8～21+）。
-- **多伺服器執行與監控**：各伺服器獨立監控視窗（即時紀錄、指令、線上玩家）、啟動前連接埠衝突檢查、平順停止與遺留行程偵測。
-- **交易式備份、遷移與名單**：備份自動保留最新份數、失敗自動回復的交易式還原、存放根目錄安全遷移，以及 OP／白名單／封鎖與 `server.properties` 驗證。
-- **模組管理**：本機啟用／停用、Modrinth 搜尋與相依自動解析、官方 CDN 與雜湊驗證、FlexVersion 更新檢查，並支援匯出 XLSX／HTML／JSON／TXT。
-- **原生單一執行檔**：WinUI 3 原生介面（跟隨系統深淺色與強調色），單檔自包含發布，無第三方加殼。
+- **建立與匯入**：Paper、Fabric、Quilt、Forge、NeoForge；可匯入既有伺服器，並自動配對 Java。
+- **多伺服器**：可同時執行，各有監控視窗（紀錄、指令、線上玩家）。
+- **備份與名單**：備份與還原、存放目錄遷移、OP／白名單／封鎖、`server.properties` 設定。
+- **模組**：啟用／停用、Modrinth 搜尋與相依解析、更新檢查、清單匯出。
+- **單一執行檔**：WinUI 3 原生介面，不需安裝。
 
 ## 使用方法
 
-下載[最新版 `MinecraftServerManager.exe`](https://github.com/Colin955023/MinecraftServerManager/releases/latest/download/MinecraftServerManager.exe)（約 31 MB，自包含，不需另裝 .NET 或 Windows App SDK），按兩下即可啟動。
+下載[最新版 `MinecraftServerManager.exe`](https://github.com/Colin955023/MinecraftServerManager/releases/latest/download/MinecraftServerManager.exe)，按兩下即可啟動。
 
 ### 從原始碼建置
 
@@ -34,12 +34,12 @@ pwsh -NoProfile -File scripts\dotnet_quality_gate.ps1
 pwsh -NoProfile -File scripts\dotnet_publish.ps1
 ```
 
-依序為：執行、品質門禁（格式、建置、全量測試）、發布單一執行檔。
+依序為：執行、品質門禁、發布。
 
 ## 說明文件
 
-- [技術手冊](docs/TECHNICAL_OVERVIEW.md)：專案分層（`App`、`Core`、`Domain`、`Infrastructure`）、安全機制與實作細節
-- [使用手冊](docs/USER_GUIDE.md)：操作指南與常見問題
+- [技術手冊](docs/TECHNICAL_OVERVIEW.md)
+- [使用手冊](docs/USER_GUIDE.md)
 
 ## 授權條款
 

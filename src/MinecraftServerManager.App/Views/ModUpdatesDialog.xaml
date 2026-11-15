@@ -5,9 +5,7 @@
         xmlns:views="using:MinecraftServerManager.App.Views"
         xmlns:vm="using:MinecraftServerManager.App.ViewModels">
 
-        <Grid Background="{ThemeResource WindowBrush}"
-                Padding="20"
-                RowSpacing="12">
+        <Grid Style="{StaticResource DialogRootGridStyle}">
                 <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
@@ -23,14 +21,11 @@
                 <!-- 說明 -->
                 <TextBlock Grid.Row="1"
                         Text="下列模組在線上平台上有相容的新版本，請勾選要更新的模組後點選「立即更新所選模組」："
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{ThemeResource CaptionTextBlockStyle}" />
+                        Style="{StaticResource SecondaryCaptionTextStyle}" />
 
                 <Border Grid.Row="2"
-                        Style="{StaticResource CardBorderStyle}"
-                        CornerRadius="8"
-                        Padding="12">
-                        <controls:TableFrame>
+                        Style="{StaticResource PanelCardStyle}">
+                        <controls:TableFrame SortTarget="{x:Bind HeaderSort}">
                                 <controls:TableFrame.Header>
                                         <Grid>
                                                 <Grid.ColumnDefinitions>
@@ -50,39 +45,27 @@
                                                 <controls:SortableTableHeader Grid.Column="0"
                                                         Text="更新"
                                                         SortPropertyName="IsSelected"
-                                                        ColumnWidth="{x:Bind views:ModUpdatesListColumns.Current.UpdateWidth, Mode=TwoWay}"
-                                                        SortRequested="OnHeaderSortRequested"
-                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                        ColumnWidth="{x:Bind views:ModUpdatesListColumns.Current.UpdateWidth, Mode=TwoWay}" />
                                                 <controls:SortableTableHeader Grid.Column="1"
                                                         Text="模組名稱"
                                                         SortPropertyName="ModName"
-                                                        ColumnWidth="{x:Bind views:ModUpdatesListColumns.Current.NameWidth, Mode=TwoWay}"
-                                                        SortRequested="OnHeaderSortRequested"
-                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                        ColumnWidth="{x:Bind views:ModUpdatesListColumns.Current.NameWidth, Mode=TwoWay}" />
                                                 <controls:SortableTableHeader Grid.Column="2"
                                                         Text="目前版本"
                                                         SortPropertyName="CurrentVersion"
-                                                        ColumnWidth="{x:Bind views:ModUpdatesListColumns.Current.CurrentVersionWidth, Mode=TwoWay}"
-                                                        SortRequested="OnHeaderSortRequested"
-                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                        ColumnWidth="{x:Bind views:ModUpdatesListColumns.Current.CurrentVersionWidth, Mode=TwoWay}" />
                                                 <controls:SortableTableHeader Grid.Column="3"
                                                         Text="最新版本"
                                                         SortPropertyName="NewVersion"
-                                                        ColumnWidth="{x:Bind views:ModUpdatesListColumns.Current.NewVersionWidth, Mode=TwoWay}"
-                                                        SortRequested="OnHeaderSortRequested"
-                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                        ColumnWidth="{x:Bind views:ModUpdatesListColumns.Current.NewVersionWidth, Mode=TwoWay}" />
                                                 <controls:SortableTableHeader Grid.Column="4"
                                                         Text="來源平台"
                                                         SortPropertyName="SourcePlatform"
-                                                        ColumnWidth="{x:Bind views:ModUpdatesListColumns.Current.PlatformWidth, Mode=TwoWay}"
-                                                        SortRequested="OnHeaderSortRequested"
-                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                        ColumnWidth="{x:Bind views:ModUpdatesListColumns.Current.PlatformWidth, Mode=TwoWay}" />
                                                 <controls:SortableTableHeader Grid.Column="5"
                                                         Text="新檔案名稱"
                                                         SortPropertyName="FileName"
-                                                        ColumnWidth="{x:Bind views:ModUpdatesListColumns.Current.FileNameWidth, Mode=TwoWay}"
-                                                        SortRequested="OnHeaderSortRequested"
-                                                        AutoFitRequested="OnHeaderAutoFitRequested" />
+                                                        ColumnWidth="{x:Bind views:ModUpdatesListColumns.Current.FileNameWidth, Mode=TwoWay}" />
                                         </Grid>
                                 </controls:TableFrame.Header>
 
@@ -108,8 +91,7 @@
                                                                                 Width="{x:Bind views:ModUpdatesListColumns.Current.FileNameWidth, Mode=OneWay}" />
                                                                 </Grid.ColumnDefinitions>
                                                                 <Border Grid.Column="0"
-                                                                        BorderBrush="{ThemeResource DataGridGridLineBrush}"
-                                                                        BorderThickness="0,0,1,0"
+                                                                        Style="{StaticResource TableCellBorderStyle}"
                                                                         Padding="4,2">
                                                                         <CheckBox
                                                                                 IsChecked="{x:Bind IsSelected, Mode=TwoWay}"

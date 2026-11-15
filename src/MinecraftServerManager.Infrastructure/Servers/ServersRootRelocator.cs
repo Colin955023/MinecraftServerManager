@@ -7,12 +7,12 @@ using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>負責伺服器存放根目錄變更時之路徑驗證、既有內容探測、全量資料遷移、跨磁碟區搬移、失敗回復與登錄檔路徑更新。</summary>
+/// <summary>伺服器根目錄遷移：驗證、搬移、失敗回復與登錄檔路徑更新</summary>
 public static class ServersRootRelocator
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServersRootRelocator));
 
-    /// <summary>驗證新設定之伺服器存放根目錄是否合法。</summary>
+    /// <summary>驗證新設定之伺服器存放根目錄是否合法</summary>
     public static RelocationPathCheckResult ValidateTargetRoot(
         string? currentRoot,
         string? newRoot,
@@ -48,7 +48,7 @@ public static class ServersRootRelocator
         return RelocationPathCheckResult.Valid;
     }
 
-    /// <summary>檢查原伺服器根目錄是否存放有伺服器或檔案（若僅有空的 servers.json 視為無存放資料）。</summary>
+    /// <summary>原根目錄是否有資料（只有空的 servers.json 視為無）</summary>
     public static bool HasStoredContent(string? currentRoot)
     {
         string normalized = SettingsManager.NormalizeExactServersRootPath(currentRoot);
@@ -82,7 +82,7 @@ public static class ServersRootRelocator
         }
     }
 
-    /// <summary>檢查目標目錄是否為空資料夾（或尚不存在）。</summary>
+    /// <summary>目標目錄是否為空資料夾（或尚不存在）</summary>
     public static bool IsTargetDirectoryEmpty(string? targetRoot)
     {
         string normalized = SettingsManager.NormalizeExactServersRootPath(targetRoot);
@@ -95,11 +95,8 @@ public static class ServersRootRelocator
         return entries.Count == 0;
     }
 
-    /// <summary>
-    /// 將舊根目錄內的所有內容遷移至新根目錄，並同步更新 servers.json 內的伺服器路徑。
-    /// 若中途失敗則自動將已搬移項目復原回舊根目錄。
-    /// </summary>
-    public static void RelocateAllContent(
+    /// <summary>遷移全部內容並更新 servers.json；失敗時復原。回傳已複製到新位置但原位置刪不掉的項目路徑</summary>
+    public static IReadOnlyList<string> RelocateAllContent(
         string currentRoot,
         string newRoot,
         IProgress<(int Percent, string Message)>? progress = null,
@@ -119,16 +116,17 @@ public static class ServersRootRelocator
         SafeFileSystem.ResolveStableDirectory(dstRoot, create: true);
         if (!SafeFileSystem.DirectoryExists(srcRoot))
         {
-            return;
+            return [];
         }
 
         var entries = SafeFileSystem.ListBoundedDirectory(srcRoot);
         if (entries.Count == 0)
         {
-            return;
+            return [];
         }
 
         var movedItems = new List<(string DestPath, string SourcePath, bool IsDirectory)>(entries.Count);
+        var leftovers = new List<string>();
 
         try
         {
@@ -142,7 +140,11 @@ public static class ServersRootRelocator
                 int pct = (int)(i * 90.0 / entries.Count);
                 progress?.Report((Math.Clamp(pct, 5, 90), $"正在搬移：{name}..."));
 
-                MoveEntryWithCrossVolumeSupport(entry.FullPath, destPath, entry.IsDirectory, cancellationToken);
+                if (!MoveEntryWithCrossVolumeSupport(entry.FullPath, destPath, entry.IsDirectory, cancellationToken))
+                {
+                    leftovers.Add(entry.FullPath);
+                }
+
                 movedItems.Add((destPath, entry.FullPath, entry.IsDirectory));
             }
 
@@ -150,8 +152,9 @@ public static class ServersRootRelocator
             RewriteRegistryPaths(dstRoot, srcRoot, dstRoot);
             progress?.Report((100, "資料遷移完成！"));
 
-            Logger.Information("已將伺服器根目錄全部內容從 {OldRoot} 遷移至 {NewRoot}（共 {Count} 項）", srcRoot, dstRoot, movedItems.Count);
+            Logger.Information("已將伺服器根目錄全部內容從 {OldRoot} 遷移至 {NewRoot}（共 {Count} 項，原位置殘留 {Leftover} 項）", srcRoot, dstRoot, movedItems.Count, leftovers.Count);
             TryDeleteEmptySourceRoot(srcRoot);
+            return leftovers;
         }
         catch (Exception ex)
         {
@@ -161,6 +164,13 @@ public static class ServersRootRelocator
                 var (DestPath, SourcePath, IsDirectory) = movedItems[i];
                 try
                 {
+                    if (leftovers.Contains(SourcePath))
+                    {
+                        // 原位置已半刪且仍被占用，不能整個搬回；只補回已被刪除的檔案
+                        RestoreLeftoverDirectory(DestPath, SourcePath);
+                        continue;
+                    }
+
                     if (IsDirectory ? SafeFileSystem.DirectoryExists(DestPath) : SafeFileSystem.FileExists(DestPath))
                     {
                         // 復原不可沿用可能已取消的權杖，否則跨磁碟項目會留在新位置
@@ -177,7 +187,31 @@ public static class ServersRootRelocator
         }
     }
 
-    /// <summary>遷移完成後，若原根目錄已無任何內容則刪除；仍有內容（含無法搬移之項目）則保留。失敗僅記錄，不影響遷移結果。</summary>
+    /// <summary>將新位置的完整副本補回半刪的原目錄（已存在者不覆寫），完成後刪除新位置</summary>
+    private static void RestoreLeftoverDirectory(string destPath, string sourcePath)
+    {
+        if (!SafeFileSystem.DirectoryExists(destPath))
+        {
+            return;
+        }
+
+        foreach (var entry in SafeFileSystem.EnumerateBoundedTree(destPath, rejectReparse: true).ToList())
+        {
+            string target = Path.Combine(sourcePath, Path.GetRelativePath(destPath, entry.FullPath));
+            if (entry.IsDirectory)
+            {
+                SafeFileSystem.ResolveStableDirectory(target, create: true);
+            }
+            else if (!SafeFileSystem.FileExists(target))
+            {
+                SafeFileSystem.CopyFile(entry.FullPath, target, overwrite: false);
+            }
+        }
+
+        SafeFileSystem.DeleteDirectory(destPath, recursive: true);
+    }
+
+    /// <summary>原根目錄已空則刪除</summary>
     private static void TryDeleteEmptySourceRoot(string srcRoot)
     {
         try
@@ -196,12 +230,13 @@ public static class ServersRootRelocator
         }
     }
 
-    private static void MoveEntryWithCrossVolumeSupport(string sourcePath, string destinationPath, bool isDirectory, CancellationToken cancellationToken = default)
+    /// <summary>搬移項目；回傳 false 代表新位置已完整，但原位置刪除失敗而殘留</summary>
+    private static bool MoveEntryWithCrossVolumeSupport(string sourcePath, string destinationPath, bool isDirectory, CancellationToken cancellationToken = default)
     {
         if (!isDirectory)
         {
             SafeFileSystem.MovePath(sourcePath, destinationPath, overwrite: true);
-            return;
+            return true;
         }
 
         string? srcRoot = Path.GetPathRoot(sourcePath);
@@ -213,7 +248,7 @@ public static class ServersRootRelocator
             try
             {
                 SafeFileSystem.MovePath(sourcePath, destinationPath, overwrite: false);
-                return;
+                return true;
             }
             catch (IOException ex)
             {
@@ -241,7 +276,17 @@ public static class ServersRootRelocator
             throw;
         }
 
-        SafeFileSystem.DeleteDirectory(sourcePath, recursive: true);
+        // 新位置已完整：原位置刪不掉（檔案被占用等）不算搬移失敗，否則會留下半刪的來源與指向舊根目錄的登錄
+        try
+        {
+            SafeFileSystem.DeleteDirectory(sourcePath, recursive: true);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.Warning(ex, "已複製至新位置，但原位置刪除失敗而殘留: {SourcePath}", sourcePath);
+            return false;
+        }
     }
 
     private static void RewriteRegistryPaths(string registryDirectory, string oldRoot, string newRoot)

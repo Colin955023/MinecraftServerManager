@@ -1,10 +1,9 @@
 using System.Text;
 using MinecraftServerManager.Infrastructure.Servers;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.Servers;
 
-/// <summary>latest.log 尾端讀取服務測試（行數與位元組上限、截斷首行捨棄、色碼清洗、缺檔回傳空清單）</summary>
+/// <summary>latest.log 尾端讀取測試</summary>
 public sealed class ServerLogReaderTests : IDisposable
 {
     private static readonly UTF8Encoding Utf8NoBom = new(false);

@@ -3,7 +3,7 @@ using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.App.Controls;
 
-/// <summary>各表格欄位之型別化排序鍵（欄位名稱須與 XAML SortPropertyName 一致；容量與下載量採原始數值排序）</summary>
+/// <summary>各表格的排序鍵（欄位名稱須與 XAML SortPropertyName 一致）</summary>
 public static class TableSortKeys
 {
     public static readonly SortKeyMap<ServerRowItem> Servers = new SortKeyMap<ServerRowItem>(

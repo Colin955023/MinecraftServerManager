@@ -1,5 +1,4 @@
 using MinecraftServerManager.App.ViewModels;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 

@@ -2,7 +2,7 @@ using MinecraftServerManager.Domain.Mods;
 
 namespace MinecraftServerManager.Core.Ports;
 
-/// <summary>模組版本相容性與相依性評估規劃抽象介面</summary>
+/// <summary>模組版本相容性與相依性評估規劃介面</summary>
 public interface IModDependencyPlanner
 {
     /// <summary>評估目標模組版本在目前伺服器環境之相容性與相依性狀態</summary>
@@ -13,7 +13,7 @@ public interface IModDependencyPlanner
         IReadOnlyList<LocalModInfo> installedMods,
         string? serverSide = null);
 
-    /// <summary>有界 BFS 遞迴解析未安裝必要相依項（upgradeInstalled=false 時已安裝者視為已滿足並略過）</summary>
+    /// <summary>遞迴解析未安裝的必要相依（upgradeInstalled=false 時已安裝者略過）</summary>
     public Task<IReadOnlyList<ModDependencyPlanItem>> ResolveDependenciesRecursivelyAsync(
         IModrinthClient modrinthClient,
         IReadOnlyList<OnlineModDependency> initialDependencies,

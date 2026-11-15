@@ -1,9 +1,9 @@
 namespace MinecraftServerManager.Core.Ports;
 
-/// <summary>呈現層使用之模組檔案路徑解析、暫存清理與下載來源判定抽象介面</summary>
+/// <summary>呈現層使用之模組檔案路徑解析、暫存清理與下載來源判定介面</summary>
 public interface IModFileService
 {
-    /// <summary>判斷下載網址是否為官方 Modrinth CDN</summary>
+    /// <summary>下載網址是否為官方 Modrinth CDN</summary>
     public bool IsOfficialModrinthSource(string? url);
 
     /// <summary>清理伺服器 mods 目錄下的安裝暫存資料</summary>

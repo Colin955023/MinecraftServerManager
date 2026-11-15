@@ -28,7 +28,7 @@
 
 namespace MinecraftServerManager.Domain.Mods;
 
-/// <summary>彈性語意版本比較引擎（移植自 Prism Launcher Version 類別，授權與版權聲明見檔案開頭與 COPYING.md）</summary>
+/// <summary>彈性版本比較（移植自 Prism Launcher，授權見檔案開頭與 COPYING.md）</summary>
 public sealed class FlexVersion
 {
     private enum SectionType : byte

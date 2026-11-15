@@ -14,11 +14,7 @@ using Microsoft.Windows.Storage.Pickers;
 
 namespace MinecraftServerManager.App.Services;
 
-/// <summary>
-/// <see cref="IUiService"/> 的 WinUI 3 原生實作。
-/// 管理 ContentDialog 佇列（<see cref="DialogStackCoordinator"/>）、模態視窗宿主（<see cref="ModalWindowHost"/>）、
-/// 檔案與資料夾選取器（透過 AppWindow.Id 繫結視窗）、UI 執行緒派送與計時器。
-/// </summary>
+/// <summary><see cref="IUiService"/> 的 WinUI 3 實作</summary>
 public sealed partial class WinUiService : IUiService
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(WinUiService));
@@ -131,7 +127,7 @@ public sealed partial class WinUiService : IUiService
         throw new InvalidOperationException("無法取得作用中的 XamlRoot。");
     }
 
-    /// <summary>將非同步 UI 作業派送至 UI 執行緒執行並等待結果（例外與取消皆原樣傳回呼叫端）</summary>
+    /// <summary>派送至 UI 執行緒執行並等待結果</summary>
     private async Task<T> InvokeOnUiAsync<T>(Func<Task<T>> operation)
     {
         var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -168,7 +164,7 @@ public sealed partial class WinUiService : IUiService
         dialog.XamlRoot = root;
         dialog.RequestedTheme = CurrentTheme;
 
-        // WinUI 同一執行緒同時只能開啟一個 ContentDialog（即使位於不同視窗），因此一律共用主視窗協調器排隊
+        // 同一執行緒同時只能開一個 ContentDialog，一律共用主視窗協調器排隊
         var coordinator = GetCoordinator(MainWindow?.Content?.XamlRoot ?? root);
         return await coordinator.ShowDialogAsync(
             () => dialog.ShowAsync().AsTask(),
@@ -221,7 +217,7 @@ public sealed partial class WinUiService : IUiService
         };
     }
 
-    /// <summary>通知提示唯一入口：資訊、成功與警告以 InfoBar 浮動顯示，錯誤以對話方塊顯示（經 DialogStackCoordinator 排隊）</summary>
+    /// <summary>通知入口：資訊、成功與警告用 InfoBar，錯誤用對話方塊</summary>
     public void ShowNotification(string message, string? title = null, NotificationType type = NotificationType.Info)
     {
         if (NotificationPresentation.UsesDialog(type))
@@ -298,7 +294,7 @@ public sealed partial class WinUiService : IUiService
         string? exePath = Environment.ProcessPath;
         if (!string.IsNullOrWhiteSpace(exePath))
         {
-            // 新行程需先取得單一實體金鑰，故啟動前釋放；啟動失敗時須取回，否則使用者可另開第二個執行個體
+            // 新行程需先取得單一實體金鑰，故啟動前釋放；啟動失敗時取回
             App.ReleaseSingleInstanceLock();
             try
             {
@@ -471,6 +467,9 @@ public sealed partial class WinUiService : IUiService
         // 圖示、標題列與內容主題已由 ServerMonitorWindow 建構時套用
         ModalWindowHost.CenterOnParent(window, MainWindow);
         var handle = new MonitorWindowHandle(window);
+        // 納入視窗堆疊，由監控視窗開出的對話框與選取器才會以它為父視窗
+        PushWindow(window);
+        window.Closed += (_, _) => PopWindow(window);
         window.Activate();
         return handle;
     }

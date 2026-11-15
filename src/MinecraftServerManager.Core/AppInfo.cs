@@ -8,7 +8,7 @@ public static class AppInfo
     public const string AppName = "Minecraft 伺服器管理器";
     public const string AppId = "MinecraftServerManager";
 
-    /// <summary>應用程式語意化版本號碼（動態自組件屬性讀取，以 Directory.Build.props 為單一事實來源）</summary>
+    /// <summary>應用程式版本（讀自組件屬性）</summary>
     public static string Version { get; } = ResolveVersion();
 
     public const string Author = "Colin955023";

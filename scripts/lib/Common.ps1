@@ -22,6 +22,18 @@ function Initialize-ScriptEnvironment
     Set-Variable -Name ErrorActionPreference -Value "Stop" -Scope 1
 }
 
+function Test-CiEnvironment
+{
+    <#
+    .SYNOPSIS
+        是否於 CI（含 GitHub Actions）執行。
+    #>
+    [CmdletBinding()]
+    param()
+
+    return ($env:CI -eq 'true' -or $env:GITHUB_ACTIONS -eq 'true')
+}
+
 function Get-ProjectVersion
 {
     [CmdletBinding()]
@@ -100,12 +112,21 @@ function Invoke-SmokeTest
     }
 
     $smokeDataDir = Join-Path ([System.IO.Path]::GetTempPath()) ("msm_smoke_" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $smokeDataDir -Force | Out-Null
+    # 預寫設定：伺服器目錄指向暫存、停用自動更新（避免連網）
+    $settingsJson = [ordered]@{
+        servers_root        = Join-Path $smokeDataDir "servers"
+        auto_update_enabled = $false
+    } | ConvertTo-Json
+    [System.IO.File]::WriteAllText((Join-Path $smokeDataDir "user_settings.json"), $settingsJson, [System.Text.UTF8Encoding]::new($false))
+
     $psi = [System.Diagnostics.ProcessStartInfo]::new($fullExePath, "--smoke-test")
     $psi.EnvironmentVariables["MSM_USER_DATA_DIR"] = $smokeDataDir
     $psi.UseShellExecute = $false
-    $proc = [System.Diagnostics.Process]::Start($psi)
+    $proc = $null
     try
     {
+        $proc = [System.Diagnostics.Process]::Start($psi)
         if (-not $proc.WaitForExit($TimeoutSeconds * 1000))
         {
             $proc.Kill($true)
@@ -118,7 +139,7 @@ function Invoke-SmokeTest
     }
     finally
     {
-        $proc.Dispose()
+        ${proc}?.Dispose()
         if (Test-Path -LiteralPath $smokeDataDir)
         {
             try
@@ -149,4 +170,121 @@ function Get-ReleaseAssetNames
         'MinecraftServerManager.spdx.json',
         'MinecraftServerManager.spdx.json.sha256'
     )
+}
+
+function Invoke-WithRetry
+{
+    <#
+    .SYNOPSIS
+        執行動作，擲出例外或原生指令結束代碼非 0 時重試（等待秒數遞增），全部失敗則擲出例外。
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Action,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Description,
+
+        [int]$MaxAttempts = 3
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++)
+    {
+        $global:LASTEXITCODE = 0
+        try
+        {
+            & $Action
+            if ($LASTEXITCODE -eq 0)
+            {
+                return
+            }
+            Write-Warning "${Description}失敗（第 $attempt 次，結束代碼 $LASTEXITCODE）"
+        }
+        catch
+        {
+            Write-Warning "${Description}失敗（第 $attempt 次）：$($_.Exception.Message)"
+        }
+
+        if ($attempt -lt $MaxAttempts)
+        {
+            Start-Sleep -Seconds ($attempt * 2)
+        }
+    }
+
+    throw "${Description}失敗"
+}
+
+function Get-TagCommit
+{
+    <#
+    .SYNOPSIS
+        取得 tag 指向的 commit SHA（含 annotated tag）；tag 不存在則回傳 $null。
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Tag
+    )
+
+    $commit = git rev-parse -q --verify "refs/tags/$Tag^{commit}" 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($commit))
+    {
+        return $null
+    }
+    return ([string]$commit).Trim()
+}
+
+function Assert-ReleaseAssets
+{
+    <#
+    .SYNOPSIS
+        確認目錄內含所有必要的 Release 資產，缺少即擲出例外。
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Directory
+    )
+
+    $actualNames = @(Get-ChildItem -LiteralPath $Directory -File | Select-Object -ExpandProperty Name)
+    $missing = @(Get-ReleaseAssetNames | Where-Object { $_ -notin $actualNames })
+    if ($missing.Count -gt 0)
+    {
+        throw "缺少必要的 Release 資產：$($missing -join ', ')"
+    }
+}
+
+function Assert-Sha256File
+{
+    <#
+    .SYNOPSIS
+        依 sha256sum 格式的雜湊檔驗證同目錄的目標檔案，不符即擲出例外。
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ShaPath
+    )
+
+    $content = (Get-Content -LiteralPath $ShaPath -Raw).Trim()
+    if ($content -notmatch '^([0-9a-fA-F]{64})\s+[\*]?(.*)$')
+    {
+        throw "無法解析雜湊檔：$ShaPath"
+    }
+
+    $expected = $Matches[1]
+    $targetName = $Matches[2].Trim()
+    $target = Join-Path (Split-Path -Parent ([System.IO.Path]::GetFullPath($ShaPath))) $targetName
+    if (-not (Test-Path -LiteralPath $target -PathType Leaf))
+    {
+        throw "雜湊檔指定的檔案不存在：$targetName"
+    }
+
+    $actual = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
+    if ($actual -ne $expected)
+    {
+        throw "雜湊不符：$targetName 預期 $expected，實際 $actual"
+    }
+    Write-Host " [SHA256 驗證通過] $targetName"
 }

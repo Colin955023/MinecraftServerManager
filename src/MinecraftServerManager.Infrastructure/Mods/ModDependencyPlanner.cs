@@ -12,7 +12,7 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModDependencyPlanner));
 
-    /// <summary>常見核心相依庫之 Modrinth Project ID 與本地 Mod ID / Slug 別名對映表</summary>
+    /// <summary>常見核心相依庫的 Modrinth Project ID 與別名對映</summary>
     private static readonly FrozenDictionary<string, string> KnownModProjectAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
         ["P7dR8mAc"] = "fabric-api",
@@ -203,16 +203,14 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
 
                 if (versions.Count == 0)
                 {
-                    string name = await ResolveProjectNameAsync(modrinthClient, targetKey, cancellationToken).ConfigureAwait(false);
-                    Logger.Warning("相依模組「{Name}」在 MC {MC} / {Loader} 下無相容版本", name, serverMinecraftVersion, normalizedLoader);
+                    Logger.Warning("相依模組「{Name}」在 MC {MC} / {Loader} 下無相容版本", targetKey, serverMinecraftVersion, normalizedLoader);
                     continue;
                 }
 
                 var matchedVersion = SelectBestCompatibleVersion(versions, serverMinecraftVersion, normalizedLoader);
                 if (matchedVersion is null)
                 {
-                    string name = await ResolveProjectNameAsync(modrinthClient, targetKey, cancellationToken).ConfigureAwait(false);
-                    Logger.Warning("相依模組「{Name}」找不到具備有效 JAR 檔案的相容版本", name);
+                    Logger.Warning("相依模組「{Name}」找不到具備有效 JAR 檔案的相容版本", targetKey);
                     continue;
                 }
 
@@ -268,19 +266,11 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                string name = await ResolveProjectNameAsync(modrinthClient, targetKey, cancellationToken).ConfigureAwait(false);
-                Logger.Warning(ex, "查詢相依模組「{Name}」失敗", name);
+                Logger.Warning(ex, "查詢相依模組「{Name}」失敗", targetKey);
             }
         }
 
         return resolvedPlans;
-    }
-
-    /// <summary>取得專案名稱供日誌與提示使用；查詢失敗時退回專案代碼</summary>
-    private static async Task<string> ResolveProjectNameAsync(IModrinthClient modrinthClient, string projectKey, CancellationToken cancellationToken)
-    {
-        var titles = await modrinthClient.GetProjectTitlesAsync([projectKey], cancellationToken).ConfigureAwait(false);
-        return titles.TryGetValue(projectKey, out string? title) && !string.IsNullOrWhiteSpace(title) ? title : projectKey;
     }
 
     private static HashSet<string> BuildInstalledIdentifiers(IReadOnlyList<LocalModInfo>? installedMods)
@@ -322,7 +312,7 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         return installedIdentifiers;
     }
 
-    /// <summary>待比對模組的正規化鍵：專案識別碼、其已知別名與檔名主幹（皆已正規化，缺少時為 null）</summary>
+    /// <summary>待比對模組的正規化鍵</summary>
     private readonly record struct ModMatchKey(string? NormalizedId, string? NormalizedAlias, string? FileStem)
     {
         public static ModMatchKey Create(string? idToMatch, string? fileName)
@@ -345,7 +335,7 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
             (key.FileStem is not null && installedIdentifiers.Contains(key.FileStem));
     }
 
-    /// <summary>比對識別碼（不分大小寫、忽略前後空白）；<paramref name="normalized"/> 為已正規化的目標識別碼</summary>
+    /// <summary>比對識別碼（不分大小寫）</summary>
     private static bool IdMatches(string? candidate, string normalized) =>
         !string.IsNullOrWhiteSpace(candidate) && candidate.AsSpan().Trim().Equals(normalized, StringComparison.OrdinalIgnoreCase);
 

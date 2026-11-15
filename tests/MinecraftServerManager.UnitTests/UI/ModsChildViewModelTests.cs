@@ -5,7 +5,6 @@ using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.Mods;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 

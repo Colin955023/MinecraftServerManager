@@ -1,5 +1,8 @@
 ﻿[CmdletBinding()]
-param()
+param(
+    # 發布後啟動主程式驗證可正常初始化（預設不啟用）
+    [switch]$SmokeTest
+)
 
 . (Join-Path $PSScriptRoot "lib\Common.ps1")
 Initialize-ScriptEnvironment
@@ -32,13 +35,17 @@ if ($LASTEXITCODE -ne 0)
 }
 Assert-SingleExecutable "發布後"
 
-# CI 執行環境無互動桌面，不執行啟動煙霧測試
-if ($env:GITHUB_ACTIONS -ne "true")
+if ($SmokeTest)
 {
     Write-Host "=== 執行啟動煙霧測試 ==="
     Invoke-SmokeTest -ExePath $targetExe
 }
 
-if ($env:GITHUB_ACTIONS -eq "true") { $null = Write-Sha256File -LiteralPath $targetExe }
+if (Test-CiEnvironment)
+{
+    $null = Write-Sha256File -LiteralPath $targetExe
+}
+
 Write-Host ("檔案大小：{0:N2} MB" -f ((Get-Item -LiteralPath $targetExe).Length / 1MB))
-$hash = (Get-FileHash -LiteralPath $targetExe -Algorithm SHA256).Hash.ToLowerInvariant(); Write-Host "SHA-256 ：$hash  $exeName"
+$hash = (Get-FileHash -LiteralPath $targetExe -Algorithm SHA256).Hash.ToLowerInvariant()
+Write-Host "SHA-256 ：$hash  $exeName"

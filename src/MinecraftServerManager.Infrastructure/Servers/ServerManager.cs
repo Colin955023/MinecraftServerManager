@@ -138,8 +138,7 @@ public sealed partial class ServerManager : IServerManager
             Lock artifactProgressLock = new();
             var loaderProgress = progress is null ? null : new SynchronousProgress<LoaderInstallProgress>(lp =>
             {
-                int mappedPct = 15 + (int)(lp.PercentCompleted * 0.70); // 15% ~ 85%
-                int clamped = Math.Clamp(mappedPct, 15, 85);
+                int clamped = ProgressMapping.Map(lp.PercentCompleted, 100, 15, 85);
                 lock (artifactProgressLock)
                 {
                     clamped = Math.Max(lastArtifactPct, clamped);
@@ -233,7 +232,7 @@ public sealed partial class ServerManager : IServerManager
         SafeFileSystem.DeleteWithin(_serversRoot, serverDir);
     }
 
-    /// <summary>解析符合官方指定 Java major 的執行檔；major 必須完全一致，無法確認或找不到時回傳 null（不退而求其次）。</summary>
+    /// <summary>解析符合官方 Java major 的執行檔；找不到回傳 null</summary>
     private async Task<string?> ResolveJavaExecutableAsync(
         string? configuredJava,
         string minecraftVersion,
@@ -282,7 +281,7 @@ public sealed partial class ServerManager : IServerManager
             return ServerOperationResult.Fail($"找不到伺服器：{name}");
         }
 
-        // 以登錄檔記錄的實際路徑為準（存放目錄遷移後與 servers 根目錄 + 名稱可能不同）；邊界由 tombstone 搬移時強制驗證
+        // 以登錄檔記錄的實際路徑為準
         string serverDir = config.Path;
 
         Logger.Information("開始刪除伺服器「{Name}」...", name);
@@ -357,7 +356,7 @@ public sealed partial class ServerManager : IServerManager
         return await _importWorkflow.ImportAsync(sourceDirectory, targetName, mode, progress, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>掃描 servers 根目錄一級子目錄，分類為「已管理 / 新增 / 跳過」並自動註冊新增項目。</summary>
+    /// <summary>掃描根目錄並註冊新伺服器</summary>
     public async Task<ServerScanReport> ScanAndRegisterAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

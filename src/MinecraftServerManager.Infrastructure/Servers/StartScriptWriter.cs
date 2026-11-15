@@ -8,12 +8,12 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>伺服器啟動腳本與 JVM 參數檔（start_server.bat、user_jvm_args.txt）的唯一寫入入口</summary>
+/// <summary>啟動腳本與 JVM 參數檔的寫入入口</summary>
 public static class StartScriptWriter
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(StartScriptWriter));
 
-    /// <summary>生成統一規範之 start_server.bat 啟動腳本。</summary>
+    /// <summary>生成統一規範之 start_server.bat 啟動腳本</summary>
     public static void Write(
         string directory,
         string launchTarget,
@@ -56,7 +56,7 @@ public static class StartScriptWriter
         AtomicFileWriter.WriteTextOrThrow(Path.Combine(directory, ServerDefaults.StartServerBatFileName), builder.ToString());
     }
 
-    /// <summary>更新 Forge / NeoForge 之 user_jvm_args.txt 啟動與記憶體參數檔案（原子安全寫入）</summary>
+    /// <summary>更新 user_jvm_args.txt</summary>
     public static void UpdateUserJvmArgs(string serverDirectory, ServerConfig config)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
@@ -90,7 +90,7 @@ public static class StartScriptWriter
         Logger.Information("已更新 Forge/NeoForge 參數檔: {Path}", userJvmArgsPath);
     }
 
-    /// <summary>更新統一啟動腳本 start_server.bat 中的記憶體設定（-Xms 與 -Xmx）</summary>
+    /// <summary>更新 start_server.bat 的記憶體設定</summary>
     public static void UpdateMemory(string serverDirectory, ServerConfig config)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
@@ -116,7 +116,7 @@ public static class StartScriptWriter
     internal static string FormatBatchArgument(string argument) =>
         argument.AsSpan().ContainsAny(' ', '\t') ? $"\"{argument}\"" : argument;
 
-    /// <summary>是否以 <c>user_jvm_args.txt</c> 傳遞 JVM 參數（Forge／NeoForge，或目錄內已有該檔或 run.bat）</summary>
+    /// <summary>是否以 <c>user_jvm_args.txt</c> 傳遞 JVM 參數</summary>
     public static bool UsesUserJvmArgsFile(LoaderKind loader, string serverDir) =>
         loader is LoaderKind.Forge or LoaderKind.NeoForge ||
         SafeFileSystem.FileExists(Path.Combine(serverDir, ServerDefaults.UserJvmArgsFileName)) ||

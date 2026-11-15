@@ -33,7 +33,7 @@ public readonly partial record struct VersionValue(
             return false;
         }
 
-        // 正規表示式已保證各段皆為數字（最多四段），僅需處理溢位；NeoForge 26.x 起使用四段式版本號
+        // 各段皆為數字（最多四段），只需處理溢位
         ReadOnlySpan<char> versionSpan = match.Groups["version"].ValueSpan;
         Span<Range> parts = stackalloc Range[4];
         int count = versionSpan.Split(parts, '.');
@@ -51,7 +51,7 @@ public readonly partial record struct VersionValue(
         return true;
     }
 
-    /// <summary>解析版本字串，失敗時回傳 <see cref="Zero"/>。</summary>
+    /// <summary>解析版本字串，失敗時回傳 <see cref="Zero"/></summary>
     public static VersionValue ParseOrZero(string? value) => TryParse(value, out var result) ? result : Zero;
 
     public int CompareTo(VersionValue other)

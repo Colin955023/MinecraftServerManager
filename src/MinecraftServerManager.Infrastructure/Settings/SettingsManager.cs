@@ -163,7 +163,7 @@ public sealed class SettingsManager
 
     public void SetBackupRetentionCount(int count) => Update(settings => settings with { BackupRetentionCount = count });
 
-    public WindowPreferences GetWindowPreferences()
+    private WindowPreferences GetWindowPreferences()
     {
         lock (_syncRoot)
         {

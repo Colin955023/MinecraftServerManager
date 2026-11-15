@@ -71,52 +71,12 @@ public sealed class ServerIntegrityService : IServerIntegrityService
                     }
 
                 case LoaderKind.NeoForge:
-                    {
-                        bool hasRunScript = HasRunScript(serverPath);
-                        string neoForgeLib = Path.Combine(serverPath, "libraries", "net", "neoforged", "neoforge");
-                        bool hasNeoForgeArgs = SafeFileSystem.HasAnyFile(neoForgeLib, "*args.txt", SearchOption.AllDirectories);
-
-                        var missing = new List<string>(2);
-                        if (!hasRunScript)
-                        {
-                            missing.Add("start_server.bat / run.bat");
-                        }
-                        if (!hasNeoForgeArgs)
-                        {
-                            missing.Add("win_args.txt");
-                        }
-
-                        return missing.Count == 0
-                            ? new ServerIntegrityResult(false, EmptyList)
-                            : new ServerIntegrityResult(true, missing);
-                    }
+                    return CheckForgeLike(serverPath, "neoforged", "neoforge");
 
                 case LoaderKind.Forge:
-                    {
-                        bool hasLegacyForge = SafeFileSystem.HasAnyFile(serverPath, "forge*.jar");
-                        if (hasLegacyForge)
-                        {
-                            return new ServerIntegrityResult(false, EmptyList);
-                        }
-
-                        bool hasRunScript = HasRunScript(serverPath);
-                        string forgeLib = Path.Combine(serverPath, "libraries", "net", "minecraftforge", "forge");
-                        bool hasForgeArgs = SafeFileSystem.HasAnyFile(forgeLib, "*args.txt", SearchOption.AllDirectories);
-
-                        var missing = new List<string>(2);
-                        if (!hasRunScript)
-                        {
-                            missing.Add("start_server.bat / run.bat");
-                        }
-                        if (!hasForgeArgs)
-                        {
-                            missing.Add("win_args.txt");
-                        }
-
-                        return missing.Count == 0
-                            ? new ServerIntegrityResult(false, EmptyList)
-                            : new ServerIntegrityResult(true, missing);
-                    }
+                    return SafeFileSystem.HasAnyFile(serverPath, "forge*.jar")
+                        ? new ServerIntegrityResult(false, EmptyList)
+                        : CheckForgeLike(serverPath, "minecraftforge", "forge");
 
                 default:
                     {
@@ -134,6 +94,26 @@ public sealed class ServerIntegrityService : IServerIntegrityService
             Logger.Warning(ex, "檢查伺服器完整性時發生非預期例外: {Path}", serverPath);
             return new ServerIntegrityResult(true, UnexpectedErrorMissingList);
         }
+    }
+
+    /// <summary>檢查啟動腳本與函式庫內的 win_args.txt</summary>
+    private static ServerIntegrityResult CheckForgeLike(string serverPath, string vendor, string artifact)
+    {
+        var missing = new List<string>(2);
+        if (!HasRunScript(serverPath))
+        {
+            missing.Add("start_server.bat / run.bat");
+        }
+
+        string library = Path.Combine(serverPath, "libraries", "net", vendor, artifact);
+        if (!SafeFileSystem.HasAnyFile(library, "*args.txt", SearchOption.AllDirectories))
+        {
+            missing.Add("win_args.txt");
+        }
+
+        return missing.Count == 0
+            ? new ServerIntegrityResult(false, EmptyList)
+            : new ServerIntegrityResult(true, missing);
     }
 
     private static bool HasRunScript(string serverPath) =>

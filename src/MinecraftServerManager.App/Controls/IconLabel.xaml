@@ -1,0 +1,15 @@
+<UserControl
+  x:Class="MinecraftServerManager.App.Controls.IconLabel"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <StackPanel Orientation="Horizontal"
+    Spacing="{x:Bind Spacing, Mode=OneWay}">
+    <ContentPresenter ContentTemplate="{x:Bind Icon, Mode=OneWay}"
+      Width="{x:Bind IconSize, Mode=OneWay}"
+      Height="{x:Bind IconSize, Mode=OneWay}"
+      VerticalAlignment="Center" />
+    <TextBlock Text="{x:Bind Text, Mode=OneWay}"
+      VerticalAlignment="Center" />
+  </StackPanel>
+</UserControl>

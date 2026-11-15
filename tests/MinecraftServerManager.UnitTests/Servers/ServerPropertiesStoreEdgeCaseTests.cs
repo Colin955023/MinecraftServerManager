@@ -1,7 +1,6 @@
 using System.Text;
 using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Infrastructure.Servers;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.Servers;
 

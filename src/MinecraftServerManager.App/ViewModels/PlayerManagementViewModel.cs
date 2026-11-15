@@ -10,7 +10,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>伺服器名單管理（ops.json, whitelist.json, banned-players.json, banned-ips.json）對話方塊 ViewModel</summary>
+/// <summary>伺服器名單管理對話方塊 ViewModel</summary>
 public sealed partial class PlayerManagementViewModel(
     string serverName,
     string serverPath,
@@ -322,7 +322,7 @@ public sealed partial class PlayerManagementViewModel(
         }
     }
 
-    /// <summary>檢查是否有尚未儲存之暫存變更；若有則彈出確認詢問對話方塊</summary>
+    /// <summary>是否有尚未儲存之暫存變更；若有則彈出確認詢問對話方塊</summary>
     public Task<bool> ConfirmDiscardAsync() =>
         ConfirmDiscardChangesAsync(_ui, HasUnsavedChanges, "有尚未儲存的名單設定變更，確定要捨棄變更並關閉嗎？");
 

@@ -7,7 +7,6 @@ using MinecraftServerManager.App.Controls;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.UnitTests.Architecture;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
@@ -108,14 +107,14 @@ public sealed partial class PresentationHelpersTests
     public void ThemeResourceKeys_AreDefinedInBothThemeDictionaries()
     {
         string appXaml = File.ReadAllText(Path.Combine(SourceScanner.SolutionRoot, "src", "MinecraftServerManager.App", "App.xaml"));
-        foreach (string key in (string[])["SuccessTextBrush", "DangerTextBrush", "WarningBrush", "MutedTextBrush", "ConsoleBackgroundBrush", "ConsoleForegroundBrush", "ConsoleMutedTextBrush"])
+        foreach (string key in (string[])["SuccessTextBrush", "DangerTextBrush", "WarningBrush", "MutedTextBrush"])
         {
             int count = Regex.Count(appXaml, $"x:Key=\"{key}\"");
             Assert.True(count >= 2, $"主題資源 {key} 必須同時定義於深色與淺色主題字典（目前 {count} 處）");
         }
     }
 
-    /// <summary>每個檢視檔內的 SortPropertyName 對應之排序鍵對照表（含同一檔案內多張表格）</summary>
+    /// <summary>各檢視檔的 SortPropertyName 與排序鍵對照</summary>
     private static bool IsSortKeyRegistered(string viewFile, string column) => viewFile switch
     {
         "ManageServerView.xaml" => TableSortKeys.Servers.TryGetSelector(column, out _),

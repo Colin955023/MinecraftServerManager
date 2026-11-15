@@ -1,6 +1,6 @@
 namespace MinecraftServerManager.Core.Ports;
 
-/// <summary>多伺服器執行階段管理抽象介面：每台伺服器各自持有一個 <see cref="IServerRuntime"/>，可同時執行</summary>
+/// <summary>多伺服器執行階段管理</summary>
 public interface IServerRuntimeHost : IAsyncDisposable
 {
     /// <summary>是否有任何伺服器正在執行</summary>

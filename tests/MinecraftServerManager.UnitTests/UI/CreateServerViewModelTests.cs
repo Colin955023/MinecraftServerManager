@@ -1,5 +1,4 @@
 using MinecraftServerManager.App.ViewModels;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
@@ -122,6 +121,51 @@ public sealed class CreateServerViewModelTests
 
         Assert.Equal("26.3", vm.SelectedMinecraftVersion);
         Assert.Equal("Paper 26.3", vm.ServerName);
+    }
+
+    [Fact]
+    public async Task StaleMinecraftVersionResponsesShouldNotOverwriteNewerLoaderSelection()
+    {
+        var catalog = new PendingLoaderCatalog();
+        var vm = Create(catalog);
+
+        vm.SelectedLoader = "Fabric";
+        vm.SelectedLoader = "Quilt";
+
+        catalog.Complete(Domain.Servers.LoaderKind.Quilt, "Q1");
+        catalog.Complete(Domain.Servers.LoaderKind.Fabric, "F1");
+        catalog.Complete(Domain.Servers.LoaderKind.Paper, "P1");
+
+        for (int i = 0; i < 50 && vm.IsLoadingVersions; i++)
+        {
+            await Task.Delay(20);
+        }
+
+        await Task.Delay(200);
+        Assert.Equal(["Q1"], vm.AvailableMinecraftVersions);
+    }
+
+    private sealed class PendingLoaderCatalog : Core.Ports.ILoaderCatalogService
+    {
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<Domain.Servers.LoaderKind, TaskCompletionSource<IReadOnlyList<Core.Loaders.LoaderVersion>>> _pending = new();
+
+        public void Complete(Domain.Servers.LoaderKind loader, string version) =>
+            Request(loader).SetResult([new(version)]);
+
+        private TaskCompletionSource<IReadOnlyList<Core.Loaders.LoaderVersion>> Request(Domain.Servers.LoaderKind loader) =>
+            _pending.GetOrAdd(loader, static _ => new(TaskCreationOptions.RunContinuationsAsynchronously));
+
+        public Task<IReadOnlyList<Core.Loaders.LoaderVersion>> GetMinecraftVersionsForLoaderAsync(Domain.Servers.LoaderKind loader, bool includeSnapshots = false, bool forceReload = false, CancellationToken cancellationToken = default) =>
+            Request(loader).Task;
+
+        public Task<IReadOnlyList<Core.Loaders.LoaderVersion>> GetPaperMinecraftVersionsAsync(bool forceReload = false, CancellationToken cancellationToken = default) =>
+            Request(Domain.Servers.LoaderKind.Paper).Task;
+
+        public Task<IReadOnlyList<Core.Loaders.LoaderVersion>> GetLoaderVersionsAsync(Domain.Servers.LoaderKind loader, string minecraftVersion, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Core.Loaders.LoaderVersion>>([new("最新穩定版")]);
+
+        public Task ForceReloadAllLoadersAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task WarmupLoadersAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class FakeLoaderCatalog : Core.Ports.ILoaderCatalogService

@@ -7,7 +7,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
-/// <summary>管理伺服器頁面 ViewModel：組合清單、生命週期、備份與存放目錄子 ViewModel，並負責各設定對話框的開啟</summary>
+/// <summary>管理伺服器頁面：組合清單、生命週期、備份與存放目錄子 ViewModel</summary>
 public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ManageServerViewModel));
@@ -78,28 +78,16 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
         _launcher = launcher;
         _ui = uiService;
 
-        List.SelectionStateChanged += OnSelectionStateChanged;
+        List.RegisterDependentCommands(ConfigureServerCommand, ManagePlayersCommand, OpenServerFolderCommand, DeleteServerCommand, EditServerMemoryCommand, RecheckServerCommand);
     }
 
     public void Dispose()
     {
-        List.SelectionStateChanged -= OnSelectionStateChanged;
         Lifecycle.Dispose();
-        Backup.Dispose();
         List.Dispose();
     }
 
     private bool HasSelectedServer() => List.HasSelectedServer;
-
-    private void OnSelectionStateChanged()
-    {
-        ConfigureServerCommand.NotifyCanExecuteChanged();
-        ManagePlayersCommand.NotifyCanExecuteChanged();
-        OpenServerFolderCommand.NotifyCanExecuteChanged();
-        DeleteServerCommand.NotifyCanExecuteChanged();
-        EditServerMemoryCommand.NotifyCanExecuteChanged();
-        RecheckServerCommand.NotifyCanExecuteChanged();
-    }
 
     [RelayCommand(CanExecute = nameof(HasSelectedServer))]
     public async Task ConfigureServerAsync()
@@ -143,25 +131,23 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
     }
 
     [RelayCommand(CanExecute = nameof(HasSelectedServer))]
-    public Task OpenServerFolder()
+    public void OpenServerFolder()
     {
         if (List.SelectedServer is not { } selected)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         if (!_fileSystem.DirectoryExists(selected.Path))
         {
             _ui.Notify($"資料夾不存在：{selected.Path}", NotificationType.Warning);
-            return Task.CompletedTask;
+            return;
         }
 
         if (!_launcher.OpenFolder(selected.Path))
         {
             _ui.Notify($"無法開啟資料夾：{selected.Path}", NotificationType.Warning);
         }
-
-        return Task.CompletedTask;
     }
 
     [RelayCommand(CanExecute = nameof(HasSelectedServer))]

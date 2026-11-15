@@ -7,7 +7,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Logging;
 
-/// <summary>提供單檔上限 10 MiB 輪替與最多 10 檔保留之檔案記錄器提供者</summary>
+/// <summary>依設定的單檔上限輪替、保留有限份數的檔案記錄器提供者</summary>
 public sealed class RotatingFileLoggerProvider : ILoggerProvider
 {
     private readonly RotatingFileLoggerOptions _options;
@@ -231,7 +231,7 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider
     private static bool IsLogFileName(string fileName) =>
         fileName.EndsWith(".log", StringComparison.OrdinalIgnoreCase) || fileName.Contains(".log.", StringComparison.OrdinalIgnoreCase);
 
-    public static void PruneLogs(string logDir, int keep)
+    internal static void PruneLogs(string logDir, int keep)
     {
         if (!SafeFileSystem.DirectoryExists(logDir))
         {

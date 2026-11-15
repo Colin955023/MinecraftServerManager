@@ -9,7 +9,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>伺服器匯入流程：暫存解壓或複製、正規化結構、偵測核心、遷移屬性、寫入啟動腳本並寫入登錄檔</summary>
+/// <summary>伺服器匯入流程</summary>
 internal sealed class ServerImportWorkflow(
     string serversRoot,
     ServerRegistryStore registry,
@@ -45,6 +45,12 @@ internal sealed class ServerImportWorkflow(
         }
 
         bool isZip = SafeFileSystem.FileExists(sourceDirectory) && sourceDirectory.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
+        if (!isZip && DescribeUnsafeSourceDirectory(sourceDirectory) is { } unsafeReason)
+        {
+            Logger.Warning("匯入來源目錄不安全（{Reason}）: {Source}", unsafeReason, sourceDirectory);
+            return ServerImportResult.Failed(targetName, unsafeReason);
+        }
+
         string targetDir = Path.Combine(_serversRoot, targetName);
         bool targetExisted = SafeFileSystem.DirectoryExists(targetDir);
         if (targetExisted && !SafeFileSystem.IsDirectoryEmpty(targetDir))
@@ -69,8 +75,8 @@ internal sealed class ServerImportWorkflow(
                 {
                     SafeZipArchive.Extract(sourceDirectory, stagingDir, (extracted, total) =>
                     {
-                        int pct = total > 0 ? (int)(10 + (extracted * 45 / total)) : 35;
-                        progress?.Report(new ServerImportProgressReport(Math.Clamp(pct, 10, 55), $"正在解壓縮檔案 ({Math.Clamp(pct, 10, 55)}%)..."));
+                        int pct = ProgressMapping.Map(extracted, total, 10, 55, unknown: 35);
+                        progress?.Report(new ServerImportProgressReport(pct, $"正在解壓縮檔案 ({pct}%)..."));
                     }, cancellationToken);
                 }, cancellationToken).ConfigureAwait(false);
             }
@@ -226,6 +232,26 @@ internal sealed class ServerImportWorkflow(
                 Logger.Warning(cleanEx, "匯入失敗後清理目標目錄失敗: {TargetDir}", targetDir);
             }
         }
+    }
+
+    /// <summary>來源為磁碟根目錄、伺服器根目錄或其上層時回傳拒絕原因（遷移模式會遞迴刪除來源）</summary>
+    private string? DescribeUnsafeSourceDirectory(string sourceDirectory)
+    {
+        string source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourceDirectory));
+        if (Path.GetPathRoot(source) is { Length: > 0 } volumeRoot &&
+            string.Equals(Path.TrimEndingDirectorySeparator(volumeRoot), source, StringComparison.OrdinalIgnoreCase))
+        {
+            return "來源不可為磁碟根目錄";
+        }
+
+        string serversRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_serversRoot));
+        if (string.Equals(source, serversRoot, StringComparison.OrdinalIgnoreCase) ||
+            serversRoot.StartsWith(source + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
+            return "來源不可為伺服器存放根目錄或其上層資料夾";
+        }
+
+        return null;
     }
 
     private static void FlattenSingleWrapper(string stagingDir)

@@ -213,7 +213,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
                 IsReady = false;
             }
 
-            // 伺服器自行結束時由此釋放行程控制代碼與輸出管線；DisposeAsync 只處理仍在執行者
+            // 伺服器自行結束時在此釋放行程資源
             await proc.DisposeAsync().ConfigureAwait(false);
         }
     }

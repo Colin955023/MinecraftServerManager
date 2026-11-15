@@ -3,7 +3,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.Services;
 
-/// <summary>提供標準 Windows 系統音效回饋輔助工具（透過 Win32 MessageBeep 原生 API 播放）</summary>
+/// <summary>系統提示音效（Win32 MessageBeep）</summary>
 public static partial class AudioFeedback
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AudioFeedback));

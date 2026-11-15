@@ -17,8 +17,8 @@ public static class ServerTombstoneManager
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerTombstoneManager));
 
-    public const string DeletePrefix = ServerDefaults.InternalPrefix + "delete-";
-    public const string DeleteMarker = ServerDefaults.InternalPrefix + "delete-marker.json";
+    private const string DeletePrefix = ServerDefaults.InternalPrefix + "delete-";
+    internal const string DeleteMarker = ServerDefaults.InternalPrefix + "delete-marker.json";
 
     private static readonly string[] EphemeralStagingPrefixes =
     [
@@ -119,32 +119,8 @@ public static class ServerTombstoneManager
             string markerPath = Path.Combine(entry.FullPath, DeleteMarker);
             string journalPath = Path.Combine(root, $"{dirName}.json");
 
-            DeleteTombstoneRecord? record = null;
-            if (SafeFileSystem.FileExists(markerPath))
-            {
-                try
-                {
-                    record = JsonCodec.ReadFile<DeleteTombstoneRecord>(markerPath);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning(ex, "反序列化墓碑內部標記失敗");
-                    record = null;
-                }
-            }
-
-            if (record == null && SafeFileSystem.FileExists(journalPath))
-            {
-                try
-                {
-                    record = JsonCodec.ReadFile<DeleteTombstoneRecord>(journalPath);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning(ex, "反序列化墓碑外部記錄失敗");
-                    record = null;
-                }
-            }
+            DeleteTombstoneRecord? record = JsonCodec.TryReadFile<DeleteTombstoneRecord>(markerPath)
+                ?? JsonCodec.TryReadFile<DeleteTombstoneRecord>(journalPath);
 
             if (record == null || record.SchemaVersion != 1 || string.IsNullOrWhiteSpace(record.ServerName))
             {

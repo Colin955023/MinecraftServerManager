@@ -1,6 +1,5 @@
 using System.Collections.Frozen;
 using System.Xml.Linq;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 

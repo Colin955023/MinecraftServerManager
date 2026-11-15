@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace MinecraftServerManager.Domain.Servers;
 
-/// <summary>伺服器名單時間格式化工具（統一以 GMT+8 台灣時區顯示 yyyy-MM-dd HH:mm:ss）</summary>
+/// <summary>名單時間格式化（GMT+8，yyyy-MM-dd HH:mm:ss）</summary>
 public static class ServerPlayerTimeFormatter
 {
     private static readonly TimeSpan Gmt8Offset = TimeSpan.FromHours(8);

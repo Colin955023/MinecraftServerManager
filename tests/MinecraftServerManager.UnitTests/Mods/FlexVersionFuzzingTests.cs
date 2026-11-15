@@ -1,6 +1,5 @@
 using System.Text;
 using MinecraftServerManager.Domain.Mods;
-using Xunit;
 
 namespace MinecraftServerManager.UnitTests.Mods;
 

@@ -134,10 +134,7 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
     private const string BackupPrefix = "backup-";
     private const string ZipExtension = ".zip";
 
-    /// <summary>
-    /// 判斷檔名是否為指定伺服器的備份壓縮檔；
-    /// 名稱後須接 <c>yyyyMMdd-HHmmss</c> 時間戳記，避免伺服器 <c>a</c> 誤認 <c>a-b</c> 的備份
-    /// </summary>
+    /// <summary>是否為指定伺服器的備份檔（名稱後須接時間戳記）</summary>
     internal static bool IsBackupFileFor(string serverName, string fileName)
     {
         ReadOnlySpan<char> file = fileName;
@@ -231,7 +228,7 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
                 var entries = SafeFileSystem.EnumerateBoundedTree(
                     serverDir,
                     rejectReparse: true,
-                    // 僅略過伺服器根目錄下的 logs、crash-reports 與舊版 backups，巢狀同名資料夾（如外掛備份）照常備份
+                    // 只略過根目錄下的 logs、crash-reports 與 backups
                     pruneDirectory: (fullPath, name) =>
                         string.Equals(Path.GetDirectoryName(fullPath), serverDir, StringComparison.OrdinalIgnoreCase) &&
                         (name.Equals("logs", StringComparison.OrdinalIgnoreCase) ||
@@ -331,7 +328,7 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
         {
             try
             {
-                // 階段零：暫存現場之 logs 與 crash-reports，防止災難復原時遺失關鍵診斷記錄檔
+                // 階段零：暫存 logs 與 crash-reports
                 if (SafeFileSystem.DirectoryExists(serverDir))
                 {
                     SafeFileSystem.RemoveReadOnlyAttributesRecursive(serverDir);
@@ -344,8 +341,8 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
                 progress?.Report(new ServerBackupProgressReport(10, "正在解壓縮備份檔案...", 0, 0));
                 SafeZipArchive.Extract(backupFilePath, stagingDir, (extracted, total) =>
                 {
-                    int pct = total > 0 ? (int)(10 + (extracted * 50 / total)) : 35;
-                    progress?.Report(new ServerBackupProgressReport(Math.Clamp(pct, 10, 60), $"正在解壓縮檔案 ({Math.Clamp(pct, 10, 60)}%)...", extracted, total));
+                    int pct = ProgressMapping.Map(extracted, total, 10, 60, unknown: 35);
+                    progress?.Report(new ServerBackupProgressReport(pct, $"正在解壓縮檔案 ({pct}%)...", extracted, total));
                 }, cancellationToken);
                 SafeFileSystem.RemoveReadOnlyAttributesRecursive(stagingDir);
 
@@ -377,9 +374,9 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
 
                 // 還原成功後清理 rollback 快照與 staging 暫存目錄
                 progress?.Report(new ServerBackupProgressReport(96, "正在清理暫存快照環境...", 0, 0));
-                CleanDirectorySafe(rollbackDir);
-                CleanDirectorySafe(stagingDir);
-                CleanDirectorySafe(preservedLogsDir);
+                SafeFileSystem.DeleteWithin(_resolvedServersRoot, rollbackDir);
+                SafeFileSystem.DeleteWithin(_resolvedServersRoot, stagingDir);
+                SafeFileSystem.DeleteWithin(_resolvedServersRoot, preservedLogsDir);
 
                 progress?.Report(new ServerBackupProgressReport(100, "備份還原完成！", 0, 0));
                 return true;
@@ -395,7 +392,7 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
                     {
                         if (snapshotCompleted)
                         {
-                            // 快照完成後伺服器目錄內只剩 backups 與已搬入的還原內容；先清掉後者，避免復原後新舊檔案混雜
+                            // 快照完成後先清除已搬入的還原內容，避免新舊檔案混雜
                             string keptBackupsDir = Path.Combine(serverDir, "backups");
                             foreach (var leftover in SafeFileSystem.ListBoundedDirectory(serverDir, rejectReparse: false))
                             {
@@ -442,11 +439,11 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
                     // 復原未完成時快照內仍有原始檔案，不可刪除
                     if (rollbackSucceeded)
                     {
-                        CleanDirectorySafe(rollbackDir);
+                        SafeFileSystem.DeleteWithin(_resolvedServersRoot, rollbackDir);
                     }
 
-                    CleanDirectorySafe(stagingDir);
-                    CleanDirectorySafe(preservedLogsDir);
+                    SafeFileSystem.DeleteWithin(_resolvedServersRoot, stagingDir);
+                    SafeFileSystem.DeleteWithin(_resolvedServersRoot, preservedLogsDir);
                 }
 
                 if (ex is OperationCanceledException)
@@ -523,21 +520,6 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
     private bool IsInsideServersRoot(string path) =>
         SafeFileSystem.IsPathWithin(Path.GetFullPath(_resolvedServersRoot), Path.GetFullPath(path), strict: false);
 
-    private static void CleanDirectorySafe(string dirPath)
-    {
-        try
-        {
-            if (SafeFileSystem.DirectoryExists(dirPath))
-            {
-                SafeFileSystem.DeleteDirectory(dirPath, recursive: true);
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning(ex, "安全清理目錄失敗");
-        }
-    }
-
     private static void PreserveLiveDiagnostics(string serverDir, string destinationDir, CancellationToken cancellationToken = default)
     {
         string liveLogs = Path.Combine(serverDir, "logs");
@@ -555,43 +537,38 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
 
     private static void RestorePreservedDiagnostics(string sourceDir, string serverDir)
     {
-        string preservedCrash = Path.Combine(sourceDir, "crash-reports");
-        string preservedLogs = Path.Combine(sourceDir, "logs");
-
-        if (SafeFileSystem.DirectoryExists(preservedCrash))
+        MergeMissingFiles(Path.Combine(sourceDir, "crash-reports"), Path.Combine(serverDir, "crash-reports"));
+        MergeMissingFiles(Path.Combine(sourceDir, "logs"), Path.Combine(serverDir, "logs"), static (file, targetDir) =>
         {
-            string targetCrash = Path.Combine(serverDir, "crash-reports");
-            SafeFileSystem.CreateDirectory(targetCrash);
-            foreach (string file in SafeFileSystem.EnumerateFiles(preservedCrash, "*"))
+            // 還原出的 latest.log 已存在時，現場記錄另存為 pre-restore
+            string preRestoreFile = Path.Combine(targetDir, "latest.log.pre-restore");
+            if (string.Equals(Path.GetFileName(file), "latest.log", StringComparison.OrdinalIgnoreCase)
+                && !SafeFileSystem.FileExists(preRestoreFile))
             {
-                string targetFile = Path.Combine(targetCrash, Path.GetFileName(file));
-                if (!SafeFileSystem.FileExists(targetFile))
-                {
-                    SafeFileSystem.CopyFile(file, targetFile);
-                }
+                SafeFileSystem.CopyFile(file, preRestoreFile);
             }
+        });
+    }
+
+    /// <summary>把來源資料夾中目標沒有的檔案複製過去；同名檔交由 onExisting 處理</summary>
+    private static void MergeMissingFiles(string sourceDir, string targetDir, Action<string, string>? onExisting = null)
+    {
+        if (!SafeFileSystem.DirectoryExists(sourceDir))
+        {
+            return;
         }
 
-        if (SafeFileSystem.DirectoryExists(preservedLogs))
+        SafeFileSystem.CreateDirectory(targetDir);
+        foreach (string file in SafeFileSystem.EnumerateFiles(sourceDir, "*"))
         {
-            string targetLogs = Path.Combine(serverDir, "logs");
-            SafeFileSystem.CreateDirectory(targetLogs);
-            foreach (string file in SafeFileSystem.EnumerateFiles(preservedLogs, "*"))
+            string targetFile = Path.Combine(targetDir, Path.GetFileName(file));
+            if (!SafeFileSystem.FileExists(targetFile))
             {
-                string fileName = Path.GetFileName(file);
-                string targetFile = Path.Combine(targetLogs, fileName);
-                if (!SafeFileSystem.FileExists(targetFile))
-                {
-                    SafeFileSystem.CopyFile(file, targetFile);
-                }
-                else if (string.Equals(fileName, "latest.log", StringComparison.OrdinalIgnoreCase))
-                {
-                    string preRestoreFile = Path.Combine(targetLogs, "latest.log.pre-restore");
-                    if (!SafeFileSystem.FileExists(preRestoreFile))
-                    {
-                        SafeFileSystem.CopyFile(file, preRestoreFile);
-                    }
-                }
+                SafeFileSystem.CopyFile(file, targetFile);
+            }
+            else
+            {
+                onExisting?.Invoke(file, targetDir);
             }
         }
     }

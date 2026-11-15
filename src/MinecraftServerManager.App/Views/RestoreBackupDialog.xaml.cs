@@ -5,7 +5,7 @@ using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>備份還原與管理視窗（原生模態視窗，透過 ModalWindowHost 裝載）</summary>
+/// <summary>備份還原與管理視窗</summary>
 public sealed partial class RestoreBackupDialog : Window
 {
     public RestoreBackupViewModel ViewModel { get; }
@@ -17,14 +17,8 @@ public sealed partial class RestoreBackupDialog : Window
         InitializeComponent();
         ModalWindowHost.ConfigureDialogWindow(this, "備份還原與管理", 720, 520, Bindings.StopTracking);
 
-        ViewModel.RequestClose += success =>
-        {
-            DialogResult = success;
-            ModalWindowHost.CloseDeferred(this);
-        };
+        ViewModel.RequestClose += ModalWindowHost.CloseWithResult(this, success => DialogResult = success);
     }
 
-    private void OnHeaderSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.Backups.SortBy(TableSortKeys.Backups, e);
-
-    private void OnHeaderAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.Backups, TableSortKeys.Backups);
+    public ITableSortTarget HeaderSort => field ??= new TableSortTarget<BackupDisplayItem>(() => ViewModel.Backups, TableSortKeys.Backups);
 }

@@ -38,9 +38,7 @@
           Margin="0,0,0,18" />
 
         <TextBlock Text="👨‍💻 開發資訊"
-          FontSize="16"
-          FontWeight="SemiBold"
-          Foreground="{ThemeResource TextBrush}"
+          Style="{StaticResource SectionHeaderTextStyle}"
           Margin="0,0,0,8" />
         <Border Style="{StaticResource CardBorderStyle}"
           CornerRadius="6"
@@ -56,14 +54,11 @@
               Foreground="{ThemeResource TextBrush}"
               Margin="0,2" />
             <TextBlock Text="• Java 管理：自動偵測 Java，支援 Windows 登錄檔與環境變數"
-              Foreground="{ThemeResource TextBrush}"
-              Margin="0,2" />
+              Style="{StaticResource BulletTextStyle}" />
             <TextBlock Text="• 架構：分層模組化設計、MVVM"
-              Foreground="{ThemeResource TextBrush}"
-              Margin="0,2" />
+              Style="{StaticResource BulletTextStyle}" />
             <TextBlock Text="• 參考專案：PrismLauncher"
-              Foreground="{ThemeResource TextBrush}"
-              Margin="0,2" />
+              Style="{StaticResource BulletTextStyle}" />
           </StackPanel>
         </Border>
 
@@ -77,9 +72,7 @@
         </Border>
 
         <TextBlock Text="📄 授權條款"
-          FontSize="16"
-          FontWeight="SemiBold"
-          Foreground="{ThemeResource TextBrush}"
+          Style="{StaticResource SectionHeaderTextStyle}"
           Margin="0,0,0,8" />
         <Border Style="{StaticResource CardBorderStyle}"
           CornerRadius="6"
@@ -87,28 +80,22 @@
           Margin="0,0,0,14">
           <StackPanel>
             <TextBlock Text="• Copyright (C) 2025-2026 Colin955023"
-              Foreground="{ThemeResource TextBrush}"
-              Margin="0,2" />
+              Style="{StaticResource BulletTextStyle}" />
             <TextBlock Text="• 本專案採用 GNU General Public License v3.0（僅限第 3 版）授權條款"
-              Foreground="{ThemeResource TextBrush}"
-              Margin="0,2" />
+              Style="{StaticResource BulletTextStyle}" />
             <TextBlock Text="• 本程式不提供任何擔保（詳見 GPLv3 第 15、16 條）"
-              Foreground="{ThemeResource TextBrush}"
-              Margin="0,2" />
+              Style="{StaticResource BulletTextStyle}" />
             <TextBlock Text="• 可依 GPLv3 條款使用、修改與散布"
-              Foreground="{ThemeResource TextBrush}"
-              Margin="0,2" />
+              Style="{StaticResource BulletTextStyle}" />
             <TextBlock Text="• 版本比較引擎（FlexVersion）移植自 Prism Launcher（GPL-3.0-only），版權聲明見 COPYING.md"
-              Foreground="{ThemeResource TextBrush}"
-              TextWrapping="Wrap"
-              Margin="0,2" />
+              Style="{StaticResource BulletTextStyle}"
+              TextWrapping="Wrap" />
             <HyperlinkButton Content="檢視 GPLv3 授權全文"
               Command="{x:Bind ViewModel.OpenLicenseCommand}"
               Padding="0"
               Margin="0,2" />
             <TextBlock Text="• 請遵守 Minecraft EULA 和相關法令"
-              Foreground="{ThemeResource TextBrush}"
-              Margin="0,2" />
+              Style="{StaticResource BulletTextStyle}" />
             <TextBlock Text="特別感謝 Prism Launcher 開發團隊的開放原始碼貢獻！"
               Foreground="{ThemeResource TextBrush}"
               Margin="0,8,0,0" />
@@ -116,9 +103,7 @@
         </Border>
 
         <TextBlock Text="🔄 更新設定"
-          FontSize="16"
-          FontWeight="SemiBold"
-          Foreground="{ThemeResource TextBrush}"
+          Style="{StaticResource SectionHeaderTextStyle}"
           Margin="0,0,0,6" />
         <TextBlock Text="更新檔僅接受 GitHub Release 提供的 SHA-256 digest 驗證"
           FontSize="12"
@@ -151,9 +136,7 @@
           Margin="0,0,0,24" />
 
         <TextBlock Text="🏠 主視窗設定"
-          FontSize="16"
-          FontWeight="SemiBold"
-          Foreground="{ThemeResource TextBrush}"
+          Style="{StaticResource SectionHeaderTextStyle}"
           Margin="0,0,0,8" />
         <Border Style="{StaticResource CardBorderStyle}"
           CornerRadius="6"
@@ -177,9 +160,7 @@
           Margin="0,0,0,20" />
 
         <TextBlock Text="🎨 顯示設定"
-          FontSize="16"
-          FontWeight="SemiBold"
-          Foreground="{ThemeResource TextBrush}"
+          Style="{StaticResource SectionHeaderTextStyle}"
           Margin="0,0,0,10" />
         <Grid Margin="0,0,0,16">
           <Grid.ColumnDefinitions>
@@ -266,9 +247,7 @@
         </Border>
 
         <TextBlock Text="💾 備份設定"
-          FontSize="16"
-          FontWeight="SemiBold"
-          Foreground="{ThemeResource TextBrush}"
+          Style="{StaticResource SectionHeaderTextStyle}"
           Margin="0,0,0,10" />
         <CheckBox Content="啟動伺服器前自動備份"
           IsChecked="{x:Bind ViewModel.IsAutoBackupBeforeStartEnabled, Mode=TwoWay}"

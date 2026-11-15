@@ -4,7 +4,7 @@ using Microsoft.UI.Xaml.Media;
 
 namespace MinecraftServerManager.App.Controls;
 
-/// <summary>依主題資源鍵設定前景筆刷之附加屬性：元素實際主題切換時自動重新套用，確保深淺色主題對比</summary>
+/// <summary>依主題資源鍵設定前景筆刷的附加屬性，主題切換時重新套用</summary>
 public static class ThemeBrush
 {
     public static readonly DependencyProperty ForegroundKeyProperty =

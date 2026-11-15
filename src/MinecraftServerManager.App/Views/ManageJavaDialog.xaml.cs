@@ -5,7 +5,7 @@ using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>管理 Java 環境視窗（原生模態視窗，透過 ModalWindowHost 裝載）</summary>
+/// <summary>管理 Java 環境視窗</summary>
 public sealed partial class ManageJavaDialog : Window
 {
     public ManageJavaViewModel ViewModel { get; }
@@ -30,15 +30,7 @@ public sealed partial class ManageJavaDialog : Window
         Close();
     }
 
-    private void ListView_DoubleTapped(object sender, Microsoft.UI.Xaml.Input.DoubleTappedRoutedEventArgs e)
-    {
-        if (ViewModel.ApplyCommand.CanExecute(null))
-        {
-            ViewModel.ApplyCommand.Execute(null);
-        }
-    }
+    private void ListView_DoubleTapped(object sender, Microsoft.UI.Xaml.Input.DoubleTappedRoutedEventArgs e) => ViewModel.ApplyCommand.TryExecute();
 
-    private void OnHeaderSortRequested(object? sender, SortRequestedEventArgs e) => ViewModel.InstalledJavas.SortBy(TableSortKeys.Javas, e);
-
-    private void OnHeaderAutoFitRequested(object? sender, string propertyName) => ((SortableTableHeader)sender!).AutoFit(ViewModel.InstalledJavas, TableSortKeys.Javas);
+    public ITableSortTarget HeaderSort => field ??= new TableSortTarget<JavaItemViewModel>(() => ViewModel.InstalledJavas, TableSortKeys.Javas);
 }
