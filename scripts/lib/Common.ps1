@@ -230,6 +230,8 @@ function Get-TagCommit
     $commit = git rev-parse -q --verify "refs/tags/$Tag^{commit}" 2>$null
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($commit))
     {
+        # tag 不存在屬預期結果；清除退出碼，避免 CI 步驟結尾沿用 git 的非 0 值而失敗
+        $global:LASTEXITCODE = 0
         return $null
     }
     return ([string]$commit).Trim()
