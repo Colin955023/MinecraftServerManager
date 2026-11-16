@@ -122,7 +122,7 @@ tests/
 - **`scripts/extract_release_notes.ps1`**：擷取 `CHANGELOG.md` 的目前版本章節，找不到即失敗。
 - **CI**：`ci-test.yml`、`codeql.yml`、`oss-scorecard.yml`、`validate-renovate.yml`。
 - **發布（`build-release.yml`）**：`master` 手動觸發；資產含 `.exe`、SLSA 證明、SBOM 與 `.sha256`；先建草稿，驗證後公開。
-- **自動更新信任邊界**：只接受本專案 GitHub Release 的 HTTPS 資產。`.sha256` 與 `.exe` 同源，只能確認下載完整，無法防範 Release 本身遭竄改；程式內不驗證簽章或 SLSA 證明（執行檔未做 Authenticode 簽章），需要時以 `gh attestation verify` 手動驗證。
+- **自動更新信任邊界**：只接受本專案 GitHub Release 的 HTTPS 資產。`.sha256` 與 `.exe` 同源，只能確認下載完整；Release 啟用不可變發布，發布後資產與 tag 無法替換，且擁有者與協作者帳號皆啟用雙重驗證。程式內不驗證簽章或 SLSA 證明（執行檔未做 Authenticode 簽章），需要時以 `gh attestation verify` 手動驗證。
 - **Renovate**：.NET 與 Windows App SDK 不跨 major，新版本滿 3 天才建 PR。
 
 ### 11. 共用入口與架構規則（A1～A31）
