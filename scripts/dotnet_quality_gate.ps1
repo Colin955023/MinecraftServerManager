@@ -69,6 +69,23 @@ function Test-VersionConsistency
             throw "C# 門禁失敗：$($project.Name) 不得定義 <Version>，版本統一由 Directory.Build.props 管理"
         }
     }
+
+    $indexPath = Join-Path $solutionDir "docs\index.html"
+    if (Test-Path -LiteralPath $indexPath)
+    {
+        $html = [System.IO.File]::ReadAllText($indexPath)
+        $versionPattern = '(?<=(?:<title>[^<]*? |>|</strong> )v)\d+\.\d+\.\d+|(?<=版本 )\d+\.\d+\.\d+'
+        $mismatched = [regex]::Matches($html, $versionPattern) | Where-Object { $_.Value -ne $version }
+        if ($mismatched)
+        {
+            if ($isCiEnvironment)
+            {
+                throw "C# 門禁失敗：docs/index.html 的版本字樣 ($($mismatched[0].Value)) 與 Directory.Build.props ($version) 不一致"
+            }
+            Write-Host "docs/index.html 版本字樣與 $version 不一致，自動同步"
+            [System.IO.File]::WriteAllText($indexPath, [regex]::Replace($html, $versionPattern, $version), [System.Text.UTF8Encoding]::new($false))
+        }
+    }
 }
 
 function Test-ScriptEncoding
