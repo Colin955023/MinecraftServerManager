@@ -13,7 +13,6 @@
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SelfContained>true</SelfContained>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <CsWinRTAotWarningLevel>2</CsWinRTAotWarningLevel>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <PublishSingleFile>true</PublishSingleFile>
@@ -69,7 +68,6 @@
         ;Microsoft.UI.Xaml.Controls.pri
         ;packages.lock.json
         ;app.manifest
-        ;Microsoft.UI.Xaml.Phone.dll
         ;Microsoft.UI.Xaml.Phone.dll.mui
         ;Microsoft.UI.Designer.dll
         ;DWriteCore.dll

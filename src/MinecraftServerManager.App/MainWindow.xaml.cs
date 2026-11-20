@@ -2,7 +2,6 @@ using System.ComponentModel;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using MinecraftServerManager.App.Controls;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
@@ -10,7 +9,6 @@ using MinecraftServerManager.App.Views;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Logging;
 using Windows.Graphics;
-using Windows.UI;
 
 namespace MinecraftServerManager.App;
 
@@ -38,8 +36,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         InitializeComponent();
         Title = "Minecraft 伺服器管理器";
 
-        ExtendsContentIntoTitleBar = true;
-
+        WindowChromeService.Apply(this, AppTitleBar);
         WindowIconHelper.SetIcon(AppWindow);
 
         AppWindow.Closing += MainWindow_AppWindowClosing;
@@ -91,7 +88,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
 
         RootGrid.RequestedTheme = targetTheme;
         _uiService!.CurrentTheme = targetTheme;
-        TitleBarThemeHelper.ApplyTitleBarTheme(AppWindow, targetTheme);
+        WindowChromeService.ApplyTheme(AppWindow, targetTheme);
         Logger.Information("主視窗套用主題模式: {Mode} ({TargetTheme})", mode, targetTheme);
     }
 
@@ -112,6 +109,24 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         };
 
         PageContentHost.Content = view;
+        SyncNavigationSelection(page);
+    }
+
+    /// <summary>依目前頁面同步導覽選取（程式設定 SelectedItem 不會觸發 ItemInvoked）</summary>
+    private void SyncNavigationSelection(PageViewModel page)
+    {
+        string? tag = page switch
+        {
+            CreateServerViewModel => "create",
+            ManageServerViewModel => "manage",
+            ModsViewModel => "mods",
+            AboutPreferencesViewModel => "about_preferences",
+            _ => null
+        };
+
+        NavView.SelectedItem = NavView.MenuItems.Concat(NavView.FooterMenuItems)
+            .OfType<NavigationViewItem>()
+            .FirstOrDefault(item => string.Equals(item.Tag as string, tag, StringComparison.Ordinal));
     }
 
     private UIElement GetOrCreateView(string key, Func<UIElement> factory)
@@ -149,27 +164,9 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
             type,
             durationSeconds ?? NotificationPresentation.GetDisplaySeconds(type));
 
-    private Brush GetSafeThemeBrush(string key, Color fallbackColor)
-    {
-        try
-        {
-            if (ThemeBrush.ResolveBrush(key, RootGrid.ActualTheme) is { } brush)
-            {
-                return brush;
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning(ex, "取得通知筆刷「{Key}」失敗", key);
-        }
-
-        return new SolidColorBrush(fallbackColor);
-    }
-
     /// <summary>於右上角顯示 InfoBar 通知：滑鼠停留時暫停關閉，最多 4 則</summary>
     private void ShowInfoBar(string title, string message, NotificationType type, int durationSeconds)
     {
-        bool isLight = RootGrid.ActualTheme == ElementTheme.Light;
         var infoBar = new InfoBar
         {
             Title = title,
@@ -179,10 +176,10 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
             IsOpen = true,
         };
 
-        // InfoBar 預設背景為半透明，外層以卡片色承載確保浮於頁面內容上仍清晰可讀
+        // InfoBar 預設背景為半透明，外層以不透明底色承載確保浮於頁面內容上仍清晰可讀
         var host = new Border
         {
-            Background = GetSafeThemeBrush("CardBrush", isLight ? Color.FromArgb(255, 255, 255, 255) : Color.FromArgb(255, 31, 34, 41)),
+            Background = ThemeBrush.ResolveBrush("NotificationBackgroundBrush", RootGrid.ActualTheme),
             CornerRadius = new CornerRadius(8),
             MinWidth = 280,
             MaxWidth = 420,
@@ -244,6 +241,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         int targetWidth = winSettings.Width > 0 ? (int)(winSettings.Width * scale) : (int)(DefaultWidthDip * scale);
         int targetHeight = winSettings.Height > 0 ? (int)(winSettings.Height * scale) : (int)(DefaultHeightDip * scale);
 
+        WindowLayoutHelper.SetMinimumSizeDip(this, 900, 580);
         AppWindow.Resize(new SizeInt32(targetWidth, targetHeight));
 
         var displayArea = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary);
@@ -452,10 +450,19 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         }
     }
 
-    private void OnNavigateClicked(object sender, RoutedEventArgs e) =>
-        _viewModel?.Navigate((string)((FrameworkElement)sender).Tag);
-
-    private void OnImportServerClicked(object sender, RoutedEventArgs e) => _viewModel?.ImportServerCommand.TryExecute();
-
-    private void OnOpenFolderClicked(object sender, RoutedEventArgs e) => _viewModel?.OpenServersFolderCommand.TryExecute();
+    private void OnNavItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
+    {
+        switch (args.InvokedItemContainer?.Tag as string)
+        {
+            case "import":
+                _viewModel?.ImportServerCommand.TryExecute();
+                break;
+            case "open_folder":
+                _viewModel?.OpenServersFolderCommand.TryExecute();
+                break;
+            case { } pageKey:
+                _viewModel?.Navigate(pageKey);
+                break;
+        }
+    }
 }

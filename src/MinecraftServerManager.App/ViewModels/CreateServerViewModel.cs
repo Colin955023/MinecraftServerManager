@@ -4,9 +4,9 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.Core.Ports;
-using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Infrastructure.Servers;
 using MinecraftServerManager.Core.Loaders;
 
 namespace MinecraftServerManager.App.ViewModels;
@@ -28,7 +28,7 @@ public sealed partial class CreateServerViewModel : PageViewModel, IDisposable
     private readonly IMinecraftJavaRequirementService _javaRequirementService;
     private readonly IJavaInstaller _javaInstaller;
     private readonly IServerRuntimeHost _runtimeHost;
-    private readonly IServerLaunchPlanner _launchPlanner;
+    private readonly Func<IServerRuntime, ServerInitializationWorkflow> _createInitializationWorkflow;
     private readonly ILocalFileSystem _fileSystem;
     private readonly IServerManager _serverManager;
     private readonly ILoaderCatalogService _loaderCatalog;
@@ -103,7 +103,7 @@ public sealed partial class CreateServerViewModel : PageViewModel, IDisposable
         IMinecraftJavaRequirementService javaRequirementService,
         IJavaInstaller javaInstaller,
         IServerRuntimeHost runtimeHost,
-        IServerLaunchPlanner launchPlanner)
+        Func<IServerRuntime, ServerInitializationWorkflow> createInitializationWorkflow)
         : base("建立新伺服器")
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
@@ -116,14 +116,14 @@ public sealed partial class CreateServerViewModel : PageViewModel, IDisposable
         ArgumentNullException.ThrowIfNull(javaRequirementService);
         ArgumentNullException.ThrowIfNull(javaInstaller);
         ArgumentNullException.ThrowIfNull(runtimeHost);
-        ArgumentNullException.ThrowIfNull(launchPlanner);
+        ArgumentNullException.ThrowIfNull(createInitializationWorkflow);
 
         _ui = uiService;
         _javaDetector = javaDetector;
         _javaRequirementService = javaRequirementService;
         _javaInstaller = javaInstaller;
         _runtimeHost = runtimeHost;
-        _launchPlanner = launchPlanner;
+        _createInitializationWorkflow = createInitializationWorkflow;
         _fileSystem = fileSystem;
         _serverManager = serverManager;
         _loaderCatalog = loaderCatalog;
@@ -666,7 +666,8 @@ public sealed partial class CreateServerViewModel : PageViewModel, IDisposable
                 Logger.Information("伺服器檔案與腳本已建立完成: {Name}，路徑: {Path}，即將執行初次啟動初始化", created.Config.Name.Value, created.Config.Path);
 
                 bool initSuccess;
-                using (var initVm = new ServerInitializationViewModel(_runtimeHost.GetRuntime(created.Config.Name.Value), _launchPlanner, created.Config, effectiveJavaPath, _ui))
+                IServerRuntime initRuntime = _runtimeHost.GetRuntime(created.Config.Name.Value);
+                using (var initVm = new ServerInitializationViewModel(initRuntime, _createInitializationWorkflow(initRuntime), created.Config, effectiveJavaPath, _ui))
                 {
                     initSuccess = await _ui.ShowServerInitializationAsync(initVm);
                 }
@@ -725,7 +726,7 @@ public sealed partial class CreateServerViewModel : PageViewModel, IDisposable
     private void UpdateMemoryWarning()
     {
         var check = Core.Utilities.MemoryUtils.CheckServerMemory(MaxMemoryMb, MinMemoryMb, _systemMemoryMb);
-        MemoryWarningText = check.Level == Core.Utilities.MemoryCheckLevel.Ok ? string.Empty : $"⚠️ 警告：{check.Message}";
+        MemoryWarningText = check.Level == Core.Utilities.MemoryCheckLevel.Ok ? string.Empty : $"警告：{check.Message}";
         IsMemoryError = check.Level == Core.Utilities.MemoryCheckLevel.Error;
     }
 

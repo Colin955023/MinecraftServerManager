@@ -7,6 +7,10 @@ namespace MinecraftServerManager.App.Collections;
 /// <summary>支援批次更新的集合；整批取代只發一次 Reset 通知</summary>
 public sealed partial class BulkObservableCollection<T> : ObservableCollection<T>
 {
+    private static readonly PropertyChangedEventArgs CountChangedArgs = new(nameof(Count));
+    private static readonly PropertyChangedEventArgs IndexerChangedArgs = new("Item[]");
+    private static readonly NotifyCollectionChangedEventArgs ResetArgs = new(NotifyCollectionChangedAction.Reset);
+
     public BulkObservableCollection()
     {
     }
@@ -34,9 +38,9 @@ public sealed partial class BulkObservableCollection<T> : ObservableCollection<T
             }
         }
 
-        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
-        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
-        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+        OnPropertyChanged(CountChangedArgs);
+        OnPropertyChanged(IndexerChangedArgs);
+        OnCollectionChanged(ResetArgs);
     }
 
     /// <summary>逐筆附加，超過上限時自前端修剪至目標數量</summary>

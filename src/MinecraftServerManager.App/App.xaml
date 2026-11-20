@@ -9,92 +9,176 @@
                 <ResourceDictionary>
                         <ResourceDictionary.MergedDictionaries>
                                 <controls:XamlControlsResources />
-                                <ResourceDictionary Source="ms-appx:///Resources/ColorIcons.xaml" />
+                                <ResourceDictionary Source="ms-appx:///Resources/Glyphs.xaml" />
                         </ResourceDictionary.MergedDictionaries>
 
                         <ResourceDictionary.ThemeDictionaries>
                                 <!-- 深色主題（Default 即 Dark） -->
                                 <ResourceDictionary x:Key="Default">
-                                        <SolidColorBrush x:Key="WindowBrush"
-                                                Color="#101114" />
-                                        <SolidColorBrush x:Key="SidebarBrush"
-                                                Color="#17191E" />
-                                        <SolidColorBrush x:Key="CardBrush"
-                                                Color="#1F2229" />
-                                        <SolidColorBrush x:Key="BorderBrush"
-                                                Color="#353A45" />
-                                        <SolidColorBrush x:Key="TextBrush"
-                                                Color="#F3F4F6" />
-                                        <SolidColorBrush x:Key="MutedTextBrush"
-                                                Color="#A5ACB9" />
-                                        <SolidColorBrush x:Key="AccentBrush"
-                                                Color="#4F6FD8" />
-                                        <SolidColorBrush x:Key="WarningBrush"
-                                                Color="#F59E0B" />
+                                        <!-- 實心危險／成功按鈕底色 -->
                                         <SolidColorBrush x:Key="DangerBrush"
                                                 Color="#B91C1C" />
                                         <SolidColorBrush x:Key="SuccessBrush"
                                                 Color="#238636" />
+                                        <!-- 實心按鈕停用狀態（對齊 Fluent
+                                        AccentFillColorDisabled／TextOnAccentFillColorDisabled） -->
+                                        <SolidColorBrush x:Key="SolidButtonDisabledBackgroundBrush"
+                                                Color="#28FFFFFF" />
+                                        <SolidColorBrush x:Key="SolidButtonDisabledForegroundBrush"
+                                                Color="#87FFFFFF" />
+                                        <!-- 程式碼以鍵解析之語意筆刷（ThemeBrush）：須為實色，StaticResource 別名會依系統主題解析 -->
                                         <SolidColorBrush x:Key="SuccessTextBrush"
-                                                Color="#3FB950" />
+                                                Color="#6CCB5F" />
                                         <SolidColorBrush x:Key="DangerTextBrush"
-                                                Color="#F85149" />
-                                        <SolidColorBrush x:Key="DataGridGridLineBrush"
-                                                Color="#3F4552" />
+                                                Color="#FF99A4" />
+                                        <SolidColorBrush x:Key="WarningTextBrush"
+                                                Color="#FCE100" />
+                                        <SolidColorBrush x:Key="MutedTextBrush"
+                                                Color="#C5FFFFFF" />
+                                        <SolidColorBrush x:Key="NotificationBackgroundBrush"
+                                                Color="#282828" />
 
-                                        <!-- 強調色控制項筆刷覆蓋 -->
+                                        <!-- 強調色專用鍵：框架同名鍵在非系統主題不受此處覆寫，自訂強調色須經專用鍵套用 -->
+                                        <SolidColorBrush x:Key="AccentBrush"
+                                                Color="#4F6FD8" />
+                                        <SolidColorBrush x:Key="AccentForegroundBrush"
+                                                Color="#FFFFFF" />
+                                        <SolidColorBrush x:Key="AccentTextBrush"
+                                                Color="#4F6FD8" />
+
+                                        <!-- 框架強調色鍵（系統主題下的控制項狀態） -->
                                         <Color x:Key="SystemAccentColor">#4F6FD8</Color>
                                         <SolidColorBrush x:Key="AccentFillColorDefaultBrush"
                                                 Color="#4F6FD8" />
                                         <SolidColorBrush x:Key="AccentFillColorSecondaryBrush"
-                                                Color="#3D5CC4" />
+                                                Color="#4F6FD8" />
                                         <SolidColorBrush x:Key="AccentFillColorTertiaryBrush"
-                                                Color="#314CA4" />
+                                                Color="#4F6FD8" />
                                         <SolidColorBrush x:Key="AccentFillColorDisabledBrush"
-                                                Color="#804F6FD8" />
+                                                Color="#644F6FD8" />
+                                        <SolidColorBrush x:Key="AccentTextFillColorPrimaryBrush"
+                                                Color="#4F6FD8" />
+                                        <SolidColorBrush x:Key="AccentButtonForeground"
+                                                Color="#FFFFFF" />
+                                        <SolidColorBrush x:Key="AccentButtonForegroundPointerOver"
+                                                Color="#FFFFFF" />
+                                        <SolidColorBrush x:Key="AccentButtonForegroundPressed"
+                                                Color="#FFFFFF" />
                                 </ResourceDictionary>
 
                                 <!-- 淺色主題 -->
                                 <ResourceDictionary x:Key="Light">
-                                        <SolidColorBrush x:Key="WindowBrush"
-                                                Color="#F5F6FA" />
-                                        <SolidColorBrush x:Key="SidebarBrush"
-                                                Color="#FFFFFF" />
-                                        <SolidColorBrush x:Key="CardBrush"
-                                                Color="#FFFFFF" />
-                                        <SolidColorBrush x:Key="BorderBrush"
-                                                Color="#D9DEE8" />
-                                        <SolidColorBrush x:Key="TextBrush"
-                                                Color="#1A1D24" />
-                                        <SolidColorBrush x:Key="MutedTextBrush"
-                                                Color="#5E6675" />
-                                        <SolidColorBrush x:Key="AccentBrush"
-                                                Color="#4F6FD8" />
-                                        <SolidColorBrush x:Key="WarningBrush"
-                                                Color="#B45309" />
+                                        <!-- 實心危險／成功按鈕底色 -->
                                         <SolidColorBrush x:Key="DangerBrush"
                                                 Color="#DC2626" />
                                         <SolidColorBrush x:Key="SuccessBrush"
                                                 Color="#1A7F37" />
+                                        <!-- 實心按鈕停用狀態（對齊 Fluent
+                                        AccentFillColorDisabled／TextOnAccentFillColorDisabled） -->
+                                        <SolidColorBrush x:Key="SolidButtonDisabledBackgroundBrush"
+                                                Color="#37000000" />
+                                        <SolidColorBrush x:Key="SolidButtonDisabledForegroundBrush"
+                                                Color="#FFFFFF" />
+                                        <!-- 程式碼以鍵解析之語意筆刷（ThemeBrush）：須為實色，StaticResource 別名會依系統主題解析 -->
                                         <SolidColorBrush x:Key="SuccessTextBrush"
-                                                Color="#1A7F37" />
+                                                Color="#0F7B0F" />
                                         <SolidColorBrush x:Key="DangerTextBrush"
-                                                Color="#CF222E" />
-                                        <SolidColorBrush x:Key="DataGridGridLineBrush"
-                                                Color="#D1D5DB" />
+                                                Color="#C42B1C" />
+                                        <SolidColorBrush x:Key="WarningTextBrush"
+                                                Color="#9D5D00" />
+                                        <SolidColorBrush x:Key="MutedTextBrush"
+                                                Color="#9E000000" />
+                                        <SolidColorBrush x:Key="NotificationBackgroundBrush"
+                                                Color="#F9F9F9" />
 
-                                        <!-- 強調色控制項筆刷覆蓋 -->
+                                        <!-- 強調色專用鍵：框架同名鍵在非系統主題不受此處覆寫，自訂強調色須經專用鍵套用 -->
+                                        <SolidColorBrush x:Key="AccentBrush"
+                                                Color="#4F6FD8" />
+                                        <SolidColorBrush x:Key="AccentForegroundBrush"
+                                                Color="#FFFFFF" />
+                                        <SolidColorBrush x:Key="AccentTextBrush"
+                                                Color="#4F6FD8" />
+
+                                        <!-- 框架強調色鍵（系統主題下的控制項狀態） -->
                                         <Color x:Key="SystemAccentColor">#4F6FD8</Color>
                                         <SolidColorBrush x:Key="AccentFillColorDefaultBrush"
                                                 Color="#4F6FD8" />
                                         <SolidColorBrush x:Key="AccentFillColorSecondaryBrush"
-                                                Color="#3D5CC4" />
+                                                Color="#4F6FD8" />
                                         <SolidColorBrush x:Key="AccentFillColorTertiaryBrush"
-                                                Color="#314CA4" />
+                                                Color="#4F6FD8" />
                                         <SolidColorBrush x:Key="AccentFillColorDisabledBrush"
-                                                Color="#804F6FD8" />
+                                                Color="#644F6FD8" />
+                                        <SolidColorBrush x:Key="AccentTextFillColorPrimaryBrush"
+                                                Color="#4F6FD8" />
+                                        <SolidColorBrush x:Key="AccentButtonForeground"
+                                                Color="#FFFFFF" />
+                                        <SolidColorBrush x:Key="AccentButtonForegroundPointerOver"
+                                                Color="#FFFFFF" />
+                                        <SolidColorBrush x:Key="AccentButtonForegroundPressed"
+                                                Color="#FFFFFF" />
                                 </ResourceDictionary>
                         </ResourceDictionary.ThemeDictionaries>
+
+                        <!-- 間距 token（4px 網格） -->
+                        <Thickness x:Key="PageContentMargin">28,20,28,20</Thickness>
+                        <Thickness x:Key="CardPadding">12</Thickness>
+                        <Thickness x:Key="DialogPadding">20</Thickness>
+                        <Thickness x:Key="CardHeaderPadding">12,10</Thickness>
+                        <Thickness x:Key="CompactButtonPadding">12,4</Thickness>
+                        <CornerRadius x:Key="TableHeaderCornerRadius">4,4,0,0</CornerRadius>
+                        <CornerRadius x:Key="TableBodyCornerRadius">0,0,4,4</CornerRadius>
+
+                        <!-- 實心按鈕共用範本：底色取自樣式，暫留／按下以不透明度呈現（同 Fluent 強調色 90%／80%），停用改用專用筆刷 -->
+                        <ControlTemplate x:Key="SolidButtonTemplate"
+                                TargetType="Button">
+                                <ContentPresenter x:Name="ContentPresenter"
+                                        Background="{TemplateBinding Background}"
+                                        BackgroundSizing="{TemplateBinding BackgroundSizing}"
+                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                        BorderThickness="{TemplateBinding BorderThickness}"
+                                        CornerRadius="{TemplateBinding CornerRadius}"
+                                        Content="{TemplateBinding Content}"
+                                        ContentTemplate="{TemplateBinding ContentTemplate}"
+                                        ContentTransitions="{TemplateBinding ContentTransitions}"
+                                        Padding="{TemplateBinding Padding}"
+                                        HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                        VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                        AutomationProperties.AccessibilityView="Raw">
+                                        <VisualStateManager.VisualStateGroups>
+                                                <VisualStateGroup x:Name="CommonStates">
+                                                        <VisualState x:Name="Normal" />
+                                                        <VisualState x:Name="PointerOver">
+                                                                <VisualState.Setters>
+                                                                        <Setter
+                                                                                Target="ContentPresenter.Opacity"
+                                                                                Value="0.9" />
+                                                                </VisualState.Setters>
+                                                        </VisualState>
+                                                        <VisualState x:Name="Pressed">
+                                                                <VisualState.Setters>
+                                                                        <Setter
+                                                                                Target="ContentPresenter.Opacity"
+                                                                                Value="0.8" />
+                                                                </VisualState.Setters>
+                                                        </VisualState>
+                                                        <VisualState x:Name="Disabled">
+                                                                <VisualState.Setters>
+                                                                        <Setter
+                                                                                Target="ContentPresenter.Background"
+                                                                                Value="{ThemeResource SolidButtonDisabledBackgroundBrush}" />
+                                                                        <Setter
+                                                                                Target="ContentPresenter.BorderBrush"
+                                                                                Value="Transparent" />
+                                                                        <Setter
+                                                                                Target="ContentPresenter.Foreground"
+                                                                                Value="{ThemeResource SolidButtonDisabledForegroundBrush}" />
+                                                                </VisualState.Setters>
+                                                        </VisualState>
+                                                </VisualStateGroup>
+                                        </VisualStateManager.VisualStateGroups>
+                                </ContentPresenter>
+                        </ControlTemplate>
 
                         <!-- 主要突顯按鈕樣式 (Primary) -->
                         <Style x:Key="PrimaryButtonStyle"
@@ -103,9 +187,11 @@
                                 <Setter Property="Background"
                                         Value="{ThemeResource AccentBrush}" />
                                 <Setter Property="Foreground"
-                                        Value="#FFFFFF" />
+                                        Value="{ThemeResource AccentForegroundBrush}" />
+                                <Setter Property="Template"
+                                        Value="{StaticResource SolidButtonTemplate}" />
                                 <Setter Property="CornerRadius"
-                                        Value="6" />
+                                        Value="{StaticResource ControlCornerRadius}" />
                                 <Setter Property="Padding"
                                         Value="14,4" />
                                 <Setter Property="MinHeight"
@@ -121,10 +207,12 @@
                                 TargetType="Button">
                                 <Setter Property="Foreground"
                                         Value="#FFFFFF" />
+                                <Setter Property="Template"
+                                        Value="{StaticResource SolidButtonTemplate}" />
                                 <Setter Property="BorderThickness"
                                         Value="1" />
                                 <Setter Property="CornerRadius"
-                                        Value="6" />
+                                        Value="{StaticResource ControlCornerRadius}" />
                                 <Setter Property="Padding"
                                         Value="14,4" />
                                 <Setter Property="MinHeight"
@@ -155,28 +243,6 @@
                                         Value="{ThemeResource SuccessBrush}" />
                         </Style>
 
-                        <!-- 左側導覽列按鈕樣式 (NavButton) -->
-                        <Style x:Key="NavButtonStyle"
-                                TargetType="Button">
-                                <Setter Property="Background"
-                                        Value="Transparent" />
-                                <Setter Property="BorderBrush"
-                                        Value="Transparent" />
-                                <Setter Property="BorderThickness"
-                                        Value="0" />
-                                <Setter Property="Foreground"
-                                        Value="{ThemeResource TextBrush}" />
-                                <Setter Property="HorizontalContentAlignment"
-                                        Value="Left" />
-                                <Setter Property="HorizontalAlignment"
-                                        Value="Stretch" />
-                                <Setter Property="CornerRadius"
-                                        Value="6" />
-                                <Setter Property="Padding"
-                                        Value="14,10" />
-                                <Setter Property="Margin"
-                                        Value="0,2" />
-                        </Style>
                         <!-- 全域 ComboBox 預設啟用滾輪選項切換 -->
                         <Style TargetType="ComboBox">
                                 <Setter
@@ -188,31 +254,23 @@
                         <Style x:Key="CardBorderStyle"
                                 TargetType="Border">
                                 <Setter Property="Background"
-                                        Value="{ThemeResource CardBrush}" />
+                                        Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
                                 <Setter Property="BorderBrush"
-                                        Value="{ThemeResource BorderBrush}" />
+                                        Value="{ThemeResource CardStrokeColorDefaultBrush}" />
                                 <Setter Property="BorderThickness"
                                         Value="1" />
+                                <Setter Property="CornerRadius"
+                                        Value="{StaticResource OverlayCornerRadius}" />
+                                <Setter Property="Padding"
+                                        Value="{StaticResource CardHeaderPadding}" />
                         </Style>
 
                         <!-- 區塊卡片 -->
                         <Style x:Key="PanelCardStyle"
                                 TargetType="Border"
                                 BasedOn="{StaticResource CardBorderStyle}">
-                                <Setter Property="CornerRadius"
-                                        Value="8" />
                                 <Setter Property="Padding"
-                                        Value="12" />
-                        </Style>
-
-                        <!-- 說明卡片 -->
-                        <Style x:Key="InfoCardStyle"
-                                TargetType="Border"
-                                BasedOn="{StaticResource CardBorderStyle}">
-                                <Setter Property="CornerRadius"
-                                        Value="6" />
-                                <Setter Property="Padding"
-                                        Value="10" />
+                                        Value="{StaticResource CardPadding}" />
                         </Style>
 
                         <!-- 忙碌進度列 -->
@@ -240,7 +298,7 @@
                                 <Setter Property="VerticalContentAlignment"
                                         Value="Stretch" />
                                 <Setter Property="BorderBrush"
-                                        Value="{ThemeResource DataGridGridLineBrush}" />
+                                        Value="{ThemeResource DividerStrokeColorDefaultBrush}" />
                                 <Setter Property="BorderThickness"
                                         Value="0,0,0,1" />
                                 <Setter Property="CornerRadius"
@@ -254,43 +312,46 @@
                                 Color="#00FF66" />
                         <SolidColorBrush x:Key="ConsoleMutedTextBrush"
                                 Color="#8B949E" />
+                        <FontFamily x:Key="ConsoleFontFamily">Consolas, Cascadia Code, Courier New</FontFamily>
 
                         <!-- 頁面標題 -->
                         <Style x:Key="PageTitleTextStyle"
                                 TargetType="TextBlock">
                                 <Setter Property="FontSize"
-                                        Value="26" />
+                                        Value="{StaticResource TitleTextBlockFontSize}" />
                                 <Setter Property="FontWeight"
-                                        Value="Bold" />
+                                        Value="SemiBold" />
                                 <Setter Property="Foreground"
-                                        Value="{ThemeResource TextBrush}" />
+                                        Value="{ThemeResource TextFillColorPrimaryBrush}" />
                         </Style>
 
                         <!-- 條列文字 -->
                         <Style x:Key="BulletTextStyle"
                                 TargetType="TextBlock">
                                 <Setter Property="Foreground"
-                                        Value="{ThemeResource TextBrush}" />
+                                        Value="{ThemeResource TextFillColorPrimaryBrush}" />
                                 <Setter Property="Margin"
                                         Value="0,2" />
+                                <Setter Property="TextWrapping"
+                                        Value="Wrap" />
                         </Style>
 
                         <!-- 區段標題 -->
                         <Style x:Key="SectionHeaderTextStyle"
                                 TargetType="TextBlock">
                                 <Setter Property="FontSize"
-                                        Value="16" />
+                                        Value="{StaticResource BodyLargeTextBlockFontSize}" />
                                 <Setter Property="FontWeight"
                                         Value="SemiBold" />
                                 <Setter Property="Foreground"
-                                        Value="{ThemeResource TextBrush}" />
+                                        Value="{ThemeResource TextFillColorPrimaryBrush}" />
                         </Style>
 
                         <!-- 表格儲存格：右側垂直分隔線 -->
                         <Style x:Key="TableCellBorderStyle"
                                 TargetType="Border">
                                 <Setter Property="BorderBrush"
-                                        Value="{ThemeResource DataGridGridLineBrush}" />
+                                        Value="{ThemeResource DividerStrokeColorDefaultBrush}" />
                                 <Setter Property="BorderThickness"
                                         Value="0,0,1,0" />
                         </Style>
@@ -306,10 +367,8 @@
                         <!-- 對話視窗根版面 -->
                         <Style x:Key="DialogRootGridStyle"
                                 TargetType="Grid">
-                                <Setter Property="Background"
-                                        Value="{ThemeResource WindowBrush}" />
                                 <Setter Property="Padding"
-                                        Value="20" />
+                                        Value="{StaticResource DialogPadding}" />
                                 <Setter Property="RowSpacing"
                                         Value="12" />
                         </Style>

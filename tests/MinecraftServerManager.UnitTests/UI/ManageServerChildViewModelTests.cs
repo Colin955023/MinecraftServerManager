@@ -9,7 +9,6 @@ using MinecraftServerManager.Infrastructure.Settings;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-/// <summary>伺服器管理頁子 ViewModel 測試</summary>
 public sealed class ManageServerChildViewModelTests : IDisposable
 {
     private readonly TempDirectory _rootTemp = new("msm-manage-child-");

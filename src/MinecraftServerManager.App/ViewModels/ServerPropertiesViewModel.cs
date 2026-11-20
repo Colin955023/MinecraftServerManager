@@ -120,6 +120,10 @@ public sealed partial class ServerPropertiesViewModel : ViewModelBase
     [ObservableProperty]
     public partial string StatusMessage { get; set; } = string.Empty;
 
+    /// <summary>狀態訊息是否為錯誤（決定 InfoBar 嚴重性）</summary>
+    [ObservableProperty]
+    public partial bool IsStatusError { get; set; }
+
     public BulkObservableCollection<PropertyEditItem> DisplayItems { get; } = [];
 
     private static readonly string[] CategoriesCache =
@@ -133,7 +137,7 @@ public sealed partial class ServerPropertiesViewModel : ViewModelBase
         "自訂屬性"
     ];
 
-    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "WinUI 3 x:Bind requires instance property when bound to ViewModel")]
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "x:Bind 靜態路徑在 SelectedCategory 之後才更新，ItemsSource 為空時 SelectedItem 會被回寫為 null")]
     public IReadOnlyList<string> Categories => CategoriesCache;
 
     public event Action<bool>? RequestClose;
@@ -209,7 +213,7 @@ public sealed partial class ServerPropertiesViewModel : ViewModelBase
         catch (Exception ex)
         {
             Logger.Warning(ex, "讀取伺服器屬性失敗");
-            StatusMessage = $"讀取屬性失敗：{ex.Message}";
+            SetStatus($"讀取屬性失敗：{ex.Message}", isError: true);
         }
     }
 
@@ -253,7 +257,7 @@ public sealed partial class ServerPropertiesViewModel : ViewModelBase
         {
             item.ResetToDefault();
         }
-        StatusMessage = "已將所有屬性還原為官方預設值";
+        SetStatus("已將所有屬性還原為官方預設值", isError: false);
     }
 
     [RelayCommand]
@@ -261,7 +265,7 @@ public sealed partial class ServerPropertiesViewModel : ViewModelBase
     {
         if (_snapshot is null)
         {
-            StatusMessage = "屬性尚未載入完成";
+            SetStatus("屬性尚未載入完成", isError: true);
             return;
         }
 
@@ -270,7 +274,7 @@ public sealed partial class ServerPropertiesViewModel : ViewModelBase
         {
             if (!item.Validate())
             {
-                StatusMessage = $"「{item.Key}」設定值無效：{item.ErrorMessage}";
+                SetStatus($"「{item.Key}」設定值無效：{item.ErrorMessage}", isError: true);
                 return;
             }
         }
@@ -294,7 +298,7 @@ public sealed partial class ServerPropertiesViewModel : ViewModelBase
             }
             else
             {
-                StatusMessage = $"儲存失敗：{result.Message}";
+                SetStatus($"儲存失敗：{result.Message}", isError: true);
             }
         }
         catch (OperationCanceledException)
@@ -304,7 +308,7 @@ public sealed partial class ServerPropertiesViewModel : ViewModelBase
         catch (Exception ex)
         {
             Logger.Error(ex, "儲存伺服器屬性失敗");
-            StatusMessage = $"儲存失敗：{ex.Message}";
+            SetStatus($"儲存失敗：{ex.Message}", isError: true);
         }
     }
 
@@ -324,5 +328,11 @@ public sealed partial class ServerPropertiesViewModel : ViewModelBase
         {
             RequestClose?.Invoke(false);
         }
+    }
+
+    private void SetStatus(string message, bool isError)
+    {
+        IsStatusError = isError;
+        StatusMessage = message;
     }
 }

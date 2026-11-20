@@ -3,7 +3,6 @@ using MinecraftServerManager.Core.Servers;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>伺服器根目錄檢查與遷移服務</summary>
 public sealed class ServersRootService : IServersRootService
 {
     public ServersRootCheck ValidateTargetRoot(string? currentRoot, string? newRoot)

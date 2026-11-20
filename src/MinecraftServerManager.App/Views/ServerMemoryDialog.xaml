@@ -4,8 +4,9 @@
   xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
   xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
   xmlns:vm="using:MinecraftServerManager.App.ViewModels"
+  xmlns:controls="using:MinecraftServerManager.App.Controls"
   mc:Ignorable="d"
-  Title="🧠 修改伺服器記憶體設定"
+  Title="修改伺服器記憶體設定"
   PrimaryButtonText="儲存設定"
   CloseButtonText="取消"
   DefaultButton="Primary"
@@ -14,44 +15,43 @@
   <StackPanel Margin="0,12,0,0"
     MinWidth="420">
     <TextBlock Text="{x:Bind ViewModel.ServerDetails}"
-      Foreground="{ThemeResource MutedTextBrush}"
-      FontSize="13"
+      Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+      FontSize="{StaticResource BodyTextBlockFontSize}"
       Margin="0,0,0,4" />
 
     <TextBlock Text="{x:Bind ViewModel.SystemMemoryText}"
-      Foreground="{ThemeResource AccentBrush}"
-      FontSize="13"
+      Foreground="{ThemeResource AccentTextBrush}"
+      FontSize="{StaticResource BodyTextBlockFontSize}"
       Margin="0,0,0,16" />
 
     <!-- 卡片輸入區 -->
     <Border Style="{StaticResource CardBorderStyle}"
-      CornerRadius="8"
       Padding="16"
       Margin="0,0,0,14">
       <StackPanel>
         <TextBlock Text="最大記憶體（-Xmx，單位 MB）："
-          FontSize="13"
+          FontSize="{StaticResource BodyTextBlockFontSize}"
           FontWeight="SemiBold"
-          Foreground="{ThemeResource TextBrush}"
+          Foreground="{ThemeResource TextFillColorPrimaryBrush}"
           Margin="0,0,0,6" />
-        <TextBox
+        <TextBox AutomationProperties.Name="最大記憶體"
           Text="{x:Bind ViewModel.MaxMemoryMb, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
           Margin="0,0,0,14" />
 
         <TextBlock Text="最小初始記憶體（-Xms，單位 MB，可留空）："
-          FontSize="13"
+          FontSize="{StaticResource BodyTextBlockFontSize}"
           FontWeight="SemiBold"
-          Foreground="{ThemeResource TextBrush}"
+          Foreground="{ThemeResource TextFillColorPrimaryBrush}"
           Margin="0,0,0,6" />
-        <TextBox
+        <TextBox AutomationProperties.Name="最小初始記憶體"
           Text="{x:Bind ViewModel.MinMemoryMb, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
       </StackPanel>
     </Border>
 
     <!-- 錯誤與警示訊息 -->
-    <TextBlock Text="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}"
-      Foreground="{ThemeResource DangerBrush}"
-      FontSize="12"
-      TextWrapping="Wrap" />
+    <InfoBar Severity="Error"
+      IsClosable="False"
+      IsOpen="{x:Bind controls:UiBindHelpers.HasText(ViewModel.ErrorMessage), Mode=OneWay}"
+      Message="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}" />
   </StackPanel>
 </ContentDialog>

@@ -318,7 +318,7 @@ public sealed class ServerManagerTests : IDisposable
         var registered = new ServerRegistryStore(tempDir.FullName).Find("Survival2");
         Assert.NotNull(registered);
 
-        // 模擬刪除進行到一半：伺服器目錄已被搬入墓碑，但登錄檔仍保留
+        // 模擬刪除進行到一半：伺服器目錄已被搬入墓碑，但伺服器清單檔仍保留
         ServerTombstoneManager.PrepareDeleteTombstone(tempDir.FullName, "Survival2", registered.Path);
         Assert.False(Directory.Exists(registered.Path));
 

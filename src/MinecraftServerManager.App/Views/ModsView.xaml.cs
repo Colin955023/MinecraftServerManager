@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using MinecraftServerManager.App.Controls;
@@ -16,13 +15,12 @@ public sealed partial class ModsView : UserControl
         ArgumentNullException.ThrowIfNull(viewModel);
         ViewModel = viewModel;
         InitializeComponent();
+        DeleteModsAccelerator.ScopeOwner = LocalModsListView;
     }
 
-    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "WinUI 3 x:Bind requires instance method")]
-    public Visibility GetLocalTabVisibility(int index) => index == 0 ? Visibility.Visible : Visibility.Collapsed;
+    public static Visibility GetLocalTabVisibility(int index) => index == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "WinUI 3 x:Bind requires instance method")]
-    public Visibility GetOnlineTabVisibility(int index) => index == 1 ? Visibility.Visible : Visibility.Collapsed;
+    public static Visibility GetOnlineTabVisibility(int index) => index == 1 ? Visibility.Visible : Visibility.Collapsed;
 
     private void OnLocalModsSelectionChanged(object sender, SelectionChangedEventArgs e) =>
         ViewModel.Local.SetSelectedMods(LocalModsListView.SelectedItems.OfType<LocalModRowItem>());
@@ -44,6 +42,17 @@ public sealed partial class ModsView : UserControl
     public ITableSortTarget OnlineSort => field ??= new TableSortTarget<OnlineModRowItem>(() => ViewModel.Online.OnlineMods, TableSortKeys.OnlineMods);
 
     private void OnOnlineModsDoubleTapped(object sender, Microsoft.UI.Xaml.Input.DoubleTappedRoutedEventArgs e) => ViewModel.PickOnlineModVersionCommand.TryExecute();
+
+    private void OnOnlineModsKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Enter && ViewModel.PickOnlineModVersionCommand.TryExecute())
+        {
+            e.Handled = true;
+        }
+    }
+
+    private void OnFocusSearchInvoked(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender, Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args) =>
+        args.Handled = (ViewModel.SelectedTabIndex == 0 ? LocalSearchBox : OnlineSearchBox).Focus(FocusState.Keyboard);
 
     private void OnlineSearchBox_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {

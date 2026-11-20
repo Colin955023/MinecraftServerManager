@@ -8,18 +8,13 @@
 
     <StackPanel Spacing="16"
         MinWidth="380">
-        <TextBlock Text="請選擇欲匯出的模組清單檔案格式："
-            Style="{StaticResource SecondaryCaptionTextStyle}" />
-
-        <StackPanel Spacing="10">
-            <RadioButton Content="純文字格式 (*.txt) — 適合快速檢閱與純文字備份"
-                IsChecked="True" />
-            <RadioButton x:Name="JsonRadio"
-                Content="JSON 格式 (*.json) — 包含完整中繼資料與雜湊值" />
-            <RadioButton x:Name="HtmlRadio"
-                Content="HTML 網頁報表 (*.html) — 具備視覺樣式之獨立表格" />
-            <RadioButton x:Name="XlsxRadio"
-                Content="Excel 工作表 (*.xlsx) — 適用於電子試算表軟體" />
-        </StackPanel>
+        <RadioButtons x:Name="FormatButtons"
+            Header="請選擇欲匯出的模組清單檔案格式："
+            SelectedIndex="0">
+            <x:String>純文字格式 (*.txt) — 適合快速檢閱與純文字備份</x:String>
+            <x:String>JSON 格式 (*.json) — 包含完整中繼資料與雜湊值</x:String>
+            <x:String>HTML 網頁報表 (*.html) — 具備視覺樣式之獨立表格</x:String>
+            <x:String>Excel 工作表 (*.xlsx) — 適用於電子試算表軟體</x:String>
+        </RadioButtons>
     </StackPanel>
 </ContentDialog>

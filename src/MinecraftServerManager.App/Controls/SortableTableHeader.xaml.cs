@@ -206,7 +206,6 @@ public sealed partial class SortableTableHeader : UserControl
         FindSortTarget()?.Sort(SortPropertyName, nextDirection);
     }
 
-    /// <summary>取得所屬 TableFrame 的排序對象</summary>
     private ITableSortTarget? FindSortTarget()
     {
         for (DependencyObject? node = this; node is not null; node = VisualTreeHelper.GetParent(node))
@@ -242,7 +241,10 @@ public sealed partial class SortableTableHeader : UserControl
         }
     }
 
-    private void OnSplitterPointerEntered(object sender, PointerRoutedEventArgs e) => ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeWestEast);
+    private void OnSplitterPointerEntered(object sender, PointerRoutedEventArgs e) =>
+        ProtectedCursor = _resizeCursor ??= InputSystemCursor.Create(InputSystemCursorShape.SizeWestEast);
+
+    private InputSystemCursor? _resizeCursor;
 
     private void OnSplitterPointerExited(object sender, PointerRoutedEventArgs e)
     {

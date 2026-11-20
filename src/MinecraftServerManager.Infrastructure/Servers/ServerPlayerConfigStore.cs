@@ -6,7 +6,6 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>伺服器名單檔案存取</summary>
 public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerPlayerConfigStore));
@@ -16,7 +15,6 @@ public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
     private const string BannedIpsFileName = ServerDefaults.BannedIpsFileName;
     private const string UserCacheFileName = ServerDefaults.UserCacheFileName;
 
-    /// <summary>讀取伺服器的名單設定（管理員、白名單、封鎖玩家與封鎖 IP 等）</summary>
     public async Task<ServerPlayerConfigBundle> LoadBundleAsync(string serverPath, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverPath);
@@ -39,7 +37,6 @@ public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>將名單設定寫回伺服器資料夾</summary>
     public async Task SaveBundleAsync(string serverPath, ServerPlayerConfigBundle bundle, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverPath);

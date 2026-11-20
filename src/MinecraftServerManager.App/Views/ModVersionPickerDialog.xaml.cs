@@ -15,7 +15,7 @@ public sealed partial class ModVersionPickerDialog : Window
     {
         ViewModel = viewModel;
         InitializeComponent();
-        ModalWindowHost.ConfigureDialogWindow(this, "選擇模組版本", 820, 560, Bindings.StopTracking);
+        ModalWindowHost.ConfigureDialogWindow(this, $"選擇模組版本 - {viewModel.ProjectTitle}", 820, 560, Bindings.StopTracking);
 
         ViewModel.RequestClose += ModalWindowHost.CloseWithResult(this, success => DialogResult = success);
     }

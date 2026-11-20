@@ -24,7 +24,7 @@ export const DANGEROUS_JVM_PREFIXES = [
 export const JVM_PRESETS_ZGC = [
   { opt: "-XX:+UseZGC", desc: "啟用低延遲 ZGC 垃圾回收器（Java 21+ 建議）" },
   { opt: "-XX:+ZGenerational", desc: "啟用世代化 ZGC 以降低停頓時間" },
-  { opt: "-XX:+AlwaysPreTouch", desc: "啟動時預先配置記憶體分頁，減少運行期抖動" }
+  { opt: "-XX:+AlwaysPreTouch", desc: "啟動時預先配置記憶體分頁，減少執行期抖動" }
 ];
 
 export const JVM_PRESETS_G1 = [
@@ -215,7 +215,7 @@ export function createInitialState() {
           { fileName: "Modded-Fabric_20261113_2100.zip", size: "310.5 MB", created: "2026-11-13 21:00" }
         ],
         onlinePlayers: [],
-        consoleLogs: ["[系統] 伺服器目前未執行。按下上方「🚀 啟動」以啟動伺服器。"],
+        consoleLogs: ["[系統] 伺服器目前未執行。按下上方「啟動」以啟動伺服器。"],
         cmdHistory: [],
         properties: DEFAULT_PROPERTIES.map((p) =>
           p.key === "server-port" ? { ...p, val: "25566" } : p.key === "motd" ? { ...p, val: "Fabric 1.21.1 Modded World" } : { ...p }

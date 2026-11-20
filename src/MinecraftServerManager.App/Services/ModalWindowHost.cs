@@ -26,7 +26,7 @@ public static partial class ModalWindowHost
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool SetForegroundWindow(IntPtr hWnd);
 
-    /// <summary>設定對話視窗標題與尺寸，關閉時解除 x:Bind 追蹤</summary>
+    /// <summary>設定對話視窗標題、外框與尺寸，關閉時解除 x:Bind 追蹤</summary>
     public static void ConfigureDialogWindow(
         Window window,
         string title,
@@ -38,7 +38,9 @@ public static partial class ModalWindowHost
         ArgumentNullException.ThrowIfNull(stopBindings);
 
         window.Title = title;
+        WindowChromeService.ApplyDialog(window, title);
         WindowLayoutHelper.ResizeToDip(window, widthDip, heightDip);
+        WindowLayoutHelper.SetMinimumSizeDip(window, Math.Max(480, widthDip * 2 / 3), Math.Max(360, heightDip * 2 / 3));
         window.Closed += (_, _) => stopBindings();
     }
 
@@ -144,7 +146,7 @@ public static partial class ModalWindowHost
 
         // 套用視窗圖示與標題列主題
         WindowIconHelper.SetIcon(childWindow.AppWindow);
-        TitleBarThemeHelper.ApplyTitleBarTheme(childWindow.AppWindow, theme);
+        WindowChromeService.ApplyTheme(childWindow.AppWindow, theme);
 
         // 套用主題
         if (childWindow.Content is FrameworkElement fe)

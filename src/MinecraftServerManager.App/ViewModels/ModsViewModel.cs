@@ -54,7 +54,7 @@ public sealed partial class ModsViewModel : PageViewModel, IDisposable
         IModManager modManager,
         IModrinthClient modrinthClient,
         IExternalLauncher launcher)
-        : base("🧩 模組管理")
+        : base("模組管理")
     {
         ArgumentNullException.ThrowIfNull(dependencyPlanner);
         ArgumentNullException.ThrowIfNull(modListExporter);

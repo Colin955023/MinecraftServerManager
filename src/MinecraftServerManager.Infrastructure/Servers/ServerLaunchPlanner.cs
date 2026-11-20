@@ -5,7 +5,6 @@ using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>伺服器啟動規劃器實作</summary>
 public sealed class ServerLaunchPlanner : IServerLaunchPlanner
 {
     public ServerLaunchPlan CreatePlan(ServerConfig config, string launchTarget, string? javaPath = null)

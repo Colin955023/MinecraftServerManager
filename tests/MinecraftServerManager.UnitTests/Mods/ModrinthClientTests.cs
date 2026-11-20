@@ -4,7 +4,6 @@ using MinecraftServerManager.Infrastructure.Mods;
 
 namespace MinecraftServerManager.UnitTests.Mods;
 
-/// <summary>Modrinth REST API 用戶端測試</summary>
 public sealed class ModrinthClientTests
 {
     [Fact]

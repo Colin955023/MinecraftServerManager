@@ -4,7 +4,6 @@ using MinecraftServerManager.Infrastructure.Mods;
 
 namespace MinecraftServerManager.UnitTests.Mods;
 
-/// <summary>模組檔案操作與交易安裝測試</summary>
 public sealed class ModFileInstallerTests : IDisposable
 {
     private readonly TempDirectory _testDirTemp = new("msm_test_installer_");
@@ -55,6 +54,40 @@ public sealed class ModFileInstallerTests : IDisposable
         Assert.True(File.Exists(activeJar));
         string[] backupFiles = Directory.GetFiles(_modsDir, "conflictmod.conflict*.bak");
         Assert.Single(backupFiles);
+    }
+
+    [Fact]
+    public async Task SetModStateAsyncWithSameLengthDifferenceInLastChunkShouldCreateBackup()
+    {
+        var installer = new ModFileInstaller(CreateHttpPort());
+        byte[] content = new byte[200_000];
+        File.WriteAllBytes(Path.Combine(_modsDir, "tailmod.jar"), content);
+        content[^1] = 1;
+        File.WriteAllBytes(Path.Combine(_modsDir, "tailmod.jar.disabled"), content);
+
+        var result = await installer.SetModStateAsync(_modsDir, "tailmod", enable: true);
+
+        Assert.True(result.Completed);
+        Assert.Single(Directory.GetFiles(_modsDir, "tailmod.conflict*.bak"));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(81920)]
+    [InlineData(200_000)]
+    public async Task SetModStateAsyncWithIdenticalContentShouldRemoveDuplicate(int length)
+    {
+        var installer = new ModFileInstaller(CreateHttpPort());
+        byte[] content = new byte[length];
+        string disabledJar = Path.Combine(_modsDir, "samemod.jar.disabled");
+        File.WriteAllBytes(Path.Combine(_modsDir, "samemod.jar"), content);
+        File.WriteAllBytes(disabledJar, content);
+
+        var result = await installer.SetModStateAsync(_modsDir, "samemod", enable: true);
+
+        Assert.True(result.Completed);
+        Assert.False(File.Exists(disabledJar));
+        Assert.Empty(Directory.GetFiles(_modsDir, "samemod.conflict*.bak"));
     }
 
     [Fact]

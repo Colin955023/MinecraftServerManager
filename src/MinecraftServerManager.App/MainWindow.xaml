@@ -4,146 +4,95 @@
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
   xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-  xmlns:controls="using:MinecraftServerManager.App.Controls"
-  xmlns:local="using:MinecraftServerManager.App"
-  xmlns:views="using:MinecraftServerManager.App.Views"
-  xmlns:vm="using:MinecraftServerManager.App.ViewModels"
   mc:Ignorable="d">
 
-  <Grid x:Name="RootGrid"
-    Background="{ThemeResource WindowBrush}">
-    <Grid.ColumnDefinitions>
-      <!-- 側邊導覽寬度 240 -->
-      <ColumnDefinition Width="240" />
-      <ColumnDefinition Width="*" />
-    </Grid.ColumnDefinitions>
+  <Grid x:Name="RootGrid">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
 
-    <!-- 左側導覽列 -->
-    <Border Grid.Column="0"
-      Background="{ThemeResource SidebarBrush}"
-      BorderBrush="{ThemeResource BorderBrush}"
-      BorderThickness="0,0,1,0">
-      <Grid Margin="12,18,12,18">
-        <Grid.RowDefinitions>
-          <RowDefinition Height="Auto" />
-          <RowDefinition Height="*" />
-          <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+    <TitleBar x:Name="AppTitleBar"
+      Title="Minecraft 伺服器管理器" />
 
-        <!-- 頂部標題 -->
-        <StackPanel Grid.Row="0"
-          Margin="12,4,8,22">
-          <TextBlock Text="MINECRAFT"
-            FontSize="11"
-            FontWeight="Bold"
-            Foreground="{ThemeResource TextBrush}" />
-          <TextBlock Text="Server Manager"
-            Style="{StaticResource SectionHeaderTextStyle}"
-            Margin="0,1,0,0" />
-        </StackPanel>
+    <!-- 左側導覽：匯入與開啟資料夾為動作項目，不改變選取 -->
+    <NavigationView x:Name="NavView"
+      Grid.Row="1"
+      PaneDisplayMode="Left"
+      OpenPaneLength="240"
+      IsBackButtonVisible="Collapsed"
+      IsPaneToggleButtonVisible="False"
+      IsSettingsVisible="False"
+      IsTitleBarAutoPaddingEnabled="False"
+      ItemInvoked="OnNavItemInvoked">
+      <NavigationView.MenuItems>
+        <NavigationViewItem Content="建立伺服器"
+          Tag="create">
+          <NavigationViewItem.Icon>
+            <FontIcon Glyph="{StaticResource IconCreateServer}" />
+          </NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="管理伺服器"
+          Tag="manage">
+          <NavigationViewItem.Icon>
+            <FontIcon Glyph="{StaticResource IconManageServer}" />
+          </NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="模組管理"
+          Tag="mods">
+          <NavigationViewItem.Icon>
+            <FontIcon Glyph="{StaticResource IconMods}" />
+          </NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItemSeparator />
+        <NavigationViewItem Content="匯入伺服器"
+          Tag="import"
+          SelectsOnInvoked="False">
+          <NavigationViewItem.Icon>
+            <FontIcon Glyph="{StaticResource IconImport}" />
+          </NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="開啟資料夾"
+          Tag="open_folder"
+          SelectsOnInvoked="False">
+          <NavigationViewItem.Icon>
+            <FontIcon Glyph="{StaticResource IconFolder}" />
+          </NavigationViewItem.Icon>
+        </NavigationViewItem>
+      </NavigationView.MenuItems>
+      <NavigationView.FooterMenuItems>
+        <NavigationViewItem Content="關於與設定"
+          Tag="about_preferences">
+          <NavigationViewItem.Icon>
+            <FontIcon Glyph="{StaticResource IconAbout}" />
+          </NavigationViewItem.Icon>
+        </NavigationViewItem>
+      </NavigationView.FooterMenuItems>
 
-        <!-- 主要導覽項目與操作按鈕 -->
-        <StackPanel Grid.Row="1"
-          Spacing="4">
-          <!-- 建立伺服器 -->
-          <Button Click="OnNavigateClicked"
-            Tag="create"
-            Style="{StaticResource NavButtonStyle}">
-            <controls:IconLabel Icon="{StaticResource IconCreateServer}"
-              Text="建立伺服器"
-              IconSize="18"
-              Spacing="12"
-              FontSize="14"
-              Foreground="{ThemeResource TextBrush}"
-              VerticalAlignment="Center" />
-          </Button>
-
-          <!-- 管理伺服器 -->
-          <Button Click="OnNavigateClicked"
-            Tag="manage"
-            Style="{StaticResource NavButtonStyle}">
-            <controls:IconLabel Icon="{StaticResource IconManageServer}"
-              Text="管理伺服器"
-              IconSize="18"
-              Spacing="12"
-              FontSize="14"
-              Foreground="{ThemeResource TextBrush}"
-              VerticalAlignment="Center" />
-          </Button>
-
-          <!-- 模組管理 -->
-          <Button Click="OnNavigateClicked"
-            Tag="mods"
-            Style="{StaticResource NavButtonStyle}">
-            <controls:IconLabel Icon="{StaticResource IconMods}"
-              Text="模組管理"
-              IconSize="18"
-              Spacing="12"
-              FontSize="14"
-              Foreground="{ThemeResource TextBrush}"
-              VerticalAlignment="Center" />
-          </Button>
-
-          <!-- 分隔線 -->
-          <Border Height="1"
-            Background="{ThemeResource BorderBrush}"
-            Margin="8,8,8,8" />
-
-          <!-- 匯入伺服器 -->
-          <Button Click="OnImportServerClicked"
-            Style="{StaticResource NavButtonStyle}">
-            <controls:IconLabel Icon="{StaticResource IconImport}"
-              Text="匯入伺服器"
-              IconSize="18"
-              Spacing="12"
-              FontSize="14"
-              Foreground="{ThemeResource TextBrush}"
-              VerticalAlignment="Center" />
-          </Button>
-
-          <!-- 開啟資料夾 -->
-          <Button Click="OnOpenFolderClicked"
-            Style="{StaticResource NavButtonStyle}">
-            <controls:IconLabel Icon="{StaticResource IconFolder}"
-              Text="開啟資料夾"
-              IconSize="18"
-              Spacing="12"
-              FontSize="14"
-              Foreground="{ThemeResource TextBrush}"
-              VerticalAlignment="Center" />
-          </Button>
-        </StackPanel>
-
-        <!-- 底部固定設定項目 -->
-        <StackPanel Grid.Row="2">
-          <Border Height="1"
-            Background="{ThemeResource BorderBrush}"
-            Margin="8,8,8,12" />
-          <Button Click="OnNavigateClicked"
-            Tag="about_preferences"
-            Style="{StaticResource NavButtonStyle}">
-            <controls:IconLabel Icon="{StaticResource IconAbout}"
-              Text="關於與設定"
-              IconSize="18"
-              Spacing="12"
-              FontSize="14"
-              Foreground="{ThemeResource TextBrush}"
-              VerticalAlignment="Center" />
-          </Button>
+      <!-- 主要內容區與右上角 InfoBar 通知容器 -->
+      <Grid>
+        <ContentPresenter x:Name="PageContentHost"
+          Margin="{StaticResource PageContentMargin}">
+          <ContentPresenter.ContentTransitions>
+            <TransitionCollection>
+              <EntranceThemeTransition FromVerticalOffset="24" />
+            </TransitionCollection>
+          </ContentPresenter.ContentTransitions>
+        </ContentPresenter>
+        <StackPanel x:Name="NotificationContainer"
+          VerticalAlignment="Top"
+          HorizontalAlignment="Right"
+          Margin="0,8,24,0"
+          Spacing="8"
+          Canvas.ZIndex="1000">
+          <StackPanel.ChildrenTransitions>
+            <TransitionCollection>
+              <AddDeleteThemeTransition />
+              <RepositionThemeTransition />
+            </TransitionCollection>
+          </StackPanel.ChildrenTransitions>
         </StackPanel>
       </Grid>
-    </Border>
-
-    <!-- 右側主要內容區與右上角 InfoBar 通知容器（上緣避開標題列的視窗控制按鈕） -->
-    <Grid Grid.Column="1">
-      <ContentPresenter x:Name="PageContentHost"
-        Margin="28,20,28,20" />
-      <StackPanel x:Name="NotificationContainer"
-        VerticalAlignment="Top"
-        HorizontalAlignment="Right"
-        Margin="0,44,24,0"
-        Spacing="8"
-        Canvas.ZIndex="1000" />
-    </Grid>
+    </NavigationView>
   </Grid>
 </Window>

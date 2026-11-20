@@ -5,9 +5,9 @@
 
   <TextBlock TextTrimming="CharacterEllipsis">
     <Run Text="{x:Bind Label, Mode=OneWay}"
-      Foreground="{ThemeResource MutedTextBrush}" />
+      Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
     <Run Text="{x:Bind Value, Mode=OneWay}"
-      Foreground="{ThemeResource TextBrush}"
+      Foreground="{ThemeResource TextFillColorPrimaryBrush}"
       FontWeight="{x:Bind ValueWeight, Mode=OneWay}" />
   </TextBlock>
 </UserControl>

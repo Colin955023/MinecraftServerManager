@@ -3,7 +3,6 @@ using MinecraftServerManager.Infrastructure.Servers;
 
 namespace MinecraftServerManager.UnitTests.Servers;
 
-/// <summary>latest.log 尾端讀取測試</summary>
 public sealed class ServerLogReaderTests : IDisposable
 {
     private static readonly UTF8Encoding Utf8NoBom = new(false);

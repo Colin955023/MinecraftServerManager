@@ -9,7 +9,7 @@
     <!-- .NET SDK 內建的預設投影套件 10.0.26100.57 會在裁剪時產生 IL2104 警告，指定較新的投影套件版本 -->
     <WindowsSdkPackageVersion>10.0.26100.87</WindowsSdkPackageVersion>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <Version>2.2.0</Version>
+    <Version>2.2.1</Version>
     <IsTrimmable Condition="!$(MSBuildProjectName.EndsWith('Tests'))">true</IsTrimmable>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -30,7 +30,7 @@
       Condition="'$(CsWinRTWindowsMetadata)' == '' and '$(WindowsSdkDir)' == ''">local</CsWinRTWindowsMetadata>
   </PropertyGroup>
   <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('Tests'))">
-    <NoWarn>$(NoWarn);CsWinRT1032;CA1859</NoWarn>
+    <NoWarn>$(NoWarn);CsWinRT1032</NoWarn>
   </PropertyGroup>
   <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>

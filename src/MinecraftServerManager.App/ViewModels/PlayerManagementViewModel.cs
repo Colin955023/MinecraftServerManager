@@ -352,6 +352,6 @@ public sealed partial class OperatorRowItem(string name, string uuid, bool isOp,
     partial void OnBypassesPlayerLimitChanged(bool value) => _onChanged();
 
     private static readonly int[] LevelsCache = [1, 2, 3, 4];
-    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "WinUI 3 x:Bind requires instance member for DataTemplate bindings")]
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "x:Bind 靜態路徑在 Level 之後才更新，ItemsSource 為空時 SelectedItem 回寫 null 會擲出例外")]
     public IReadOnlyList<int> AvailableLevels => LevelsCache;
 }

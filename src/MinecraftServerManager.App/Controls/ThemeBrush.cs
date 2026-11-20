@@ -75,6 +75,9 @@ public static class ThemeBrush
             case Control control:
                 control.Foreground = brush;
                 break;
+            case IconElement icon:
+                icon.Foreground = brush;
+                break;
         }
     }
 }

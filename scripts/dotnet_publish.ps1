@@ -1,13 +1,16 @@
-﻿[CmdletBinding()]
+﻿#Requires -Version 7.1
+[CmdletBinding()]
 param(
     # 發布後啟動主程式驗證可正常初始化（預設不啟用）
     [switch]$SmokeTest
 )
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot "lib\Common.ps1")
 Initialize-ScriptEnvironment
 
-$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+$repoRoot = Get-RepoRoot
 $projectPath = Join-Path $repoRoot "src\MinecraftServerManager.App\MinecraftServerManager.App.csproj"
 $outputRoot = Join-Path $repoRoot "output"
 $exeName = "MinecraftServerManager.exe"

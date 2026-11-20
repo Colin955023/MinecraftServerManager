@@ -8,10 +8,8 @@ internal sealed class TempDirectory : IDisposable
     public TempDirectory(string prefix = "msm-test-") =>
         FullName = Directory.CreateTempSubdirectory(prefix).FullName;
 
-    /// <summary>暫存目錄完整路徑</summary>
     public string FullName { get; }
 
-    /// <summary>組合暫存目錄下的子路徑</summary>
     public string Combine(params ReadOnlySpan<string> parts) =>
         Path.Combine(FullName, Path.Combine(parts));
 

@@ -14,25 +14,19 @@ public static class JsonCodec
 
     public const long DefaultMaxBytes = 2L * 1024 * 1024;
 
-    private static readonly JsonSerializerOptions CompactOptions = new()
-    {
-        PropertyNamingPolicy = null,
-        PropertyNameCaseInsensitive = true,
-    };
+    private static readonly AppJsonSerializerContext DefaultContext = AppJsonSerializerContext.Default;
 
-    private static readonly JsonSerializerOptions IndentedOptions = new(CompactOptions)
+    private static readonly JsonSerializerOptions IndentedOptions = new(DefaultContext.Options)
     {
         WriteIndented = true,
     };
 
-    private static readonly JsonSerializerOptions RelaxedIndentedOptions = new(IndentedOptions)
+    private static readonly AppJsonSerializerContext IndentedContext = new(IndentedOptions);
+
+    private static readonly AppJsonSerializerContext RelaxedContext = new(new JsonSerializerOptions(IndentedOptions)
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-    };
-
-    private static readonly AppJsonSerializerContext DefaultContext = new(CompactOptions);
-    private static readonly AppJsonSerializerContext IndentedContext = new(IndentedOptions);
-    private static readonly AppJsonSerializerContext RelaxedContext = new(RelaxedIndentedOptions);
+    });
 
     public static JsonDocument ParseDocument(string json, JsonDocumentOptions options = default) =>
         JsonDocument.Parse(json, options);

@@ -9,18 +9,17 @@
     xmlns:vm="using:MinecraftServerManager.App.ViewModels"
     mc:Ignorable="d">
 
-    <Grid Margin="0,0,16,16"
-        Background="Transparent">
+    <Grid Background="Transparent">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
+            <RowDefinition Height="*" MinHeight="160" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- 頂部標題 -->
         <TextBlock Grid.Row="0"
-            Text="⚙️ 管理伺服器"
+            Text="管理伺服器"
             Style="{StaticResource PageTitleTextStyle}"
             Margin="0,0,0,16" />
 
@@ -37,7 +36,7 @@
                 <TextBlock Grid.Column="0"
                     Text="偵測路徑："
                     VerticalAlignment="Center"
-                    Foreground="{ThemeResource TextBrush}"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Margin="0,0,2,0" />
                 <TextBox Grid.Column="1"
                     Text="{x:Bind ViewModel.List.DetectPath, Mode=OneWay}"
@@ -48,7 +47,6 @@
                     ToolTipService.ToolTip="修改伺服器存放主資料夾路徑">
                     <controls:IconLabel Icon="{StaticResource IconFolder}"
                         Text="修改路徑"
-                        Foreground="{ThemeResource TextBrush}"
                         VerticalAlignment="Center" />
                 </Button>
             </Grid>
@@ -59,21 +57,21 @@
                     Height="32">
                     <controls:IconLabel Icon="{StaticResource IconSearch}"
                         Text="偵測現有伺服器"
-                        Foreground="{ThemeResource TextBrush}"
                         VerticalAlignment="Center" />
                 </Button>
                 <Button Command="{x:Bind ViewModel.List.AddServerCommand}"
                     Height="32">
                     <controls:IconLabel Icon="{StaticResource IconCreateServer}"
                         Text="手動新增"
-                        Foreground="{ThemeResource TextBrush}"
                         VerticalAlignment="Center" />
                 </Button>
                 <Button Command="{x:Bind ViewModel.List.RefreshServersCommand}"
                     Height="32">
+                    <Button.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="F5" />
+                    </Button.KeyboardAccelerators>
                     <controls:IconLabel Icon="{StaticResource IconRefresh}"
                         Text="重新整理"
-                        Foreground="{ThemeResource TextBrush}"
                         VerticalAlignment="Center" />
                 </Button>
 
@@ -84,9 +82,10 @@
                     <ProgressBar Style="{StaticResource BusyProgressBarStyle}"
                         VerticalAlignment="Center"
                         Visibility="{x:Bind ViewModel.List.IsBusy, Mode=OneWay}" />
-                    <TextBlock Text="{x:Bind ViewModel.List.BusyStatusText, Mode=OneWay}"
-                        FontSize="12"
-                        Foreground="{ThemeResource AccentBrush}"
+                    <TextBlock AutomationProperties.LiveSetting="Polite"
+                        Text="{x:Bind ViewModel.List.BusyStatusText, Mode=OneWay}"
+                        FontSize="{StaticResource CaptionTextBlockFontSize}"
+                        Foreground="{ThemeResource AccentTextBrush}"
                         VerticalAlignment="Center" />
                 </StackPanel>
             </StackPanel>
@@ -95,7 +94,6 @@
         <!-- 中間卡片：伺服器清單 -->
         <Border Grid.Row="2"
             Style="{StaticResource CardBorderStyle}"
-            CornerRadius="8"
             Padding="16"
             Margin="0,0,0,14">
             <Grid>
@@ -106,12 +104,14 @@
 
                 <TextBlock Grid.Row="0"
                     Text="伺服器清單"
-                    FontSize="18"
+                    FontSize="{StaticResource BodyLargeTextBlockFontSize}"
                     FontWeight="SemiBold"
-                    Foreground="{ThemeResource TextBrush}"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Margin="0,0,0,12" />
 
-                <controls:TableFrame Grid.Row="1" SortTarget="{x:Bind HeaderSort}">
+                <controls:TableFrame Grid.Row="1" SortTarget="{x:Bind HeaderSort}"
+                    IsEmpty="{x:Bind controls:UiBindHelpers.IsIdleEmpty(ViewModel.List.Servers.Count, ViewModel.List.IsBusy), Mode=OneWay}"
+                    EmptyText="尚無伺服器，請先建立或匯入伺服器">
                     <controls:TableFrame.Header>
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -168,24 +168,42 @@
                         </Grid>
                     </controls:TableFrame.Header>
 
-                    <ListView ItemsSource="{x:Bind ViewModel.List.Servers}"
+                    <ListView x:Name="ServersListView"
+                        ItemsSource="{x:Bind ViewModel.List.Servers}"
                         SelectedItem="{x:Bind ViewModel.List.SelectedServer, Mode=TwoWay}"
                         SelectionMode="Single"
                         controls:ListSelectionBehavior.ClearOnOutsidePress="True"
                         MinHeight="180"
                         ItemContainerStyle="{StaticResource TableListViewItemStyle}"
-                        DoubleTapped="OnServersListViewDoubleTapped">
+                        DoubleTapped="OnServersListViewDoubleTapped"
+                        PreviewKeyDown="OnServersListViewKeyDown">
                         <ListView.ContextFlyout>
                             <MenuFlyout>
-                                <MenuFlyoutItem Text="🧠 修改記憶體設定"
-                                    Command="{x:Bind ViewModel.EditServerMemoryCommand}" />
-                                <MenuFlyoutItem Text="🔄 重新偵測伺服器"
-                                    Command="{x:Bind ViewModel.RecheckServerCommand}" />
+                                <MenuFlyoutItem Text="修改記憶體設定"
+                                    Command="{x:Bind ViewModel.EditServerMemoryCommand}">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="{StaticResource IconMemory}" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                                <MenuFlyoutItem Text="重新偵測伺服器"
+                                    Command="{x:Bind ViewModel.RecheckServerCommand}">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="{StaticResource IconRefresh}" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
                                 <MenuFlyoutSeparator />
-                                <MenuFlyoutItem Text="📂 開啟備份資料夾"
-                                    Command="{x:Bind ViewModel.Backup.OpenBackupFolderCommand}" />
-                                <MenuFlyoutItem Text="📁 修改備份路徑"
-                                    Command="{x:Bind ViewModel.Backup.EditBackupPathCommand}" />
+                                <MenuFlyoutItem Text="開啟備份資料夾"
+                                    Command="{x:Bind ViewModel.Backup.OpenBackupFolderCommand}">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="{StaticResource IconFolder}" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                                <MenuFlyoutItem Text="修改備份路徑"
+                                    Command="{x:Bind ViewModel.Backup.EditBackupPathCommand}">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="{StaticResource IconBackup}" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
                             </MenuFlyout>
                         </ListView.ContextFlyout>
 
@@ -247,13 +265,13 @@
         <StackPanel Grid.Row="3"
             Spacing="6">
             <TextBlock Text="操作"
-                FontSize="18"
+                FontSize="{StaticResource BodyLargeTextBlockFontSize}"
                 FontWeight="SemiBold"
-                Foreground="{ThemeResource TextBrush}" />
+                Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
 
             <!-- 未選取伺服器時的提示 -->
             <TextBlock Text="請於上方清單中選取伺服器以檢視詳細資訊與執行操作"
-                Foreground="{ThemeResource MutedTextBrush}"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 Margin="0,0,0,10"
                 Visibility="{x:Bind controls:UiBindHelpers.InverseBoolToVis(ViewModel.List.HasSelectedServer), Mode=OneWay}" />
 
@@ -354,17 +372,9 @@
                     Style="{StaticResource DangerButtonStyle}"
                     Width="120"
                     Height="32">
-                    <StackPanel Orientation="Horizontal"
-                        Spacing="6"
-                        VerticalAlignment="Center">
-                        <TextBlock Text="⏹️"
-                            FontSize="11"
-                            VerticalAlignment="Center"
-                            Foreground="#FFFFFF" />
-                        <TextBlock Text="停止"
-                            VerticalAlignment="Center"
-                            Foreground="#FFFFFF" />
-                    </StackPanel>
+                    <controls:IconLabel Icon="{StaticResource IconStop}"
+                        Text="停止"
+                        VerticalAlignment="Center" />
                 </Button>
 
                 <Button Command="{x:Bind ViewModel.Lifecycle.MonitorServerCommand}"
@@ -421,6 +431,10 @@
                     Style="{StaticResource DangerButtonStyle}"
                     Width="120"
                     Height="32">
+                    <Button.KeyboardAccelerators>
+                        <KeyboardAccelerator x:Name="DeleteServerAccelerator"
+                            Key="Delete" />
+                    </Button.KeyboardAccelerators>
                     <controls:IconLabel Icon="{StaticResource IconDelete}"
                         Text="刪除"
                         VerticalAlignment="Center" />

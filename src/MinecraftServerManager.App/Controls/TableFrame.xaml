@@ -9,18 +9,33 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <Border Grid.Row="0"
-            Background="{ThemeResource CardBrush}"
-            BorderBrush="{ThemeResource DataGridGridLineBrush}"
-            BorderThickness="1">
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="{StaticResource TableHeaderCornerRadius}">
             <ContentPresenter Content="{x:Bind Header, Mode=OneWay}"
                 HorizontalContentAlignment="Stretch" />
         </Border>
         <Border Grid.Row="1"
-            BorderBrush="{ThemeResource DataGridGridLineBrush}"
-            BorderThickness="1,0,1,1">
-            <ContentPresenter Content="{x:Bind Body, Mode=OneWay}"
-                HorizontalContentAlignment="Stretch"
-                VerticalContentAlignment="Stretch" />
+            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+            BorderThickness="1,0,1,1"
+            CornerRadius="{StaticResource TableBodyCornerRadius}">
+            <Grid>
+                <ContentPresenter Content="{x:Bind Body, Mode=OneWay}"
+                    HorizontalContentAlignment="Stretch"
+                    VerticalContentAlignment="Stretch" />
+                <TextBlock x:Name="EmptyTextBlock"
+                    x:Load="{x:Bind IsEmpty, Mode=OneWay}"
+                    Text="{x:Bind EmptyText, Mode=OneWay}"
+                    Style="{StaticResource BodyTextBlockStyle}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    TextAlignment="Center"
+                    Margin="{StaticResource CardPadding}"
+                    IsHitTestVisible="False"
+                    AutomationProperties.LiveSetting="Polite" />
+            </Grid>
         </Border>
     </Grid>
 </UserControl>

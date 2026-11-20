@@ -6,7 +6,6 @@ using MinecraftServerManager.Infrastructure.Servers;
 
 namespace MinecraftServerManager.UnitTests.Servers;
 
-/// <summary>呈現層連接埠實作測試</summary>
 public sealed class PresentationPortServiceTests : IDisposable
 {
     private readonly TempDirectory _rootTemp = new("msm-ports-");

@@ -2,7 +2,6 @@ using MinecraftServerManager.Core.Ports;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>多伺服器執行階段管理</summary>
 public sealed class ServerRuntimeHost(IProcessRunner processRunner, IRunningServerRegistry registry) : IServerRuntimeHost
 {
     private readonly Dictionary<string, ServerRuntime> _runtimes = new(StringComparer.OrdinalIgnoreCase);

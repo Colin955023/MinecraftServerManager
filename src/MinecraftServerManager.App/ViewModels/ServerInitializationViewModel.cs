@@ -3,7 +3,6 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Ports;
-using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Servers;
@@ -77,19 +76,20 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
 
     public ServerInitializationViewModel(
         IServerRuntime serverRuntime,
-        IServerLaunchPlanner launchPlanner,
+        ServerInitializationWorkflow workflow,
         ServerConfig config,
         string javaExecutablePath,
         IUiService uiService)
     {
         ArgumentNullException.ThrowIfNull(serverRuntime);
+        ArgumentNullException.ThrowIfNull(workflow);
         ArgumentNullException.ThrowIfNull(config);
 
         _ui = uiService;
         _serverRuntime = serverRuntime;
         _config = config;
         _javaExecutablePath = javaExecutablePath;
-        _workflow = new ServerInitializationWorkflow(serverRuntime, launchPlanner);
+        _workflow = workflow;
         TitleText = $"正在初始化伺服器「{config.Name.Value}」";
     }
 

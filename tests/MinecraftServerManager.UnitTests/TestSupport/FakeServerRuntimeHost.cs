@@ -2,7 +2,6 @@ using MinecraftServerManager.Core.Ports;
 
 namespace MinecraftServerManager.UnitTests.TestSupport;
 
-/// <summary>測試用多伺服器執行階段管理</summary>
 internal sealed class FakeServerRuntimeHost : IServerRuntimeHost
 {
     private readonly Dictionary<string, IServerRuntime> _runtimes = new(StringComparer.OrdinalIgnoreCase);

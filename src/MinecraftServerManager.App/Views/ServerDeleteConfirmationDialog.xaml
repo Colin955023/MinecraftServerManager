@@ -3,6 +3,7 @@
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
   xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:controls="using:MinecraftServerManager.App.Controls"
   mc:Ignorable="d"
   Title="確認刪除伺服器"
   PrimaryButtonText="{x:Bind PrimaryText, Mode=OneTime}"
@@ -13,11 +14,22 @@
   PrimaryButtonClick="Dialog_PrimaryButtonClick"
   SecondaryButtonClick="Dialog_SecondaryButtonClick">
 
-  <StackPanel Margin="0,12,0,0">
-    <TextBlock Text="{x:Bind Message, Mode=OneTime}"
+  <Grid Margin="0,12,0,0">
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="Auto" />
+      <ColumnDefinition Width="*" />
+    </Grid.ColumnDefinitions>
+    <FontIcon Glyph="{StaticResource IconWarning}"
+      FontFamily="{StaticResource SymbolThemeFontFamily}"
+      controls:ThemeBrush.ForegroundKey="WarningTextBrush"
+      FontSize="{StaticResource TitleTextBlockFontSize}"
+      VerticalAlignment="Top"
+      Margin="0,0,14,0" />
+    <TextBlock Grid.Column="1"
+      Text="{x:Bind Message, Mode=OneTime}"
       TextWrapping="Wrap"
-      FontSize="14"
+      FontSize="{StaticResource BodyTextBlockFontSize}"
       LineHeight="22"
-      Foreground="{ThemeResource TextBrush}" />
-  </StackPanel>
+      Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+  </Grid>
 </ContentDialog>

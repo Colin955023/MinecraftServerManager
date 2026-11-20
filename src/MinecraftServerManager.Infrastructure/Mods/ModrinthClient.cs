@@ -8,7 +8,6 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
-/// <summary>Modrinth REST API 用戶端實作</summary>
 public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
 {
     private static string GetStringOrEmpty(JsonElement element, string propertyName) =>

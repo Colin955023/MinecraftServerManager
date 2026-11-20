@@ -37,7 +37,7 @@ public sealed class MainViewModelTests : IDisposable
     [Theory]
     [InlineData("create", typeof(CreateServerViewModel), "建立新伺服器")]
     [InlineData("manage", typeof(ManageServerViewModel), "管理現有伺服器")]
-    [InlineData("mods", typeof(ModsViewModel), "🧩 模組管理")]
+    [InlineData("mods", typeof(ModsViewModel), "模組管理")]
     [InlineData("about_preferences", typeof(AboutPreferencesViewModel), "關於與設定")]
     public void NavigateShouldSwitchCurrentPageWhenKeyIsValid(string key, Type expectedType, string expectedTitle)
     {

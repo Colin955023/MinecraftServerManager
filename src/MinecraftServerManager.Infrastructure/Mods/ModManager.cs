@@ -5,7 +5,6 @@ using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
-/// <summary>模組管理外觀服務實作</summary>
 public sealed class ModManager(
     ILocalModScanner scanner,
     IModFileInstaller installer) : IModManager

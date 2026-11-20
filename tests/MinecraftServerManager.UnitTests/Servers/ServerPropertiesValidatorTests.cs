@@ -2,7 +2,6 @@ using MinecraftServerManager.Core.Servers;
 
 namespace MinecraftServerManager.UnitTests.Servers;
 
-/// <summary>伺服器屬性設定驗證器單元測試</summary>
 public sealed class ServerPropertiesValidatorTests
 {
     [Theory]

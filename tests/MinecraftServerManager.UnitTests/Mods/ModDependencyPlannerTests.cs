@@ -3,7 +3,6 @@ using MinecraftServerManager.Infrastructure.Mods;
 
 namespace MinecraftServerManager.UnitTests.Mods;
 
-/// <summary>模組相容性與相依性規劃測試</summary>
 public sealed class ModDependencyPlannerTests
 {
     [Fact]

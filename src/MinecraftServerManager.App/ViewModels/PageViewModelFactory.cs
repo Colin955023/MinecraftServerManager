@@ -16,7 +16,7 @@ public sealed class PageViewModelFactory(PageServices services)
         javaRequirementService: services.JavaRequirementService,
         javaInstaller: services.JavaInstaller,
         runtimeHost: services.RuntimeHost,
-        launchPlanner: services.LaunchPlanner);
+        createInitializationWorkflow: runtime => new Infrastructure.Servers.ServerInitializationWorkflow(runtime, services.LaunchPlanner));
 
     /// <summary>建立「管理現有伺服器」頁面及其四個子 ViewModel</summary>
     public ManageServerViewModel CreateManagePage(Action<string> navigate)

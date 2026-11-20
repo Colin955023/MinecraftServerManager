@@ -48,6 +48,7 @@ public sealed class HttpDownloadClient : IHttpPort
     private readonly HttpClient _client;
     private const int RequestMaxAttempts = 3;
     private const int RequestMaxRedirects = 10;
+    private static readonly TimeSpan ProgressReportInterval = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan RequestRetryDelay = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
 
@@ -199,7 +200,6 @@ public sealed class HttpDownloadClient : IHttpPort
             cancellationToken);
     }
 
-    /// <summary>取得 JSON 文件（呼叫端負責處置）</summary>
     public Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentAsync(
         Uri uri,
         CancellationToken cancellationToken = default)
@@ -214,7 +214,6 @@ public sealed class HttpDownloadClient : IHttpPort
             cancellationToken);
     }
 
-    /// <summary>安全取得文字內容</summary>
     public Task<string?> GetTextAsync(
         Uri uri,
         CancellationToken cancellationToken = default)
@@ -239,7 +238,6 @@ public sealed class HttpDownloadClient : IHttpPort
             failureFactory: (_, _) => null,
             cancellationToken);
     }
-    /// <summary>安全傳送 POST JSON 請求並取得文字回應</summary>
     public Task<string?> PostJsonAsync(
         Uri uri,
         string jsonPayload,
@@ -640,6 +638,8 @@ public sealed class HttpDownloadClient : IHttpPort
         {
             long downloaded = existingBytes;
             long total = totalBytes > 0 ? totalBytes : (response.Content.Headers.ContentLength ?? 0);
+            long reportedBytes = downloaded;
+            long lastReportTimestamp = 0;
             int read;
             while ((read = await source.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false)) > 0)
             {
@@ -652,7 +652,20 @@ public sealed class HttpDownloadClient : IHttpPort
 
                 await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
                 hash?.AppendData(buffer, 0, read);
-                progress?.Report(new HttpProgress(downloaded, total));
+
+                // 進度回報節流：最多每 100 毫秒一次，迴圈結束後補報最後一筆
+                long now = System.Diagnostics.Stopwatch.GetTimestamp();
+                if (progress is not null && System.Diagnostics.Stopwatch.GetElapsedTime(lastReportTimestamp, now) >= ProgressReportInterval)
+                {
+                    progress.Report(new HttpProgress(downloaded, total));
+                    reportedBytes = downloaded;
+                    lastReportTimestamp = now;
+                }
+            }
+
+            if (progress is not null && reportedBytes != downloaded)
+            {
+                progress.Report(new HttpProgress(downloaded, total));
             }
 
             await output.FlushAsync(cancellationToken).ConfigureAwait(false);

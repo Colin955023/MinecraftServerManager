@@ -23,10 +23,11 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
     private readonly IServerPropertiesStore _propertiesStore;
     private readonly IUiTimer _flushTimer;
     private readonly IUiTimer _statsTimer;
-    private const int MaxBufferedLines = 5000;
     private const int DisplayedLogsHighWatermark = 2200;
     private const int DisplayedLogsLowWatermark = 1800;
-    private readonly LogLineBuffer _logBuffer = new(MaxBufferedLines);
+
+    // 超過高水位即修剪至低水位，緩衝只需比高水位多一行即可觸發修剪
+    private readonly LogLineBuffer _logBuffer = new(DisplayedLogsHighWatermark + 1);
     private readonly string _serverPath;
     private readonly string _serverName;
     private long? _startTimestamp;
@@ -77,7 +78,6 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
 
     public bool HasNoOnlinePlayers => OnlinePlayers.Count == 0;
 
-    /// <summary>伺服器啟動委派</summary>
     private readonly Func<Task> _startRequestHandler;
     private readonly ServerStopCoordinator _stopCoordinator;
 

@@ -12,7 +12,10 @@ public static class UiBindHelpers
     public const string DangerTextBrushKey = "DangerTextBrush";
 
     /// <summary>警告狀態文字主題資源鍵</summary>
-    public const string WarningTextBrushKey = "WarningBrush";
+    public const string WarningTextBrushKey = "WarningTextBrush";
+
+    /// <summary>強調色文字主題資源鍵（由 AccentColorService 寫入主題字典）</summary>
+    public const string AccentTextBrushKey = "AccentTextBrush";
 
     /// <summary>次要文字主題資源鍵</summary>
     public const string MutedTextBrushKey = "MutedTextBrush";
@@ -24,6 +27,16 @@ public static class UiBindHelpers
     /// <summary>空白或 null 轉 Collapsed，否則 Visible</summary>
     public static Visibility NullOrWhitespaceToVis(string? value) =>
         string.IsNullOrWhiteSpace(value) ? Visibility.Collapsed : Visibility.Visible;
+
+    /// <summary>非空白字串為 true（InfoBar.IsOpen 用）</summary>
+    public static bool HasText(string? value) => !string.IsNullOrWhiteSpace(value);
+
+    /// <summary>項目數為 0 且非忙碌時為 true（表格空狀態用）</summary>
+    public static bool IsIdleEmpty(int count, bool isBusy) => count == 0 && !isBusy;
+
+    /// <summary>錯誤轉 Error，否則 Success</summary>
+    public static Microsoft.UI.Xaml.Controls.InfoBarSeverity ErrorSeverity(bool isError) =>
+        isError ? Microsoft.UI.Xaml.Controls.InfoBarSeverity.Error : Microsoft.UI.Xaml.Controls.InfoBarSeverity.Success;
 
     /// <summary>錯誤狀態前景資源鍵</summary>
     public static string ErrorBrushKey(bool hasError) =>

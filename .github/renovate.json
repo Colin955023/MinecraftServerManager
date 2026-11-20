@@ -123,8 +123,21 @@
       "prBodyNotes": [
         "⚠️ 必須同步更新 `build-release.yml` 中的 `SBOM_TOOL_SHA256`（`sbom-tool-win-x64.exe` 的 SHA-256），否則發布流程會因雜湊不符而中止。"
       ]
+    },
+    {
+      "description": "鎖定檔維護沒有單一套件發佈時間戳，排除 minimumReleaseAge 以避免 PR 長期卡在 pending",
+      "matchUpdateTypes": [
+        "lockFileMaintenance"
+      ],
+      "minimumReleaseAge": null,
+      "labels": [
+        "dependencies"
+      ]
     }
   ],
+  "lockFileMaintenance": {
+    "enabled": true
+  },
   "vulnerabilityAlerts": {
     "labels": [
       "dependencies",

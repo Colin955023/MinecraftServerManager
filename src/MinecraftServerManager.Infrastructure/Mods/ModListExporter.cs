@@ -18,7 +18,6 @@ public sealed class ModListExporter : IModListExporter
     private static readonly string[] XlsxHeaders =
         ["啟用狀態", "模組名稱", "版本", "Minecraft版本", "載入器", "作者", "檔案名稱", "模組ID", "檔案大小", "修改時間", "描述"];
 
-    /// <summary>將模組清單依指定格式匯出至檔案</summary>
     public async Task ExportAsync(
         IReadOnlyList<ModListExportRow> rows,
         ModListExportFormat format,

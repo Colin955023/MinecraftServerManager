@@ -2,7 +2,6 @@ using MinecraftServerManager.Core.Ports;
 
 namespace MinecraftServerManager.UnitTests.TestSupport;
 
-/// <summary>測試用行程啟動器替身</summary>
 internal sealed class StubProcessRunner : IProcessRunner
 {
     private readonly Func<ProcessStartSpec, IManagedProcess> _factory;
@@ -59,7 +58,6 @@ internal sealed class StubManagedProcess : IManagedProcess
     public int? ExitCode => HasExited ? _defaultExitCode : null;
     public List<string> WrittenLines { get; } = [];
 
-    /// <summary>行程被處置後完成</summary>
     public Task Disposed => _disposedTcs.Task;
 
     private readonly TaskCompletionSource _disposedTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);

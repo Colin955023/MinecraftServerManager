@@ -8,22 +8,16 @@
         <Grid Style="{StaticResource DialogRootGridStyle}">
                 <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <!-- 標題 -->
-                <TextBlock Grid.Row="0"
-                        Text="📦 發現可用模組更新"
-                        Style="{ThemeResource TitleTextBlockStyle}" />
-
                 <!-- 說明 -->
-                <TextBlock Grid.Row="1"
+                <TextBlock Grid.Row="0"
                         Text="下列模組在線上平台上有相容的新版本，請勾選要更新的模組後點選「立即更新所選模組」："
                         Style="{StaticResource SecondaryCaptionTextStyle}" />
 
-                <Border Grid.Row="2"
+                <Border Grid.Row="1"
                         Style="{StaticResource PanelCardStyle}">
                         <controls:TableFrame SortTarget="{x:Bind HeaderSort}">
                                 <controls:TableFrame.Header>
@@ -94,6 +88,7 @@
                                                                         Style="{StaticResource TableCellBorderStyle}"
                                                                         Padding="4,2">
                                                                         <CheckBox
+                                                                                AutomationProperties.Name="選取更新"
                                                                                 IsChecked="{x:Bind IsSelected, Mode=TwoWay}"
                                                                                 MinWidth="0"
                                                                                 HorizontalAlignment="Center"
@@ -122,9 +117,13 @@
                 </Border>
 
                 <!-- 底部操作列 -->
-                <Grid Grid.Row="3">
+                <Grid Grid.Row="2"
+                        ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
                         <StackPanel Orientation="Horizontal"
-                                HorizontalAlignment="Left"
                                 Spacing="8">
                                 <Button Content="全選"
                                         Click="OnSelectAllClicked" />
@@ -132,16 +131,16 @@
                                         Click="OnDeselectAllClicked" />
                         </StackPanel>
 
-                        <StackPanel Orientation="Horizontal"
-                                HorizontalAlignment="Right"
+                        <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
                                 Spacing="10">
+                                <Button Content="立即更新所選模組"
+                                        Click="OnUpdateClicked"
+                                        Style="{StaticResource PrimaryButtonStyle}"
+                                        MinWidth="140" />
                                 <Button Content="取消"
                                         Click="OnCancelClicked"
                                         MinWidth="80" />
-                                <Button Content="立即更新所選模組"
-                                        Click="OnUpdateClicked"
-                                        Style="{ThemeResource AccentButtonStyle}"
-                                        MinWidth="140" />
                         </StackPanel>
                 </Grid>
         </Grid>

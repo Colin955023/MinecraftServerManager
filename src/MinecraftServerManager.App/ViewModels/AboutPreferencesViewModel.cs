@@ -293,11 +293,9 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
             return "(無更新紀錄)";
         }
 
-        var trimmedLines = keptLines.Skip(start).Take(end - start + 1).ToList();
-
-        if (trimmedLines.Count > 15)
+        var trimmedLines = keptLines.GetRange(start, Math.Min(end - start + 1, 15));
+        if (end - start + 1 > 15)
         {
-            trimmedLines = [.. trimmedLines.Take(15)];
             trimmedLines.Add("... (完整內容請檢視發行頁面)");
         }
 
@@ -327,9 +325,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         SelectedThemeModeIndex = 0;
         ResetAccentColor();
 
-        TrySave(() => _settingsManager.SetAutoUpdateEnabled(true));
-        TrySave(() => _settingsManager.SetThemeMode("system"));
-        _onThemeModeChanged("system");
+        // 屬性變更處理常式已負責儲存與套用主題，此處不重複寫入
         _onResetWindowSizeRequested();
     }
 

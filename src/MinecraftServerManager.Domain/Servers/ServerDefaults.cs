@@ -27,7 +27,7 @@ public static class ServerDefaults
     /// <summary>Minecraft 伺服器標準預設通訊埠</summary>
     public const string DefaultPort = "25565";
 
-    /// <summary>伺服器登錄檔名（位於伺服器根目錄）</summary>
+    /// <summary>伺服器清單檔名（位於伺服器根目錄）</summary>
     public const string RegistryFileName = "servers.json";
 
     /// <summary>管理工具內部項目（墓碑、暫存）之名稱前綴，不可作為伺服器名稱</summary>

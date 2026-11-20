@@ -1,3 +1,4 @@
+using System.Buffers;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Utilities;
@@ -386,7 +387,6 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         return (enabledPath, disabledPath);
     }
 
-    /// <summary>指定的模組下載 URL 是否為官方 Modrinth CDN 來源</summary>
     public static bool IsOfficialModrinthSource(string? url)
     {
         if (string.IsNullOrWhiteSpace(url))
@@ -404,10 +404,40 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         return false;
     }
 
+    /// <summary>逐塊比對內容（呼叫端已確認長度相同）；讀取失敗視為不同</summary>
     private static async Task<bool> HasSameContentAsync(string firstFile, string secondFile, CancellationToken cancellationToken)
     {
-        string firstHash = await HashCalculator.ComputeFileHashAsync(firstFile, "sha256", cancellationToken: cancellationToken).ConfigureAwait(false);
-        return !string.IsNullOrEmpty(firstHash)
-            && string.Equals(firstHash, await HashCalculator.ComputeFileHashAsync(secondFile, "sha256", cancellationToken: cancellationToken).ConfigureAwait(false), StringComparison.OrdinalIgnoreCase);
+        const int ChunkSize = 81920;
+        byte[] firstBuffer = ArrayPool<byte>.Shared.Rent(ChunkSize);
+        byte[] secondBuffer = ArrayPool<byte>.Shared.Rent(ChunkSize);
+        try
+        {
+            using var first = SafeFileSystem.OpenRead(firstFile, FileShare.Read, FileOptions.SequentialScan | FileOptions.Asynchronous);
+            using var second = SafeFileSystem.OpenRead(secondFile, FileShare.Read, FileOptions.SequentialScan | FileOptions.Asynchronous);
+            while (true)
+            {
+                int firstRead = await first.ReadAtLeastAsync(firstBuffer.AsMemory(0, ChunkSize), ChunkSize, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
+                int secondRead = await second.ReadAtLeastAsync(secondBuffer.AsMemory(0, ChunkSize), ChunkSize, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
+                if (!firstBuffer.AsSpan(0, firstRead).SequenceEqual(secondBuffer.AsSpan(0, secondRead)))
+                {
+                    return false;
+                }
+
+                if (firstRead < ChunkSize)
+                {
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.Warning(ex, "比對模組檔案內容失敗: {FilePath}", firstFile);
+            return false;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(firstBuffer);
+            ArrayPool<byte>.Shared.Return(secondBuffer);
+        }
     }
 }

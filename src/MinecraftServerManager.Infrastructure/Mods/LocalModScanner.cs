@@ -10,7 +10,6 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
-/// <summary>本地模組目錄掃描器與 JAR 詮釋資料抽取實作</summary>
 public sealed class LocalModScanner : ILocalModScanner
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(LocalModScanner));

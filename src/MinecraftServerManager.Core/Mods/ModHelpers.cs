@@ -95,7 +95,7 @@ public static partial class ModHelpers
             return text;
         }
 
-        return ColorAndFormattingCodeRegex().Replace(text, string.Empty);
+        return ColorAndFormattingCodeRegex().Replace(text, static _ => string.Empty);
     }
 
     public static string NormalizeModSearchQuery(string rawQuery)
@@ -107,10 +107,10 @@ public static partial class ModHelpers
 
         string clean = ModFilenameStem(rawQuery);
         clean = StripColorAndFormattingCodes(clean);
-        clean = CamelCaseRegex().Replace(clean, " $1");
-        clean = CamelCaseAcronymBoundaryRegex().Replace(clean, " ");
+        clean = CamelCaseRegex().Replace(clean, static m => " " + m.Groups[1].Value);
+        clean = CamelCaseAcronymBoundaryRegex().Replace(clean, static _ => " ");
         clean = clean.Replace('_', ' ').Replace('-', ' ').Replace('+', ' ');
-        clean = CombinedModNoiseRegex().Replace(clean, " ");
+        clean = CombinedModNoiseRegex().Replace(clean, static _ => " ");
 
         var sb = new StringBuilder(clean.Length);
         foreach (var range in clean.AsSpan().Split(' '))

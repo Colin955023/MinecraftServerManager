@@ -124,6 +124,32 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
         Assert.Null(AccentColorService.ParseColor("#ZZZZZZ"));
     }
 
+    [Theory]
+    [InlineData("#FFB900", "#000000")]
+    [InlineData("#FFFFFF", "#000000")]
+    [InlineData("#0F2A5C", "#FFFFFF")]
+    [InlineData("#000000", "#FFFFFF")]
+    public void AccentColorService_GetReadableForeground_ShouldPickHigherContrast(string background, string expected)
+    {
+        var color = AccentColorService.ParseColor(background);
+        Assert.NotNull(color);
+        Assert.Equal(expected, AccentColorService.ToHex(AccentColorService.GetReadableForeground(color.Value)));
+    }
+
+    [Theory]
+    [InlineData("#284375", "#2C2C2C", "#8998B3")]
+    [InlineData("#FFB900", "#F3F3F3", "#8C6600")]
+    [InlineData("#0F2A5C", "#F3F3F3", "#0F2A5C")]
+    [InlineData("#4CC2FF", "#2C2C2C", "#4CC2FF")]
+    public void AccentColorService_EnsureTextContrast_ShouldReachMinimumContrast(string text, string background, string expected)
+    {
+        var textColor = AccentColorService.ParseColor(text);
+        var backgroundColor = AccentColorService.ParseColor(background);
+        Assert.NotNull(textColor);
+        Assert.NotNull(backgroundColor);
+        Assert.Equal(expected, AccentColorService.ToHex(AccentColorService.EnsureTextContrast(textColor.Value, backgroundColor.Value)));
+    }
+
     [Fact]
     public async Task CheckForUpdatesShouldNotifyWhenAlreadyLatestVersion()
     {

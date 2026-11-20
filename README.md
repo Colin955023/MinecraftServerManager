@@ -22,7 +22,7 @@ Windows 11 的 Minecraft 伺服器管理工具，以 C#、.NET 10 與 WinUI 3 �
 
 ## 使用方法
 
-下載[最新版 `MinecraftServerManager.exe`](https://github.com/Colin955023/MinecraftServerManager/releases/latest/download/MinecraftServerManager.exe)，按兩下即可啟動。
+取得最新版 `MinecraftServerManager.exe` 後，按兩下即可啟動。
 
 ### 從原始碼建置
 

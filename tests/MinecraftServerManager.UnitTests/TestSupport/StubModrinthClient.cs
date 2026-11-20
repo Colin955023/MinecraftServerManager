@@ -3,7 +3,6 @@ using MinecraftServerManager.Domain.Mods;
 
 namespace MinecraftServerManager.UnitTests.TestSupport;
 
-/// <summary>測試用共用 Modrinth API 用戶端替身</summary>
 internal sealed class StubModrinthClient : IModrinthClient
 {
     public Dictionary<string, IReadOnlyList<OnlineModVersion>> Versions { get; } = new(StringComparer.OrdinalIgnoreCase);

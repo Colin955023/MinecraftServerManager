@@ -12,7 +12,7 @@
       DoubleTapped="OnButtonDoubleTapped"
       Background="Transparent"
       BorderThickness="0"
-      CornerRadius="0"
+      CornerRadius="{StaticResource ControlCornerRadius}"
       Padding="8,6"
       HorizontalAlignment="Stretch"
       HorizontalContentAlignment="Left"
@@ -21,11 +21,11 @@
         Spacing="4">
         <TextBlock Text="{x:Bind Text, Mode=OneWay}"
           FontWeight="SemiBold"
-          FontSize="12"
+          FontSize="{StaticResource CaptionTextBlockFontSize}"
           TextTrimming="CharacterEllipsis"
           VerticalAlignment="Center" />
         <FontIcon Glyph="{x:Bind SortGlyph}"
-          FontSize="10"
+          FontSize="{StaticResource CaptionTextBlockFontSize}"
           Opacity="0.7"
           VerticalAlignment="Center"
           Visibility="{x:Bind SortIndicatorVisibility}" />
@@ -51,7 +51,7 @@
       <Border Width="1"
         HorizontalAlignment="Right"
         VerticalAlignment="Stretch"
-        Background="{ThemeResource DataGridGridLineBrush}" />
+        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
     </Grid>
   </Grid>
 </UserControl>

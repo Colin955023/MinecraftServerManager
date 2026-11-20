@@ -107,7 +107,7 @@ public sealed partial class PresentationHelpersTests
     public void ThemeResourceKeys_AreDefinedInBothThemeDictionaries()
     {
         string appXaml = File.ReadAllText(Path.Combine(SourceScanner.SolutionRoot, "src", "MinecraftServerManager.App", "App.xaml"));
-        foreach (string key in (string[])["SuccessTextBrush", "DangerTextBrush", "WarningBrush", "MutedTextBrush"])
+        foreach (string key in (string[])[UiBindHelpers.SuccessTextBrushKey, UiBindHelpers.DangerTextBrushKey, UiBindHelpers.WarningTextBrushKey, UiBindHelpers.MutedTextBrushKey, "NotificationBackgroundBrush"])
         {
             int count = Regex.Count(appXaml, $"x:Key=\"{key}\"");
             Assert.True(count >= 2, $"主題資源 {key} 必須同時定義於深色與淺色主題字典（目前 {count} 處）");

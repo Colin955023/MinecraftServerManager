@@ -14,7 +14,6 @@ using Microsoft.Windows.Storage.Pickers;
 
 namespace MinecraftServerManager.App.Services;
 
-/// <summary><see cref="IUiService"/> 的 WinUI 3 實作</summary>
 public sealed partial class WinUiService : IUiService
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(WinUiService));
@@ -26,7 +25,34 @@ public sealed partial class WinUiService : IUiService
     private readonly ConditionalWeakTable<XamlRoot, DialogStackCoordinator> _coordinators = [];
 
     public Window? MainWindow { get; private set; }
-    public ElementTheme CurrentTheme { get; set; } = ElementTheme.Default;
+    /// <summary>程式主題；變更時同步至所有已開啟視窗的內容與標題列</summary>
+    public ElementTheme CurrentTheme
+    {
+        get;
+        set
+        {
+            if (field == value)
+            {
+                return;
+            }
+
+            field = value;
+            RunOnUi(() =>
+            {
+                lock (_windowLock)
+                {
+                    foreach (var win in _windowStack)
+                    {
+                        if (win.AppWindow is not null && win.Content is FrameworkElement fe)
+                        {
+                            fe.RequestedTheme = value;
+                            WindowChromeService.ApplyTheme(win.AppWindow, value);
+                        }
+                    }
+                }
+            });
+        }
+    } = ElementTheme.Default;
 
     public WinUiService(DispatcherQueue dispatcherQueue, IProcessRunner processRunner)
     {
@@ -49,7 +75,7 @@ public sealed partial class WinUiService : IUiService
                         var t = fe.RequestedTheme;
                         fe.RequestedTheme = t == ElementTheme.Light ? ElementTheme.Dark : ElementTheme.Light;
                         fe.RequestedTheme = t;
-                        TitleBarThemeHelper.ApplyTitleBarTheme(win.AppWindow, CurrentTheme);
+                        WindowChromeService.ApplyTheme(win.AppWindow, CurrentTheme);
                     }
                 }
             }
@@ -127,7 +153,6 @@ public sealed partial class WinUiService : IUiService
         throw new InvalidOperationException("無法取得作用中的 XamlRoot。");
     }
 
-    /// <summary>派送至 UI 執行緒執行並等待結果</summary>
     private async Task<T> InvokeOnUiAsync<T>(Func<Task<T>> operation)
     {
         var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -217,7 +242,6 @@ public sealed partial class WinUiService : IUiService
         };
     }
 
-    /// <summary>通知入口：資訊、成功與警告用 InfoBar，錯誤用對話方塊</summary>
     public void ShowNotification(string message, string? title = null, NotificationType type = NotificationType.Info)
     {
         if (NotificationPresentation.UsesDialog(type))
@@ -526,7 +550,7 @@ public sealed partial class WinUiService : IUiService
     private ProgressSession<TReport> ShowProgressSession<TReport>(string heading, string initialMessage, Func<TReport, (int Percent, string Message)> map)
     {
         var dialog = OpenProgressDialog(heading, initialMessage);
-        var progress = new Progress<TReport>(report =>
+        var progress = new CoalescingProgress<TReport>(_dispatcherQueue, report =>
         {
             var (percent, message) = map(report);
             dialog.UpdateProgress(percent, message);
@@ -573,6 +597,48 @@ public sealed partial class WinUiService : IUiService
         public void BringToFront() => _window.Activate();
 
         public void Close() => _window.Close();
+    }
+
+    /// <summary>合併進度回報：UI 執行緒同時最多一筆待處理，只顯示最新一筆</summary>
+    private sealed class CoalescingProgress<TReport>(DispatcherQueue dispatcherQueue, Action<TReport> handler) : IProgress<TReport>
+    {
+        private readonly Lock _lock = new();
+        private TReport? _latest;
+        private bool _pending;
+
+        public void Report(TReport value)
+        {
+            lock (_lock)
+            {
+                _latest = value;
+                if (_pending)
+                {
+                    return;
+                }
+
+                _pending = true;
+            }
+
+            if (!dispatcherQueue.TryEnqueue(Flush))
+            {
+                lock (_lock)
+                {
+                    _pending = false;
+                }
+            }
+        }
+
+        private void Flush()
+        {
+            TReport report;
+            lock (_lock)
+            {
+                report = _latest!;
+                _pending = false;
+            }
+
+            handler(report);
+        }
     }
 
     private sealed partial class ProgressSession<TReport>(IProgress<TReport> progress, OperationProgressDialog dialog) : IProgressSession<TReport>

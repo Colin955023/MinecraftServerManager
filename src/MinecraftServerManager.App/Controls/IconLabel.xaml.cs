@@ -7,7 +7,7 @@ namespace MinecraftServerManager.App.Controls;
 public sealed partial class IconLabel : UserControl
 {
     public static readonly DependencyProperty IconProperty =
-        DependencyProperty.Register(nameof(Icon), typeof(DataTemplate), typeof(IconLabel), new PropertyMetadata(null));
+        DependencyProperty.Register(nameof(Icon), typeof(string), typeof(IconLabel), new PropertyMetadata(string.Empty));
 
     public static readonly DependencyProperty TextProperty =
         DependencyProperty.Register(nameof(Text), typeof(string), typeof(IconLabel), new PropertyMetadata(string.Empty));
@@ -23,9 +23,10 @@ public sealed partial class IconLabel : UserControl
         InitializeComponent();
     }
 
-    public DataTemplate? Icon
+    /// <summary>Segoe Fluent Icons 字碼（見 Resources/Glyphs.xaml）</summary>
+    public string Icon
     {
-        get => (DataTemplate?)GetValue(IconProperty);
+        get => (string)GetValue(IconProperty);
         set => SetValue(IconProperty, value);
     }
 

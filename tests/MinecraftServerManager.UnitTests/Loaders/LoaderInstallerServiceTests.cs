@@ -1,6 +1,7 @@
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Loaders;
+using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.UnitTests.Loaders;
 
@@ -282,7 +283,240 @@ public sealed class LoaderInstallerServiceTests : IDisposable
         Assert.Empty(Directory.EnumerateFiles(_cacheDir));
     }
 
+    [Fact]
+    public async Task InstallLoaderFabricPrefersFirstStableEntryAndFallsBackToFirstWhenNoStable()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy vanilla");
+        string unstableFirstJson = """
+        [
+            { "url": "https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.2.0-rc1/fabric-installer-1.2.0-rc1.jar", "version": "1.2.0-rc1", "stable": false },
+            { "url": "https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.2/fabric-installer-1.1.2.jar", "version": "1.1.2", "stable": true }
+        ]
+        """;
+        var runner = new StubProcessRunner(0, onStart: _ => File.WriteAllText(Path.Combine(_serverDir, "fabric-server-launch.jar"), "ok"));
+        await new LoaderInstallerService(CreateHttpPort(fabricMetaJson: unstableFirstJson), runner, _cacheDir)
+            .InstallLoaderAsync(LoaderKind.Fabric, "1.20.4", "0.15.7", _serverDir, "java.exe");
+        Assert.Contains(Path.Combine(_cacheDir, "fabric-installer-1.1.2.jar"), runner.LastSpecification!.Arguments);
+
+        string allUnstableJson = """
+        [
+            { "url": "https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.2.0/fabric-installer-1.2.0.jar", "version": "1.2.0", "stable": false },
+            { "url": "https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.2/fabric-installer-1.1.2.jar", "version": "1.1.2", "stable": false }
+        ]
+        """;
+        await new LoaderInstallerService(CreateHttpPort(fabricMetaJson: allUnstableJson), runner, _cacheDir)
+            .InstallLoaderAsync(LoaderKind.Fabric, "1.20.4", "0.15.7", _serverDir, "java.exe");
+        Assert.Contains(Path.Combine(_cacheDir, "fabric-installer-1.2.0.jar"), runner.LastSpecification!.Arguments);
+    }
+
+    [Fact]
+    public async Task InstallLoaderQuiltUsesMetaSha256FirstAndFallsBackToMavenHash()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy vanilla");
+        var httpWithMetaHash = CreateHttpPort();
+        var runner = new StubProcessRunner(0, onStart: _ => File.WriteAllText(Path.Combine(_serverDir, "quilt-server-launch.jar"), "ok"));
+
+        await new LoaderInstallerService(httpWithMetaHash, runner, _cacheDir)
+            .InstallLoaderAsync(LoaderKind.Quilt, "1.20.4", "0.26.0", _serverDir, "java.exe");
+
+        Assert.Equal(1, httpWithMetaHash.RequestCount);
+        Assert.Equal(DefaultInstallerSha256, httpWithMetaHash.LastDownloadExpectedHash);
+        Assert.Equal("sha256", httpWithMetaHash.LastDownloadExpectedAlgorithm);
+        Assert.Contains(Path.Combine(_cacheDir, "quilt-installer-0.15.1.jar"), runner.LastSpecification!.Arguments);
+
+        // 移除已快取檔改測無 Meta hashes 時退回 Maven .sha256
+        File.Delete(Path.Combine(_cacheDir, "quilt-installer-0.15.1.jar"));
+        string noHashesQuiltJson = """
+        [
+            { "version": "0.15.2", "url": "https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-installer/0.15.2/quilt-installer-0.15.2.jar" }
+        ]
+        """;
+        string mavenHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        var httpMavenFallback = CreateHttpPort(
+            quiltMetaJson: noHashesQuiltJson,
+            customGetText: uri => uri.AbsoluteUri.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase) ? mavenHash : null);
+
+        await new LoaderInstallerService(httpMavenFallback, runner, _cacheDir)
+            .InstallLoaderAsync(LoaderKind.Quilt, "1.20.4", "0.26.0", _serverDir, "java.exe");
+
+        Assert.Equal(mavenHash, httpMavenFallback.LastDownloadExpectedHash);
+        Assert.True(httpMavenFallback.RequestCount >= 2);
+    }
+
+    [Theory]
+    [InlineData("http://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.2/fabric-installer-1.1.2.jar")]
+    [InlineData("https://evil.example.com/net/fabricmc/fabric-installer/1.1.2/fabric-installer-1.1.2.jar")]
+    [InlineData("https://maven.fabricmc.net:8443/net/fabricmc/fabric-installer/1.1.2/fabric-installer-1.1.2.jar")]
+    [InlineData("https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.2/other-tool.jar")]
+    [InlineData("https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.2/fabric-installer-1.1.2.jar?v=1")]
+    public async Task InstallLoaderRejectsUntrustedDynamicInstallerUri(string invalidUrl)
+    {
+        await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy vanilla");
+        string badMeta = $$"""[{ "url": "{{invalidUrl}}", "version": "1.1.2", "stable": true }]""";
+        var http = CreateHttpPort(fabricMetaJson: badMeta);
+        var runner = new StubProcessRunner(0);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new LoaderInstallerService(http, runner, _cacheDir)
+                .InstallLoaderAsync(LoaderKind.Fabric, "1.20.4", "0.15.7", _serverDir, "java.exe"));
+
+        Assert.Equal(0, http.DownloadCount);
+        Assert.Null(runner.LastSpecification);
+    }
+
+    [Fact]
+    public async Task InstallLoaderRefreshesMetadataAfterOneHourTtlExpires()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy vanilla");
+        int metaRequests = 0;
+        var http = CreateHttpPort(customGetText: uri =>
+        {
+            if (uri.Host.Equals("meta.fabricmc.net", StringComparison.OrdinalIgnoreCase))
+            {
+                metaRequests++;
+                return DefaultFabricInstallerMetaJson;
+            }
+            return null;
+        });
+        var clock = new MutableTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var runner = new StubProcessRunner(0, onStart: _ => File.WriteAllText(Path.Combine(_serverDir, "fabric-server-launch.jar"), "ok"));
+        var service = new LoaderInstallerService(http, runner, _cacheDir) { TimeProvider = clock };
+
+        await service.InstallLoaderAsync(LoaderKind.Fabric, "1.20.4", "0.15.7", _serverDir, "java.exe");
+        clock.Advance(TimeSpan.FromMinutes(30));
+        await service.InstallLoaderAsync(LoaderKind.Fabric, "1.20.4", "0.15.7", _serverDir, "java.exe");
+        Assert.Equal(1, metaRequests);
+
+        clock.Advance(TimeSpan.FromMinutes(31));
+        await service.InstallLoaderAsync(LoaderKind.Fabric, "1.20.4", "0.15.7", _serverDir, "java.exe");
+        Assert.Equal(2, metaRequests);
+    }
+
+    [Fact]
+    public async Task InstallLoaderFallsBackToLatestIntactCachedInstallerWhenMetaFails()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy vanilla");
+        SeedCachedInstaller("fabric-installer-1.0.1.jar", "old-1.0.1");
+        SeedCachedInstaller("fabric-installer-1.1.2.jar", "new-1.1.2");
+        SeedCachedInstaller("fabric-installer-1.2.0.jar", "corrupt-1.2.0", overrideHash: new string('f', 64));
+
+        var http = CreateHttpPort(customGetText: uri =>
+            uri.Host.Equals("meta.fabricmc.net", StringComparison.OrdinalIgnoreCase)
+                ? throw new HttpRequestException("offline")
+                : null);
+        var runner = new StubProcessRunner(0, onStart: _ => File.WriteAllText(Path.Combine(_serverDir, "fabric-server-launch.jar"), "ok"));
+
+        await new LoaderInstallerService(http, runner, _cacheDir)
+            .InstallLoaderAsync(LoaderKind.Fabric, "1.20.4", "0.15.7", _serverDir, "java.exe");
+
+        Assert.Equal(0, http.DownloadCount);
+        Assert.Contains(Path.Combine(_cacheDir, "fabric-installer-1.1.2.jar"), runner.LastSpecification!.Arguments);
+    }
+
+    [Fact]
+    public async Task InstallLoaderCleansOldFabricInstallersAndKeepsRecentFiveForForge()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy vanilla");
+        SeedCachedInstaller("fabric-installer-1.0.1.jar", "old");
+        await File.WriteAllTextAsync(Path.Combine(_cacheDir, "fabric-installer-1.0.1.jar.part"), "part");
+        await File.WriteAllTextAsync(Path.Combine(_cacheDir, "fabric-installer-1.1.2.jar.part"), "stale-part");
+        SeedCachedInstaller("quilt-installer-0.15.1.jar", "keep-other-loader");
+
+        var runner = new StubProcessRunner(0, onStart: _ => File.WriteAllText(Path.Combine(_serverDir, "fabric-server-launch.jar"), "ok"));
+        await new LoaderInstallerService(CreateHttpPort(), runner, _cacheDir)
+            .InstallLoaderAsync(LoaderKind.Fabric, "1.20.4", "0.15.7", _serverDir, "java.exe");
+
+        Assert.True(File.Exists(Path.Combine(_cacheDir, "fabric-installer-1.1.2.jar")));
+        Assert.True(File.Exists(Path.Combine(_cacheDir, "fabric-installer-1.1.2.jar.sha256")));
+        Assert.False(File.Exists(Path.Combine(_cacheDir, "fabric-installer-1.0.1.jar")));
+        Assert.False(File.Exists(Path.Combine(_cacheDir, "fabric-installer-1.0.1.jar.sha256")));
+        Assert.False(File.Exists(Path.Combine(_cacheDir, "fabric-installer-1.0.1.jar.part")));
+        Assert.False(File.Exists(Path.Combine(_cacheDir, "fabric-installer-1.1.2.jar.part")));
+        Assert.True(File.Exists(Path.Combine(_cacheDir, "quilt-installer-0.15.1.jar")));
+
+        // Forge 預置 6 份歷史版與 1 份孤兒 .sha256，執行後應保留最新 5 份（含本次）
+        DateTime baseUtc = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        for (int i = 1; i <= 6; i++)
+        {
+            SeedCachedInstaller($"forge-1.20.1-47.0.{i}-installer.jar", $"forge-{i}", baseUtc.AddHours(i));
+        }
+        await File.WriteAllTextAsync(Path.Combine(_cacheDir, "forge-1.19.4-45.0.1-installer.jar.sha256"), "orphan");
+
+        var forgeRunner = new StubProcessRunner(0, onStart: _ => File.WriteAllText(Path.Combine(_serverDir, "run.bat"), "@echo off\n"));
+        await new LoaderInstallerService(CreateHttpPort(), forgeRunner, _cacheDir)
+            .InstallLoaderAsync(LoaderKind.Forge, "1.20.4", "49.0.1", _serverDir, "java.exe");
+
+        Assert.True(File.Exists(Path.Combine(_cacheDir, "forge-1.20.4-49.0.1-installer.jar")));
+        Assert.True(File.Exists(Path.Combine(_cacheDir, "forge-1.20.1-47.0.6-installer.jar")));
+        Assert.True(File.Exists(Path.Combine(_cacheDir, "forge-1.20.1-47.0.3-installer.jar")));
+        Assert.True(File.Exists(Path.Combine(_cacheDir, "forge-1.20.1-47.0.3-installer.jar.sha256")));
+        Assert.False(File.Exists(Path.Combine(_cacheDir, "forge-1.20.1-47.0.2-installer.jar")));
+        Assert.False(File.Exists(Path.Combine(_cacheDir, "forge-1.20.1-47.0.2-installer.jar.sha256")));
+        Assert.False(File.Exists(Path.Combine(_cacheDir, "forge-1.20.1-47.0.1-installer.jar")));
+        Assert.False(File.Exists(Path.Combine(_cacheDir, "forge-1.19.4-45.0.1-installer.jar.sha256")));
+    }
+
+    [Fact]
+    public async Task InstallLoaderKeepsExistingCacheWhenRemoteHashMissingAndDownloadRefused()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy vanilla");
+        SeedCachedInstaller("fabric-installer-1.0.1.jar", "intact-old");
+        var http = CreateHttpPort(installerSha256: null);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new LoaderInstallerService(http, new StubProcessRunner(0), _cacheDir)
+                .InstallLoaderAsync(LoaderKind.Fabric, "1.20.4", "0.15.7", _serverDir, "java.exe"));
+
+        Assert.True(File.Exists(Path.Combine(_cacheDir, "fabric-installer-1.0.1.jar")));
+        Assert.True(File.Exists(Path.Combine(_cacheDir, "fabric-installer-1.0.1.jar.sha256")));
+    }
+
+    private void SeedCachedInstaller(string fileName, string content, DateTime? lastWriteUtc = null, string? overrideHash = null)
+    {
+        string jarPath = Path.Combine(_cacheDir, fileName);
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(content);
+        File.WriteAllBytes(jarPath, bytes);
+        if (lastWriteUtc is DateTime ts)
+        {
+            File.SetLastWriteTimeUtc(jarPath, ts);
+        }
+
+        string hash = overrideHash ?? HashCalculator.DigestBytes(bytes);
+        File.WriteAllText(jarPath + ".sha256", hash);
+    }
+
+    private sealed class MutableTimeProvider(DateTimeOffset initialUtc) : TimeProvider
+    {
+        private DateTimeOffset _utcNow = initialUtc;
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+        public void Advance(TimeSpan delta) => _utcNow = _utcNow.Add(delta);
+    }
+
     private const string DefaultInstallerSha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    private const string DefaultFabricInstallerMetaJson = """
+        [
+            {
+                "url": "https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.2/fabric-installer-1.1.2.jar",
+                "maven": "net.fabricmc:fabric-installer:1.1.2",
+                "version": "1.1.2",
+                "stable": true
+            }
+        ]
+        """;
+
+    private const string DefaultQuiltInstallerMetaJson = """
+        [
+            {
+                "maven": "org.quiltmc:quilt-installer:0.15.1",
+                "version": "0.15.1",
+                "url": "https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-installer/0.15.1/quilt-installer-0.15.1.jar",
+                "hashes": {
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+            }
+        ]
+        """;
 
     /// <summary>建立安裝器用 HTTP 替身；<paramref name="installerSha256"/> 為 null 代表遠端無 .sha256</summary>
     private static StubHttpPort CreateHttpPort(
@@ -290,7 +524,9 @@ public sealed class LoaderInstallerServiceTests : IDisposable
         string metaJson = "",
         string paperBuildJson = "",
         Func<Uri, string?>? customGetText = null,
-        string? installerSha256 = DefaultInstallerSha256) =>
+        string? installerSha256 = DefaultInstallerSha256,
+        string? fabricMetaJson = DefaultFabricInstallerMetaJson,
+        string? quiltMetaJson = DefaultQuiltInstallerMetaJson) =>
         new()
         {
             TextHandler = uri =>
@@ -298,6 +534,18 @@ public sealed class LoaderInstallerServiceTests : IDisposable
                 if (customGetText?.Invoke(uri) is string custom)
                 {
                     return custom;
+                }
+
+                if (uri.Host.Equals("meta.fabricmc.net", StringComparison.OrdinalIgnoreCase) &&
+                    uri.AbsolutePath.Equals("/v2/versions/installer", StringComparison.OrdinalIgnoreCase))
+                {
+                    return fabricMetaJson;
+                }
+
+                if (uri.Host.Equals("meta.quiltmc.org", StringComparison.OrdinalIgnoreCase) &&
+                    uri.AbsolutePath.Equals("/v3/versions/installer", StringComparison.OrdinalIgnoreCase))
+                {
+                    return quiltMetaJson;
                 }
 
                 if (uri.AbsoluteUri.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase))

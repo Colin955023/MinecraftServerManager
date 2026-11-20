@@ -467,7 +467,7 @@ export function initWinUiSimulator() {
             </div>
             <div class="winui-actions-wrap">
               <button type="button" class="winui-btn" id="dlg-java-autodetect">自動偵測配對</button>
-              <button type="button" class="winui-btn" id="dlg-java-install">⬇️ winget 安裝 Java ${reqMajor}</button>
+              <button type="button" class="winui-btn" id="dlg-java-install">winget 安裝 Java ${reqMajor}</button>
             </div>
           </div>
           <div class="winui-table-scroll">
@@ -784,10 +784,10 @@ export function initWinUiSimulator() {
         renderServerTable();
         renderServerDetails();
         showContextMenuAt(e.clientX, e.clientY, [
-          { label: "🧠 修改記憶體設定", onClick: () => openServerMemoryDialog(srv) },
-          { label: "🔄 重新偵測伺服器", onClick: () => showInfoBar("重新偵測完成", `已重新檢查「${srv.name}」核心檔案與版本資訊。`, "success") },
-          { label: "📂 開啟備份資料夾", onClick: () => handleOpenBackupFolder(srv) },
-          { label: "📁 修改備份路徑", onClick: () => handleEditBackupPath(srv) }
+          { label: "修改記憶體設定", onClick: () => openServerMemoryDialog(srv) },
+          { label: "重新偵測伺服器", onClick: () => showInfoBar("重新偵測完成", `已重新檢查「${srv.name}」核心檔案與版本資訊。`, "success") },
+          { label: "開啟備份資料夾", onClick: () => handleOpenBackupFolder(srv) },
+          { label: "修改備份路徑", onClick: () => handleEditBackupPath(srv) }
         ]);
       });
 
@@ -1110,7 +1110,7 @@ export function initWinUiSimulator() {
 
   function openServerMemoryDialog(srv) {
     openModal({
-      title: `🧠 修改伺服器記憶體設定 — ${srv.name}`,
+      title: `修改伺服器記憶體設定 — ${srv.name}`,
       render({ body, footer }) {
         body.innerHTML = `
           <div class="winui-sub-label">目前伺服器：${escHtml(srv.name)} (${escHtml(srv.loader)} ${escHtml(srv.version)})</div>
@@ -1336,22 +1336,22 @@ export function initWinUiSimulator() {
             </div>
             <div class="winui-actions-wrap">
               <label class="winui-input-row u-fs-82"><input type="checkbox" id="mon-autoscroll" checked> 自動捲動</label>
-              <button type="button" class="winui-btn winui-btn-success" id="mon-start-btn">🚀 啟動</button>
-              <button type="button" class="winui-btn winui-btn-danger" id="mon-stop-btn">⏹️ 停止</button>
-              <button type="button" class="winui-btn" id="mon-clear-btn">🧹 清除紀錄</button>
-              <button type="button" class="winui-btn" id="mon-refresh-btn">🔄 重新整理</button>
+              <button type="button" class="winui-btn winui-btn-success" id="mon-start-btn">啟動</button>
+              <button type="button" class="winui-btn winui-btn-danger" id="mon-stop-btn">停止</button>
+              <button type="button" class="winui-btn" id="mon-clear-btn">清除紀錄</button>
+              <button type="button" class="winui-btn" id="mon-refresh-btn">重新整理</button>
             </div>
           </div>
           <div class="winui-monitor-grid u-my0">
             <div class="winui-console-panel u-minh-310">
               <div class="winui-console-bar">
-                <span>📜 伺服器終端輸出</span>
-                <button type="button" class="winui-btn" id="mon-copy-logs">📋 複製全部紀錄</button>
+                <span>伺服器終端輸出</span>
+                <button type="button" class="winui-btn" id="mon-copy-logs">複製全部紀錄</button>
               </div>
               <div id="mon-logs-box" class="winui-console-logs u-maxh-260"></div>
             </div>
             <div class="winui-card u-flex u-dir-col u-gap-45">
-              <div class="u-bold">👥 線上玩家</div>
+              <div class="u-bold">線上玩家</div>
               <div class="winui-sub-label">點選玩家名稱複製 ID</div>
               <div class="u-flex u-dir-col u-gap-30" id="mon-players-list"></div>
             </div>
@@ -1537,7 +1537,7 @@ export function initWinUiSimulator() {
     let searchTxt = "";
 
     openModal({
-      title: `👥 伺服器名單管理 — ${srv.name}`,
+      title: `伺服器名單管理 — ${srv.name}`,
       size: "is-wide",
       render({ body, footer }) {
         body.innerHTML = `
@@ -1549,10 +1549,10 @@ export function initWinUiSimulator() {
             </div>
             <div class="winui-card u-flex u-dir-col u-gap-65">
               <div class="winui-tab-row u-mb0">
-                <button type="button" class="winui-btn winui-btn-accent" data-ptab="ops">👑 管理員名單 (ops.json)</button>
-                <button type="button" class="winui-btn" data-ptab="whitelist">📋 白名單 (whitelist.json)</button>
-                <button type="button" class="winui-btn" data-ptab="banp">🚫 封鎖玩家 (banned-players)</button>
-                <button type="button" class="winui-btn" data-ptab="banip">🌐 封鎖 IP (banned-ips)</button>
+                <button type="button" class="winui-btn winui-btn-accent" data-ptab="ops">管理員名單 (ops.json)</button>
+                <button type="button" class="winui-btn" data-ptab="whitelist">白名單 (whitelist.json)</button>
+                <button type="button" class="winui-btn" data-ptab="banp">封鎖玩家 (banned-players)</button>
+                <button type="button" class="winui-btn" data-ptab="banip">封鎖 IP (banned-ips)</button>
               </div>
               <div class="u-flex-1 u-scroll-y" id="dlg-ptab-pane"></div>
             </div>
@@ -1827,7 +1827,7 @@ export function initWinUiSimulator() {
     let category = "全部";
 
     openModal({
-      title: `🔧 編輯伺服器屬性 — ${srv.name} (server.properties)`,
+      title: `編輯伺服器屬性 — ${srv.name} (server.properties)`,
       size: "is-medium",
       render({ body, footer }) {
         body.innerHTML = `
@@ -2137,7 +2137,7 @@ export function initWinUiSimulator() {
         renderModsTable();
         showContextMenuAt(e.clientX, e.clientY, [
           {
-            label: "📋 複製模組資訊",
+            label: "複製模組資訊",
             onClick: async () => {
               const txt = `模組名稱: ${mod.name}\n版本: ${mod.version}\n狀態: ${mod.enabled ? "啟用" : "停用"}\n載入器: ${mod.loader}`;
               try {
@@ -2149,11 +2149,11 @@ export function initWinUiSimulator() {
             }
           },
           {
-            label: "📂 在資料夾中顯示",
+            label: "在資料夾中顯示",
             onClick: () => showInfoBar("在資料夾中顯示", `${state.serversRoot}\\${getActiveModServer()?.name}\\mods\\${mod.fileName}`, "info")
           },
           {
-            label: "🗑️ 刪除模組",
+            label: "刪除模組",
             danger: true,
             onClick: async () => {
               const ok = await showConfirmDialog({
@@ -2320,7 +2320,7 @@ export function initWinUiSimulator() {
 
   function openInstallQueueDialog() {
     openModal({
-      title: "📋 待安裝模組清單",
+      title: "待安裝模組清單",
       size: "is-medium",
       render({ body, footer }) {
         body.innerHTML = state.installQueue.length === 0
@@ -2437,7 +2437,7 @@ export function initWinUiSimulator() {
       return;
     }
     openModal({
-      title: "📦 發現可用模組更新",
+      title: "發現可用模組更新",
       size: "is-medium",
       render({ body, footer }) {
         body.innerHTML = `
@@ -2751,7 +2751,7 @@ export function initWinUiSimulator() {
             const decision = backupCount > 0
               ? await showConfirmDialog({
                 title: "確認刪除伺服器",
-                message: `確定要刪除伺服器「${srv.name}」嗎？\n\n⚠️ 這將永久刪除伺服器檔案，無法復原！\n\n偵測到此伺服器有 ${backupCount} 個外部備份檔案，是否一併刪除？`,
+                message: `確定要刪除伺服器「${srv.name}」嗎？\n\n⚠ 這將永久刪除伺服器檔案，無法復原！\n\n偵測到此伺服器有 ${backupCount} 個外部備份檔案，是否一併刪除？`,
                 primaryText: "連同備份一併刪除",
                 primaryDanger: true,
                 secondaryText: "僅刪除伺服器",
@@ -2759,7 +2759,7 @@ export function initWinUiSimulator() {
               })
               : await showConfirmDialog({
                 title: "確認刪除伺服器",
-                message: `確定要刪除伺服器「${srv.name}」嗎？\n\n⚠️ 這將永久刪除伺服器檔案，無法復原！`,
+                message: `確定要刪除伺服器「${srv.name}」嗎？\n\n⚠ 這將永久刪除伺服器檔案，無法復原！`,
                 primaryText: "確定刪除",
                 primaryDanger: true
               });

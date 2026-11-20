@@ -105,8 +105,8 @@
       },
       "Microsoft.WindowsAppSDK.Base": {
         "type": "Transitive",
-        "resolved": "2.6.5",
-        "contentHash": "/R+z6xrl4mIu6FmXNkdvMlL/Enl7pXgO5Q75LBJdls6uvieh3VTOn6jtvwtlywFnZMKfvsDP0Ckal6/phireJQ==",
+        "resolved": "2.7.0",
+        "contentHash": "pz1xzq2mady89xuPbpsLrgVuB0v+bLZp8T4MJQu8d3HSimrrPPghEJmE6rqxvhAlk62iVjPhMZ9rVnhomCPmHQ==",
         "dependencies": {
           "Microsoft.Windows.SDK.BuildTools": "10.0.26100.4654",
           "Microsoft.Windows.SDK.BuildTools.MSIX": "1.7.251221100"
@@ -114,19 +114,19 @@
       },
       "Microsoft.WindowsAppSDK.Foundation": {
         "type": "Transitive",
-        "resolved": "2.6.5",
-        "contentHash": "wd7+g7tRSEv1YMcxgPi1MZ7I4nfB5/nhcOkcOrnhJbeRtT2XLTtFDIxJ6cBxx/SOI2FJ+EocJXhisuCvBYB/4w==",
+        "resolved": "2.7.0",
+        "contentHash": "20RAdyrhDL5i5T1kHaIWzDf8oDQ8SiKSCuAVje0Y4zFKLO/OSlxoTl2omjl43CEvEbRm7A+T6CxxfjUtj6rTjA==",
         "dependencies": {
-          "Microsoft.WindowsAppSDK.Base": "[2.6.5, 3.0.0)",
-          "Microsoft.WindowsAppSDK.InteractiveExperiences": "[2.6.5, 3.0.0)"
+          "Microsoft.WindowsAppSDK.Base": "[2.7.0, 3.0.0)",
+          "Microsoft.WindowsAppSDK.InteractiveExperiences": "[2.7.0, 3.0.0)"
         }
       },
       "Microsoft.WindowsAppSDK.InteractiveExperiences": {
         "type": "Transitive",
-        "resolved": "2.6.5",
-        "contentHash": "WBpbDUPqOds+P+XrvawF8xietPS4VU4z4oT1CFQ+/IGYYszv37YSg2X6B0aOi506OFEjApW2UjWsgwkPxeUJqA==",
+        "resolved": "2.7.0",
+        "contentHash": "J3RehOxm689NHJlmjAhCFmGZF6REyxU/gxFkKBJEeGxTLZ4uhTW3AG5oRH4QcA/zM5UUp8Al0wiqFYaBnqvvLw==",
         "dependencies": {
-          "Microsoft.WindowsAppSDK.Base": "2.6.5"
+          "Microsoft.WindowsAppSDK.Base": "2.7.0"
         }
       },
       "Mono.Cecil": {
@@ -212,17 +212,17 @@
         "dependencies": {
           "CommunityToolkit.Mvvm": "[8.4.2, )",
           "Microsoft.Windows.CsWinRT": "[2.3.1, )",
-          "Microsoft.WindowsAppSDK.DWrite": "[2.6.5, )",
-          "Microsoft.WindowsAppSDK.Runtime": "[2.6.5, )",
-          "Microsoft.WindowsAppSDK.WinUI": "[2.6.5, )",
-          "MinecraftServerManager.Core": "[2.2.0, )",
-          "MinecraftServerManager.Infrastructure": "[2.2.0, )"
+          "Microsoft.WindowsAppSDK.DWrite": "[2.7.0, )",
+          "Microsoft.WindowsAppSDK.Runtime": "[2.7.0, )",
+          "Microsoft.WindowsAppSDK.WinUI": "[2.7.0, )",
+          "MinecraftServerManager.Core": "[2.2.1, )",
+          "MinecraftServerManager.Infrastructure": "[2.2.1, )"
         }
       },
       "minecraftservermanager.core": {
         "type": "Project",
         "dependencies": {
-          "MinecraftServerManager.Domain": "[2.2.0, )"
+          "MinecraftServerManager.Domain": "[2.2.1, )"
         }
       },
       "minecraftservermanager.domain": {
@@ -232,7 +232,7 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "[10.0.15, )",
-          "MinecraftServerManager.Core": "[2.2.0, )"
+          "MinecraftServerManager.Core": "[2.2.1, )"
         }
       },
       "CommunityToolkit.Mvvm": {
@@ -264,32 +264,32 @@
       },
       "Microsoft.WindowsAppSDK.DWrite": {
         "type": "CentralTransitive",
-        "requested": "[2.6.5, )",
-        "resolved": "2.6.5",
-        "contentHash": "ycKzxoqVig32FrCZiJyrarY+LgxNwqY2Fr4eEiMEIqK2m+a7YGs46pzPMtYEkl64rgUdBofFZwZ6/XRf+KA7Lg==",
+        "requested": "[2.7.0, )",
+        "resolved": "2.7.0",
+        "contentHash": "8p7Dq+KjbXBh29s/zbDmCauylblws9aF2px5T4q0wNDwiUaF5hKCyrPs3VU3ampO3kkZPSfn+FX0O0DAhLgnsg==",
         "dependencies": {
-          "Microsoft.WindowsAppSDK.Base": "2.6.5"
+          "Microsoft.WindowsAppSDK.Base": "2.7.0"
         }
       },
       "Microsoft.WindowsAppSDK.Runtime": {
         "type": "CentralTransitive",
-        "requested": "[2.6.5, )",
-        "resolved": "2.6.5",
-        "contentHash": "anTYWEcvxa5eB2EP9ZEzDQq2VI/mFqNg3E/aYcoRpphxfquj6VSj+gHDAMWQ3fU3RjQ+9KmMtSZkZ9So29QdDg==",
+        "requested": "[2.7.0, )",
+        "resolved": "2.7.0",
+        "contentHash": "YAC/DDVctNWUbV50GGdu2tll72J+TzsEXykzjjLndaNk+ylPgT4VmZBBWhxzkIGIfxzUlzyVcBeQImcKttoGCQ==",
         "dependencies": {
-          "Microsoft.WindowsAppSDK.Base": "2.6.5"
+          "Microsoft.WindowsAppSDK.Base": "2.7.0"
         }
       },
       "Microsoft.WindowsAppSDK.WinUI": {
         "type": "CentralTransitive",
-        "requested": "[2.6.5, )",
-        "resolved": "2.6.5",
-        "contentHash": "kGdcXPYSTEN5XdZd500dPH+zmq6gyDCCjyG5LwXzaa0tPG/6drYh5M+QmStfmLf7LnPKv5O6ZJucDspepSCo3g==",
+        "requested": "[2.7.0, )",
+        "resolved": "2.7.0",
+        "contentHash": "6Pit9KmeSKLpLlUUR8TSWIRdos4V8ilsz7eaOf8o9H2555lTBtQgQyQR4LjXf1EDcAe4EYocQ+YDipe0pbQrpA==",
         "dependencies": {
           "Microsoft.Web.WebView2": "1.0.3719.77",
-          "Microsoft.WindowsAppSDK.Base": "2.6.5",
-          "Microsoft.WindowsAppSDK.Foundation": "2.6.5",
-          "Microsoft.WindowsAppSDK.InteractiveExperiences": "2.6.5"
+          "Microsoft.WindowsAppSDK.Base": "2.7.0",
+          "Microsoft.WindowsAppSDK.Foundation": "2.7.0",
+          "Microsoft.WindowsAppSDK.InteractiveExperiences": "2.7.0"
         }
       }
     }

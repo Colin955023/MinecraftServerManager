@@ -1,13 +1,31 @@
-﻿<#
+﻿#Requires -Version 7.1
+<#
 .SYNOPSIS
     Minecraft Server Manager 共用 PowerShell 函式庫
 #>
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+# 共用 UTF-8 無 BOM 編碼
+$Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+
+function Get-RepoRoot
+{
+    <#
+    .SYNOPSIS
+        取得儲存庫根目錄完整路徑。
+    #>
+    [CmdletBinding()]
+    param()
+
+    return [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+}
 
 function Initialize-ScriptEnvironment
 {
     <#
     .SYNOPSIS
-        統一設定 UTF-8 主控台編碼、停用 MSBuild 節點重用，並將錯誤偏好設為 Stop（作用於呼叫端腳本範圍）。
+        統一設定 UTF-8 主控台編碼並停用 MSBuild 節點重用。
     #>
     [CmdletBinding()]
     param()
@@ -15,11 +33,9 @@ function Initialize-ScriptEnvironment
     $env:DOTNET_CLI_FORCE_UTF8_ENCODING = "1"
     $env:MSBUILDDISABLENODEREUSE = "1"
 
-    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-    [Console]::InputEncoding = $utf8NoBom
-    [Console]::OutputEncoding = $utf8NoBom
-    Set-Variable -Name OutputEncoding -Value $utf8NoBom -Scope 1
-    Set-Variable -Name ErrorActionPreference -Value "Stop" -Scope 1
+    [Console]::InputEncoding = $Utf8NoBom
+    [Console]::OutputEncoding = $Utf8NoBom
+    Set-Variable -Name OutputEncoding -Value $Utf8NoBom -Scope 1
 }
 
 function Test-CiEnvironment
@@ -44,7 +60,7 @@ function Get-ProjectVersion
 
     if ([string]::IsNullOrWhiteSpace($RepoRoot))
     {
-        $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+        $RepoRoot = Get-RepoRoot
     }
 
     $propsPath = Join-Path $RepoRoot "Directory.Build.props"
@@ -53,7 +69,7 @@ function Get-ProjectVersion
         throw "找不到版本定義檔案 Directory.Build.props ($propsPath)"
     }
 
-    [xml]$propsXml = Get-Content -Raw -Encoding UTF8 $propsPath
+    [xml]$propsXml = Get-Content -LiteralPath $propsPath -Raw -Encoding UTF8
     $versionNode = $propsXml.SelectSingleNode("//Version")
     if ($null -eq $versionNode -or [string]::IsNullOrWhiteSpace($versionNode.InnerText))
     {
@@ -86,7 +102,7 @@ function Write-Sha256File
     [System.IO.File]::WriteAllText(
         $shaPath,
         "$hash  $([System.IO.Path]::GetFileName($fullPath))`n",
-        [System.Text.UTF8Encoding]::new($false)
+        $Utf8NoBom
     )
     return $shaPath
 }
@@ -112,13 +128,13 @@ function Invoke-SmokeTest
     }
 
     $smokeDataDir = Join-Path ([System.IO.Path]::GetTempPath()) ("msm_smoke_" + [Guid]::NewGuid().ToString("N"))
-    New-Item -ItemType Directory -Path $smokeDataDir -Force | Out-Null
+    $null = [System.IO.Directory]::CreateDirectory($smokeDataDir)
     # 預寫設定：伺服器目錄指向暫存、停用自動更新（避免連網）
     $settingsJson = [ordered]@{
         servers_root        = Join-Path $smokeDataDir "servers"
         auto_update_enabled = $false
     } | ConvertTo-Json
-    [System.IO.File]::WriteAllText((Join-Path $smokeDataDir "user_settings.json"), $settingsJson, [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText((Join-Path $smokeDataDir "user_settings.json"), $settingsJson, $Utf8NoBom)
 
     $psi = [System.Diagnostics.ProcessStartInfo]::new($fullExePath, "--smoke-test")
     $psi.EnvironmentVariables["MSM_USER_DATA_DIR"] = $smokeDataDir
@@ -277,7 +293,7 @@ function Assert-Sha256File
 
     $expected = $Matches[1]
     $targetName = $Matches[2].Trim()
-    $target = Join-Path (Split-Path -Parent ([System.IO.Path]::GetFullPath($ShaPath))) $targetName
+    $target = Join-Path ([System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($ShaPath))) $targetName
     if (-not (Test-Path -LiteralPath $target -PathType Leaf))
     {
         throw "雜湊檔指定的檔案不存在：$targetName"

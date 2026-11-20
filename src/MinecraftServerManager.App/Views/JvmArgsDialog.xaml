@@ -25,9 +25,7 @@
 
         <!-- 建議參數清單卡片 -->
         <Border Grid.Row="1"
-            Style="{StaticResource CardBorderStyle}"
-            CornerRadius="8"
-            Padding="12,8">
+            Style="{StaticResource CardBorderStyle}">
             <ScrollViewer VerticalScrollBarVisibility="Auto"
                 HorizontalScrollBarVisibility="Disabled">
                 <ItemsControl ItemsSource="{x:Bind ViewModel.RecommendedArgs}">
@@ -38,7 +36,7 @@
                                 Margin="0,3,0,3">
                                 <TextBlock Text="{x:Bind Option}"
                                     FontFamily="Consolas, Segoe UI"
-                                    FontSize="13" />
+                                    FontSize="{StaticResource BodyTextBlockFontSize}" />
                             </CheckBox>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
@@ -57,7 +55,7 @@
             Spacing="6">
             <CheckBox Content="其他自訂參數"
                 IsChecked="{x:Bind ViewModel.HasCustomArgs, Mode=TwoWay}" />
-            <TextBox
+            <TextBox AutomationProperties.Name="自訂 JVM 參數"
                 Text="{x:Bind ViewModel.CustomArgsText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                 IsEnabled="{x:Bind ViewModel.HasCustomArgs, Mode=OneWay}"
                 PlaceholderText="例如：-Dfile.encoding=UTF-8" />

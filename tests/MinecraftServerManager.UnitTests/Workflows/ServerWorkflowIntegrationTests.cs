@@ -9,7 +9,6 @@ using MinecraftServerManager.Infrastructure.Servers;
 
 namespace MinecraftServerManager.UnitTests.Workflows;
 
-/// <summary>伺服器端對端工作流程測試</summary>
 public sealed class ServerWorkflowIntegrationTests : IDisposable
 {
     private readonly TempDirectory _testRootTemp = new("msm_integration_");

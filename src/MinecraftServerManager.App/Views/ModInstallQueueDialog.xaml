@@ -8,20 +8,15 @@
         <Grid Style="{StaticResource DialogRootGridStyle}">
                 <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <TextBlock Grid.Row="0"
-                        Text="📋 待安裝模組清單"
-                        Style="{ThemeResource TitleTextBlockStyle}" />
-
-                <TextBlock Grid.Row="1"
                         Text="目前已排入安裝佇列的模組與相依項目如下："
                         Style="{StaticResource SecondaryCaptionTextStyle}" />
 
-                <Border Grid.Row="2"
+                <Border Grid.Row="1"
                         Style="{StaticResource PanelCardStyle}">
                         <controls:TableFrame SortTarget="{x:Bind HeaderSort}">
                                 <controls:TableFrame.Header>
@@ -103,20 +98,20 @@
                         </controls:TableFrame>
                 </Border>
 
-                <Grid Grid.Row="3">
+                <Grid Grid.Row="2">
                         <Button Content="清空清單"
                                 Click="ClearQueue_Click"
                                 HorizontalAlignment="Left" />
                         <StackPanel Orientation="Horizontal"
                                 HorizontalAlignment="Right"
                                 Spacing="10">
+                                <Button Content="開始安裝"
+                                        Click="StartInstall_Click"
+                                        Style="{StaticResource PrimaryButtonStyle}"
+                                        MinWidth="100" />
                                 <Button Content="關閉"
                                         Click="Close_Click"
                                         MinWidth="80" />
-                                <Button Content="開始安裝"
-                                        Click="StartInstall_Click"
-                                        Style="{ThemeResource AccentButtonStyle}"
-                                        MinWidth="100" />
                         </StackPanel>
                 </Grid>
         </Grid>

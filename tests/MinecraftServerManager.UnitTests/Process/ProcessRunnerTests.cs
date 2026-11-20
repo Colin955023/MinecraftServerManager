@@ -140,6 +140,43 @@ public sealed class ProcessRunnerTests
     }
 
     [Fact]
+    public async Task LateSubscriber_ReceivesBacklogInOrderWithoutConcurrentCalls()
+    {
+        const int lineCount = 200;
+        var runner = new ProcessRunner();
+        await using var process = await runner.StartAsync(new ProcessStartSpec(
+            "cmd.exe",
+            ["/d", "/c", $"for /L %i in (1,1,{lineCount}) do @echo %i"]));
+
+        // 延後訂閱，讓部分輸出先進入積壓佇列
+        await Task.Delay(200, TestContext.Current.CancellationToken);
+
+        var received = new List<int>();
+        int active = 0;
+        bool overlapped = false;
+        process.OutputReceived += item =>
+        {
+            if (Interlocked.Increment(ref active) > 1)
+            {
+                overlapped = true;
+            }
+
+            if (int.TryParse(item.Text, out int value))
+            {
+                received.Add(value);
+            }
+
+            Thread.SpinWait(2000);
+            Interlocked.Decrement(ref active);
+        };
+
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(overlapped);
+        Assert.Equal(Enumerable.Range(1, lineCount), received);
+    }
+
+    [Fact]
     public void GetStartTimeUtc_ReturnsValueForCurrentProcessAndNullForMissingPid()
     {
         var runner = new ProcessRunner();

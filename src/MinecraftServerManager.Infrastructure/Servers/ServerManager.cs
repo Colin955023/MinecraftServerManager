@@ -160,7 +160,7 @@ public sealed partial class ServerManager : IServerManager
             progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.Artifact, 85, "伺服器核心安裝完成"));
 
             // ── Phase 4: LaunchScript (85% ~ 95%) ──
-            progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.LaunchScript, 85, "正在生成啟動腳本..."));
+            progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.LaunchScript, 85, "正在產生啟動腳本..."));
 
             string? launchJar = ServerLaunchTargetResolver.ResolveLaunchTarget(stableStaging, plan.Config.LoaderType);
             if (launchJar is null)
@@ -170,7 +170,7 @@ public sealed partial class ServerManager : IServerManager
 
             StartScriptWriter.Write(stableStaging, launchJar, plan.Config.MemoryMaxMb, plan.Config.MemoryMinMb ?? ServerDefaults.DefaultMemoryMinMb, resolvedJavaPath, plan.Config.JvmArgs, plan.Config.LoaderType);
             ServerSetupHelpers.CleanupRedundantStartupScripts(stableStaging);
-            progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.LaunchScript, 95, "啟動腳本已生成並通過完整性驗證"));
+            progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.LaunchScript, 95, "啟動腳本已產生並通過完整性驗證"));
 
             // ── Phase 5: Commit (95% ~ 100%) ──
             progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.Commit, 95, "正在登錄伺服器設定..."));
@@ -281,7 +281,7 @@ public sealed partial class ServerManager : IServerManager
             return ServerOperationResult.Fail($"找不到伺服器：{name}");
         }
 
-        // 以登錄檔記錄的實際路徑為準
+        // 以伺服器清單檔記錄的實際路徑為準
         string serverDir = config.Path;
 
         Logger.Information("開始刪除伺服器「{Name}」...", name);
@@ -356,7 +356,6 @@ public sealed partial class ServerManager : IServerManager
         return await _importWorkflow.ImportAsync(sourceDirectory, targetName, mode, progress, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>掃描根目錄並註冊新伺服器</summary>
     public async Task<ServerScanReport> ScanAndRegisterAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

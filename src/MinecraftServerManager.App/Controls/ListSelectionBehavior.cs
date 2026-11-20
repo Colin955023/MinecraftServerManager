@@ -59,7 +59,7 @@ public static class ListSelectionBehavior
     {
         Detach(listView);
 
-        // 掛在最上層視覺根（頁面、對話方塊或視窗內容），才能收到清單以外區域的點選
+        // 掛在最上層視覺根（頁面、對話框或視窗內容），才能收到清單以外區域的點選
         UIElement root = listView;
         while (VisualTreeHelper.GetParent(root) is UIElement parent)
         {

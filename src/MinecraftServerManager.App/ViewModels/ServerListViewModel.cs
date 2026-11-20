@@ -58,7 +58,7 @@ public sealed partial class ServerRowItem : ObservableObject
     public partial long RawLastModifiedTicks { get; set; } = -1;
 }
 
-/// <summary>伺服器管理頁：伺服器清單、選取狀態、執行狀態探測與目錄大小背景計算</summary>
+/// <summary>伺服器管理頁：伺服器清單、選取狀態、執行狀態偵測與目錄大小背景計算</summary>
 public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerListViewModel));
@@ -75,7 +75,7 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
     private readonly IServerDirectorySizeService _directorySizeService;
     private readonly ILocalFileSystem _fileSystem;
     private readonly Action<string> _navigateCallback;
-    private CancellationTokenSource? _sizeCalculationCts;
+    private readonly SerialCancellation _sizeCalculation = new();
 
     [ObservableProperty]
     public partial string DetectPath { get; set; } = string.Empty;
@@ -155,9 +155,7 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
     {
         _runtimeHost.ServerStateChanged -= OnServerStateChanged;
         _stopCoordinator.StoppingStateChanged -= OnServerStateChanged;
-        CancelSizeCalculation();
-        _sizeCalculationCts?.Dispose();
-        _sizeCalculationCts = null;
+        _sizeCalculation.Dispose();
     }
 
     /// <summary>取得已驗證之伺服器存放根目錄，驗證失敗時改用設定值</summary>
@@ -401,25 +399,9 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
         row.HasMissingFiles = snapshot.HasMissingFiles;
     }
 
-    private void CancelSizeCalculation()
-    {
-        try
-        {
-            _sizeCalculationCts?.Cancel();
-        }
-        catch (ObjectDisposedException ex)
-        {
-            Logger.Information("取消目錄大小計算時權杖已釋放: {Message}", ex.Message);
-        }
-    }
-
     private void TriggerBackgroundSizeBackfill()
     {
-        CancelSizeCalculation();
-        _sizeCalculationCts?.Dispose();
-        var cts = new CancellationTokenSource();
-        _sizeCalculationCts = cts;
-        var token = cts.Token;
+        var token = _sizeCalculation.Next();
 
         var targets = Servers.Select(s => (Row: s, s.Path)).ToList();
 

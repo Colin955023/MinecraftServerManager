@@ -11,7 +11,6 @@ public sealed class ServerLogReader(int maxBytesToRead = ServerLogReader.Default
     /// <summary>預設讀取尾端位元組上限（2 MB）</summary>
     public const int DefaultMaxBytes = 2 * 1024 * 1024;
 
-    /// <summary>預設讀取行數上限</summary>
     private const int DefaultMaxLines = 2500;
 
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerLogReader));

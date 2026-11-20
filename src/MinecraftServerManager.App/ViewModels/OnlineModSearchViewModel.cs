@@ -45,7 +45,7 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase, IDisposabl
     private readonly IExternalLauncher _launcher;
     private readonly IUiService _ui;
     private readonly List<OnlineModRowItem> _allOnlineMods = [];
-    private CancellationTokenSource? _searchCts;
+    private readonly SerialCancellation _search = new();
     private bool _disposed;
 
     [ObservableProperty]
@@ -167,16 +167,7 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase, IDisposabl
         }
 
         // 新搜尋取消前一次搜尋，避免較慢的舊回應覆寫新結果
-        var searchCts = new CancellationTokenSource();
-        var previousCts = _searchCts;
-        _searchCts = searchCts;
-        if (previousCts is not null)
-        {
-            await previousCts.CancelAsync().ConfigureAwait(true);
-            previousCts.Dispose();
-        }
-
-        CancellationToken token = searchCts.Token;
+        CancellationToken token = _search.Next();
 
         IsSearchingOnline = true;
         _allOnlineMods.Clear();
@@ -241,13 +232,11 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase, IDisposabl
         }
         finally
         {
-            if (ReferenceEquals(_searchCts, searchCts))
+            // 未被較新搜尋取代時才結束忙碌狀態
+            if (!token.IsCancellationRequested)
             {
-                _searchCts = null;
                 IsSearchingOnline = false;
             }
-
-            searchCts.Dispose();
         }
     }
 
@@ -292,8 +281,6 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase, IDisposabl
 
         _disposed = true;
         _context.ServerChanged -= OnServerChanged;
-        var cts = Interlocked.Exchange(ref _searchCts, null);
-        cts?.Cancel();
-        cts?.Dispose();
+        _search.Dispose();
     }
 }

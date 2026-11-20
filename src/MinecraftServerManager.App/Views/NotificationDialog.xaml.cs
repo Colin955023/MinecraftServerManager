@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using MinecraftServerManager.App.Controls;
 using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
@@ -21,7 +22,8 @@ public sealed partial class NotificationDialog : ContentDialog, INotifyPropertyC
 
     public string DialogTitle { get; }
     public string Message { get; }
-    public string IconGlyph { get; }
+    /// <summary>圖示前景主題資源鍵</summary>
+    public string IconBrushKey { get; } = UiBindHelpers.DangerTextBrushKey;
 
     public string ButtonText
     {
@@ -45,7 +47,6 @@ public sealed partial class NotificationDialog : ContentDialog, INotifyPropertyC
 
         DialogTitle = title;
         Message = message;
-        IconGlyph = "❌";
         _totalSeconds = 10.0;
         _buttonText = $"確定 ({(int)_totalSeconds}s)";
 

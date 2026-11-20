@@ -229,7 +229,7 @@ public sealed partial class ServerInspector : IServerInspector
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    Logger.Warning(ex, "探測 NeoForge 函式庫目錄失敗");
+                    Logger.Warning(ex, "偵測 NeoForge 函式庫目錄失敗");
                 }
             }
 
@@ -256,7 +256,7 @@ public sealed partial class ServerInspector : IServerInspector
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    Logger.Warning(ex, "探測 Forge 函式庫目錄失敗");
+                    Logger.Warning(ex, "偵測 Forge 函式庫目錄失敗");
                 }
             }
 
@@ -283,7 +283,7 @@ public sealed partial class ServerInspector : IServerInspector
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    Logger.Warning(ex, "探測 {Loader} 函式庫目錄失敗", display);
+                    Logger.Warning(ex, "偵測 {Loader} 函式庫目錄失敗", display);
                 }
             }
         }

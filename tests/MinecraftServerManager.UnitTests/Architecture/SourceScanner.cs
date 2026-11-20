@@ -41,8 +41,8 @@ public static class SourceScanner
         throw new InvalidOperationException($"無法自路徑 '{AppContext.BaseDirectory}' 向上定位專案儲存庫根目錄。");
     }
 
-    /// <summary>取得目錄下的 C# 原始碼（排除 bin、obj 與產生碼）</summary>
-    public static IReadOnlyList<(string RelativePath, string FullPath)> GetSourceFiles(string relativeDirectory)
+    /// <summary>取得目錄下符合樣式的原始碼（預設 C#；排除 bin、obj 與產生碼）</summary>
+    public static IReadOnlyList<(string RelativePath, string FullPath)> GetSourceFiles(string relativeDirectory, string searchPattern = "*.cs")
     {
         string fullDirectory = Path.Combine(SolutionRoot, relativeDirectory);
         if (!Directory.Exists(fullDirectory))
@@ -51,7 +51,7 @@ public static class SourceScanner
         }
 
         var results = new List<(string RelativePath, string FullPath)>();
-        foreach (string file in Directory.EnumerateFiles(fullDirectory, "*.cs", SearchOption.AllDirectories))
+        foreach (string file in Directory.EnumerateFiles(fullDirectory, searchPattern, SearchOption.AllDirectories))
         {
             string normalized = file.Replace('\\', '/');
             if (normalized.Contains("/bin/", StringComparison.OrdinalIgnoreCase) ||

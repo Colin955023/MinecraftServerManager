@@ -29,13 +29,12 @@ public sealed partial class ServerMonitorWindow : Window
 
         InitializeComponent();
 
-        ExtendsContentIntoTitleBar = true;
-
         WindowIconHelper.SetIcon(AppWindow);
         Title = _viewModel.WindowTitle;
 
         WindowLayoutHelper.ResizeToDip(this, 1050, 680);
-        SetTitleBar(AppTitleBar);
+        WindowLayoutHelper.SetMinimumSizeDip(this, 720, 480);
+        WindowChromeService.Apply(this, AppTitleBar);
 
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
@@ -47,7 +46,7 @@ public sealed partial class ServerMonitorWindow : Window
         if (_ui is WinUiService winUi)
         {
             RootGrid.RequestedTheme = winUi.CurrentTheme;
-            TitleBarThemeHelper.ApplyTitleBarTheme(AppWindow, winUi.CurrentTheme);
+            WindowChromeService.ApplyTheme(AppWindow, winUi.CurrentTheme);
         }
 
         if (_viewModel.Logs is INotifyCollectionChanged notify)

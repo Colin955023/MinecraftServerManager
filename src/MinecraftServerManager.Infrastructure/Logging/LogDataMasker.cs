@@ -42,8 +42,8 @@ public static partial class LogDataMasker
             return masked;
         }
 
-        masked = SensitiveKeyValueRegex().Replace(masked, "$1$2" + MaskReplacement);
-        return BearerTokenRegex().Replace(masked, "$1" + MaskReplacement);
+        masked = SensitiveKeyValueRegex().Replace(masked, static m => m.Groups[1].Value + m.Groups[2].Value + MaskReplacement);
+        return BearerTokenRegex().Replace(masked, static m => m.Groups[1].Value + MaskReplacement);
     }
 
     private static bool MayContainSensitiveData(string text) =>

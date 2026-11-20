@@ -7,7 +7,6 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
-/// <summary>模組版本相容性與相依性關係分析規劃實作</summary>
 public sealed class ModDependencyPlanner : IModDependencyPlanner
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModDependencyPlanner));
@@ -312,7 +311,6 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         return installedIdentifiers;
     }
 
-    /// <summary>待比對模組的正規化鍵</summary>
     private readonly record struct ModMatchKey(string? NormalizedId, string? NormalizedAlias, string? FileStem)
     {
         public static ModMatchKey Create(string? idToMatch, string? fileName)

@@ -2,7 +2,6 @@ using MinecraftServerManager.Infrastructure.Mods;
 
 namespace MinecraftServerManager.UnitTests.Mods;
 
-/// <summary>模組快取索引持久化測試</summary>
 public sealed class ModIndexPersistenceTests : IDisposable
 {
     private readonly TempDirectory _testDirTemp = new("msm_test_mod_index_");

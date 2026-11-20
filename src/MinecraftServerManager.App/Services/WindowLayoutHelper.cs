@@ -29,6 +29,17 @@ public static partial class WindowLayoutHelper
         window.AppWindow.Resize(new SizeInt32((int)(widthDip * scale), (int)(heightDip * scale)));
     }
 
+    /// <summary>依視窗 DPI 設定可調整的最小邏輯尺寸</summary>
+    public static void SetMinimumSizeDip(Window window, int widthDip, int heightDip)
+    {
+        if (window.AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
+        {
+            double scale = GetScale(window);
+            presenter.PreferredMinimumWidth = (int)(widthDip * scale);
+            presenter.PreferredMinimumHeight = (int)(heightDip * scale);
+        }
+    }
+
     /// <summary>計算將指定尺寸置中於參考矩形之座標，並夾限於螢幕工作區內</summary>
     public static PointInt32 CenterWithin(RectInt32 reference, RectInt32 workArea, int width, int height)
     {

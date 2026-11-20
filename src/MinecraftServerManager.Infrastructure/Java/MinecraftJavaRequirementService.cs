@@ -27,7 +27,6 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         _cacheDirectory = SafeFileSystem.ResolveStableDirectory(cacheDirectory, create: true);
     }
 
-    /// <summary>取得指定 Minecraft 版本所需的 Java major（優先快取）</summary>
     public async Task<int> GetRequiredJavaMajorAsync(
         string minecraftVersion,
         LoaderKind loader = LoaderKind.Unknown,
@@ -71,7 +70,6 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         throw new InvalidOperationException($"無法從 Mojang 官方或載入器版本資訊取得 Minecraft 版本「{cleaned}」指定的 Java major 版本。");
     }
 
-    /// <summary>僅從本機快取取得指定版本所需的 Java 主版本號，無快取時回傳 null</summary>
     public int? GetCachedJavaMajor(string minecraftVersion, LoaderKind loader = LoaderKind.Unknown)
     {
         if (string.IsNullOrWhiteSpace(minecraftVersion))
@@ -96,7 +94,6 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         return null;
     }
 
-    /// <summary>快取中出現過的 Java major（由小到大）；無快取回傳預設值</summary>
     public IReadOnlyList<int> GetCachedAvailableJavaMajors()
     {
         EnsureCacheLoaded();

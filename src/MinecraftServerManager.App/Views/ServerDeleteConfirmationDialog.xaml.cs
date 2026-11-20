@@ -20,13 +20,13 @@ public sealed partial class ServerDeleteConfirmationDialog : ContentDialog
 
         if (backupCount > 0)
         {
-            Message = $"確定要刪除伺服器「{serverName}」嗎？\n\n⚠️ 這將永久刪除伺服器檔案，無法復原！\n\n偵測到此伺服器有 {backupCount} 個外部備份檔案，是否一併刪除？";
+            Message = $"確定要刪除伺服器「{serverName}」嗎？\n\n這將永久刪除伺服器檔案，無法復原！\n\n偵測到此伺服器有 {backupCount} 個外部備份檔案，是否一併刪除？";
             PrimaryText = "連同備份一併刪除";
             SecondaryText = "僅刪除伺服器";
         }
         else
         {
-            Message = $"確定要刪除伺服器「{serverName}」嗎？\n\n⚠️ 這將永久刪除伺服器檔案，無法復原！";
+            Message = $"確定要刪除伺服器「{serverName}」嗎？\n\n這將永久刪除伺服器檔案，無法復原！";
             PrimaryText = "確定刪除";
             SecondaryText = string.Empty;
         }

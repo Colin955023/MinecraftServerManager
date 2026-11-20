@@ -4,7 +4,6 @@ using MinecraftServerManager.Infrastructure.Mods;
 
 namespace MinecraftServerManager.UnitTests.Mods;
 
-/// <summary>模組管理外觀服務測試</summary>
 public sealed class ModManagerTests : IDisposable
 {
     private readonly TempDirectory _testDirTemp = new("msm_test_modmgr_");

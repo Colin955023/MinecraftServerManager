@@ -5,9 +5,9 @@
 
   <StackPanel Orientation="Horizontal"
     Spacing="{x:Bind Spacing, Mode=OneWay}">
-    <ContentPresenter ContentTemplate="{x:Bind Icon, Mode=OneWay}"
-      Width="{x:Bind IconSize, Mode=OneWay}"
-      Height="{x:Bind IconSize, Mode=OneWay}"
+    <FontIcon Glyph="{x:Bind Icon, Mode=OneWay}"
+      FontFamily="{StaticResource SymbolThemeFontFamily}"
+      FontSize="{x:Bind IconSize, Mode=OneWay}"
       VerticalAlignment="Center" />
     <TextBlock Text="{x:Bind Text, Mode=OneWay}"
       VerticalAlignment="Center" />

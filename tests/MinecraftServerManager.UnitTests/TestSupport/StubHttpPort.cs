@@ -34,16 +34,13 @@ internal sealed class StubHttpPort : IHttpPort
     /// <summary>GET 文字回應（回傳 null 代表無回應）；可擲出例外以模擬連線失敗</summary>
     public Func<Uri, string?> TextHandler { get; init; } = static _ => null;
 
-    /// <summary>POST JSON 回應</summary>
     public Func<Uri, string, string?> PostHandler { get; init; } = static (_, _) => null;
 
-    /// <summary>下載行為</summary>
     public Func<StubDownload, Task<HttpResult>>? DownloadHandler { get; init; }
 
     /// <summary>GET 文字請求次數（含 JSON 取得）</summary>
     public int RequestCount => _requestCount;
 
-    /// <summary>下載請求次數</summary>
     public int DownloadCount => _downloadCount;
 
     public string? LastDownloadExpectedHash { get; private set; }

@@ -176,7 +176,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 }
             }
 
-            // 探測逾時，避免異常 java.exe 卡住偵測
+            // 版本偵測逾時，避免異常 java.exe 卡住
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(ProbeTimeout);
 
@@ -207,7 +207,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            Logger.Warning("Java 版本探測逾時: {ExecutablePath}", executablePath);
+            Logger.Warning("Java 版本偵測逾時: {ExecutablePath}", executablePath);
             return null;
         }
         catch (Exception ex) when (ex is FileNotFoundException or Win32Exception or InvalidOperationException)
@@ -497,7 +497,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         }
         catch (Exception ex)
         {
-            Logger.Warning(ex, "寫入 Java 探測快取失敗");
+            Logger.Warning(ex, "寫入 Java 偵測快取失敗");
         }
     }
 }

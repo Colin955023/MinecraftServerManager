@@ -104,7 +104,7 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
         }
 
         if (!await _ui.ConfirmAsync(
-            $"確定要將備份「{SelectedBackup.FileName}」還原至伺服器「{_serverName}」嗎？\n\n⚠️ 此操作將以備份內容覆蓋現有伺服器檔案，且無法復原。",
+            $"確定要將備份「{SelectedBackup.FileName}」還原至伺服器「{_serverName}」嗎？\n\n此操作將以備份內容覆蓋現有伺服器檔案，且無法復原。",
             "確認還原備份",
             UiMessageLevel.Warning).ConfigureAwait(true))
         {

@@ -17,7 +17,7 @@ public sealed class CreateServerViewModelTests
             NoOp.Create<Core.Ports.IMinecraftJavaRequirementService>(),
             NoOp.Create<Core.Ports.IJavaInstaller>(),
             NoOp.Create<Core.Ports.IServerRuntimeHost>(),
-            NoOp.Create<Core.Servers.IServerLaunchPlanner>());
+            static runtime => new Infrastructure.Servers.ServerInitializationWorkflow(runtime, NoOp.Create<Core.Servers.IServerLaunchPlanner>()));
 
     [Fact]
     public void MemoryValidationShouldCatchInvalidValues()

@@ -19,6 +19,12 @@
 *.yaml text eol=lf
 *.yml text eol=lf
 *.xml text eol=lf
+*.config text eol=lf
+
+# 網頁：LF
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
 
 # 文件：LF
 *.md text eol=lf
@@ -38,3 +44,4 @@
 *.jar binary
 *.zip binary
 *.7z binary
+*.avif binary

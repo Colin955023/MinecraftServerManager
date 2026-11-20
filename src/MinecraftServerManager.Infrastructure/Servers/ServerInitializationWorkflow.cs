@@ -26,7 +26,6 @@ public sealed class ServerInitializationWorkflow : IDisposable
         _runtime.ServerReady += OnServerReady;
     }
 
-    /// <summary>是否已偵測到伺服器就緒訊號（初始化已完成）</summary>
     public bool ReadyDetected => _readyDetected;
 
     /// <summary>解析啟動檔：優先啟動腳本，否則 server.jar</summary>
@@ -35,7 +34,6 @@ public sealed class ServerInitializationWorkflow : IDisposable
             ? ServerDefaults.StartServerBatFileName
             : "server.jar";
 
-    /// <summary>以指定啟動檔啟動伺服器</summary>
     public async Task StartAsync(string javaExecutablePath, ServerConfig config, string executableName)
     {
         ArgumentNullException.ThrowIfNull(config);

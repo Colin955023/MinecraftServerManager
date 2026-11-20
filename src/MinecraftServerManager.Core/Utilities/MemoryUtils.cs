@@ -104,12 +104,12 @@ public static partial class MemoryUtils
 
         if (hasXmx)
         {
-            content = XmxFlagRegex().Replace(content, $"-Xmx{maxMb}M");
+            content = XmxFlagRegex().Replace(content, _ => $"-Xmx{maxMb}M");
         }
 
         if (hasXms)
         {
-            content = XmsFlagRegex().Replace(content, $"-Xms{minMb}M");
+            content = XmsFlagRegex().Replace(content, _ => $"-Xms{minMb}M");
         }
         else if (hasXmx)
         {

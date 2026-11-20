@@ -30,7 +30,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 1
 
       - name: Extract version and verify CHANGELOG
         id: extract_notes
@@ -50,12 +49,17 @@ jobs:
         run: |
           . ./scripts/lib/Common.ps1
           git fetch --tags --force
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error "Preflight 失敗：取得遠端標籤失敗"
+              exit $LASTEXITCODE
+          }
           $tag = $env:RELEASE_TAG
-          $headCommit = (git rev-parse HEAD).Trim()
-          if ($LASTEXITCODE -ne 0 -or -not $headCommit) {
+          $headCommit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($headCommit)) {
               Write-Error "Preflight 失敗：無法取得目前 HEAD commit"
               exit 1
           }
+          $headCommit = $headCommit.Trim()
 
           $existingTagCommit = Get-TagCommit -Tag $tag
           if ($null -eq $existingTagCommit) {
@@ -106,7 +110,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 1
 
       - name: Setup .NET SDK
         uses: ./.github/actions/setup-dotnet
@@ -115,7 +118,6 @@ jobs:
         run: .\scripts\dotnet_publish.ps1
 
       - name: Generate SBOM (SPDX)
-        shell: pwsh
         env:
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
           SBOM_TOOL_VERSION: v4.1.5
@@ -200,7 +202,6 @@ jobs:
           }
 
       - name: Upload release payload
-        if: success()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release_payload
@@ -225,7 +226,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 1
 
       - name: Download release payload
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -244,13 +244,22 @@ jobs:
         run: |
           . ./scripts/lib/Common.ps1
           git fetch --tags --force
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error "取得遠端標籤失敗"
+              exit $LASTEXITCODE
+          }
           $tag = $env:RELEASE_TAG
           if ($null -ne (Get-TagCommit -Tag $tag)) {
               Write-Host "Tag $tag 已存在（Preflight 已驗證指向目前 HEAD），略過建立。"
               exit 0
           }
 
-          $headCommit = (git rev-parse HEAD).Trim()
+          $headCommit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($headCommit)) {
+              Write-Error "無法取得目前 HEAD commit"
+              exit 1
+          }
+          $headCommit = $headCommit.Trim()
 
           $tagRequest = @{
               tag = $tag
@@ -338,7 +347,7 @@ jobs:
                   gh release download $tag --dir $verifyDir --repo $env:GITHUB_REPOSITORY --clobber
               }
 
-              $downloadedFiles = Get-ChildItem -LiteralPath $verifyDir -File
+              $downloadedFiles = @(Get-ChildItem -LiteralPath $verifyDir -File)
               Write-Host "成功下載 $($downloadedFiles.Count) 個發布資產："
               $downloadedFiles | Select-Object Name, Length | Format-Table -AutoSize
 

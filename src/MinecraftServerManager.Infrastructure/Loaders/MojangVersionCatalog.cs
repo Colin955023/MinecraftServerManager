@@ -127,7 +127,6 @@ internal static class MojangVersionCatalog
         return result;
     }
 
-    /// <summary>自本機版本快取查詢指定版本之官方 package URL</summary>
     public static string? TryGetCachedPackageUrl(string cacheDirectory, string minecraftVersion)
     {
         foreach (var version in LoadCachedVersions(GetVersionsCachePath(cacheDirectory)))
@@ -216,7 +215,6 @@ internal static class MojangVersionCatalog
         return v.Major > 1 || (v.Major == 1 && (v.Minor > 2 || (v.Minor == 2 && v.Patch >= 5)));
     }
 
-    /// <summary>取得官方 Java major 需求</summary>
     public static async Task<int?> FetchOfficialJavaMajorAsync(IHttpPort httpPort, string packageUrl, CancellationToken cancellationToken)
     {
         try

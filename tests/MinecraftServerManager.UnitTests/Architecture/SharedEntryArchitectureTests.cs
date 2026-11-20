@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace MinecraftServerManager.UnitTests.Architecture;
-/// <summary>架構規則測試（A1～A31），對應技術手冊第 11 節</summary>
+/// <summary>架構規則測試（A1～A35），對應技術手冊第 11 節</summary>
 public sealed partial class SharedEntryArchitectureTests
 {
     #region 輔助方法
@@ -36,7 +36,7 @@ public sealed partial class SharedEntryArchitectureTests
 
     #endregion
 
-    #region 規則表（A1～A31，A9 另以專案參照檢查）
+    #region 規則表（A1～A35，A9 另以專案參照檢查）
 
     private const string Infra = "src/MinecraftServerManager.Infrastructure/";
     private const string Core = "src/MinecraftServerManager.Core/";
@@ -45,14 +45,15 @@ public sealed partial class SharedEntryArchitectureTests
 
     private static readonly string[] Src = ["src"];
 
-    /// <summary>架構規則：範圍、違規正規式、說明、白名單與是否保留字串</summary>
+    /// <summary>架構規則：範圍、違規正規式、說明、白名單、是否保留字串與掃描檔案樣式</summary>
     private sealed record Rule(
         string Id,
         string[] Scopes,
         Regex Pattern,
         string Message,
         Func<string, bool> IsAllowed,
-        bool PreserveStrings = false);
+        bool PreserveStrings = false,
+        string FilePattern = "*.cs");
 
     private static Func<string, bool> Allow(params string[] paths) =>
         path => paths.Any(allowed => string.Equals(path, allowed, StringComparison.OrdinalIgnoreCase));
@@ -104,7 +105,7 @@ public sealed partial class SharedEntryArchitectureTests
         new("A15", Src, A15Regex(), "全專案嚴格禁止使用 Debug 或 Trace 等級輸出日誌（一般使用 Information，非致命例外使用 Warning，嚴重錯誤使用 Error）", AllowNone),
 
         new("A16", Src, A16Regex(), "視窗標題列、系統強調色、模態視窗繫結與圖示資源載入必須統一由專屬服務管理",
-            Allow(App + "Services/TitleBarThemeHelper.cs", App + "Services/AccentColorService.cs", App + "Services/ModalWindowHost.cs", App + "Services/WindowIconHelper.cs")),
+            Allow(App + "Services/WindowChromeService.cs", App + "Services/AccentColorService.cs", App + "Services/ModalWindowHost.cs", App + "Services/WindowIconHelper.cs")),
 
         new("A17", Src, A17Regex(), "Windows 保留裝置名稱檢查必須統一使用 ServerName.IsWindowsDeviceName，模組檔名與雜湊挑選必須統一使用 ModHelpers",
             Allow(Domain + "ValueObjects/ServerName.cs", Core + "Mods/ModHelpers.cs"), PreserveStrings: true),
@@ -148,13 +149,26 @@ public sealed partial class SharedEntryArchitectureTests
 
         new("A31", Src, A31Regex(), "PageServices 僅可出現在組合根與 PageViewModelFactory，ViewModel 不得持有整包服務",
             Allow(App + "AppCompositionRoot.cs", App + "ViewModels/PageServices.cs", App + "ViewModels/PageViewModelFactory.cs")),
+
+        new("A32", Src, A32Regex(), "視窗材質與標題列必須統一由 WindowChromeService 套用",
+            Allow(App + "Services/WindowChromeService.cs")),
+
+        new("A33", Src, A33Regex(), "有狀態的基礎設施物件只能由組合根或其專屬擁有者建立",
+            Allow(App + "AppCompositionRoot.cs", App + "App.xaml.cs", App + "ViewModels/PageViewModelFactory.cs",
+                Infra + "Servers/ServerManager.cs", Infra + "Servers/ServerRuntimeHost.cs", Infra + "Mods/LocalModScanner.cs")),
+
+        new("A34", [App.TrimEnd('/')], A34Regex(), "XAML 禁止寫死色碼與數值字級，必須使用主題資源與字階 token",
+            path => string.Equals(path, App + "App.xaml", StringComparison.OrdinalIgnoreCase) || StartsWith(path, App + "Resources/"),
+            PreserveStrings: true, FilePattern: "*.xaml"),
+
+        new("A35", [App.TrimEnd('/')], A35Regex(), "XAML 與其程式碼後置禁止 emoji，圖示字型必須使用 SymbolThemeFontFamily",
+            AllowNone, PreserveStrings: true, FilePattern: "*.xaml*"),
     }.ToDictionary(static rule => rule.Id, StringComparer.Ordinal);
 
     #endregion
 
-    #region 架構規則測試（A1～A31）
+    #region 架構規則測試（A1～A35）
 
-    /// <summary>依規則表掃描並要求零違規</summary>
     [Theory]
     [InlineData("A1")]
     [InlineData("A2")]
@@ -186,10 +200,14 @@ public sealed partial class SharedEntryArchitectureTests
     [InlineData("A29")]
     [InlineData("A30")]
     [InlineData("A31")]
+    [InlineData("A32")]
+    [InlineData("A33")]
+    [InlineData("A34")]
+    [InlineData("A35")]
     public void Rule_ShouldHaveNoViolations(string ruleId)
     {
         Rule rule = Rules[ruleId];
-        var files = rule.Scopes.SelectMany(SourceScanner.GetSourceFiles);
+        var files = rule.Scopes.SelectMany(scope => SourceScanner.GetSourceFiles(scope, rule.FilePattern));
         var violations = SourceScanner.ScanViolations(
             files,
             rule.Pattern,
@@ -201,7 +219,6 @@ public sealed partial class SharedEntryArchitectureTests
         AssertNoViolations(violations, rule.Id);
     }
 
-    /// <summary>技術手冊規則表的編號須與測試規則一致</summary>
     [Fact]
     public void RuleTable_ShouldMatchTestedRules()
     {
@@ -214,7 +231,6 @@ public sealed partial class SharedEntryArchitectureTests
         Assert.Equal(Rules.Keys.Append("A9").Order(StringComparer.Ordinal), documented);
     }
 
-    /// <summary>每條規則都須列入 InlineData</summary>
     [Fact]
     public void InlineData_ShouldCoverAllRules()
     {
@@ -272,7 +288,7 @@ public sealed partial class SharedEntryArchitectureTests
 
     #endregion
 
-    #region 規則比對正規式（A1～A31）
+    #region 規則比對正規式（A1～A35）
 
     [GeneratedRegex(@"(?<![\w\.])((System\.IO\.)?(File\.|Directory\.|FileInfo\b|DirectoryInfo\b|FileStream\b|DriveInfo\b))")]
     private static partial Regex A1Regex();
@@ -369,6 +385,18 @@ public sealed partial class SharedEntryArchitectureTests
 
     [GeneratedRegex(@"\bPageServices\b")]
     private static partial Regex A31Regex();
+
+    [GeneratedRegex(@"\b(SystemBackdrop|MicaBackdrop|ExtendsContentIntoTitleBar)\b|\bSetTitleBar\(")]
+    private static partial Regex A32Regex();
+
+    [GeneratedRegex(@"\bnew\s+(ServerRegistryStore|ServerImportWorkflow|ModIndexPersistence|ServerRuntime|ServerInitializationWorkflow|SettingsManager|ProcessRunner)\(")]
+    private static partial Regex A33Regex();
+
+    [GeneratedRegex(@"#[0-9A-Fa-f]{6,8}\b|\bFontSize=""\d")]
+    private static partial Regex A34Regex();
+
+    [GeneratedRegex(@"[\uD83C-\uD83E][\uDC00-\uDFFF]|[\u2600-\u27BF]|\bFontFamily=""Segoe")]
+    private static partial Regex A35Regex();
 
     #endregion
 }

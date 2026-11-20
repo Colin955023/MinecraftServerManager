@@ -17,6 +17,12 @@ public sealed partial class TableFrame : UserControl
     public static readonly DependencyProperty SortTargetProperty =
         DependencyProperty.Register(nameof(SortTarget), typeof(ITableSortTarget), typeof(TableFrame), new PropertyMetadata(null));
 
+    public static readonly DependencyProperty IsEmptyProperty =
+        DependencyProperty.Register(nameof(IsEmpty), typeof(bool), typeof(TableFrame), new PropertyMetadata(false));
+
+    public static readonly DependencyProperty EmptyTextProperty =
+        DependencyProperty.Register(nameof(EmptyText), typeof(string), typeof(TableFrame), new PropertyMetadata(string.Empty));
+
     public TableFrame()
     {
         InitializeComponent();
@@ -34,6 +40,20 @@ public sealed partial class TableFrame : UserControl
     {
         get => (ITableSortTarget?)GetValue(SortTargetProperty);
         set => SetValue(SortTargetProperty, value);
+    }
+
+    /// <summary>為 true 時於內容區置中顯示 <see cref="EmptyText"/></summary>
+    public bool IsEmpty
+    {
+        get => (bool)GetValue(IsEmptyProperty);
+        set => SetValue(IsEmptyProperty, value);
+    }
+
+    /// <summary>空狀態提示文字</summary>
+    public string EmptyText
+    {
+        get => (string)GetValue(EmptyTextProperty);
+        set => SetValue(EmptyTextProperty, value);
     }
 
     /// <summary>清單內容</summary>

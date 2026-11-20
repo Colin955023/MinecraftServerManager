@@ -7,7 +7,6 @@ namespace MinecraftServerManager.Infrastructure.Utilities;
 /// <summary>原子寫入：先寫同目錄暫存檔，再一次替換目標</summary>
 public static class AtomicFileWriter
 {
-    /// <summary>原子寫入暫存檔副檔名</summary>
     public const string TempFileExtension = ".tmp";
 
     /// <summary>產生同目錄的暫存檔路徑</summary>

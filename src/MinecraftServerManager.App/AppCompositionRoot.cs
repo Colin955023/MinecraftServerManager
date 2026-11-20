@@ -123,7 +123,7 @@ public sealed class AppCompositionRoot : IAsyncDisposable
         _mainViewModel = new MainViewModel(uiService, _settingsManager, updateCheckerService, _sharedProcessRunner, services.FileSystem, runningServerRegistry, new PageViewModelFactory(services));
     }
 
-    /// <summary>啟動背景非同步預熱任務（Java 探測與載入器目錄清單）</summary>
+    /// <summary>啟動背景非同步預熱任務（Java 偵測與載入器目錄清單）</summary>
     public void StartBackgroundWarmup()
     {
         _ = Task.Run(async () =>

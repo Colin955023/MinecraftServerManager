@@ -6,7 +6,6 @@ using MinecraftServerManager.Infrastructure.Servers;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-/// <summary>監控視窗 ViewModel 測試</summary>
 public sealed class ServerMonitorViewModelTests : IDisposable
 {
     private readonly TempDirectory _tempRootTemp = new("msm-monitor-test-");

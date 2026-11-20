@@ -8,7 +8,6 @@ using MinecraftServerManager.Infrastructure.Settings;
 
 namespace MinecraftServerManager.UnitTests.TestSupport;
 
-/// <summary>測試用相依集合工廠</summary>
 internal static class TestDependencies
 {
     public static PageServices Create(
@@ -60,11 +59,9 @@ internal static class TestDependencies
             AppUpdateService: NoOp.Create<IAppUpdateService>());
     }
 
-    /// <summary>以相依集合組裝「管理現有伺服器」頁面</summary>
     public static ManageServerViewModel CreateManagePage(PageServices services, Action<string>? navigate = null) =>
         new PageViewModelFactory(services).CreateManagePage(navigate ?? (static _ => { }));
 
-    /// <summary>以相依集合組裝主視窗 ViewModel</summary>
     public static MainViewModel CreateMainViewModel(PageServices services) => new(
         services.UiService,
         services.SettingsManager,

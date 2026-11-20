@@ -7,7 +7,7 @@ charset = utf-8
 trim_trailing_whitespace = true
 insert_final_newline = true
 
-[*.{csproj,props,targets,xaml,xml}]
+[*.{csproj,props,targets,xaml,xml,config,yml,yaml,json,html,css,js}]
 indent_size = 2
 
 [*.ps1]
@@ -70,17 +70,10 @@ dotnet_diagnostic.IDE0060.severity = error
 dotnet_diagnostic.IDE0079.severity = warning
 dotnet_diagnostic.IDE0005.severity = error
 dotnet_diagnostic.IDE0004.severity = error
-dotnet_diagnostic.IDE0071.severity = warning
-dotnet_diagnostic.IDE0075.severity = warning
-dotnet_diagnostic.IDE0080.severity = warning
-dotnet_diagnostic.IDE0110.severity = warning
-dotnet_diagnostic.IDE0150.severity = warning
 
 # 命名 / 可維護性
 dotnet_diagnostic.IDE0001.severity = warning
 dotnet_diagnostic.IDE0002.severity = warning
-dotnet_diagnostic.IDE0044.severity = warning
-dotnet_diagnostic.IDE1006.severity = warning
 
 # .NET Code Quality
 dotnet_diagnostic.CA1823.severity = error
@@ -118,6 +111,7 @@ dotnet_diagnostic.IDE0060.severity = none
 dotnet_diagnostic.IDE0005.severity = none
 dotnet_diagnostic.CA1707.severity = none
 dotnet_diagnostic.CA1849.severity = none
+dotnet_diagnostic.CA1859.severity = none
 dotnet_diagnostic.CA1861.severity = none
 dotnet_diagnostic.CA2000.severity = none
 dotnet_diagnostic.CA2007.severity = none

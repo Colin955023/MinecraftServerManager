@@ -2,7 +2,6 @@ using MinecraftServerManager.Core.Ports;
 
 namespace MinecraftServerManager.Infrastructure.FileSystem;
 
-/// <summary>呈現層的本機檔案系統存取</summary>
 public sealed class LocalFileSystem : ILocalFileSystem
 {
     public bool FileExists(string? path) =>

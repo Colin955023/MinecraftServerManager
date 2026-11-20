@@ -121,7 +121,6 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher, I
         return true;
     }
 
-    /// <summary>取得指定 PID 行程的啟動時間（UTC），查詢失敗回傳 null</summary>
     public DateTime? GetStartTimeUtc(int pid)
     {
         try
@@ -135,7 +134,6 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher, I
         }
     }
 
-    /// <summary>強制終止指定 PID 的行程及其子行程，行程已不存在視為成功</summary>
     public bool KillProcessTree(int pid)
     {
         try
@@ -399,6 +397,8 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher, I
         private readonly Task _standardErrorTask;
         private readonly Task _outputDispatchTask;
         private readonly Lock _outputLock = new();
+        /// <summary>序列化處理常式呼叫：積壓重播與新輸出不交錯、不並行</summary>
+        private readonly Lock _dispatchLock = new();
         private readonly Queue<ProcessOutput> _pendingOutput = new();
         private int _exitLogged;
         private bool _wasForceStopped;
@@ -441,25 +441,30 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher, I
             add
             {
                 ArgumentNullException.ThrowIfNull(value);
-                List<ProcessOutput>? backlog = null;
-                lock (_outputLock)
+
+                // 重播期間持有派送鎖，新輸出須等積壓輸出依序送完，避免交錯或並行呼叫處理常式
+                lock (_dispatchLock)
                 {
-                    _outputReceived += value;
-                    if (_pendingOutput.Count > 0)
+                    List<ProcessOutput>? backlog = null;
+                    lock (_outputLock)
                     {
-                        backlog = new List<ProcessOutput>(_pendingOutput.Count);
-                        while (_pendingOutput.TryDequeue(out var output))
+                        _outputReceived += value;
+                        if (_pendingOutput.Count > 0)
                         {
-                            backlog.Add(output);
+                            backlog = new List<ProcessOutput>(_pendingOutput.Count);
+                            while (_pendingOutput.TryDequeue(out var output))
+                            {
+                                backlog.Add(output);
+                            }
                         }
                     }
-                }
 
-                if (backlog is not null)
-                {
-                    foreach (var output in backlog)
+                    if (backlog is not null)
                     {
-                        NotifyOutputReceived(value, output);
+                        foreach (var output in backlog)
+                        {
+                            NotifyOutputReceived(value, output);
+                        }
                     }
                 }
             }
@@ -659,23 +664,26 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher, I
         {
             await foreach (ProcessOutput output in _outputChannel.Reader.ReadAllAsync().ConfigureAwait(false))
             {
-                Action<ProcessOutput>? handler;
-                lock (_outputLock)
+                lock (_dispatchLock)
                 {
-                    handler = _outputReceived;
-                    if (handler is null)
+                    Action<ProcessOutput>? handler;
+                    lock (_outputLock)
                     {
-                        _pendingOutput.Enqueue(output);
-                        while (_pendingOutput.Count > MaxPendingOutputLines)
+                        handler = _outputReceived;
+                        if (handler is null)
                         {
-                            _pendingOutput.Dequeue();
+                            _pendingOutput.Enqueue(output);
+                            while (_pendingOutput.Count > MaxPendingOutputLines)
+                            {
+                                _pendingOutput.Dequeue();
+                            }
                         }
                     }
-                }
 
-                if (handler is not null)
-                {
-                    NotifyOutputReceived(handler, output);
+                    if (handler is not null)
+                    {
+                        NotifyOutputReceived(handler, output);
+                    }
                 }
             }
         }

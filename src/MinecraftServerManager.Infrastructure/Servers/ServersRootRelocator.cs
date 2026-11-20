@@ -7,7 +7,7 @@ using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>伺服器根目錄遷移：驗證、搬移、失敗回復與登錄檔路徑更新</summary>
+/// <summary>伺服器根目錄遷移：驗證、搬移、失敗回復與伺服器清單檔路徑更新</summary>
 public static class ServersRootRelocator
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServersRootRelocator));
@@ -148,7 +148,7 @@ public static class ServersRootRelocator
                 movedItems.Add((destPath, entry.FullPath, entry.IsDirectory));
             }
 
-            progress?.Report((95, "正在更新伺服器路徑登錄檔..."));
+            progress?.Report((95, "正在更新伺服器清單檔路徑..."));
             RewriteRegistryPaths(dstRoot, srcRoot, dstRoot);
             progress?.Report((100, "資料遷移完成！"));
 

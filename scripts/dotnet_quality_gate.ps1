@@ -1,4 +1,8 @@
-﻿$commonScript = Join-Path $PSScriptRoot "lib\Common.ps1"
+﻿#Requires -Version 7.1
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+$commonScript = Join-Path $PSScriptRoot "lib\Common.ps1"
 if (-not (Test-Path -LiteralPath $commonScript))
 {
     throw "C# 門禁失敗：找不到共用函式庫 $commonScript"
@@ -6,8 +10,8 @@ if (-not (Test-Path -LiteralPath $commonScript))
 . $commonScript
 Initialize-ScriptEnvironment
 
-$solutionPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\MinecraftServerManager.slnx"))
-$solutionDir = Split-Path -Parent $solutionPath
+$solutionDir = Get-RepoRoot
+$solutionPath = Join-Path $solutionDir "MinecraftServerManager.slnx"
 
 $isCiEnvironment = Test-CiEnvironment
 
@@ -63,7 +67,7 @@ function Test-VersionConsistency
 
     foreach ($project in Get-ChildItem -LiteralPath $solutionDir -Filter "*.csproj" -Recurse -File)
     {
-        [xml]$projectXml = Get-Content -Raw -Encoding UTF8 $project.FullName
+        [xml]$projectXml = Get-Content -LiteralPath $project.FullName -Raw -Encoding UTF8
         if ($null -ne $projectXml.SelectSingleNode("//Version"))
         {
             throw "C# 門禁失敗：$($project.Name) 不得定義 <Version>，版本統一由 Directory.Build.props 管理"
@@ -75,15 +79,15 @@ function Test-VersionConsistency
     {
         $html = [System.IO.File]::ReadAllText($indexPath)
         $versionPattern = '(?<=(?:<title>[^<]*? |>|</strong> )v)\d+\.\d+\.\d+|(?<=版本 )\d+\.\d+\.\d+'
-        $mismatched = [regex]::Matches($html, $versionPattern) | Where-Object { $_.Value -ne $version }
-        if ($mismatched)
+        $mismatched = @([regex]::Matches($html, $versionPattern) | Where-Object { $_.Value -ne $version })
+        if ($mismatched.Count -gt 0)
         {
             if ($isCiEnvironment)
             {
                 throw "C# 門禁失敗：docs/index.html 的版本字樣 ($($mismatched[0].Value)) 與 Directory.Build.props ($version) 不一致"
             }
             Write-Host "docs/index.html 版本字樣與 $version 不一致，自動同步"
-            [System.IO.File]::WriteAllText($indexPath, [regex]::Replace($html, $versionPattern, $version), [System.Text.UTF8Encoding]::new($false))
+            [System.IO.File]::WriteAllText($indexPath, [regex]::Replace($html, $versionPattern, $version), $Utf8NoBom)
         }
     }
 }
@@ -210,7 +214,7 @@ try
 }
 finally
 {
-    if (-not $isCiEnvironment -and (Test-Path $testResultsDir))
+    if (-not $isCiEnvironment -and (Test-Path -LiteralPath $testResultsDir))
     {
         try
         {

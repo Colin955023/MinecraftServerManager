@@ -98,7 +98,6 @@ public static class CrashDiagnostics
         return new UncleanExitReport(processId, startedAt, logFile, tail);
     }
 
-    /// <summary>寫入本次工作階段標記</summary>
     internal static void WriteSessionMarker(string logDir, int processId, string? logFilePath)
     {
         string startedAt = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);

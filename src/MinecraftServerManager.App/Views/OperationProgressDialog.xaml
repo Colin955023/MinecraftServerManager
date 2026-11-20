@@ -25,12 +25,12 @@
     <TextBlock Grid.Row="0"
       Text="{x:Bind PhaseMessage, Mode=OneWay}"
       ToolTipService.ToolTip="{x:Bind PhaseMessage, Mode=OneWay}"
-      FontSize="14"
+      FontSize="{StaticResource BodyTextBlockFontSize}"
       Height="64"
       MaxLines="3"
       TextWrapping="Wrap"
       TextTrimming="CharacterEllipsis"
-      Foreground="{ThemeResource MutedTextBrush}"
+      Foreground="{ThemeResource TextFillColorSecondaryBrush}"
       Margin="0,0,0,16" />
 
     <!-- 進度列 -->
@@ -39,16 +39,16 @@
       Minimum="0"
       Maximum="100"
       Value="{x:Bind ProgressValue, Mode=OneWay}"
-      Foreground="{ThemeResource AccentBrush}"
-      CornerRadius="4" />
+      Foreground="{ThemeResource AccentTextBrush}"
+      CornerRadius="{StaticResource ControlCornerRadius}" />
 
     <!-- 百分比文字 -->
     <TextBlock Grid.Row="2"
       Text="{x:Bind PercentDisplay, Mode=OneWay}"
-      FontSize="13"
+      FontSize="{StaticResource BodyTextBlockFontSize}"
       FontWeight="SemiBold"
       HorizontalAlignment="Right"
-      Foreground="{ThemeResource TextBrush}"
+      Foreground="{ThemeResource TextFillColorPrimaryBrush}"
       Margin="0,8,0,0" />
   </Grid>
 </ContentDialog>

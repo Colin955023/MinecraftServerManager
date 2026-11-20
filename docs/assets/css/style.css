@@ -753,8 +753,8 @@
 
   .winui-infobar-host {
     position: absolute;
-    inset-block-end: 1rem;
-    inset-inline-end: 1.25rem;
+    inset-block-start: 0.5rem;
+    inset-inline-end: 1.5rem;
     z-index: 20;
     display: flex;
     flex-direction: column;
@@ -1462,7 +1462,7 @@
 
   .shot-thumb-btn img {
     inline-size: 100%;
-    aspect-ratio: 1671 / 1017;
+    aspect-ratio: 1669 / 1015;
     object-fit: contain;
     background: #14171c;
   }

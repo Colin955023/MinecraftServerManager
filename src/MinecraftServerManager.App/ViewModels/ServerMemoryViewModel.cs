@@ -32,7 +32,7 @@ public sealed partial class ServerMemoryViewModel(
     public string ServerDetails => $"伺服器：{_config.Name.Value} ({_config.MinecraftVersion.Value} / {_config.LoaderType})";
 
     public string SystemMemoryText => _systemMemoryMb > 0
-        ? $"💻 系統實體記憶體總量：約 {_systemMemoryMb} MB ({_systemMemoryMb / 1024} GB)"
+        ? $"系統實體記憶體總量：約 {_systemMemoryMb} MB ({_systemMemoryMb / 1024} GB)"
         : string.Empty;
 
     public event Action<bool>? RequestClose;

@@ -36,6 +36,7 @@ jobs:
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: 8.24.3
 
   quality:
     name: C# Quality & Tests
@@ -46,13 +47,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 1
 
       - name: Setup .NET SDK
         uses: ./.github/actions/setup-dotnet
 
       - name: C# 品質門禁 (Restore, Format, Build, Tests)
-        run: pwsh -NoProfile -File scripts/dotnet_quality_gate.ps1
+        run: ./scripts/dotnet_quality_gate.ps1
 
       - name: Upload Test Results
         if: failure()
@@ -78,24 +78,14 @@ jobs:
     name: 單一執行檔發布驗證
     runs-on: windows-latest
     timeout-minutes: 20
-    permissions:
-      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 1
 
       - name: Setup .NET SDK
         uses: ./.github/actions/setup-dotnet
 
       - name: 發布單一執行檔（裁剪檢查）
-        run: pwsh -NoProfile -File scripts/dotnet_publish.ps1
-
-      - name: 啟動煙霧測試（實驗性）
-        continue-on-error: true
-        run: |
-          . scripts/lib/Common.ps1
-          Initialize-ScriptEnvironment
-          Invoke-SmokeTest -ExePath output/MinecraftServerManager.exe -TimeoutSeconds 60
+        run: ./scripts/dotnet_publish.ps1

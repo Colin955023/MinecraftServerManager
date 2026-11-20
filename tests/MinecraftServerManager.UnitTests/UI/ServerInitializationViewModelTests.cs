@@ -5,7 +5,6 @@ using MinecraftServerManager.Infrastructure.Servers;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-/// <summary>初始化視窗 ViewModel 測試</summary>
 public sealed class ServerInitializationViewModelTests : IDisposable
 {
     private readonly TempDirectory _serverDirTemp = new("msm-init-vm-");
@@ -22,7 +21,7 @@ public sealed class ServerInitializationViewModelTests : IDisposable
 
     private ServerInitializationViewModel CreateViewModel() => new(
         _runtime,
-        new ServerLaunchPlanner(),
+        new ServerInitializationWorkflow(_runtime, new ServerLaunchPlanner()),
         new ServerConfig(ServerName.Parse("InitServer"), MinecraftVersion.Parse("1.21.4"), LoaderKind.Vanilla, string.Empty, 2048, path: _serverDir),
         "java",
         _ui);

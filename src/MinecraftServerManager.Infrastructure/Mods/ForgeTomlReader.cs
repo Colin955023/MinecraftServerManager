@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
@@ -142,12 +143,30 @@ internal static partial class ForgeTomlReader
             return value;
         }
 
-        return value
-            .Replace("\\n", "\n", StringComparison.Ordinal)
-            .Replace("\\r", "\r", StringComparison.Ordinal)
-            .Replace("\\t", "\t", StringComparison.Ordinal)
-            .Replace("\\\"", "\"", StringComparison.Ordinal)
-            .Replace("\\\\", "\\", StringComparison.Ordinal);
+        // 單次掃描：逐一處理跳脫序列，避免 \\n 被誤判為換行
+        var builder = new StringBuilder(value.Length);
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            if (c != '\\' || i + 1 >= value.Length)
+            {
+                builder.Append(c);
+                continue;
+            }
+
+            char next = value[++i];
+            switch (next)
+            {
+                case 'n': builder.Append('\n'); break;
+                case 'r': builder.Append('\r'); break;
+                case 't': builder.Append('\t'); break;
+                case '"': builder.Append('"'); break;
+                case '\\': builder.Append('\\'); break;
+                default: builder.Append('\\').Append(next); break;
+            }
+        }
+
+        return builder.ToString();
     }
 
     private static string CleanTomlValue(string raw)

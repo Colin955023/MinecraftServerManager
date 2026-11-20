@@ -7,7 +7,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>伺服器登錄檔（servers.json）存取</summary>
+/// <summary>伺服器清單檔（servers.json）存取</summary>
 internal sealed class ServerRegistryStore
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerRegistryStore));
@@ -53,7 +53,7 @@ internal sealed class ServerRegistryStore
         }
     }
 
-    /// <summary>取得登錄檔記錄的實際路徑（供墓碑復原使用）</summary>
+    /// <summary>取得伺服器清單檔記錄的實際路徑（供墓碑復原使用）</summary>
     public string? FindPath(string name)
     {
         lock (_lock)
@@ -62,7 +62,7 @@ internal sealed class ServerRegistryStore
         }
     }
 
-    /// <summary>取得登錄檔目前內容的複本（供掃描比對已註冊名稱與路徑）</summary>
+    /// <summary>取得伺服器清單檔目前內容的複本（供掃描比對已註冊名稱與路徑）</summary>
     public IReadOnlyDictionary<string, ServerConfigPayload> Snapshot()
     {
         lock (_lock)
@@ -71,7 +71,6 @@ internal sealed class ServerRegistryStore
         }
     }
 
-    /// <summary>以指定鍵新增或更新伺服器設定</summary>
     public void Set(string key, ServerConfig config)
     {
         lock (_lock)
@@ -82,7 +81,6 @@ internal sealed class ServerRegistryStore
         }
     }
 
-    /// <summary>移除指定鍵的伺服器設定</summary>
     public void Remove(string key)
     {
         lock (_lock)
@@ -128,11 +126,11 @@ internal sealed class ServerRegistryStore
         return false;
     }
 
-    /// <summary>鎖內取得可修改的登錄檔複本</summary>
+    /// <summary>鎖內取得可修改的伺服器清單檔複本</summary>
     private Dictionary<string, ServerConfigPayload> LoadRegistry() =>
         new(ReadRegistry(), StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>鎖內取得登錄檔內容；快取命中時直接回傳快取本體（不複製），呼叫端只能唯讀使用且不得外洩</summary>
+    /// <summary>鎖內取得伺服器清單檔內容；快取命中時直接回傳快取本體（不複製），呼叫端只能唯讀使用且不得外洩</summary>
     private Dictionary<string, ServerConfigPayload> ReadRegistry()
     {
         if (!SafeFileSystem.FileExists(_registryFilePath))
@@ -153,7 +151,7 @@ internal sealed class ServerRegistryStore
             if (loaded is null)
             {
                 // 內容無法解析（損毀或空白）：保留原檔後以空白清單繼續，避免下次儲存永久覆蓋
-                Logger.Warning("伺服器登錄檔內容無法解析，使用空白清單: {Path}", _registryFilePath);
+                Logger.Warning("伺服器清單檔內容無法解析，使用空白清單: {Path}", _registryFilePath);
                 PreserveUnreadableRegistry();
                 return new Dictionary<string, ServerConfigPayload>(StringComparer.OrdinalIgnoreCase);
             }
@@ -164,13 +162,13 @@ internal sealed class ServerRegistryStore
         }
         catch (Exception ex)
         {
-            Logger.Warning(ex, "讀取伺服器登錄檔失敗，使用空白清單: {Path}", _registryFilePath);
+            Logger.Warning(ex, "讀取伺服器清單檔失敗，使用空白清單: {Path}", _registryFilePath);
             PreserveUnreadableRegistry();
             return new Dictionary<string, ServerConfigPayload>(StringComparer.OrdinalIgnoreCase);
         }
     }
 
-    /// <summary>登錄檔無法讀取時另存為 <c>.bad</c></summary>
+    /// <summary>伺服器清單檔無法讀取時另存為 <c>.bad</c></summary>
     private void PreserveUnreadableRegistry()
     {
         if (_unreadableRegistryPreserved)
@@ -185,7 +183,7 @@ internal sealed class ServerRegistryStore
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning(ex, "無法備份損毀的伺服器登錄檔: {Path}", _registryFilePath);
+            Logger.Warning(ex, "無法備份損毀的伺服器清單檔: {Path}", _registryFilePath);
         }
     }
 

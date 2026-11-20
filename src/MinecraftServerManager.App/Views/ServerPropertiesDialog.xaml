@@ -13,14 +13,10 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- 標題與說明 -->
-        <StackPanel Grid.Row="0"
-            Spacing="4">
-            <TextBlock Text="編輯伺服器屬性"
-                Style="{ThemeResource TitleTextBlockStyle}" />
-            <TextBlock Text="修改 server.properties 設定檔，支援 60+ 項官方設定、中文說明與預設值還原"
-                Style="{StaticResource SecondaryCaptionTextStyle}" />
-        </StackPanel>
+        <!-- 說明 -->
+        <TextBlock Grid.Row="0"
+            Text="修改 server.properties 設定檔，支援 60+ 項官方設定、中文說明與預設值還原"
+            Style="{StaticResource SecondaryCaptionTextStyle}" />
 
         <!-- 搜尋與分類過濾列 -->
         <Grid Grid.Row="1"
@@ -32,12 +28,12 @@
             </Grid.ColumnDefinitions>
 
             <!-- 快速搜尋輸入框 -->
-            <TextBox Grid.Column="0"
+            <TextBox AutomationProperties.Name="搜尋屬性" Grid.Column="0"
                 Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                 PlaceholderText="搜尋屬性名稱或中文說明..." />
 
             <!-- 分類下拉選單 -->
-            <ComboBox Grid.Column="1"
+            <ComboBox AutomationProperties.Name="屬性分類" Grid.Column="1"
                 ItemsSource="{x:Bind ViewModel.Categories}"
                 SelectedItem="{x:Bind ViewModel.SelectedCategory, Mode=TwoWay}"
                 HorizontalAlignment="Stretch" />
@@ -51,7 +47,6 @@
         <!-- 屬性清單區域 -->
         <Border Grid.Row="2"
             Style="{StaticResource CardBorderStyle}"
-            CornerRadius="8"
             Padding="8">
             <ListView x:Name="PropertiesListView"
                 ItemsSource="{x:Bind ViewModel.DisplayItems}"
@@ -84,7 +79,8 @@
                             <Grid Grid.Column="1"
                                 VerticalAlignment="Center">
                                 <!-- 以 x:Load 只建立該屬性型別需要的編輯器，避免隱藏的 ComboBox 雙向繫結誤寫屬性值 -->
-                                <TextBox x:Name="TextEditor"
+                                <TextBox AutomationProperties.Name="{x:Bind Key}"
+                                    x:Name="TextEditor"
                                     x:Load="{x:Bind IsText}"
                                     Text="{x:Bind Value, Mode=TwoWay}"
                                     PlaceholderText="{x:Bind DefaultValue}"
@@ -94,7 +90,8 @@
                                     Content="啟用"
                                     IsChecked="{x:Bind BoolValue, Mode=TwoWay}"
                                     VerticalAlignment="Center" />
-                                <ComboBox x:Name="OptionsEditor"
+                                <ComboBox AutomationProperties.Name="{x:Bind Key}"
+                                    x:Name="OptionsEditor"
                                     x:Load="{x:Bind IsOptions}"
                                     ItemsSource="{x:Bind Options}"
                                     SelectedItem="{x:Bind Value, Mode=TwoWay}"
@@ -115,23 +112,24 @@
         </Border>
 
         <!-- 狀態訊息 -->
-        <TextBlock Grid.Row="3"
-            Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
-            Foreground="{ThemeResource SystemFillColorCriticalBrush}"
-            Style="{ThemeResource CaptionTextBlockStyle}" />
+        <InfoBar Grid.Row="3"
+            IsClosable="False"
+            Severity="{x:Bind helpers:UiBindHelpers.ErrorSeverity(ViewModel.IsStatusError), Mode=OneWay}"
+            IsOpen="{x:Bind helpers:UiBindHelpers.HasText(ViewModel.StatusMessage), Mode=OneWay}"
+            Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}" />
 
         <!-- 底部動作按鈕 -->
         <StackPanel Grid.Row="4"
             Orientation="Horizontal"
             HorizontalAlignment="Right"
             Spacing="10">
+            <Button Content="儲存變更"
+                Command="{x:Bind ViewModel.SaveCommand}"
+                Style="{StaticResource PrimaryButtonStyle}"
+                MinWidth="100" />
             <Button Content="取消"
                 Command="{x:Bind ViewModel.CancelCommand}"
                 MinWidth="80" />
-            <Button Content="儲存變更"
-                Command="{x:Bind ViewModel.SaveCommand}"
-                Style="{ThemeResource AccentButtonStyle}"
-                MinWidth="100" />
         </StackPanel>
     </Grid>
 </Window>

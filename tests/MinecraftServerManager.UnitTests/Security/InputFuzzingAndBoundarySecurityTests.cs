@@ -5,7 +5,6 @@ using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.UnitTests.Security;
 
-/// <summary>輸入解析與安全邊界測試</summary>
 public sealed class InputFuzzingAndBoundarySecurityTests
 {
     private static readonly string[] BoundaryPropertyKeys =

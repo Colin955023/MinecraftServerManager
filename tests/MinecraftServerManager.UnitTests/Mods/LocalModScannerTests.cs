@@ -5,7 +5,6 @@ using MinecraftServerManager.Infrastructure.Mods;
 
 namespace MinecraftServerManager.UnitTests.Mods;
 
-/// <summary>本地模組檔案掃描與詮釋資料解析測試</summary>
 public sealed class LocalModScannerTests : IDisposable
 {
     private readonly TempDirectory _testDirTemp = new("msm_test_scanner_");

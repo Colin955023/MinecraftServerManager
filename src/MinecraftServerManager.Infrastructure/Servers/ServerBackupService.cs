@@ -26,10 +26,15 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
             return Task.FromResult<IReadOnlyList<ServerBackupInfo>>([]);
         }
 
+        return Task.Run(() => ListBackups(serverName, backupDirectory), cancellationToken);
+    }
+
+    private IReadOnlyList<ServerBackupInfo> ListBackups(string serverName, string backupDirectory)
+    {
         string backupsDir = ResolveExternalBackupDirectory(backupDirectory);
         if (!SafeFileSystem.DirectoryExists(backupsDir))
         {
-            return Task.FromResult<IReadOnlyList<ServerBackupInfo>>([]);
+            return [];
         }
 
         var list = new List<ServerBackupInfo>();
@@ -50,7 +55,7 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
             }
         }
 
-        return Task.FromResult<IReadOnlyList<ServerBackupInfo>>([.. list.OrderByDescending(static b => b.CreatedAt)]);
+        return [.. list.OrderByDescending(static b => b.CreatedAt)];
     }
 
     public ServerBackupSummary GetBackupSummary(string serverName, string? backupDirectory)
@@ -471,16 +476,18 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
             return Task.FromResult(false);
         }
 
-        string backupsDir = ResolveExternalBackupDirectory(backupDirectory);
-        string targetPath = Path.Combine(backupsDir, Path.GetFileName(backupFileName));
-
-        if (SafeFileSystem.FileExists(targetPath))
+        return Task.Run(() =>
         {
-            SafeFileSystem.DeleteFile(targetPath);
-            return Task.FromResult(true);
-        }
+            string backupsDir = ResolveExternalBackupDirectory(backupDirectory);
+            string targetPath = Path.Combine(backupsDir, Path.GetFileName(backupFileName));
+            if (!SafeFileSystem.FileExists(targetPath))
+            {
+                return false;
+            }
 
-        return Task.FromResult(false);
+            SafeFileSystem.DeleteFile(targetPath);
+            return true;
+        }, cancellationToken);
     }
 
     private async Task PruneOldBackupsAsync(

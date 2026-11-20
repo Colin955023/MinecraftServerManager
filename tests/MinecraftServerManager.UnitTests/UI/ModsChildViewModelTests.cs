@@ -8,7 +8,6 @@ using MinecraftServerManager.Infrastructure.Mods;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-/// <summary>模組頁子 ViewModel 與共用狀態測試</summary>
 public sealed class ModsChildViewModelTests
 {
     private static ServerConfig CreateServer(string name = "FabricServer") =>

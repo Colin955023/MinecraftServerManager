@@ -13,13 +13,9 @@
                         <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <StackPanel Grid.Row="0"
-                        Spacing="4">
-                        <TextBlock Text="{x:Bind ViewModel.ProjectTitle}"
-                                Style="{ThemeResource TitleTextBlockStyle}" />
-                        <TextBlock Text="選擇要安裝的模組版本（已依伺服器的 Minecraft 版本與載入器篩選）"
-                                Style="{StaticResource SecondaryCaptionTextStyle}" />
-                </StackPanel>
+                <TextBlock Grid.Row="0"
+                        Text="選擇要安裝的模組版本（已依伺服器的 Minecraft 版本與載入器篩選）"
+                        Style="{StaticResource SecondaryCaptionTextStyle}" />
 
                 <Border Grid.Row="1"
                         Style="{StaticResource PanelCardStyle}">
@@ -107,6 +103,7 @@
 
                 <!-- 狀態訊息 -->
                 <TextBlock Grid.Row="2"
+                        AutomationProperties.LiveSetting="Polite"
                         Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
                         Style="{StaticResource SecondaryCaptionTextStyle}" />
 
@@ -115,16 +112,16 @@
                         Orientation="Horizontal"
                         HorizontalAlignment="Right"
                         Spacing="10">
-                        <Button Content="取消"
-                                Command="{x:Bind ViewModel.CancelCommand}"
-                                MinWidth="80" />
+                        <Button Content="立即安裝"
+                                Command="{x:Bind ViewModel.InstallCommand}"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                MinWidth="100" />
                         <Button Content="加入安裝清單"
                                 Command="{x:Bind ViewModel.QueueCommand}"
                                 MinWidth="110" />
-                        <Button Content="立即安裝"
-                                Command="{x:Bind ViewModel.InstallCommand}"
-                                Style="{ThemeResource AccentButtonStyle}"
-                                MinWidth="100" />
+                        <Button Content="取消"
+                                Command="{x:Bind ViewModel.CancelCommand}"
+                                MinWidth="80" />
                 </StackPanel>
         </Grid>
 </Window>

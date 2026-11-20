@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using MinecraftServerManager.App.Controls;
@@ -22,7 +21,7 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
         ArgumentNullException.ThrowIfNull(viewModel);
         ViewModel = viewModel;
         InitializeComponent();
-        ModalWindowHost.ConfigureDialogWindow(this, "伺服器初次啟動初始化", 780, 540, Bindings.StopTracking);
+        ModalWindowHost.ConfigureDialogWindow(this, viewModel.TitleText, 780, 540, Bindings.StopTracking);
         ViewModel.CloseRequested += Close;
 
         if (Content is FrameworkElement fe)
@@ -33,8 +32,7 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
         AppWindow.Closing += ServerInitializationDialog_Closing;
     }
 
-    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "WinUI 3 x:Bind requires instance method")]
-    public string CountdownBrushKey(InitializationCountdownState state) =>
+    public static string CountdownBrushKey(InitializationCountdownState state) =>
         state == InitializationCountdownState.Success ? UiBindHelpers.SuccessTextBrushKey : UiBindHelpers.WarningTextBrushKey;
 
     private async void ServerInitializationDialog_Loaded(object sender, RoutedEventArgs e)

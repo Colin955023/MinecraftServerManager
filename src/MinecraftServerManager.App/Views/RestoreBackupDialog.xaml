@@ -13,14 +13,10 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- 標題與說明 -->
-        <StackPanel Grid.Row="0"
-            Spacing="4">
-            <TextBlock Text="備份還原與管理"
-                Style="{ThemeResource TitleTextBlockStyle}" />
-            <TextBlock Text="選擇備份存檔進行還原（具備 Staging 交易安全防護與自動復原機制）"
-                Style="{StaticResource SecondaryCaptionTextStyle}" />
-        </StackPanel>
+        <!-- 說明 -->
+        <TextBlock Grid.Row="0"
+            Text="選擇備份存檔進行還原（具備 Staging 交易安全防護與自動復原機制）"
+            Style="{StaticResource SecondaryCaptionTextStyle}" />
 
         <Border Grid.Row="1"
             Style="{StaticResource PanelCardStyle}">
@@ -81,6 +77,7 @@
 
         <!-- 狀態提示 -->
         <TextBlock Grid.Row="2"
+            AutomationProperties.LiveSetting="Polite"
             Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
             Style="{StaticResource SecondaryCaptionTextStyle}" />
 
@@ -93,13 +90,13 @@
             <StackPanel Orientation="Horizontal"
                 HorizontalAlignment="Right"
                 Spacing="10">
+                <Button Content="開始還原"
+                    Command="{x:Bind ViewModel.RestoreCommand}"
+                    Style="{StaticResource PrimaryButtonStyle}"
+                    MinWidth="100" />
                 <Button Content="取消"
                     Command="{x:Bind ViewModel.CancelCommand}"
                     MinWidth="80" />
-                <Button Content="開始還原"
-                    Command="{x:Bind ViewModel.RestoreCommand}"
-                    Style="{ThemeResource AccentButtonStyle}"
-                    MinWidth="100" />
             </StackPanel>
         </Grid>
     </Grid>

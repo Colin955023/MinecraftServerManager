@@ -37,7 +37,6 @@ internal class ManualUiService : NoOpUiService
         return timer;
     }
 
-    /// <summary>觸發所有執行中的計時器一次</summary>
     public void TickRunningTimers()
     {
         foreach (var timer in _timers.ToArray())
