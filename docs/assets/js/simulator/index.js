@@ -93,11 +93,22 @@ export function initWinUiSimulator() {
     bar.className = "winui-infobar";
     bar.dataset.level = level in INFOBAR_ICONS ? level : "info";
     bar.setAttribute("role", bar.dataset.level === "error" ? "alert" : "status");
-    bar.innerHTML = `<strong class="winui-infobar-icon" aria-hidden="true">${INFOBAR_ICONS[bar.dataset.level]}</strong>
-      <div><div class="u-bold">${escHtml(title)}</div><div class="winui-sub-label u-text">${escHtml(message)}</div></div>
-      <button type="button" class="winui-infobar-close" aria-label="關閉通知">✕</button>`;
+    const el = (tag, className, text) => {
+      const node = document.createElement(tag);
+      node.className = className;
+      node.textContent = text;
+      return node;
+    };
+    const icon = el("strong", "winui-infobar-icon", INFOBAR_ICONS[bar.dataset.level]);
+    icon.setAttribute("aria-hidden", "true");
+    const body = document.createElement("div");
+    body.append(el("div", "u-bold", title), el("div", "winui-sub-label u-text", message));
+    const close = el("button", "winui-infobar-close", "✕");
+    close.type = "button";
+    close.setAttribute("aria-label", "關閉通知");
+    bar.append(icon, body, close);
     const timerId = setTimeout(() => bar.remove(), 4200);
-    bar.querySelector(".winui-infobar-close").addEventListener("click", () => {
+    close.addEventListener("click", () => {
       clearTimeout(timerId);
       bar.remove();
     });
