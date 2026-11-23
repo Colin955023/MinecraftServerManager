@@ -1,0 +1,65 @@
+<Window
+  x:Class="MinecraftServerManager.App.Views.ServerInitializationWindow"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:controls="using:MinecraftServerManager.App.Controls"
+  xmlns:views="using:MinecraftServerManager.App.Views">
+
+  <Grid Style="{StaticResource DialogRootGridStyle}">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- 頂部狀態 -->
+    <controls:BusyStatusIndicator Grid.Row="0"
+      IsBusy="{x:Bind ViewModel.IsProgressVisible, Mode=OneWay}"
+      Message="{x:Bind ViewModel.StatusText, Mode=OneWay}"
+      BusyName="初始化中" />
+
+    <Border Grid.Row="1"
+      Padding="0,8"
+      Background="{StaticResource ConsoleBackgroundBrush}"
+      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+      BorderThickness="1"
+      CornerRadius="{StaticResource OverlayCornerRadius}"
+      RequestedTheme="Dark">
+      <ListView x:Name="ConsoleListView"
+        Style="{StaticResource ConsoleLogListViewStyle}"
+        ItemsSource="{x:Bind ViewModel.ConsoleLines}"
+        AutomationProperties.Name="初始化輸出" />
+    </Border>
+
+    <!-- 底部按鈕列 -->
+    <Grid Grid.Row="2">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <!-- 左側：取消按鈕 -->
+      <Button Grid.Column="0"
+        Content="取消初始化"
+        Command="{x:Bind ViewModel.CancelCommand}" />
+
+      <!-- 中間：倒數計時提示 -->
+      <TextBlock Grid.Column="1"
+        Style="{StaticResource CaptionTextBlockStyle}"
+        Margin="12,0"
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center"
+        Text="{x:Bind ViewModel.CountdownText, Mode=OneWay}"
+        controls:ThemeBrush.ForegroundKey="{x:Bind views:ServerInitializationWindow.CountdownBrushKey(ViewModel.CountdownState), Mode=OneWay}"
+        AutomationProperties.LiveSetting="Polite" />
+
+      <!-- 右側：完成按鈕 -->
+      <Button Grid.Column="2"
+        Style="{StaticResource PrimaryButtonStyle}"
+        Content="{x:Bind ViewModel.CompleteButtonText, Mode=OneWay}"
+        IsEnabled="{x:Bind ViewModel.IsCompleteEnabled, Mode=OneWay}"
+        Command="{x:Bind ViewModel.CompleteCommand}" />
+    </Grid>
+  </Grid>
+</Window>

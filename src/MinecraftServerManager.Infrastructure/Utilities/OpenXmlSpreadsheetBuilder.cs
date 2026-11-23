@@ -11,6 +11,12 @@ namespace MinecraftServerManager.Infrastructure.Utilities;
 public static class OpenXmlSpreadsheetBuilder
 {
     private static readonly SearchValues<char> InvalidSheetNameChars = SearchValues.Create("[]:*?/\\");
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
+    /// <summary>Excel 保留的工作表名稱</summary>
+    private const string ReservedSheetName = "History";
+    private const int MaxSheetNameLength = 31;
+    private static readonly char[] SheetNameTrimChars = [' ', '\''];
     private static readonly string[] CachedColumnNames = [.. Enumerable.Range(1, 100).Select(ComputeExcelColumnName)];
 
     /// <summary>將字串表格建立為 .xlsx 位元組</summary>
@@ -66,7 +72,7 @@ public static class OpenXmlSpreadsheetBuilder
 
             // 直接寫入串流，避免大量字串配置
             var sheetEntry = archive.CreateEntry("xl/worksheets/sheet1.xml", CompressionLevel.Optimal);
-            using var writer = new StreamWriter(sheetEntry.Open(), new UTF8Encoding(false));
+            using var writer = new StreamWriter(sheetEntry.Open(), Utf8NoBom);
             writer.Write(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
                 "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
@@ -96,7 +102,7 @@ public static class OpenXmlSpreadsheetBuilder
     {
         var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
         using var stream = entry.Open();
-        using var writer = new StreamWriter(stream);
+        using var writer = new StreamWriter(stream, Utf8NoBom);
         writer.Write(content);
     }
 
@@ -114,7 +120,8 @@ public static class OpenXmlSpreadsheetBuilder
 
     private static string ComputeExcelColumnName(int columnNumber)
     {
-        Span<char> buffer = stackalloc char[4];
+        // int.MaxValue 對應 7 個字母（FXSHRXW）
+        Span<char> buffer = stackalloc char[7];
         int pos = buffer.Length;
         int current = columnNumber;
 
@@ -136,24 +143,32 @@ public static class OpenXmlSpreadsheetBuilder
             return "Sheet1";
         }
 
-        string validText = RemoveInvalidXmlRunes(sheetName);
-        var sb = new StringBuilder(validText.Length);
-        foreach (char c in validText)
+        string cleaned = RemoveInvalidXmlRunes(sheetName);
+        if (cleaned.AsSpan().ContainsAny(InvalidSheetNameChars))
         {
-            if (InvalidSheetNameChars.Contains(c))
+            cleaned = string.Create(cleaned.Length, cleaned, static (span, source) =>
             {
-                sb.Append('_');
-            }
-            else
-            {
-                sb.Append(c);
-            }
+                source.AsSpan().CopyTo(span);
+                int index;
+                while ((index = span.IndexOfAny(InvalidSheetNameChars)) >= 0)
+                {
+                    span[index] = '_';
+                    span = span[(index + 1)..];
+                }
+            });
         }
 
-        string cleaned = sb.ToString().Trim('\'').Trim();
-        if (cleaned.Length > 31)
+        // 工作表名稱不可以單引號開頭或結尾；截斷後須再修剪一次
+        cleaned = cleaned.Trim(SheetNameTrimChars);
+        if (cleaned.Length > MaxSheetNameLength)
         {
-            cleaned = cleaned[..(char.IsHighSurrogate(cleaned[30]) ? 30 : 31)].Trim();
+            int length = char.IsHighSurrogate(cleaned[MaxSheetNameLength - 1]) ? MaxSheetNameLength - 1 : MaxSheetNameLength;
+            cleaned = cleaned[..length].Trim(SheetNameTrimChars);
+        }
+
+        if (cleaned.Equals(ReservedSheetName, StringComparison.OrdinalIgnoreCase))
+        {
+            cleaned += "_";
         }
 
         return string.IsNullOrEmpty(cleaned) ? "Sheet1" : cleaned;

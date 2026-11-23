@@ -1,52 +1,37 @@
 <ContentDialog x:Class="MinecraftServerManager.App.Views.NotificationDialog"
-    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    xmlns:controls="using:MinecraftServerManager.App.Controls"
-    mc:Ignorable="d"
-    Title="{x:Bind DialogTitle, Mode=OneTime}"
-    PrimaryButtonText="{x:Bind ButtonText, Mode=OneWay}"
-    DefaultButton="Primary"
-    PointerEntered="Dialog_PointerEntered"
-    PointerExited="Dialog_PointerExited"
-    PrimaryButtonClick="Dialog_PrimaryButtonClick">
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:controls="using:MinecraftServerManager.App.Controls"
+  mc:Ignorable="d"
+  Title="{x:Bind DialogTitle}"
+  PrimaryButtonText="{x:Bind ButtonText, Mode=OneWay}"
+  DefaultButton="Primary"
+  PointerEntered="OnDialogPointerEntered"
+  PointerExited="OnDialogPointerExited"
+  PrimaryButtonClick="OnPrimaryButtonClicked">
 
-    <Grid Margin="0,12,0,0">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+  <Grid Margin="0,12,0,0">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
 
-        <!-- 訊息內容與圖示 -->
-        <Grid Grid.Row="0"
-            Margin="0,0,0,16">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
+    <!-- 訊息內容與圖示 -->
+    <controls:IconMessageContent Grid.Row="0"
+      Margin="0,0,0,16"
+      Glyph="{StaticResource IconError}"
+      IconBrushKey="{x:Bind IconBrushKey}"
+      Message="{x:Bind Message}" />
 
-            <FontIcon Glyph="{StaticResource IconError}"
-                FontFamily="{StaticResource SymbolThemeFontFamily}"
-                controls:ThemeBrush.ForegroundKey="{x:Bind IconBrushKey, Mode=OneTime}"
-                FontSize="{StaticResource TitleTextBlockFontSize}"
-                VerticalAlignment="Top"
-                Margin="0,0,14,0" />
-
-            <TextBlock Grid.Column="1"
-                Text="{x:Bind Message, Mode=OneTime}"
-                TextWrapping="Wrap"
-                FontSize="{StaticResource BodyTextBlockFontSize}"
-                VerticalAlignment="Center"
-                Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-        </Grid>
-
-        <!-- 倒數進度列 -->
-        <ProgressBar Grid.Row="1"
-            x:Name="CountdownProgress"
-            Height="4"
-            Maximum="100"
-            Value="100"
-            Foreground="{ThemeResource AccentTextBrush}" />
-    </Grid>
+    <!-- 倒數進度列 -->
+    <ProgressBar x:Name="CountdownProgress"
+      Grid.Row="1"
+      Height="4"
+      Maximum="100"
+      Value="100"
+      Foreground="{ThemeResource AccentBrush}"
+      AutomationProperties.Name="自動關閉倒數" />
+  </Grid>
 </ContentDialog>

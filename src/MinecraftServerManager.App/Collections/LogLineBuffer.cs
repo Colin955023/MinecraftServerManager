@@ -26,12 +26,7 @@ public sealed class LogLineBuffer
     public void Post(string line) => _channel.Writer.TryWrite(line);
 
     /// <summary>捨棄所有待排出行</summary>
-    public void Clear()
-    {
-        while (_channel.Reader.TryRead(out _))
-        {
-        }
-    }
+    public void Clear() => Skip(int.MaxValue);
 
     /// <summary>排出最多 <paramref name="maxLines"/> 行至 <paramref name="destination"/>，回傳行數</summary>
     public int DrainTo(List<string> destination, int maxLines = int.MaxValue)
@@ -47,18 +42,44 @@ public sealed class LogLineBuffer
         return taken;
     }
 
-    /// <summary>排出全部待處理行至 <paramref name="target"/>，超過高水位時修剪至低水位；回傳是否有新行</summary>
+    /// <summary>排出待處理行至 <paramref name="target"/>，超過高水位時修剪至低水位；回傳是否有新行</summary>
+    /// <remarks>待處理行超過高水位時只排出最新的低水位筆數，單次 UI 工作量以高水位為上限</remarks>
     public bool FlushTo(BulkObservableCollection<string> target, int highWatermark, int lowWatermark)
     {
         ArgumentNullException.ThrowIfNull(target);
-        _reusableBatch.Clear();
-        if (DrainTo(_reusableBatch) == 0)
+        ArgumentOutOfRangeException.ThrowIfLessThan(highWatermark, 1);
+        ArgumentOutOfRangeException.ThrowIfNegative(lowWatermark);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(lowWatermark, highWatermark);
+
+        int pending = Count;
+        int maxLines = highWatermark;
+        if (pending > highWatermark)
         {
-            return false;
+            // 超量的舊行即使排出也會被修剪，直接捨棄
+            Skip(pending - lowWatermark);
+            maxLines = lowWatermark;
         }
 
-        target.AppendAndTrim(_reusableBatch, highWatermark, lowWatermark);
-        _reusableBatch.Clear();
-        return true;
+        try
+        {
+            if (DrainTo(_reusableBatch, maxLines) == 0)
+            {
+                return false;
+            }
+
+            target.AppendAndTrim(_reusableBatch, highWatermark, lowWatermark);
+            return true;
+        }
+        finally
+        {
+            _reusableBatch.Clear();
+        }
+    }
+
+    private void Skip(int count)
+    {
+        for (int i = 0; i < count && _channel.Reader.TryRead(out _); i++)
+        {
+        }
     }
 }

@@ -13,7 +13,7 @@ public sealed partial class IconLabel : UserControl
         DependencyProperty.Register(nameof(Text), typeof(string), typeof(IconLabel), new PropertyMetadata(string.Empty));
 
     public static readonly DependencyProperty IconSizeProperty =
-        DependencyProperty.Register(nameof(IconSize), typeof(double), typeof(IconLabel), new PropertyMetadata(15d));
+        DependencyProperty.Register(nameof(IconSize), typeof(double), typeof(IconLabel), new PropertyMetadata(14d));
 
     public static readonly DependencyProperty SpacingProperty =
         DependencyProperty.Register(nameof(Spacing), typeof(double), typeof(IconLabel), new PropertyMetadata(6d));

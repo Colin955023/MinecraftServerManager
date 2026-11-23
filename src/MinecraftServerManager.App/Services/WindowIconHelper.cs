@@ -8,10 +8,11 @@ namespace MinecraftServerManager.App.Services;
 /// <summary>載入內嵌圖示並指派至 AppWindow</summary>
 public static partial class WindowIconHelper
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(WindowIconHelper));
     private const nint IDI_APPLICATION = 32512;
+
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(WindowIconHelper));
+    private static readonly Lock SyncLock = new();
     private static IconId? s_cachedIconId;
-    private static readonly Lock s_lock = new();
 
     [LibraryImport("kernel32.dll", EntryPoint = "GetModuleHandleW", StringMarshalling = StringMarshalling.Utf16)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -26,13 +27,7 @@ public static partial class WindowIconHelper
     {
         ArgumentNullException.ThrowIfNull(appWindow);
 
-        if (s_cachedIconId.HasValue)
-        {
-            appWindow.SetIcon(s_cachedIconId.Value);
-            return;
-        }
-
-        lock (s_lock)
+        lock (SyncLock)
         {
             if (s_cachedIconId.HasValue)
             {

@@ -25,7 +25,7 @@
       "minecraftservermanager.core": {
         "type": "Project",
         "dependencies": {
-          "MinecraftServerManager.Domain": "[2.2.0, )"
+          "MinecraftServerManager.Domain": "[2.2.1, )"
         }
       },
       "minecraftservermanager.domain": {

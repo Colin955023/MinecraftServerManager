@@ -1,6 +1,8 @@
 using System.Collections.Frozen;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.ComponentModel;
+using Microsoft.UI.Dispatching;
 using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.Infrastructure.Logging;
 
@@ -26,7 +28,7 @@ public sealed class SortKeyMap<T>
         return this;
     }
 
-    /// <summary>取得欄位各列的顯示文字</summary>
+    /// <summary>取得欄位各列的顯示文字；無顯示覆寫時以目前文化格式化排序鍵</summary>
     public IEnumerable<string?> GetDisplayTexts(IEnumerable<T> items, string column)
     {
         if (_displays.TryGetValue(column, out var display))
@@ -34,7 +36,9 @@ public sealed class SortKeyMap<T>
             return items.Select(display);
         }
 
-        return TryGetSelector(column, out var selector) ? items.Select(item => selector(item) as string) : [];
+        return TryGetSelector(column, out var selector)
+            ? items.Select(item => Convert.ToString(selector(item), System.Globalization.CultureInfo.CurrentCulture))
+            : [];
     }
 
     /// <summary>取得指定欄位之排序鍵選擇器</summary>
@@ -68,7 +72,7 @@ public static class TableSortExtensions
 
         if (!keys.TryGetSelector(column, out var selector))
         {
-            Logger.Warning("表格排序欄位未登錄排序鍵: {Type}.{Column}", typeof(T).Name, column);
+            Logger.Warning("表格排序欄位未登錄排序鍵：{Type}.{Column}", typeof(T).Name, column);
             return;
         }
 
@@ -109,12 +113,98 @@ public interface ITableSortTarget
 
     /// <summary>依內容調整表頭欄寬</summary>
     public void AutoFit(SortableTableHeader header);
+
+    /// <summary>重新監看集合並套用目前排序（頁面自快取還原時使用）；尚未排序時不動作</summary>
+    public void Attach();
+
+    /// <summary>解除對集合異動事件的訂閱（頁面卸載時使用）</summary>
+    public void Detach();
 }
 
-/// <summary>以集合與排序鍵實作的排序對象</summary>
-public sealed class TableSortTarget<T>(Func<ObservableCollection<T>> items, SortKeyMap<T> keys) : ITableSortTarget
+/// <summary>以集合與排序鍵實作的排序對象；記住目前排序，集合重新整理或篩選（新增／重設）後自動重新套用</summary>
+/// <param name="items"></param>
+/// <param name="keys"></param>
+/// <param name="enqueueLow">以低優先權排入 UI 執行緒的委派；預設使用目前執行緒的 DispatcherQueue，測試可注入</param>
+public sealed partial class TableSortTarget<T>(Func<ObservableCollection<T>> items, SortKeyMap<T> keys, Func<Action, bool>? enqueueLow = null) : ITableSortTarget
 {
-    public void Sort(string column, ListSortDirection direction) => items().SortBy(keys, column, direction);
+    private readonly Func<Action, bool> _enqueueLow = enqueueLow ?? (static action => EnqueueLowOnUiThread(action));
+    private ObservableCollection<T>? _observed;
+    private string? _column;
+    private ListSortDirection _direction;
+    private bool _sorting;
+    private bool _resortPending;
+
+    public void Sort(string column, ListSortDirection direction)
+    {
+        _column = column;
+        _direction = direction;
+        Attach();
+    }
+
+    public void Attach()
+    {
+        if (_column is null)
+        {
+            return;
+        }
+
+        Observe(items());
+        ApplySort();
+    }
+
+    public void Detach()
+    {
+        _observed?.CollectionChanged -= OnCollectionChanged;
+        _observed = null;
+    }
+
+    private void Observe(ObservableCollection<T> collection)
+    {
+        if (ReferenceEquals(collection, _observed))
+        {
+            return;
+        }
+
+        _observed?.CollectionChanged -= OnCollectionChanged;
+        _observed = collection;
+        collection.CollectionChanged += OnCollectionChanged;
+    }
+
+    private void ApplySort()
+    {
+        if (_observed is null || _column is null)
+        {
+            return;
+        }
+
+        _sorting = true;
+        try
+        {
+            _observed.SortBy(keys, _column, _direction);
+        }
+        finally
+        {
+            _sorting = false;
+        }
+    }
+
+    /// <summary>集合事件中不可修改集合，合併為一次低優先權重新排序</summary>
+    private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (_sorting || _resortPending || e.Action is not (NotifyCollectionChangedAction.Add or NotifyCollectionChangedAction.Reset))
+        {
+            return;
+        }
+
+        _resortPending = _enqueueLow(() =>
+        {
+            _resortPending = false;
+            ApplySort();
+        });
+    }
+
+    private static bool EnqueueLowOnUiThread(Action action) =>
+        DispatcherQueue.GetForCurrentThread()?.TryEnqueue(DispatcherQueuePriority.Low, () => action()) == true;
 
     public void AutoFit(SortableTableHeader header) => header.AutoFit(items(), keys);
 }

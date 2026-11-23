@@ -17,4 +17,7 @@ public interface IServerRuntimeHost : IAsyncDisposable
 
     /// <summary>取得目前執行中的伺服器名稱</summary>
     public IReadOnlyList<string> GetRunningServerNames();
+
+    /// <summary>釋放未執行中的伺服器執行階段（如伺服器已刪除）；執行中則保留並回傳 false</summary>
+    public ValueTask<bool> ReleaseIdleRuntimeAsync(string serverName);
 }

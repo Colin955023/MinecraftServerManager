@@ -15,8 +15,19 @@ public sealed record LoaderVersion(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     string? Build = null);
 
+/// <summary>載入器安裝階段</summary>
+public enum LoaderInstallPhase
+{
+    VanillaPrepare,
+    Fetching,
+    Downloading,
+    Installing,
+    Finalizing,
+    Completed,
+}
+
 /// <summary>載入器安裝進度快照</summary>
 public sealed record LoaderInstallProgress(
-    string Phase,
+    LoaderInstallPhase Phase,
     string Message,
     int PercentCompleted);

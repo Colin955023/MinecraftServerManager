@@ -1,6 +1,7 @@
-using System.Collections.ObjectModel;
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
@@ -11,13 +12,45 @@ namespace MinecraftServerManager.App.ViewModels;
 /// <summary>模組管理頁面：伺服器選取、分頁導覽與各子 ViewModel</summary>
 public sealed partial class ModsViewModel : PageViewModel, IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModsViewModel));
     private const string NoServerPlaceholder = "請選擇伺服器";
+
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModsViewModel));
+    private static readonly string[] NoServerPlaceholderArray = [NoServerPlaceholder];
 
     private readonly IServerManager _serverManager;
     private readonly IUiService _ui;
     private bool _isLoadingServers;
     private bool _reloadPending;
+    private bool _disposed;
+
+    /// <summary>子 ViewModel 由 <see cref="PageViewModelFactory"/> 以同一 <paramref name="context"/> 組裝後注入</summary>
+    public ModsViewModel(
+        ModsContext context,
+        LocalModsViewModel local,
+        OnlineModSearchViewModel online,
+        ModInstallQueueViewModel queue,
+        ModUpdateViewModel updates,
+        IServerManager serverManager,
+        IUiService uiService)
+        : base("模組管理")
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(local);
+        ArgumentNullException.ThrowIfNull(online);
+        ArgumentNullException.ThrowIfNull(queue);
+        ArgumentNullException.ThrowIfNull(updates);
+        ArgumentNullException.ThrowIfNull(serverManager);
+        ArgumentNullException.ThrowIfNull(uiService);
+
+        Context = context;
+        Local = local;
+        Online = online;
+        Queue = queue;
+        Updates = updates;
+        _serverManager = serverManager;
+        _ui = uiService;
+        Local.PropertyChanged += OnLocalPropertyChanged;
+    }
 
     [ObservableProperty]
     public partial string SelectedServer { get; set; } = NoServerPlaceholder;
@@ -28,10 +61,14 @@ public sealed partial class ModsViewModel : PageViewModel, IDisposable
     [ObservableProperty]
     public partial int SelectedTabIndex { get; set; }
 
-    public ObservableCollection<string> Servers { get; } = [];
+    /// <summary>線上分頁首次切換後才建立（之後保留以免重建）</summary>
+    [ObservableProperty]
+    public partial bool IsOnlineTabCreated { get; private set; }
+
+    public BulkObservableCollection<string> Servers { get; } = [];
 
     /// <summary>子 ViewModel 共用之伺服器狀態</summary>
-    public ModsContext Context { get; } = new();
+    public ModsContext Context { get; }
 
     /// <summary>本地模組清單</summary>
     public LocalModsViewModel Local { get; }
@@ -45,36 +82,20 @@ public sealed partial class ModsViewModel : PageViewModel, IDisposable
     /// <summary>更新檢查</summary>
     public ModUpdateViewModel Updates { get; }
 
-    public ModsViewModel(
-        IModDependencyPlanner dependencyPlanner,
-        IModListExporter modListExporter,
-        IModFileService modFileService,
-        IUiService uiService,
-        IServerManager serverManager,
-        IModManager modManager,
-        IModrinthClient modrinthClient,
-        IExternalLauncher launcher)
-        : base("模組管理")
+    private void OnLocalPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        ArgumentNullException.ThrowIfNull(dependencyPlanner);
-        ArgumentNullException.ThrowIfNull(modListExporter);
-        ArgumentNullException.ThrowIfNull(modFileService);
-        ArgumentNullException.ThrowIfNull(uiService);
-        ArgumentNullException.ThrowIfNull(serverManager);
-        ArgumentNullException.ThrowIfNull(modManager);
-        ArgumentNullException.ThrowIfNull(modrinthClient);
-        ArgumentNullException.ThrowIfNull(launcher);
-
-        _serverManager = serverManager;
-        _ui = uiService;
-
-        Local = new LocalModsViewModel(Context, modFileService, modListExporter, uiService, modManager, launcher);
-        Online = new OnlineModSearchViewModel(Context, uiService, modrinthClient, launcher);
-        Queue = new ModInstallQueueViewModel(Context, dependencyPlanner, modFileService, uiService, modManager, modrinthClient);
-        Updates = new ModUpdateViewModel(Context, dependencyPlanner, modFileService, uiService, modManager, modrinthClient);
+        if (e.PropertyName == nameof(LocalModsViewModel.CanCheckUpdates))
+        {
+            CheckModUpdatesCommand.NotifyCanExecuteChanged();
+        }
     }
 
-    partial void OnSelectedTabIndexChanged(int value) => Online.SetActiveTab(value == 1);
+    partial void OnSelectedTabIndexChanged(int value)
+    {
+        bool online = value == 1;
+        IsOnlineTabCreated |= online;
+        Online.SetActiveTab(online);
+    }
 
     partial void OnSelectedServerChanged(string value)
     {
@@ -130,8 +151,6 @@ public sealed partial class ModsViewModel : PageViewModel, IDisposable
         try
         {
             string previous = SelectedServer;
-            Servers.Clear();
-
             var allServers = await _serverManager.GetAllServersAsync();
             var serverNames = allServers
                 .Where(static s => s.LoaderType is LoaderKind.Fabric or LoaderKind.Forge or LoaderKind.NeoForge or LoaderKind.Quilt)
@@ -139,10 +158,7 @@ public sealed partial class ModsViewModel : PageViewModel, IDisposable
                 .ToList();
             if (serverNames.Count > 0)
             {
-                foreach (string name in serverNames)
-                {
-                    Servers.Add(name);
-                }
+                Servers.ReplaceAll(serverNames);
 
                 // 保留既有選取項目，避免重新整理後重設回第一筆
                 string target = serverNames.Contains(previous, StringComparer.OrdinalIgnoreCase)
@@ -163,7 +179,7 @@ public sealed partial class ModsViewModel : PageViewModel, IDisposable
                 return;
             }
 
-            Servers.Add(NoServerPlaceholder);
+            Servers.ReplaceAll(NoServerPlaceholderArray);
             SelectedServer = NoServerPlaceholder;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -188,8 +204,22 @@ public sealed partial class ModsViewModel : PageViewModel, IDisposable
         Queue.PickVersionAndQueueAsync(mod ?? Online.SelectedOnlineMod);
 
     /// <summary>檢查本地已勾選模組之相容更新</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanCheckModUpdates))]
     public Task CheckModUpdatesAsync() => Updates.CheckModUpdatesAsync(Local.GetCheckedMods());
 
-    public void Dispose() => Online.Dispose();
+    private bool CanCheckModUpdates() => Local.CanCheckUpdates;
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        Local.PropertyChanged -= OnLocalPropertyChanged;
+        Local.Dispose();
+        Online.Dispose();
+        Queue.Dispose();
+    }
 }

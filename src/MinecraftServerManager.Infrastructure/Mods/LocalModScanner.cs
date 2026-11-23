@@ -1,19 +1,24 @@
-using MinecraftServerManager.Infrastructure.Logging;
 using System.IO.Compression;
-using System.Text.Json;
 using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
-public sealed class LocalModScanner : ILocalModScanner
+public sealed partial class LocalModScanner : ILocalModScanner
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(LocalModScanner));
     private const int MaxMetadataEntryBytes = 256 * 1024;
+
+    /// <summary>內嵌 JAR（jarjar／jars）與其 ZIP 解析的位元組上限</summary>
+    private const int MaxEmbeddedJarBytes = 10 * 1024 * 1024;
+
+    // 同目錄掃描共用 .modcache 索引檔，須序列化避免互相覆寫
+    private readonly KeyedAsyncLock _directoryGates = new();
 
     public async Task<IReadOnlyList<LocalModInfo>> ScanModsAsync(string modsDirectory, CancellationToken cancellationToken = default)
     {
@@ -21,6 +26,7 @@ public sealed class LocalModScanner : ILocalModScanner
         cancellationToken.ThrowIfCancellationRequested();
 
         string stableModsDir = SafeFileSystem.ResolveStableDirectory(modsDirectory, create: true);
+        using var gate = await _directoryGates.AcquireAsync(stableModsDir, cancellationToken).ConfigureAwait(false);
         var entries = SafeFileSystem.ListBoundedDirectory(stableModsDir, rejectReparse: false)
             .Where(static e => !e.IsDirectory && ModHelpers.IsModFileName(e.FullPath))
             .ToList();
@@ -28,13 +34,27 @@ public sealed class LocalModScanner : ILocalModScanner
         var persistence = new ModIndexPersistence(stableModsDir);
         persistence.CleanupStaleEntries(entries.Select(static e => Path.GetFileName(e.FullPath)));
 
-        // 預設平行度即為 ProcessorCount；各項結果依索引寫入陣列，免去並行集合
+        // 平行掃描上限設為 4，避免磁碟 I/O 與 CPU 爭搶；各項結果依索引寫入陣列，免去並行集合
         var scanned = new LocalModInfo?[entries.Count];
-        await Parallel.ForAsync(0, entries.Count, cancellationToken, async (i, ct) =>
-            scanned[i] = await ScanSingleModCoreAsync(entries[i], persistence, ct).ConfigureAwait(false)).ConfigureAwait(false);
+        await Parallel.ForAsync(0, entries.Count, new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken }, async (i, ct) =>
+            scanned[i] = await ScanSingleModAsync(entries[i], persistence, ct).ConfigureAwait(false)).ConfigureAwait(false);
 
         persistence.Flush();
-        return [.. scanned.OfType<LocalModInfo>().OrderBy(static m => m.Filename, StringComparer.OrdinalIgnoreCase)];
+        return [.. scanned.OfType<LocalModInfo>().OrderBy(static m => m.FileName, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    /// <summary>單一模組失敗只略過該筆，不中斷整體掃描</summary>
+    private static async Task<LocalModInfo?> ScanSingleModAsync(FileSystemEntry entry, ModIndexPersistence persistence, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await ScanSingleModCoreAsync(entry, persistence, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Warning(ex, "掃描模組檔案失敗，已略過: {File}", entry.FullPath);
+            return null;
+        }
     }
 
     private static async Task<LocalModInfo?> ScanSingleModCoreAsync(FileSystemEntry entry, ModIndexPersistence persistence, CancellationToken cancellationToken)
@@ -68,15 +88,23 @@ public sealed class LocalModScanner : ILocalModScanner
         string? cachedHash = persistence.GetCachedHash(fileName, ModHelpers.PreferredHashAlgorithm);
         if (string.IsNullOrEmpty(cachedHash))
         {
-            cachedHash = await HashCalculator.ComputeFileHashAsync(filePath, ModHelpers.PreferredHashAlgorithm, cancellationToken: cancellationToken).ConfigureAwait(false);
-            if (!string.IsNullOrEmpty(cachedHash))
+            try
             {
-                persistence.CacheHash(fileName, ModHelpers.PreferredHashAlgorithm, cachedHash);
+                cachedHash = await HashCalculator.ComputeFileHashAsync(filePath, ModHelpers.PreferredHashAlgorithm, cancellationToken: cancellationToken).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(cachedHash))
+                {
+                    persistence.CacheHash(fileName, ModHelpers.PreferredHashAlgorithm, cachedHash);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // 檔案被占用時仍列出模組，僅缺雜湊
+                Logger.Warning(ex, "計算模組雜湊失敗: {File}", fileName);
+                cachedHash = null;
             }
         }
 
         var modInfo = metadata.ToModInfo(
-            filePath: filePath,
             fileName: fileName,
             baseStem: baseStem,
             fileSize: fileLength,
@@ -95,20 +123,9 @@ public sealed class LocalModScanner : ILocalModScanner
         {
             using var archive = SafeZipArchive.OpenRead(filePath);
 
-            // 1. fabric.mod.json / quilt.mod.json
-            var fabricEntry = archive.GetEntry("fabric.mod.json") ?? archive.GetEntry("quilt.mod.json");
-            if (fabricEntry is not null && SafeZipArchive.ReadEntryTextBounded(fabricEntry, MaxMetadataEntryBytes) is { } fabricJson)
+            // 1~2. fabric.mod.json / quilt.mod.json / mods.toml / neoforge.mods.toml
+            if (TryParseModDescriptor(archive, meta))
             {
-                using var doc = JsonCodec.ParseDocument(fabricJson);
-                ParseFabricJson(doc.RootElement, meta, archive);
-                return meta;
-            }
-
-            // 2. META-INF/mods.toml / META-INF/neoforge.mods.toml (Forge / NeoForge)
-            var forgeEntry = archive.GetEntry("META-INF/mods.toml") ?? archive.GetEntry("META-INF/neoforge.mods.toml");
-            if (forgeEntry is not null && SafeZipArchive.ReadEntryTextBounded(forgeEntry, MaxMetadataEntryBytes) is { } content)
-            {
-                ParseForgeToml(content, meta, archive);
                 return meta;
             }
 
@@ -151,31 +168,16 @@ public sealed class LocalModScanner : ILocalModScanner
             (e.FullName.StartsWith("META-INF/jarjar/", StringComparison.OrdinalIgnoreCase) ||
              e.FullName.StartsWith("META-INF/jars/", StringComparison.OrdinalIgnoreCase)) &&
             ModHelpers.IsJarFileName(e.FullName) &&
-            e.Length <= 10 * 1024 * 1024);
+            e.Length <= MaxEmbeddedJarBytes);
 
-        if (innerJarEntry is not null && SafeZipArchive.ReadEntryBytesBounded(innerJarEntry, 10 * 1024 * 1024) is { } innerJarBytes)
+        if (innerJarEntry is not null && SafeZipArchive.ReadEntryBytesBounded(innerJarEntry, MaxEmbeddedJarBytes) is { } innerJarBytes)
         {
             try
             {
                 using var ms = new MemoryStream(innerJarBytes, writable: false);
-                using var innerZip = SafeZipArchive.OpenRead(ms, leaveOpen: true, maxArchiveBytes: 10 * 1024 * 1024);
+                using var innerZip = SafeZipArchive.OpenRead(ms, leaveOpen: true, maxArchiveBytes: MaxEmbeddedJarBytes);
 
-                bool parsed = false;
-                var innerToml = innerZip.GetEntry("META-INF/mods.toml") ?? innerZip.GetEntry("META-INF/neoforge.mods.toml");
-                var innerFabric = innerZip.GetEntry("fabric.mod.json") ?? innerZip.GetEntry("quilt.mod.json");
-                if (innerToml is not null && SafeZipArchive.ReadEntryTextBounded(innerToml, MaxMetadataEntryBytes) is { } tomlContent)
-                {
-                    ParseForgeToml(tomlContent, meta, innerZip);
-                    parsed = true;
-                }
-                else if (innerFabric is not null && SafeZipArchive.ReadEntryTextBounded(innerFabric, MaxMetadataEntryBytes) is { } innerFabricJson)
-                {
-                    using var doc = JsonCodec.ParseDocument(innerFabricJson);
-                    ParseFabricJson(doc.RootElement, meta, innerZip);
-                    parsed = true;
-                }
-
-                if (parsed)
+                if (TryParseModDescriptor(innerZip, meta))
                 {
                     if (string.IsNullOrWhiteSpace(meta.Version) && !string.IsNullOrWhiteSpace(manifestVersion))
                     {
@@ -208,283 +210,62 @@ public sealed class LocalModScanner : ILocalModScanner
         return false;
     }
 
-    private static void ParseFabricJson(JsonElement root, LocalModMetadataBuilder meta, ZipArchive archive)
+    /// <summary>依序解析 fabric.mod.json、quilt.mod.json、mods.toml、neoforge.mods.toml；成功解析任一者回傳 true</summary>
+    private static bool TryParseModDescriptor(ZipArchive archive, LocalModMetadataBuilder meta)
     {
-        meta.LoaderType = "fabric";
-        if (root.TryGetProperty("id", out var idElem))
+        if (archive.GetEntry("fabric.mod.json") is { } fabricEntry && SafeZipArchive.ReadEntryTextBounded(fabricEntry, MaxMetadataEntryBytes) is { } fabricJson)
         {
-            meta.Id = ModHelpers.StripColorAndFormattingCodes(idElem.GetString() ?? string.Empty);
+            using var doc = JsonCodec.ParseDocument(fabricJson);
+            ParseFabricJson(doc.RootElement, meta, archive);
+            return true;
         }
 
-        if (root.TryGetProperty("name", out var nameElem))
+        if (archive.GetEntry("quilt.mod.json") is { } quiltEntry && SafeZipArchive.ReadEntryTextBounded(quiltEntry, MaxMetadataEntryBytes) is { } quiltJson)
         {
-            meta.Name = ModHelpers.StripColorAndFormattingCodes(nameElem.GetString() ?? meta.Name);
+            using var doc = JsonCodec.ParseDocument(quiltJson);
+            ParseQuiltJson(doc.RootElement, meta, archive);
+            return true;
         }
 
-        if (root.TryGetProperty("version", out var verElem))
+        if (archive.GetEntry("META-INF/neoforge.mods.toml") is { } neoEntry && SafeZipArchive.ReadEntryTextBounded(neoEntry, MaxMetadataEntryBytes) is { } neoToml)
         {
-            string? v = verElem.GetString() ?? meta.Version;
-            if (v == "${file.jarVersion}")
-            {
-                v = ReadManifest(archive).Version ?? v;
-            }
-
-            if (!string.IsNullOrWhiteSpace(v))
-            {
-                meta.Version = ModHelpers.StripColorAndFormattingCodes(v);
-            }
+            ParseForgeToml(neoToml, meta, archive, LoaderNeoForge);
+            return true;
         }
 
-        if (root.TryGetProperty("description", out var descElem))
+        if (archive.GetEntry("META-INF/mods.toml") is { } forgeEntry && SafeZipArchive.ReadEntryTextBounded(forgeEntry, MaxMetadataEntryBytes) is { } forgeToml)
         {
-            meta.Description = ModHelpers.StripColorAndFormattingCodes(descElem.GetString() ?? string.Empty);
+            ParseForgeToml(forgeToml, meta, archive, LoaderForge);
+            return true;
         }
 
-        if (root.TryGetProperty("authors", out var authorsElem))
-        {
-            if (authorsElem.ValueKind == JsonValueKind.Array)
-            {
-                var authors = authorsElem.EnumerateArray()
-                    .Select(static a => a.ValueKind == JsonValueKind.String ? a.GetString() : a.TryGetProperty("name", out var n) ? n.GetString() : null)
-                    .Where(static a => !string.IsNullOrWhiteSpace(a))
-                    .Select(ModHelpers.StripColorAndFormattingCodes);
-                meta.Author = string.Join(", ", authors);
-            }
-            else if (authorsElem.ValueKind == JsonValueKind.String)
-            {
-                meta.Author = ModHelpers.StripColorAndFormattingCodes(authorsElem.GetString() ?? string.Empty);
-            }
-        }
-
-        if (root.TryGetProperty("depends", out var dependsElem) &&
-            dependsElem.TryGetProperty("minecraft", out var mcElem))
-        {
-            string? raw = null;
-            if (mcElem.ValueKind == JsonValueKind.String)
-            {
-                raw = mcElem.GetString();
-            }
-            else if (mcElem.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var item in mcElem.EnumerateArray())
-                {
-                    if (item.ValueKind == JsonValueKind.String)
-                    {
-                        raw = item.GetString();
-                        if (!string.IsNullOrWhiteSpace(raw))
-                        {
-                            break;
-                        }
-                    }
-                }
-            }
-
-            meta.SetMinecraftVersionIfValid(raw);
-        }
+        return false;
     }
 
-    private static void ParseForgeToml(string content, LocalModMetadataBuilder meta, ZipArchive archive)
+    // 載入器顯示名稱統一大小寫
+    private const string LoaderFabric = "Fabric";
+    private const string LoaderQuilt = "Quilt";
+    private const string LoaderForge = "Forge";
+    private const string LoaderNeoForge = "NeoForge";
+
+    private static readonly string[] KnownLoaderDisplayNames = [LoaderNeoForge, LoaderFabric, LoaderQuilt, LoaderForge];
+
+    /// <summary>將載入器名稱正規化為統一大小寫的顯示名稱；未知名稱原樣回傳</summary>
+    private static string NormalizeLoaderDisplayName(string loader)
     {
-        meta.LoaderType = "forge";
-
-        int depIdx = content.IndexOf("[[dependencies", StringComparison.OrdinalIgnoreCase);
-        string modSection = depIdx >= 0 ? content[..depIdx] : content;
-
-        string? id = null;
-        string? name = null;
-        string? v = null;
-        string? desc = null;
-        string? author = null;
-
-        int idx = 0;
-        while (idx < modSection.Length)
+        foreach (string known in KnownLoaderDisplayNames)
         {
-            int lineStart = idx;
-            int nextNewline = modSection.IndexOf('\n', idx);
-            int lineEnd = nextNewline >= 0 ? nextNewline : modSection.Length;
-
-            int pos = lineStart;
-            while (pos < lineEnd && (modSection[pos] == ' ' || modSection[pos] == '\t'))
+            if (string.Equals(loader, known, StringComparison.OrdinalIgnoreCase))
             {
-                pos++;
+                return known;
             }
-
-            int eqIdx = -1;
-            for (int i = pos; i < lineEnd; i++)
-            {
-                if (modSection[i] == '=')
-                {
-                    eqIdx = i;
-                    break;
-                }
-            }
-
-            if (eqIdx > pos)
-            {
-                ReadOnlySpan<char> keySpan = modSection.AsSpan(pos, eqIdx - pos).Trim();
-                int nextIdx = lineEnd + (nextNewline >= 0 ? 1 : 0);
-                string? parsedValue = ForgeTomlReader.ExtractValueAt(modSection, eqIdx + 1, ref nextIdx);
-                if (parsedValue is not null)
-                {
-                    if (keySpan.Equals("modId", StringComparison.OrdinalIgnoreCase))
-                    {
-                        id ??= parsedValue;
-                    }
-                    else if (keySpan.Equals("displayName", StringComparison.OrdinalIgnoreCase))
-                    {
-                        name ??= parsedValue;
-                    }
-                    else if (keySpan.Equals("version", StringComparison.OrdinalIgnoreCase))
-                    {
-                        v ??= parsedValue;
-                    }
-                    else if (keySpan.Equals("description", StringComparison.OrdinalIgnoreCase))
-                    {
-                        desc ??= parsedValue;
-                    }
-                    else if (keySpan.Equals("authors", StringComparison.OrdinalIgnoreCase))
-                    {
-                        author ??= parsedValue;
-                    }
-                }
-
-                idx = nextIdx;
-                continue;
-            }
-
-            idx = lineEnd + (nextNewline >= 0 ? 1 : 0);
         }
 
-        if (!string.IsNullOrWhiteSpace(id))
-        {
-            meta.Id = ModHelpers.StripColorAndFormattingCodes(id);
-        }
-
-        if (!string.IsNullOrWhiteSpace(name))
-        {
-            meta.Name = ModHelpers.StripColorAndFormattingCodes(name);
-        }
-
-        if (!string.IsNullOrWhiteSpace(v))
-        {
-            if (v == "${file.jarVersion}")
-            {
-                v = ReadManifest(archive).Version ?? v;
-            }
-            meta.Version = ModHelpers.StripColorAndFormattingCodes(v);
-        }
-
-        if (!string.IsNullOrWhiteSpace(desc))
-        {
-            meta.Description = ModHelpers.StripColorAndFormattingCodes(desc);
-        }
-
-        if (!string.IsNullOrWhiteSpace(author))
-        {
-            meta.Author = ModHelpers.StripColorAndFormattingCodes(author);
-        }
-
-        meta.SetMinecraftVersionIfValid(ForgeTomlReader.ExtractMinecraftDependency(content));
+        return loader;
     }
 
-    private static void ParseLegacyMcModInfo(JsonElement root, LocalModMetadataBuilder meta)
-    {
-        meta.LoaderType = "Forge";
-        var target = root;
-        if (root.ValueKind == JsonValueKind.Array && root.GetArrayLength() > 0)
-        {
-            target = root[0];
-        }
-
-        if (target.TryGetProperty("name", out var nameElem))
-        {
-            meta.Name = ModHelpers.StripColorAndFormattingCodes(nameElem.GetString() ?? meta.Name);
-        }
-
-        if (target.TryGetProperty("version", out var verElem))
-        {
-            string? v = verElem.GetString() ?? meta.Version;
-            if (!string.IsNullOrWhiteSpace(v))
-            {
-                meta.Version = ModHelpers.StripColorAndFormattingCodes(v);
-            }
-        }
-
-        if (target.TryGetProperty("mcversion", out var mcElem))
-        {
-            meta.SetMinecraftVersionIfValid(mcElem.GetString());
-        }
-
-        if (target.TryGetProperty("description", out var descElem))
-        {
-            meta.Description = ModHelpers.StripColorAndFormattingCodes(descElem.GetString() ?? string.Empty);
-        }
-
-        if (target.TryGetProperty("authorList", out var authorListElem) && authorListElem.ValueKind == JsonValueKind.Array)
-        {
-            var authors = authorListElem.EnumerateArray()
-                .Select(static a => a.GetString())
-                .Where(static a => !string.IsNullOrWhiteSpace(a))
-                .Select(ModHelpers.StripColorAndFormattingCodes);
-            meta.Author = string.Join(", ", authors);
-        }
-    }
-
-    private readonly record struct ManifestInfo(string? EmbeddedPath, string? Title, string? Vendor, string? Version);
-
-    /// <summary>讀取 MANIFEST.MF 的模組中繼資料</summary>
-    private static ManifestInfo ReadManifest(ZipArchive archive)
-    {
-        string? embeddedPath = null;
-        string? title = null;
-        string? vendor = null;
-        string? version = null;
-
-        try
-        {
-            var entry = archive.GetEntry("META-INF/MANIFEST.MF");
-            if (entry is not null && SafeZipArchive.ReadEntryTextBounded(entry, MaxMetadataEntryBytes) is { } text)
-            {
-                foreach (ReadOnlySpan<char> line in text.AsSpan().EnumerateLines())
-                {
-                    int colon = line.IndexOf(':');
-                    if (colon <= 0)
-                    {
-                        continue;
-                    }
-
-                    ReadOnlySpan<char> key = line[..colon].Trim();
-                    ReadOnlySpan<char> val = line[(colon + 1)..].Trim();
-
-                    if (key.Equals("Embedded-Dependencies-Mod", StringComparison.OrdinalIgnoreCase))
-                    {
-                        embeddedPath = val.ToString();
-                    }
-                    else if (key.Equals("Specification-Title", StringComparison.OrdinalIgnoreCase) ||
-                             key.Equals("Implementation-Title", StringComparison.OrdinalIgnoreCase))
-                    {
-                        title ??= val.ToString();
-                    }
-                    else if (key.Equals("Specification-Vendor", StringComparison.OrdinalIgnoreCase) ||
-                             key.Equals("Implementation-Vendor", StringComparison.OrdinalIgnoreCase))
-                    {
-                        vendor ??= val.ToString();
-                    }
-                    else if (key.Equals("Implementation-Version", StringComparison.OrdinalIgnoreCase) &&
-                             !val.IsEmpty && !val.Equals("${projectversion}", StringComparison.Ordinal))
-                    {
-                        version ??= val.ToString();
-                    }
-                }
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning(ex, "讀取模組 MANIFEST.MF 失敗");
-        }
-
-        return new ManifestInfo(embeddedPath, title, vendor, version);
-    }
+    private static string? ResolveJarVersion(string? version, ZipArchive archive) =>
+        version == "${file.jarVersion}" ? ReadManifest(archive).Version ?? version : version;
 
     private static void ApplyFallbackLogic(string baseStem, LocalModMetadataBuilder meta)
     {
@@ -552,36 +333,6 @@ public sealed class LocalModScanner : ILocalModScanner
         }
     }
 
-    private static string? DetectLoaderDisplayNameFromText(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return null;
-        }
-
-        if (text.Contains("neoforge", StringComparison.OrdinalIgnoreCase))
-        {
-            return "NeoForge";
-        }
-
-        if (text.Contains("fabric", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Fabric";
-        }
-
-        if (text.Contains("quilt", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Quilt";
-        }
-
-        if (text.Contains("forge", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Forge";
-        }
-
-        return null;
-    }
-
     private sealed class LocalModMetadataBuilder
     {
         public string Id { get; set; } = string.Empty;
@@ -592,6 +343,51 @@ public sealed class LocalModScanner : ILocalModScanner
         public string Author { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public ModPlatform Platform { get; set; } = ModPlatform.Local;
+
+        /// <summary>非 null 時寫入去除色碼後的值</summary>
+        internal void SetId(string? raw)
+        {
+            if (raw is not null)
+            {
+                Id = ModHelpers.StripColorAndFormattingCodes(raw);
+            }
+        }
+
+        /// <summary>非 null 時寫入去除色碼後的值</summary>
+        internal void SetName(string? raw)
+        {
+            if (raw is not null)
+            {
+                Name = ModHelpers.StripColorAndFormattingCodes(raw);
+            }
+        }
+
+        /// <summary>非 null 時寫入去除色碼後的值</summary>
+        internal void SetDescription(string? raw)
+        {
+            if (raw is not null)
+            {
+                Description = ModHelpers.StripColorAndFormattingCodes(raw);
+            }
+        }
+
+        /// <summary>非 null 時寫入去除色碼後的值</summary>
+        internal void SetAuthor(string? raw)
+        {
+            if (raw is not null)
+            {
+                Author = ModHelpers.StripColorAndFormattingCodes(raw);
+            }
+        }
+
+        /// <summary>非空白時寫入去除色碼後的版本號</summary>
+        internal void SetVersion(string? raw)
+        {
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                Version = ModHelpers.StripColorAndFormattingCodes(raw);
+            }
+        }
 
         internal void SetMinecraftVersionIfValid(string? raw)
         {
@@ -623,7 +419,7 @@ public sealed class LocalModScanner : ILocalModScanner
             Name = dict.GetValueOrDefault("name", fallbackName),
             Version = NormalizeUnknown(dict.TryGetValue("version", out string? v) ? v : null),
             MinecraftVersion = NormalizeUnknown(dict.TryGetValue("mc_version", out string? mc) ? mc : null),
-            LoaderType = NormalizeUnknown(dict.TryGetValue("loader_type", out string? lt) ? lt : null),
+            LoaderType = NormalizeUnknown(dict.TryGetValue("loader_type", out string? lt) ? lt : null) is { } loader ? NormalizeLoaderDisplayName(loader) : null,
             Author = dict.GetValueOrDefault("author", string.Empty),
             Description = dict.GetValueOrDefault("description", string.Empty),
             Platform = Enum.TryParse<ModPlatform>(dict.GetValueOrDefault("platform", "Local"), ignoreCase: true, out var p) ? p : ModPlatform.Local,
@@ -640,7 +436,6 @@ public sealed class LocalModScanner : ILocalModScanner
         }
 
         internal LocalModInfo ToModInfo(
-            string filePath,
             string fileName,
             string baseStem,
             long fileSize,
@@ -650,7 +445,7 @@ public sealed class LocalModScanner : ILocalModScanner
             new(
                 id: string.IsNullOrWhiteSpace(Id) ? baseStem : Id,
                 name: string.IsNullOrWhiteSpace(Name) ? baseStem : Name,
-                filename: fileName,
+                fileName: fileName,
                 version: Version ?? "未知",
                 minecraftVersion: MinecraftVersion ?? "未知",
                 loaderType: LoaderType ?? "未知",
@@ -658,7 +453,6 @@ public sealed class LocalModScanner : ILocalModScanner
                 author: Author,
                 platform: Platform,
                 status: isEnabled ? ModStatus.Enabled : ModStatus.Disabled,
-                filePath: filePath,
                 fileSize: fileSize,
                 fileMtime: fileMtime,
                 currentHash: cachedHash ?? string.Empty,

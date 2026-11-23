@@ -9,7 +9,7 @@ public sealed class ProgressMappingTests
     [InlineData(50, 100, 32)]
     [InlineData(100, 100, 55)]
     [InlineData(250, 100, 55)]
-    public void Map_ScalesIntoRangeAndClamps(long completed, long total, int expected) =>
+    public void Map_Value_ScalesIntoRangeAndClamps(long completed, long total, int expected) =>
         Assert.Equal(expected, ProgressMapping.Map(completed, total, 10, 55));
 
     [Fact]

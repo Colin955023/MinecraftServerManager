@@ -43,6 +43,19 @@
       ],
       "depNameTemplate": "renovate",
       "datasourceTemplate": "npm"
+    },
+    {
+      "customType": "regex",
+      "description": "ci-test.yml 的 Gitleaks 版本（GITLEAKS_VERSION）",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/ci-test\\.yml$/"
+      ],
+      "matchStrings": [
+        "GITLEAKS_VERSION:\\s*(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "gitleaks/gitleaks",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
     }
   ],
   "packageRules": [
@@ -99,6 +112,14 @@
       ]
     },
     {
+      "description": "global.json 的 SDK 與 Windows SDK 投影套件併入 .NET 群組",
+      "groupName": ".NET ecosystem",
+      "matchPackageNames": [
+        "dotnet-sdk",
+        "Microsoft.Windows.SDK.NET.Ref"
+      ]
+    },
+    {
       "groupName": "GitHub Actions",
       "matchManagers": [
         "github-actions"
@@ -125,7 +146,7 @@
       ]
     },
     {
-      "description": "鎖定檔維護沒有單一套件發佈時間戳，排除 minimumReleaseAge 以避免 PR 長期卡在 pending",
+      "description": "鎖定檔維護沒有單一套件發布時間戳，排除 minimumReleaseAge 以避免 PR 長期卡在 pending",
       "matchUpdateTypes": [
         "lockFileMaintenance"
       ],

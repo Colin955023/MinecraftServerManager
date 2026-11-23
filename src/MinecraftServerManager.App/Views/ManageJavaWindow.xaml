@@ -1,0 +1,178 @@
+<Window
+  x:Class="MinecraftServerManager.App.Views.ManageJavaWindow"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:controls="using:MinecraftServerManager.App.Controls"
+  xmlns:vm="using:MinecraftServerManager.App.ViewModels">
+
+  <Grid Style="{StaticResource DialogRootGridStyle}">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- 頂部資訊卡片 -->
+    <Border Grid.Row="0"
+      Style="{StaticResource CardBorderStyle}"
+      Padding="16,12">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <StackPanel Grid.Column="0"
+          Spacing="4">
+          <TextBlock Style="{StaticResource SectionHeaderTextStyle}"
+            Text="本機 Java 執行環境管理" />
+          <controls:WrapPanel ItemSpacing="16"
+            LineSpacing="4">
+            <controls:LabeledValue Label="目前 Minecraft 版本："
+              Value="{x:Bind ViewModel.MinecraftVersionText}"
+              ValueWeight="SemiBold" />
+            <controls:LabeledValue Label="指定 Java 需求："
+              Value="{x:Bind ViewModel.RequiredMajorText, Mode=OneWay}"
+              ValueWeight="SemiBold" />
+          </controls:WrapPanel>
+        </StackPanel>
+
+        <!-- 工具列按鈕 -->
+        <StackPanel Grid.Column="1"
+          VerticalAlignment="Center"
+          Orientation="Horizontal"
+          Spacing="8">
+          <Button Content="自動偵測配對"
+            Command="{x:Bind ViewModel.AutoDetectCommand}" />
+          <Button Content="手動瀏覽..."
+            Command="{x:Bind ViewModel.BrowseFileCommand}" />
+          <Button Command="{x:Bind ViewModel.RefreshCommand}">
+            <Button.KeyboardAccelerators>
+              <KeyboardAccelerator Key="F5" />
+            </Button.KeyboardAccelerators>
+            <controls:IconLabel Icon="{StaticResource IconRefresh}"
+              Text="重新整理" />
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- winget 線上安裝區塊 -->
+    <Border Grid.Row="1"
+      Style="{StaticResource CardBorderStyle}"
+      Padding="16,10">
+      <Grid ColumnSpacing="8">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="140" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <TextBlock Grid.Column="0"
+          Style="{StaticResource BodyTextBlockStyle}"
+          VerticalAlignment="Center"
+          Text="線上安裝 Java (winget)："
+          Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+        <ComboBox Grid.Column="1"
+          HorizontalAlignment="Stretch"
+          ItemsSource="{x:Bind ViewModel.AvailableInstallOptions}"
+          SelectedItem="{x:Bind ViewModel.SelectedInstallMajorOption, Mode=TwoWay}"
+          AutomationProperties.Name="線上安裝 Java 版本">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:JavaMajorOption">
+              <TextBlock Text="{x:Bind DisplayName}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <Button Grid.Column="2"
+          Style="{StaticResource PrimaryButtonStyle}"
+          Command="{x:Bind ViewModel.InstallWithWingetCommand}">
+          <controls:IconLabel Icon="{StaticResource IconDownload}"
+            Text="安裝所選版本" />
+        </Button>
+        <TextBlock Grid.Column="3"
+          Style="{StaticResource SecondaryCaptionTextStyle}"
+          Margin="6,0,0,0"
+          VerticalAlignment="Center"
+          Text="* 依版本快取篩選可用版本，安裝需允許系統管理員權限" />
+      </Grid>
+    </Border>
+
+    <controls:TableFrame Grid.Row="2"
+      SortTarget="{x:Bind HeaderSort}"
+      IsEmpty="{x:Bind controls:UiBindHelpers.IsIdleEmpty(ViewModel.InstalledJavas.Count, ViewModel.IsBusy), Mode=OneWay}"
+      EmptyText="尚未偵測到 Java">
+      <controls:TableFrame.Header>
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="110" />
+            <ColumnDefinition Width="140" />
+            <ColumnDefinition Width="160" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <controls:SortableTableHeader Grid.Column="0"
+            Text="主要版本"
+            SortPropertyName="MajorVersion" />
+          <controls:SortableTableHeader Grid.Column="1"
+            Text="發行廠商"
+            SortPropertyName="Vendor" />
+          <controls:SortableTableHeader Grid.Column="2"
+            Text="相容狀態"
+            SortPropertyName="StatusText" />
+          <controls:SortableTableHeader Grid.Column="3"
+            Text="執行檔路徑"
+            SortPropertyName="ExecutablePath" />
+        </Grid>
+      </controls:TableFrame.Header>
+
+      <ListView Style="{StaticResource TableListViewStyle}"
+        ItemsSource="{x:Bind ViewModel.InstalledJavas}"
+        SelectedItem="{x:Bind ViewModel.SelectedJava, Mode=TwoWay}"
+        SelectionMode="Single"
+        controls:ListViewBehaviors.ClearOnOutsidePress="True"
+        controls:ListViewBehaviors.InvokeCommand="{x:Bind ViewModel.ApplyCommand}"
+        AutomationProperties.Name="已安裝的 Java">
+        <ListView.ItemTemplate>
+          <DataTemplate x:DataType="vm:JavaItemViewModel">
+            <Grid>
+              <controls:TableCell Grid.Column="0"
+                Text="{x:Bind DisplayName}" />
+              <controls:TableCell Grid.Column="1"
+                Text="{x:Bind Vendor}" />
+              <controls:TableCell Grid.Column="2"
+                Text="{x:Bind StatusText}"
+                TextFontWeight="{x:Bind controls:UiBindHelpers.FormatStatusWeight(IsRecommended)}"
+                ForegroundKey="{x:Bind controls:UiBindHelpers.FormatStatusBrushKey(IsRecommended)}" />
+              <controls:TableCell Grid.Column="3"
+                Text="{x:Bind ExecutablePath}"
+                ShowRightBorder="False" />
+            </Grid>
+          </DataTemplate>
+        </ListView.ItemTemplate>
+      </ListView>
+    </controls:TableFrame>
+
+    <!-- 狀態列提示 -->
+    <controls:BusyStatusIndicator Grid.Row="3"
+      IsBusy="{x:Bind ViewModel.IsBusy, Mode=OneWay}"
+      Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+      BusyName="處理中" />
+
+    <!-- 底部操作列 -->
+    <StackPanel Grid.Row="4"
+      HorizontalAlignment="Right"
+      Orientation="Horizontal"
+      Spacing="10">
+      <Button Style="{StaticResource PrimaryButtonStyle}"
+        MinWidth="120"
+        Content="套用選定 Java"
+        Command="{x:Bind ViewModel.ApplyCommand}" />
+      <Button MinWidth="80"
+        Content="取消"
+        Command="{x:Bind ViewModel.CancelCommand}" />
+    </StackPanel>
+  </Grid>
+</Window>

@@ -21,6 +21,24 @@ function Get-RepoRoot
     return [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
 }
 
+function Test-Utf8Bom
+{
+    <#
+    .SYNOPSIS
+        檢查檔案是否以 UTF-8 with BOM（0xEF 0xBB 0xBF）開頭。
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $buffer = [byte[]]::new(3)
+    $fs = [System.IO.File]::OpenRead($Path)
+    try { $read = $fs.Read($buffer, 0, 3) } finally { $fs.Dispose() }
+    return ($read -eq 3 -and $buffer[0] -eq 0xEF -and $buffer[1] -eq 0xBB -and $buffer[2] -eq 0xBF)
+}
+
 function Initialize-ScriptEnvironment
 {
     <#
@@ -33,8 +51,16 @@ function Initialize-ScriptEnvironment
     $env:DOTNET_CLI_FORCE_UTF8_ENCODING = "1"
     $env:MSBUILDDISABLENODEREUSE = "1"
 
-    [Console]::InputEncoding = $Utf8NoBom
-    [Console]::OutputEncoding = $Utf8NoBom
+    try
+    {
+        [Console]::InputEncoding = $Utf8NoBom
+        [Console]::OutputEncoding = $Utf8NoBom
+    }
+    catch [System.IO.IOException]
+    {
+        # 無主控台（如輸出重新導向的背景程序）時無法設定，不影響後續執行
+        Write-Verbose "略過主控台編碼設定：$($_.Exception.Message)"
+    }
     Set-Variable -Name OutputEncoding -Value $Utf8NoBom -Scope 1
 }
 
@@ -79,6 +105,58 @@ function Get-ProjectVersion
     return $versionNode.InnerText.Trim()
 }
 
+function Get-ChangelogSection
+{
+    <#
+    .SYNOPSIS
+        取得 CHANGELOG 中指定版本章節的內文；找不到或內文空白回傳 $null。
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Changelog,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Version
+    )
+
+    $escaped = [regex]::Escape($Version)
+    # 版本號後須為非版本字元，避免 2.2.1 誤配 2.2.10 或 2.3.0 誤配 2.3.0-beta
+    $pattern = "(?ms)^##\s+\[?v?$escaped(?![\w.\-])\]?[^\r\n]*\r?\n(.*?)(?=^##\s+|\Z)"
+    if ($Changelog -notmatch $pattern)
+    {
+        return $null
+    }
+
+    $body = $Matches[1].Trim()
+    return [string]::IsNullOrWhiteSpace($body) ? $null : $body
+}
+
+function Get-Sha256Hex
+{
+    <#
+    .SYNOPSIS
+        計算指定檔案的 SHA-256 十六進位雜湊字串（預設小寫）。
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LiteralPath,
+
+        [switch]$UpperCase
+    )
+
+    $fullPath = [System.IO.Path]::GetFullPath($LiteralPath)
+    if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf))
+    {
+        throw "找不到要計算雜湊的檔案：$fullPath"
+    }
+
+    $hash = (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash
+    if ($UpperCase) { return $hash }
+    return $hash.ToLowerInvariant()
+}
+
 function Write-Sha256File
 {
     <#
@@ -92,12 +170,7 @@ function Write-Sha256File
     )
 
     $fullPath = [System.IO.Path]::GetFullPath($LiteralPath)
-    if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf))
-    {
-        throw "找不到要計算雜湊的檔案：$fullPath"
-    }
-
-    $hash = (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $hash = Get-Sha256Hex -LiteralPath $fullPath
     $shaPath = "$fullPath.sha256"
     [System.IO.File]::WriteAllText(
         $shaPath,
@@ -146,6 +219,8 @@ function Invoke-SmokeTest
         if (-not $proc.WaitForExit($TimeoutSeconds * 1000))
         {
             $proc.Kill($true)
+            # 等待行程樹結束釋放檔案鎖，避免清理暫存目錄失敗
+            $null = $proc.WaitForExit(5000)
             throw "煙霧測試逾時（$TimeoutSeconds 秒）"
         }
         if ($proc.ExitCode -ne 0)
@@ -202,9 +277,11 @@ function Invoke-WithRetry
         [Parameter(Mandatory = $true)]
         [string]$Description,
 
+        [ValidateRange(1, 10)]
         [int]$MaxAttempts = 3
     )
 
+    $lastError = $null
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++)
     {
         $global:LASTEXITCODE = 0
@@ -215,12 +292,13 @@ function Invoke-WithRetry
             {
                 return
             }
-            Write-Warning "${Description}失敗（第 $attempt 次，結束代碼 $LASTEXITCODE）"
+            $lastError = "結束代碼 $LASTEXITCODE"
         }
         catch
         {
-            Write-Warning "${Description}失敗（第 $attempt 次）：$($_.Exception.Message)"
+            $lastError = $_.Exception.Message
         }
+        Write-Warning "${Description}失敗（第 $attempt 次）：$lastError"
 
         if ($attempt -lt $MaxAttempts)
         {
@@ -228,7 +306,41 @@ function Invoke-WithRetry
         }
     }
 
-    throw "${Description}失敗"
+    throw "${Description}失敗（已嘗試 $MaxAttempts 次）：$lastError"
+}
+
+function Sync-RemoteTags
+{
+    <#
+    .SYNOPSIS
+        強制同步遠端標籤，失敗即擲出例外。
+    #>
+    [CmdletBinding()]
+    param()
+
+    # 輸出導向主控台，避免混入呼叫端的回傳值
+    git fetch --tags --force | Out-Host
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "取得遠端標籤失敗（結束代碼 $LASTEXITCODE）"
+    }
+}
+
+function Get-HeadCommit
+{
+    <#
+    .SYNOPSIS
+        取得目前 HEAD 的 commit SHA，失敗即擲出例外。
+    #>
+    [CmdletBinding()]
+    param()
+
+    $commit = git rev-parse HEAD
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($commit))
+    {
+        throw "無法取得目前 HEAD commit"
+    }
+    return ([string]$commit).Trim()
 }
 
 function Get-TagCommit
@@ -251,6 +363,31 @@ function Get-TagCommit
         return $null
     }
     return ([string]$commit).Trim()
+}
+
+function Test-ReleaseTagAtHead
+{
+    <#
+    .SYNOPSIS
+        同步遠端標籤後檢查發行標籤：已指向 HEAD 回傳 $true、尚未建立回傳 $false、指向其他 commit 擲出例外。
+        正常結果一律將 $LASTEXITCODE 設為 0，避免 CI 步驟結尾沿用原生指令的結束代碼而失敗。
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Tag
+    )
+
+    $null = Sync-RemoteTags
+    $headCommit = Get-HeadCommit
+    $tagCommit = Get-TagCommit -Tag $Tag
+    if ($null -ne $tagCommit -and $tagCommit -ne $headCommit)
+    {
+        throw "Tag $Tag 已存在且指向不同 commit [$tagCommit]，請更新版本號"
+    }
+
+    $global:LASTEXITCODE = 0
+    return ($null -ne $tagCommit)
 }
 
 function Assert-ReleaseAssets
@@ -285,7 +422,7 @@ function Assert-Sha256File
         [string]$ShaPath
     )
 
-    $content = (Get-Content -LiteralPath $ShaPath -Raw).Trim()
+    $content = (Get-Content -LiteralPath $ShaPath -Raw -Encoding UTF8).Trim()
     if ($content -notmatch '^([0-9a-fA-F]{64})\s+[\*]?(.*)$')
     {
         throw "無法解析雜湊檔：$ShaPath"
@@ -293,14 +430,19 @@ function Assert-Sha256File
 
     $expected = $Matches[1]
     $targetName = $Matches[2].Trim()
+    # 僅接受同目錄的純檔名，阻擋路徑穿越
+    if ([string]::IsNullOrEmpty($targetName) -or $targetName -match '[\\/:]' -or $targetName -in '.', '..')
+    {
+        throw "雜湊檔的目標檔名不合法：$targetName"
+    }
     $target = Join-Path ([System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($ShaPath))) $targetName
     if (-not (Test-Path -LiteralPath $target -PathType Leaf))
     {
         throw "雜湊檔指定的檔案不存在：$targetName"
     }
 
-    $actual = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
-    if ($actual -ne $expected)
+    $actual = Get-Sha256Hex -LiteralPath $target
+    if ($actual -ne $expected.ToLowerInvariant())
     {
         throw "雜湊不符：$targetName 預期 $expected，實際 $actual"
     }

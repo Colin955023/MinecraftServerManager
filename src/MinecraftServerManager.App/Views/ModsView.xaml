@@ -41,25 +41,22 @@
           <ColumnDefinition Width="*" />
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
-        <controls:IconLabel Icon="{StaticResource IconFolder}"
+        <controls:IconLabel Grid.Column="0"
+          Margin="0,0,12,0"
+          Icon="{StaticResource IconFolder}"
           Text="伺服器："
           IconSize="16"
-          Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-          Grid.Column="0"
-          VerticalAlignment="Center"
-          Margin="0,0,12,0" />
-        <ComboBox AutomationProperties.Name="伺服器" Grid.Column="1"
-          ItemsSource="{x:Bind ViewModel.Servers, Mode=OneWay}"
-          SelectedItem="{x:Bind ViewModel.SelectedServer, Mode=TwoWay}"
+          Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+        <ComboBox Grid.Column="1"
+          Margin="0,0,12,0"
           HorizontalAlignment="Stretch"
-          Margin="0,0,12,0" />
+          ItemsSource="{x:Bind ViewModel.Servers}"
+          SelectedItem="{x:Bind ViewModel.SelectedServer, Mode=TwoWay}"
+          AutomationProperties.Name="伺服器" />
         <Button Grid.Column="2"
-          Command="{x:Bind ViewModel.RefreshServersCommand}"
-          Height="32">
+          Command="{x:Bind ViewModel.RefreshServersCommand}">
           <controls:IconLabel Icon="{StaticResource IconRefresh}"
-            Text="重新整理"
-            IconSize="14"
-            VerticalAlignment="Center" />
+            Text="重新整理" />
         </Button>
       </Grid>
     </Border>
@@ -101,57 +98,41 @@
           <controls:WrapPanel Grid.Column="0"
             ItemSpacing="8"
             LineSpacing="8">
-            <Button Command="{x:Bind ViewModel.Local.ImportModsCommand}"
-              Height="32">
-              <controls:IconLabel Icon="{StaticResource IconCreateServer}"
-                Text="匯入模組"
-                IconSize="14" />
+            <Button Command="{x:Bind ViewModel.Local.ImportModsCommand}">
+              <controls:IconLabel Icon="{StaticResource IconImport}"
+                Text="匯入模組" />
             </Button>
-            <Button Command="{x:Bind ViewModel.Local.RefreshLocalModsCommand}"
-              Height="32">
+            <Button Command="{x:Bind ViewModel.Local.RefreshLocalModsCommand}">
               <Button.KeyboardAccelerators>
                 <KeyboardAccelerator Key="F5" />
               </Button.KeyboardAccelerators>
               <controls:IconLabel Icon="{StaticResource IconRefresh}"
-                Text="重新整理"
-                IconSize="14" />
+                Text="重新整理" />
             </Button>
-            <Button Command="{x:Bind ViewModel.CheckModUpdatesCommand}"
-              IsEnabled="{x:Bind ViewModel.Local.CanCheckUpdates, Mode=OneWay}"
-              Height="32">
-              <controls:IconLabel Icon="{StaticResource IconRefresh}"
-                Text="檢查更新"
-                IconSize="14" />
+            <Button Command="{x:Bind ViewModel.CheckModUpdatesCommand}">
+              <controls:IconLabel Icon="{StaticResource IconCheckUpdate}"
+                Text="檢查更新" />
             </Button>
-            <Button Click="OnSelectAllLocalModsClicked"
-              Height="32">
+            <Button Click="OnSelectAllLocalModsClicked">
               <controls:IconLabel Icon="{StaticResource IconSelectAll}"
-                Text="全選"
-                IconSize="14" />
+                Text="全選" />
             </Button>
-            <Button Command="{x:Bind ViewModel.Local.BatchToggleCommand}"
-              IsEnabled="{x:Bind ViewModel.Local.CanBatchToggle, Mode=OneWay}"
-              Height="32">
+            <Button Command="{x:Bind ViewModel.Local.BatchToggleCommand}">
               <controls:IconLabel Icon="{StaticResource IconToggle}"
-                Text="批次切換"
-                IconSize="14" />
+                Text="批次切換" />
             </Button>
-            <Button Command="{x:Bind ViewModel.Local.OpenModsFolderCommand}"
-              Height="32">
+            <Button Command="{x:Bind ViewModel.Local.OpenModsFolderCommand}">
               <controls:IconLabel Icon="{StaticResource IconFolder}"
-                Text="開啟模組資料夾"
-                IconSize="14" />
+                Text="開啟模組資料夾" />
             </Button>
-            <Button Command="{x:Bind ViewModel.Local.DeleteSelectedModCommand}"
-              Style="{StaticResource DangerButtonStyle}"
-              Height="32">
+            <Button Style="{StaticResource DangerButtonStyle}"
+              Command="{x:Bind ViewModel.Local.DeleteSelectedModCommand}">
               <Button.KeyboardAccelerators>
                 <KeyboardAccelerator x:Name="DeleteModsAccelerator"
                   Key="Delete" />
               </Button.KeyboardAccelerators>
               <controls:IconLabel Icon="{StaticResource IconDelete}"
-                Text="刪除已選取模組"
-                IconSize="14" />
+                Text="刪除已選取模組" />
             </Button>
           </controls:WrapPanel>
 
@@ -163,198 +144,161 @@
             <StackPanel Orientation="Horizontal"
               Spacing="8">
               <TextBox x:Name="LocalSearchBox"
-                AutomationProperties.Name="搜尋本地模組"
                 Width="150"
-                Text="{x:Bind ViewModel.Local.LocalSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                 Height="32"
-                PlaceholderText="搜尋本地模組...">
-                <TextBox.KeyboardAccelerators>
-                  <KeyboardAccelerator Modifiers="Control"
-                    Key="F"
-                    Invoked="OnFocusSearchInvoked" />
-                </TextBox.KeyboardAccelerators>
-              </TextBox>
-              <ComboBox AutomationProperties.Name="篩選本地模組"
-                ItemsSource="{x:Bind vm:LocalModsViewModel.LocalFilterOptions}"
+                Text="{x:Bind ViewModel.Local.LocalSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                PlaceholderText="搜尋本地模組..."
+                controls:TextBoxShortcuts.FocusOnCtrlF="True"
+                AutomationProperties.Name="搜尋本地模組" />
+              <ComboBox Width="100"
+                Height="32"
+                ItemsSource="{x:Bind ViewModel.Local.LocalFilterOptions}"
                 SelectedItem="{x:Bind ViewModel.Local.SelectedLocalFilter, Mode=TwoWay}"
-                Width="100"
-                Height="32" />
+                AutomationProperties.Name="篩選本地模組" />
             </StackPanel>
-            <Button Command="{x:Bind ViewModel.Local.ExportModListCommand}"
+            <Button Padding="12,0"
               HorizontalAlignment="Right"
-              Height="32"
-              Padding="12,0">
-              <controls:IconLabel Icon="{StaticResource IconFolder}"
-                Text="匯出模組清單"
-                IconSize="14" />
+              Command="{x:Bind ViewModel.Local.ExportModListCommand}">
+              <controls:IconLabel Icon="{StaticResource IconExport}"
+                Text="匯出模組清單" />
             </Button>
           </StackPanel>
         </Grid>
 
         <!-- 本地模組清單 -->
-        <Border Grid.Row="1"
-          Style="{StaticResource PanelCardStyle}">
-          <controls:TableFrame SortTarget="{x:Bind LocalSort}"
-            IsEmpty="{x:Bind controls:UiBindHelpers.IsIdleEmpty(ViewModel.Local.LocalMods.Count, x:False), Mode=OneWay}"
-            EmptyText="沒有符合的模組">
-            <controls:TableFrame.Header>
-              <Grid>
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition
-                    Width="{x:Bind views:LocalModListColumns.Current.EnabledWidth, Mode=OneWay}" />
-                  <ColumnDefinition
-                    Width="{x:Bind views:LocalModListColumns.Current.NameWidth, Mode=OneWay}" />
-                  <ColumnDefinition
-                    Width="{x:Bind views:LocalModListColumns.Current.VersionWidth, Mode=OneWay}" />
-                  <ColumnDefinition
-                    Width="{x:Bind views:LocalModListColumns.Current.AuthorWidth, Mode=OneWay}" />
-                  <ColumnDefinition
-                    Width="{x:Bind views:LocalModListColumns.Current.LoaderWidth, Mode=OneWay}" />
-                  <ColumnDefinition
-                    Width="{x:Bind views:LocalModListColumns.Current.PlatformWidth, Mode=OneWay}" />
-                  <ColumnDefinition
-                    Width="{x:Bind views:LocalModListColumns.Current.SizeWidth, Mode=OneWay}" />
-                  <ColumnDefinition
-                    Width="{x:Bind views:LocalModListColumns.Current.ModifiedWidth, Mode=OneWay}" />
-                  <ColumnDefinition
-                    Width="{x:Bind views:LocalModListColumns.Current.DescriptionWidth, Mode=OneWay}" />
-                </Grid.ColumnDefinitions>
+        <controls:TableFrame Grid.Row="1"
+          SortTarget="{x:Bind LocalSort}"
+          IsEmpty="{x:Bind controls:UiBindHelpers.IsIdleEmpty(ViewModel.Local.LocalMods.Count, ViewModel.Local.IsLoading), Mode=OneWay}"
+          EmptyText="沒有符合的模組">
+          <controls:TableFrame.Header>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="60" />
+                <ColumnDefinition Width="200" />
+                <ColumnDefinition Width="110" />
+                <ColumnDefinition Width="120" />
+                <ColumnDefinition Width="90" />
+                <ColumnDefinition Width="95" />
+                <ColumnDefinition Width="100" />
+                <ColumnDefinition Width="140" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
 
-                <controls:SortableTableHeader Grid.Column="0"
-                  Text="啟用"
-                  SortPropertyName="IsEnabled"
-                  ColumnWidth="{x:Bind views:LocalModListColumns.Current.EnabledWidth, Mode=TwoWay}" />
-                <controls:SortableTableHeader Grid.Column="1"
-                  Text="模組名稱"
-                  SortPropertyName="Name"
-                  ColumnWidth="{x:Bind views:LocalModListColumns.Current.NameWidth, Mode=TwoWay}" />
-                <controls:SortableTableHeader Grid.Column="2"
-                  Text="版本"
-                  SortPropertyName="Version"
-                  ColumnWidth="{x:Bind views:LocalModListColumns.Current.VersionWidth, Mode=TwoWay}" />
-                <controls:SortableTableHeader Grid.Column="3"
-                  Text="作者"
-                  SortPropertyName="Author"
-                  ColumnWidth="{x:Bind views:LocalModListColumns.Current.AuthorWidth, Mode=TwoWay}" />
-                <controls:SortableTableHeader Grid.Column="4"
-                  Text="載入器"
-                  SortPropertyName="LoaderType"
-                  ColumnWidth="{x:Bind views:LocalModListColumns.Current.LoaderWidth, Mode=TwoWay}" />
-                <controls:SortableTableHeader Grid.Column="5"
-                  Text="來源平台"
-                  SortPropertyName="SourcePlatform"
-                  ColumnWidth="{x:Bind views:LocalModListColumns.Current.PlatformWidth, Mode=TwoWay}" />
-                <controls:SortableTableHeader Grid.Column="6"
-                  Text="檔案大小"
-                  SortPropertyName="FileSize"
-                  ColumnWidth="{x:Bind views:LocalModListColumns.Current.SizeWidth, Mode=TwoWay}" />
-                <controls:SortableTableHeader Grid.Column="7"
-                  Text="修改時間"
-                  SortPropertyName="ModifiedTime"
-                  ColumnWidth="{x:Bind views:LocalModListColumns.Current.ModifiedWidth, Mode=TwoWay}" />
-                <controls:SortableTableHeader Grid.Column="8"
-                  Text="描述"
-                  SortPropertyName="Description"
-                  ColumnWidth="{x:Bind views:LocalModListColumns.Current.DescriptionWidth, Mode=TwoWay}" />
-              </Grid>
-            </controls:TableFrame.Header>
-            <ListView x:Name="LocalModsListView"
-              ItemsSource="{x:Bind ViewModel.Local.LocalMods}"
-              SelectedItem="{x:Bind ViewModel.Local.SelectedLocalMod, Mode=TwoWay}"
-              SelectionMode="Extended"
-              controls:ListSelectionBehavior.ClearOnOutsidePress="True"
-              SelectionChanged="OnLocalModsSelectionChanged"
-              ItemContainerStyle="{StaticResource TableListViewItemStyle}">
-              <ListView.ContextFlyout>
-                <MenuFlyout>
-                  <MenuFlyoutItem Text="複製模組資訊"
-                    Command="{x:Bind ViewModel.Local.CopyModInfoCommand}">
-                    <MenuFlyoutItem.Icon>
-                      <FontIcon Glyph="{StaticResource IconCopy}" />
-                    </MenuFlyoutItem.Icon>
-                  </MenuFlyoutItem>
-                  <MenuFlyoutItem Text="在資料夾中顯示"
-                    Command="{x:Bind ViewModel.Local.ShowInFolderCommand}">
-                    <MenuFlyoutItem.Icon>
-                      <FontIcon Glyph="{StaticResource IconFolder}" />
-                    </MenuFlyoutItem.Icon>
-                  </MenuFlyoutItem>
-                  <MenuFlyoutSeparator />
-                  <MenuFlyoutItem Text="刪除模組"
-                    Command="{x:Bind ViewModel.Local.DeleteSelectedModCommand}">
-                    <MenuFlyoutItem.Icon>
-                      <FontIcon Glyph="{StaticResource IconDelete}" />
-                    </MenuFlyoutItem.Icon>
-                  </MenuFlyoutItem>
-                </MenuFlyout>
-              </ListView.ContextFlyout>
+              <controls:SortableTableHeader Grid.Column="0"
+                Text="啟用"
+                SortPropertyName="IsEnabled" />
+              <controls:SortableTableHeader Grid.Column="1"
+                Text="模組名稱"
+                SortPropertyName="Name" />
+              <controls:SortableTableHeader Grid.Column="2"
+                Text="版本"
+                SortPropertyName="Version" />
+              <controls:SortableTableHeader Grid.Column="3"
+                Text="作者"
+                SortPropertyName="Author" />
+              <controls:SortableTableHeader Grid.Column="4"
+                Text="載入器"
+                SortPropertyName="LoaderType" />
+              <controls:SortableTableHeader Grid.Column="5"
+                Text="來源平台"
+                SortPropertyName="SourcePlatform" />
+              <controls:SortableTableHeader Grid.Column="6"
+                Text="檔案大小"
+                SortPropertyName="FileSize" />
+              <controls:SortableTableHeader Grid.Column="7"
+                Text="修改時間"
+                SortPropertyName="ModifiedTime" />
+              <controls:SortableTableHeader Grid.Column="8"
+                Text="描述"
+                SortPropertyName="Description" />
+            </Grid>
+          </controls:TableFrame.Header>
+          <ListView x:Name="LocalModsListView"
+            Style="{StaticResource TableListViewStyle}"
+            ItemsSource="{x:Bind ViewModel.Local.LocalMods}"
+            SelectedItem="{x:Bind ViewModel.Local.SelectedLocalMod, Mode=TwoWay}"
+            SelectionMode="Extended"
+            SelectionChanged="OnLocalModsSelectionChanged"
+            controls:ListViewBehaviors.ClearOnOutsidePress="True"
+            controls:ListViewBehaviors.SelectOnRightTap="True"
+            AutomationProperties.Name="本地模組">
+            <ListView.ContextFlyout>
+              <MenuFlyout>
+                <MenuFlyoutItem Text="複製模組資訊"
+                  Command="{x:Bind ViewModel.Local.CopyModInfoCommand}">
+                  <MenuFlyoutItem.Icon>
+                    <FontIcon Glyph="{StaticResource IconCopy}"
+                      FontFamily="{StaticResource SymbolThemeFontFamily}"
+                      AutomationProperties.AccessibilityView="Raw" />
+                  </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="在資料夾中顯示"
+                  Command="{x:Bind ViewModel.Local.ShowInFolderCommand}">
+                  <MenuFlyoutItem.Icon>
+                    <FontIcon Glyph="{StaticResource IconFolder}"
+                      FontFamily="{StaticResource SymbolThemeFontFamily}"
+                      AutomationProperties.AccessibilityView="Raw" />
+                  </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="刪除模組"
+                  Command="{x:Bind ViewModel.Local.DeleteSelectedModCommand}">
+                  <MenuFlyoutItem.Icon>
+                    <FontIcon Glyph="{StaticResource IconDelete}"
+                      FontFamily="{StaticResource SymbolThemeFontFamily}"
+                      AutomationProperties.AccessibilityView="Raw" />
+                  </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+              </MenuFlyout>
+            </ListView.ContextFlyout>
 
-              <ListView.ItemTemplate>
-                <DataTemplate x:DataType="vm:LocalModRowItem">
-                  <Grid>
-                    <Grid.ColumnDefinitions>
-                      <ColumnDefinition
-                        Width="{x:Bind views:LocalModListColumns.Current.EnabledWidth, Mode=OneWay}" />
-                      <ColumnDefinition
-                        Width="{x:Bind views:LocalModListColumns.Current.NameWidth, Mode=OneWay}" />
-                      <ColumnDefinition
-                        Width="{x:Bind views:LocalModListColumns.Current.VersionWidth, Mode=OneWay}" />
-                      <ColumnDefinition
-                        Width="{x:Bind views:LocalModListColumns.Current.AuthorWidth, Mode=OneWay}" />
-                      <ColumnDefinition
-                        Width="{x:Bind views:LocalModListColumns.Current.LoaderWidth, Mode=OneWay}" />
-                      <ColumnDefinition
-                        Width="{x:Bind views:LocalModListColumns.Current.PlatformWidth, Mode=OneWay}" />
-                      <ColumnDefinition
-                        Width="{x:Bind views:LocalModListColumns.Current.SizeWidth, Mode=OneWay}" />
-                      <ColumnDefinition
-                        Width="{x:Bind views:LocalModListColumns.Current.ModifiedWidth, Mode=OneWay}" />
-                      <ColumnDefinition
-                        Width="{x:Bind views:LocalModListColumns.Current.DescriptionWidth, Mode=OneWay}" />
-                    </Grid.ColumnDefinitions>
-
-                    <Border Grid.Column="0"
-                      Style="{StaticResource TableCellBorderStyle}"
-                      Padding="4,2">
-                      <CheckBox AutomationProperties.Name="啟用模組"
-                        IsChecked="{x:Bind IsEnabled, Mode=OneWay}"
-                        Click="OnModToggleClicked"
-                        MinWidth="0"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center" />
-                    </Border>
-                    <controls:TableCell Grid.Column="1"
-                      Text="{x:Bind Name}" />
-                    <controls:TableCell Grid.Column="2"
-                      Text="{x:Bind Version}" />
-                    <controls:TableCell Grid.Column="3"
-                      x:Phase="1"
-                      Text="{x:Bind Author}" />
-                    <controls:TableCell Grid.Column="4"
-                      x:Phase="1"
-                      Text="{x:Bind LoaderType}" />
-                    <controls:TableCell Grid.Column="5"
-                      x:Phase="1"
-                      Text="{x:Bind SourcePlatform, Mode=OneWay}" />
-                    <controls:TableCell Grid.Column="6"
-                      x:Phase="1"
-                      Text="{x:Bind FileSize}" />
-                    <controls:TableCell Grid.Column="7"
-                      x:Phase="1"
-                      Text="{x:Bind ModifiedTime}" />
-                    <controls:TableCell Grid.Column="8"
-                      x:Phase="1"
-                      Text="{x:Bind Description}" />
-                  </Grid>
-                </DataTemplate>
-              </ListView.ItemTemplate>
-            </ListView>
-          </controls:TableFrame>
-        </Border>
+            <ListView.ItemTemplate>
+              <DataTemplate x:DataType="vm:LocalModRowItem">
+                <Grid>
+                  <Border Grid.Column="0"
+                    Style="{StaticResource TableCellBorderStyle}"
+                    Padding="4,2">
+                    <CheckBox AutomationProperties.Name="{x:Bind Name}"
+                      IsChecked="{x:Bind IsEnabled, Mode=OneWay}"
+                      Click="OnLocalModToggleClicked"
+                      MinWidth="0"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center" />
+                  </Border>
+                  <controls:TableCell Grid.Column="1"
+                    Text="{x:Bind Name}" />
+                  <controls:TableCell Grid.Column="2"
+                    Text="{x:Bind Version}" />
+                  <controls:TableCell Grid.Column="3"
+                    x:Phase="1"
+                    Text="{x:Bind Author}" />
+                  <controls:TableCell Grid.Column="4"
+                    x:Phase="1"
+                    Text="{x:Bind LoaderType}" />
+                  <controls:TableCell Grid.Column="5"
+                    x:Phase="1"
+                    Text="{x:Bind SourcePlatform, Mode=OneWay}" />
+                  <controls:TableCell Grid.Column="6"
+                    x:Phase="1"
+                    Text="{x:Bind FileSize}" />
+                  <controls:TableCell Grid.Column="7"
+                    x:Phase="1"
+                    Text="{x:Bind ModifiedTime}" />
+                  <controls:TableCell Grid.Column="8"
+                    x:Phase="1"
+                    Text="{x:Bind Description}"
+                    ShowRightBorder="False" />
+                </Grid>
+              </DataTemplate>
+            </ListView.ItemTemplate>
+          </ListView>
+        </controls:TableFrame>
       </Grid>
 
       <!-- 線上瀏覽模組分頁 -->
-      <Grid Grid.Row="1"
+      <Grid x:Name="OnlineTab"
+        x:Load="{x:Bind ViewModel.IsOnlineTabCreated, Mode=OneWay}"
+        Grid.Row="1"
         Visibility="{x:Bind views:ModsView.GetOnlineTabVisibility(ViewModel.SelectedTabIndex), Mode=OneWay}">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
@@ -370,8 +314,8 @@
           <controls:IconLabel Icon="{StaticResource IconInfo}"
             Text="{x:Bind ViewModel.Online.OnlineFilterHint, Mode=OneWay}"
             Spacing="8"
-            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-            FontSize="{StaticResource CaptionTextBlockFontSize}" />
+            FontSize="{StaticResource CaptionTextBlockFontSize}"
+            Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
         </Border>
 
         <!-- 線上搜尋列 -->
@@ -387,152 +331,116 @@
             <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
           <TextBox x:Name="OnlineSearchBox"
-            AutomationProperties.Name="搜尋線上模組"
             Grid.Column="0"
-            Text="{x:Bind ViewModel.Online.OnlineSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-            KeyDown="OnlineSearchBox_KeyDown"
             Height="32"
+            Margin="0,0,10,0"
+            Text="{x:Bind ViewModel.Online.OnlineSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
             PlaceholderText="輸入模組名稱搜尋..."
-            Margin="0,0,10,0">
-            <TextBox.KeyboardAccelerators>
-              <KeyboardAccelerator Modifiers="Control"
-                Key="F"
-                Invoked="OnFocusSearchInvoked" />
-            </TextBox.KeyboardAccelerators>
-          </TextBox>
+            controls:TextBoxShortcuts.FocusOnCtrlF="True"
+            controls:TextBoxShortcuts.EnterCommand="{x:Bind ViewModel.Online.SearchOnlineModsCommand}"
+            AutomationProperties.Name="搜尋線上模組" />
           <TextBlock Grid.Column="1"
-            Text="平台："
-            VerticalAlignment="Center"
             Margin="0,0,6,0"
+            VerticalAlignment="Center"
+            Text="平台："
             Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-          <ComboBox AutomationProperties.Name="平台" Grid.Column="2"
-            ItemsSource="{x:Bind vm:OnlineModSearchViewModel.PlatformOptions}"
-            SelectedItem="{x:Bind ViewModel.Online.SelectedPlatform, Mode=TwoWay}"
+          <ComboBox Grid.Column="2"
             Width="120"
             Height="32"
-            Margin="0,0,10,0" />
+            Margin="0,0,10,0"
+            ItemsSource="{x:Bind ViewModel.Online.PlatformOptions}"
+            SelectedItem="{x:Bind ViewModel.Online.SelectedPlatform, Mode=TwoWay}"
+            AutomationProperties.Name="平台" />
           <TextBlock Grid.Column="3"
-            Text="排序："
-            VerticalAlignment="Center"
             Margin="0,0,6,0"
+            VerticalAlignment="Center"
+            Text="排序："
             Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-          <ComboBox AutomationProperties.Name="排序" Grid.Column="4"
-            ItemsSource="{x:Bind vm:OnlineModSearchViewModel.OnlineSortOptions}"
-            SelectedItem="{x:Bind ViewModel.Online.SelectedOnlineSort, Mode=TwoWay}"
+          <ComboBox Grid.Column="4"
             Width="110"
             Height="32"
-            Margin="0,0,10,0" />
+            Margin="0,0,10,0"
+            ItemsSource="{x:Bind ViewModel.Online.OnlineSortOptions}"
+            SelectedItem="{x:Bind ViewModel.Online.SelectedOnlineSort, Mode=TwoWay}"
+            AutomationProperties.Name="排序" />
           <Button Grid.Column="5"
-            Command="{x:Bind ViewModel.Online.SearchOnlineModsCommand}"
             Style="{StaticResource PrimaryButtonStyle}"
-            Height="32"
-            Padding="16,0">
+            Padding="16,0"
+            Command="{x:Bind ViewModel.Online.SearchOnlineModsCommand}">
             <controls:IconLabel Icon="{StaticResource IconSearch}"
-              Text="搜尋模組"
-              VerticalAlignment="Center" />
+              Text="搜尋模組" />
           </Button>
-          <StackPanel Grid.Column="6"
-            Orientation="Horizontal"
-            VerticalAlignment="Center"
+          <controls:BusyStatusIndicator Grid.Column="6"
             Margin="10,0,0,0"
-            Spacing="8">
-            <ProgressBar Style="{StaticResource BusyProgressBarStyle}"
-              VerticalAlignment="Center"
-              Visibility="{x:Bind ViewModel.Online.IsSearchingOnline, Mode=OneWay}" />
-            <TextBlock Text="搜尋中..."
-              FontSize="{StaticResource CaptionTextBlockFontSize}"
-              Foreground="{ThemeResource AccentTextBrush}"
-              VerticalAlignment="Center"
-              Visibility="{x:Bind ViewModel.Online.IsSearchingOnline, Mode=OneWay}" />
-          </StackPanel>
+            IsBusy="{x:Bind ViewModel.Online.IsSearchingOnline, Mode=OneWay}"
+            Message="搜尋中..."
+            UseAccentForeground="True"
+            HideMessageWhenIdle="True"
+            BusyName="搜尋中" />
         </Grid>
 
         <!-- 線上瀏覽結果清單 -->
-        <Border Grid.Row="2"
-          Style="{StaticResource PanelCardStyle}">
-          <controls:TableFrame SortTarget="{x:Bind OnlineSort}"
-            IsEmpty="{x:Bind controls:UiBindHelpers.IsIdleEmpty(ViewModel.Online.OnlineMods.Count, ViewModel.Online.IsSearchingOnline), Mode=OneWay}"
-            EmptyText="沒有搜尋結果">
-            <controls:TableFrame.Header>
-              <Grid>
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition
-                    Width="{x:Bind views:OnlineModListColumns.Current.TitleWidth, Mode=OneWay}" />
-                  <ColumnDefinition
-                    Width="{x:Bind views:OnlineModListColumns.Current.AuthorWidth, Mode=OneWay}" />
-                  <ColumnDefinition
-                    Width="{x:Bind views:OnlineModListColumns.Current.DownloadsWidth, Mode=OneWay}" />
-                  <ColumnDefinition
-                    Width="{x:Bind views:OnlineModListColumns.Current.VersionWidth, Mode=OneWay}" />
-                  <ColumnDefinition
-                    Width="{x:Bind views:OnlineModListColumns.Current.DescriptionWidth, Mode=OneWay}" />
-                </Grid.ColumnDefinitions>
+        <controls:TableFrame Grid.Row="2"
+          SortTarget="{x:Bind OnlineSort}"
+          IsEmpty="{x:Bind controls:UiBindHelpers.IsIdleEmpty(ViewModel.Online.OnlineMods.Count, ViewModel.Online.IsSearchingOnline), Mode=OneWay}"
+          EmptyText="沒有搜尋結果">
+          <controls:TableFrame.Header>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="220" />
+                <ColumnDefinition Width="120" />
+                <ColumnDefinition Width="100" />
+                <ColumnDefinition Width="120" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
 
-                <controls:SortableTableHeader Grid.Column="0"
-                  Text="模組名稱"
-                  SortPropertyName="Title"
-                  ColumnWidth="{x:Bind views:OnlineModListColumns.Current.TitleWidth, Mode=TwoWay}" />
-                <controls:SortableTableHeader Grid.Column="1"
-                  Text="作者"
-                  SortPropertyName="Author"
-                  ColumnWidth="{x:Bind views:OnlineModListColumns.Current.AuthorWidth, Mode=TwoWay}" />
-                <controls:SortableTableHeader Grid.Column="2"
-                  Text="下載量"
-                  SortPropertyName="Downloads"
-                  ColumnWidth="{x:Bind views:OnlineModListColumns.Current.DownloadsWidth, Mode=TwoWay}" />
-                <controls:SortableTableHeader Grid.Column="3"
-                  Text="最新版本"
-                  SortPropertyName="LatestVersion"
-                  ColumnWidth="{x:Bind views:OnlineModListColumns.Current.VersionWidth, Mode=TwoWay}" />
-                <controls:SortableTableHeader Grid.Column="4"
-                  Text="簡介"
-                  SortPropertyName="Description"
-                  ColumnWidth="{x:Bind views:OnlineModListColumns.Current.DescriptionWidth, Mode=TwoWay}" />
-              </Grid>
-            </controls:TableFrame.Header>
-            <ListView ItemsSource="{x:Bind ViewModel.Online.OnlineMods}"
-              SelectedItem="{x:Bind ViewModel.Online.SelectedOnlineMod, Mode=TwoWay}"
-              SelectionMode="Single"
-              controls:ListSelectionBehavior.ClearOnOutsidePress="True"
-              ItemContainerStyle="{StaticResource TableListViewItemStyle}"
-              DoubleTapped="OnOnlineModsDoubleTapped"
-              PreviewKeyDown="OnOnlineModsKeyDown">
-              <ListView.ItemTemplate>
-                <DataTemplate x:DataType="vm:OnlineModRowItem">
-                  <Grid>
-                    <Grid.ColumnDefinitions>
-                      <ColumnDefinition
-                        Width="{x:Bind views:OnlineModListColumns.Current.TitleWidth, Mode=OneWay}" />
-                      <ColumnDefinition
-                        Width="{x:Bind views:OnlineModListColumns.Current.AuthorWidth, Mode=OneWay}" />
-                      <ColumnDefinition
-                        Width="{x:Bind views:OnlineModListColumns.Current.DownloadsWidth, Mode=OneWay}" />
-                      <ColumnDefinition
-                        Width="{x:Bind views:OnlineModListColumns.Current.VersionWidth, Mode=OneWay}" />
-                      <ColumnDefinition
-                        Width="{x:Bind views:OnlineModListColumns.Current.DescriptionWidth, Mode=OneWay}" />
-                    </Grid.ColumnDefinitions>
-
-                    <controls:TableCell Grid.Column="0"
-                      Text="{x:Bind Title}" />
-                    <controls:TableCell Grid.Column="1"
-                      x:Phase="1"
-                      Text="{x:Bind Author}" />
-                    <controls:TableCell Grid.Column="2"
-                      x:Phase="1"
-                      Text="{x:Bind Downloads}" />
-                    <controls:TableCell Grid.Column="3"
-                      x:Phase="1"
-                      Text="{x:Bind LatestVersion}" />
-                    <controls:TableCell Grid.Column="4"
-                      x:Phase="1"
-                      Text="{x:Bind Description}" />
-                  </Grid>
-                </DataTemplate>
-              </ListView.ItemTemplate>
-            </ListView>
-          </controls:TableFrame>
-        </Border>
+              <controls:SortableTableHeader Grid.Column="0"
+                Text="模組名稱"
+                SortPropertyName="Title" />
+              <controls:SortableTableHeader Grid.Column="1"
+                Text="作者"
+                SortPropertyName="Author" />
+              <controls:SortableTableHeader Grid.Column="2"
+                Text="下載量"
+                SortPropertyName="Downloads" />
+              <controls:SortableTableHeader Grid.Column="3"
+                Text="最新版本"
+                SortPropertyName="LatestVersion" />
+              <controls:SortableTableHeader Grid.Column="4"
+                Text="簡介"
+                SortPropertyName="Description" />
+            </Grid>
+          </controls:TableFrame.Header>
+          <ListView Style="{StaticResource TableListViewStyle}"
+            ItemsSource="{x:Bind ViewModel.Online.OnlineMods}"
+            SelectedItem="{x:Bind ViewModel.Online.SelectedOnlineMod, Mode=TwoWay}"
+            SelectionMode="Single"
+            controls:ListViewBehaviors.ClearOnOutsidePress="True"
+            controls:ListViewBehaviors.InvokeCommand="{x:Bind ViewModel.PickOnlineModVersionCommand}"
+            AutomationProperties.Name="線上模組">
+            <ListView.ItemTemplate>
+              <DataTemplate x:DataType="vm:OnlineModRowItem">
+                <Grid>
+                  <controls:TableCell Grid.Column="0"
+                    Text="{x:Bind Title}" />
+                  <controls:TableCell Grid.Column="1"
+                    x:Phase="1"
+                    Text="{x:Bind Author}" />
+                  <controls:TableCell Grid.Column="2"
+                    x:Phase="1"
+                    Text="{x:Bind Downloads}" />
+                  <controls:TableCell Grid.Column="3"
+                    x:Phase="1"
+                    Text="{x:Bind LatestVersion}" />
+                  <controls:TableCell Grid.Column="4"
+                    x:Phase="1"
+                    Text="{x:Bind Description}"
+                    ShowRightBorder="False" />
+                </Grid>
+              </DataTemplate>
+            </ListView.ItemTemplate>
+          </ListView>
+        </controls:TableFrame>
 
         <!-- 底部安裝操作列 -->
         <Grid Grid.Row="3"
@@ -545,31 +453,33 @@
           <controls:WrapPanel VerticalAlignment="Center"
             ItemSpacing="16"
             LineSpacing="2">
-            <TextBlock Text="{x:Bind ViewModel.Online.OnlineResultHint, Mode=OneWay}"
+            <TextBlock Style="{StaticResource SecondaryCaptionTextStyle}"
               VerticalAlignment="Center"
+              Text="{x:Bind ViewModel.Online.OnlineResultHint, Mode=OneWay}"
               TextTrimming="CharacterEllipsis"
+              TextWrapping="NoWrap"
               ToolTipService.ToolTip="{x:Bind ViewModel.Online.OnlineResultHint, Mode=OneWay}"
-              Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-              FontSize="{StaticResource CaptionTextBlockFontSize}" />
-            <TextBlock Text="{x:Bind ViewModel.Queue.InstallQueueHint, Mode=OneWay}"
+              AutomationProperties.LiveSetting="Polite" />
+            <TextBlock Style="{StaticResource SecondaryCaptionTextStyle}"
               VerticalAlignment="Center"
+              Text="{x:Bind ViewModel.Queue.InstallQueueHint, Mode=OneWay}"
               TextTrimming="CharacterEllipsis"
+              TextWrapping="NoWrap"
               ToolTipService.ToolTip="{x:Bind ViewModel.Queue.InstallQueueHint, Mode=OneWay}"
-              Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-              FontSize="{StaticResource CaptionTextBlockFontSize}" />
+              AutomationProperties.LiveSetting="Polite" />
           </controls:WrapPanel>
           <StackPanel Grid.Column="1"
             Orientation="Horizontal"
             Spacing="10">
+            <Button Content="開始安裝"
+              Command="{x:Bind ViewModel.Queue.InstallQueuedModsCommand}"
+              Style="{StaticResource PrimaryButtonStyle}" />
             <Button Content="{x:Bind ViewModel.Online.OpenPlatformPageButtonText, Mode=OneWay}"
               Command="{x:Bind ViewModel.Online.OpenModPlatformPageCommand}" />
             <Button Content="檢視安裝清單"
               Command="{x:Bind ViewModel.Queue.ViewInstallQueueCommand}" />
             <Button Content="清空清單"
               Command="{x:Bind ViewModel.Queue.ClearInstallQueueCommand}" />
-            <Button Content="開始安裝"
-              Command="{x:Bind ViewModel.Queue.InstallQueuedModsCommand}"
-              Style="{StaticResource PrimaryButtonStyle}" />
           </StackPanel>
         </Grid>
       </Grid>

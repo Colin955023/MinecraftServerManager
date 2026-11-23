@@ -5,6 +5,7 @@ using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Controls;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
@@ -34,11 +35,12 @@ public sealed class OnlineModRowItem
 /// <summary>模組頁：線上平台、關鍵字、排序與搜尋結果</summary>
 public sealed partial class OnlineModSearchViewModel : ViewModelBase, IDisposable
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(OnlineModSearchViewModel));
     private const string CurseForgeComingSoonHint = "CurseForge 模組搜尋即將推出，敬請期待";
     private const string NoServerFilterHint = "請先選擇伺服器以篩選相容模組";
-    private static readonly string[] OnlineSortOptionsCache = ["相關性", "下載量", "最新發布", "最近更新", "名稱"];
-    private static readonly string[] PlatformOptionsCache = ["Modrinth", "CurseForge"];
+
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(OnlineModSearchViewModel));
+    private static readonly string[] OnlineSortOptionsValues = ["相關性", "下載量", "最新發布", "最近更新", "名稱"];
+    private static readonly string[] PlatformOptionsValues = ["Modrinth", "CurseForge"];
 
     private readonly ModsContext _context;
     private readonly IModrinthClient _modrinthClient;
@@ -47,6 +49,23 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase, IDisposabl
     private readonly List<OnlineModRowItem> _allOnlineMods = [];
     private readonly SerialCancellation _search = new();
     private bool _disposed;
+
+    public OnlineModSearchViewModel(
+        ModsContext context,
+        IUiService uiService,
+        IModrinthClient modrinthClient,
+        IExternalLauncher launcher)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(uiService);
+        ArgumentNullException.ThrowIfNull(modrinthClient);
+        ArgumentNullException.ThrowIfNull(launcher);
+        _context = context;
+        _modrinthClient = modrinthClient;
+        _launcher = launcher;
+        _ui = uiService;
+        _context.ServerChanged += OnServerChanged;
+    }
 
     [ObservableProperty]
     public partial string OnlineSearchText { get; set; } = string.Empty;
@@ -75,36 +94,29 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase, IDisposabl
 
     public BulkObservableCollection<OnlineModRowItem> OnlineMods { get; } = [];
 
-    public static IReadOnlyList<string> OnlineSortOptions => OnlineSortOptionsCache;
+    public IReadOnlyList<string> OnlineSortOptions { get; } = OnlineSortOptionsValues;
 
-    public static IReadOnlyList<string> PlatformOptions => PlatformOptionsCache;
+    public IReadOnlyList<string> PlatformOptions { get; } = PlatformOptionsValues;
 
     public string OpenPlatformPageButtonText => IsCurseForge ? "開啟 CurseForge 頁面" : "開啟 Modrinth 頁面";
 
     private bool IsCurseForge => string.Equals(SelectedPlatform, "CurseForge", StringComparison.OrdinalIgnoreCase);
 
-    public OnlineModSearchViewModel(
-        ModsContext context,
-        IUiService uiService,
-        IModrinthClient modrinthClient,
-        IExternalLauncher launcher)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(uiService);
-        ArgumentNullException.ThrowIfNull(modrinthClient);
-        ArgumentNullException.ThrowIfNull(launcher);
-        _context = context;
-        _modrinthClient = modrinthClient;
-        _launcher = launcher;
-        _ui = uiService;
-        _context.ServerChanged += OnServerChanged;
-    }
-
+    /// <summary>切換伺服器：取消進行中的搜尋並清空舊結果；線上分頁顯示中則依新伺服器重新搜尋</summary>
     private void OnServerChanged()
     {
         OnlineFilterHint = _context.Server is { } server
-            ? $"相容條件：Minecraft {server.MinecraftVersion.Value} ｜ 載入器: {server.LoaderType} ｜ 僅限伺服器端與兩端相容模組"
+            ? $"相容條件：Minecraft {server.MinecraftVersion.Value} ｜ 載入器：{server.LoaderType} ｜ 僅限伺服器端與兩端相容模組"
             : NoServerFilterHint;
+
+        _search.Cancel();
+        IsSearchingOnline = false;
+        ClearResults();
+        OnlineResultHint = IsCurseForge ? CurseForgeComingSoonHint : string.Empty;
+        if (IsActiveTab && !IsCurseForge)
+        {
+            _ = RunSafeAsync(SearchOnlineModsAsync, "搜尋線上模組", Logger);
+        }
     }
 
     /// <summary>通知分頁切換；首次切換至線上分頁時自動預載推薦模組</summary>
@@ -175,7 +187,7 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase, IDisposabl
 
         try
         {
-            string? loader = _context.LoaderId;
+            LoaderKind? loader = _context.LoaderType;
             string? mcVersion = _context.MinecraftVersion;
             string query = OnlineSearchText?.Trim() ?? string.Empty;
             string sortIndex = SelectedOnlineSort switch
@@ -185,7 +197,7 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase, IDisposabl
                 "最近更新" => "updated",
                 _ => "relevance"
             };
-            Logger.Information("搜尋線上模組: 平台: {Platform}, 關鍵字: {Query}, 載入器: {Loader}, MC版本: {Version}, 排序: {SortIndex}", SelectedPlatform, query, loader, mcVersion, sortIndex);
+            Logger.Information("搜尋線上模組：平台：{Platform}，關鍵字：{Query}，載入器：{Loader}，MC 版本：{Version}，排序：{SortIndex}", SelectedPlatform, query, loader, mcVersion, sortIndex);
             var results = await _modrinthClient.SearchModsAsync(query, loader: loader, minecraftVersion: mcVersion, index: sortIndex, cancellationToken: token);
             token.ThrowIfCancellationRequested();
 
@@ -266,10 +278,7 @@ public sealed partial class OnlineModSearchViewModel : ViewModelBase, IDisposabl
             ? $"https://www.curseforge.com/minecraft/mc-mods/{(!string.IsNullOrWhiteSpace(mod.Slug) ? mod.Slug : mod.Id)}"
             : $"https://modrinth.com/mod/{mod.Id}";
 
-        if (!_launcher.OpenUrl(url, isTrusted: true))
-        {
-            _ui.Notify($"無法開啟連結：{url}", NotificationType.Warning);
-        }
+        _ui.OpenUrlOrWarn(_launcher, url);
     }
 
     public void Dispose()

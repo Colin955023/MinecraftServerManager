@@ -5,11 +5,12 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 
 public sealed class ServersRootService : IServersRootService
 {
-    public ServersRootCheck ValidateTargetRoot(string? currentRoot, string? newRoot)
-    {
-        var result = ServersRootRelocator.ValidateTargetRoot(currentRoot, newRoot, out string normalizedCurrent, out string normalizedNew);
-        return new ServersRootCheck(result, normalizedCurrent, normalizedNew);
-    }
+    public Task<ServersRootCheck> ValidateTargetRootAsync(string? currentRoot, string? newRoot, CancellationToken cancellationToken = default) =>
+        Task.Run(() =>
+        {
+            var result = ServersRootRelocator.ValidateTargetRoot(currentRoot, newRoot, out string normalizedCurrent, out string normalizedNew);
+            return new ServersRootCheck(result, normalizedCurrent, normalizedNew);
+        }, cancellationToken);
 
     public Task<bool> HasStoredContentAsync(string? currentRoot, CancellationToken cancellationToken = default) =>
         Task.Run(() => ServersRootRelocator.HasStoredContent(currentRoot), cancellationToken);

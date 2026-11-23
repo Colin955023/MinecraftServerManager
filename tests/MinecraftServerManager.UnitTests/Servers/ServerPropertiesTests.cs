@@ -16,7 +16,7 @@ public sealed class ServerPropertiesTests : IDisposable
     public void Dispose() => _testRootTemp.Dispose();
 
     [Fact]
-    public void CodecParsesBasicAndEscapedProperties()
+    public void Parse_BasicAndEscapedProperties_ReturnsValues()
     {
         string raw = @"
 # 伺服器設定範例
@@ -34,7 +34,7 @@ allow-flight=true
     }
 
     [Fact]
-    public void CodecHandlesMultilineContinuation()
+    public void Parse_MultilineContinuation_JoinsLines()
     {
         string raw = @"
 motd=Line 1 \
@@ -49,7 +49,7 @@ server-port=25565
     }
 
     [Fact]
-    public void CodecSerializesAndRoundTrips()
+    public void Serialize_ParsedDocument_RoundTrips()
     {
         var original = new Dictionary<string, string>
         {
@@ -67,13 +67,13 @@ server-port=25565
     }
 
     [Fact]
-    public async Task StoreReturnsDefaultWhenFileIsMissing()
+    public async Task ReadAsync_MissingFile_ReturnsDefaults()
     {
         var store = new ServerPropertiesStore(_testRoot);
         string serverDir = Path.Combine(_testRoot, "test-server");
         Directory.CreateDirectory(serverDir);
 
-        var snapshot = await store.ReadAsync("test-server");
+        var snapshot = await store.ReadAsync("test-server", TestContext.Current.CancellationToken);
 
         Assert.Equal(ServerPropertiesReadStatus.Missing, snapshot.Status);
         Assert.True(snapshot.Readable);
@@ -81,18 +81,15 @@ server-port=25565
     }
 
     [Fact]
-    public async Task StoreUpdatesAndDetectsRevisionConflict()
+    public async Task UpdateAsync_StaleRevision_DetectsConflict()
     {
         var store = new ServerPropertiesStore(_testRoot);
         string serverDir = Path.Combine(_testRoot, "test-server");
         Directory.CreateDirectory(serverDir);
 
         // 初始建立
-        var initial = await store.ReadAsync("test-server");
-        var update1 = await store.UpdateAsync(
-            "test-server",
-            new Dictionary<string, string> { ["server-port"] = "25570", ["difficulty"] = "hard" },
-            initial.Revision);
+        var initial = await store.ReadAsync("test-server", TestContext.Current.CancellationToken);
+        var update1 = await store.UpdateAsync("test-server", new Dictionary<string, string> { ["server-port"] = "25570", ["difficulty"] = "hard" }, initial.Revision, TestContext.Current.CancellationToken);
 
         Assert.True(update1.Success);
         Assert.Equal("25570", update1.Snapshot.Properties["server-port"]);
@@ -102,24 +99,22 @@ server-port=25565
         var conflict = await store.UpdateAsync(
             "test-server",
             new Dictionary<string, string> { ["server-port"] = "25580" },
-            initial.Revision);
+            initial.Revision,
+            TestContext.Current.CancellationToken);
 
         Assert.False(conflict.Success);
         Assert.Equal(ServerPropertiesUpdateError.Conflict, conflict.ErrorKind);
     }
 
     [Fact]
-    public async Task StoreRejectsInvalidPortRange()
+    public async Task UpdateAsync_InvalidPort_Rejects()
     {
         var store = new ServerPropertiesStore(_testRoot);
         string serverDir = Path.Combine(_testRoot, "test-server");
         Directory.CreateDirectory(serverDir);
 
-        var initial = await store.ReadAsync("test-server");
-        var invalidPort = await store.UpdateAsync(
-            "test-server",
-            new Dictionary<string, string> { ["server-port"] = "999999" },
-            initial.Revision);
+        var initial = await store.ReadAsync("test-server", TestContext.Current.CancellationToken);
+        var invalidPort = await store.UpdateAsync("test-server", new Dictionary<string, string> { ["server-port"] = "999999" }, initial.Revision, TestContext.Current.CancellationToken);
 
         Assert.False(invalidPort.Success);
         Assert.Equal(ServerPropertiesUpdateError.Invalid, invalidPort.ErrorKind);

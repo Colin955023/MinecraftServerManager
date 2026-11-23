@@ -23,9 +23,17 @@ public sealed partial class TableFrame : UserControl
     public static readonly DependencyProperty EmptyTextProperty =
         DependencyProperty.Register(nameof(EmptyText), typeof(string), typeof(TableFrame), new PropertyMetadata(string.Empty));
 
+    public static readonly DependencyProperty ShowCardProperty =
+        DependencyProperty.Register(nameof(ShowCard), typeof(bool), typeof(TableFrame), new PropertyMetadata(true, OnShowCardChanged));
+
+    private readonly List<WeakReference<Grid>> _rowGrids = [];
+    private ListViewBase? _listView;
+
     public TableFrame()
     {
         InitializeComponent();
+        Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
     }
 
     /// <summary>表頭列內容</summary>
@@ -61,5 +69,140 @@ public sealed partial class TableFrame : UserControl
     {
         get => (UIElement?)GetValue(BodyProperty);
         set => SetValue(BodyProperty, value);
+    }
+
+    /// <summary>是否在最外層顯示卡片外框與內距（預設為 true）</summary>
+    public bool ShowCard
+    {
+        get => (bool)GetValue(ShowCardProperty);
+        set => SetValue(ShowCardProperty, value);
+    }
+
+    private static void OnShowCardChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
+        ((TableFrame)d).ApplyCardAppearance();
+
+    private void ApplyCardAppearance()
+    {
+        if (ShowCard)
+        {
+            CardBorder.ClearValue(Border.BackgroundProperty);
+            CardBorder.ClearValue(Border.BorderBrushProperty);
+            CardBorder.ClearValue(Border.BorderThicknessProperty);
+            CardBorder.ClearValue(Border.CornerRadiusProperty);
+            CardBorder.ClearValue(Border.PaddingProperty);
+        }
+        else
+        {
+            CardBorder.Background = null;
+            CardBorder.BorderBrush = null;
+            CardBorder.BorderThickness = default;
+            CardBorder.CornerRadius = default;
+            CardBorder.Padding = default;
+        }
+    }
+
+    public Grid? GetHeaderGrid() => Header as Grid ?? Header.FindDescendant<Grid>();
+
+    public void SyncColumnWidth(int columnIndex, GridLength width)
+    {
+        if (GetHeaderGrid() is { } headerGrid && columnIndex >= 0 && columnIndex < headerGrid.ColumnDefinitions.Count)
+        {
+            headerGrid.ColumnDefinitions[columnIndex].Width = width;
+        }
+
+        for (int i = _rowGrids.Count - 1; i >= 0; i--)
+        {
+            if (_rowGrids[i].TryGetTarget(out var rowGrid))
+            {
+                if (columnIndex >= 0 && columnIndex < rowGrid.ColumnDefinitions.Count)
+                {
+                    rowGrid.ColumnDefinitions[columnIndex].Width = width;
+                }
+            }
+            else
+            {
+                _rowGrids.RemoveAt(i);
+            }
+        }
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        SortTarget?.Attach();
+
+        if (GetHeaderGrid() is { } headerGrid)
+        {
+            var headers = headerGrid.Children.OfType<SortableTableHeader>().OrderBy(Grid.GetColumn).ToList();
+            if (headers.Count > 0)
+            {
+                headers[^1].ShowSplitter = false;
+            }
+        }
+
+        _listView = Body as ListViewBase ?? Body.FindDescendant<ListViewBase>();
+        _listView?.ContainerContentChanging += OnContainerContentChanging;
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        SortTarget?.Detach();
+        _listView?.ContainerContentChanging -= OnContainerContentChanging;
+        _listView = null;
+
+        _rowGrids.Clear();
+    }
+
+    private void OnContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+    {
+        if (args.ItemContainer is not null)
+        {
+            var rowGrid = args.ItemContainer.ContentTemplateRoot as Grid ?? args.ItemContainer.FindDescendant<Grid>();
+            if (rowGrid is not null)
+            {
+                SyncRowGridDefinitions(rowGrid);
+                RegisterRowGrid(rowGrid);
+            }
+        }
+    }
+
+    private void SyncRowGridDefinitions(Grid rowGrid)
+    {
+        if (GetHeaderGrid() is not { } headerGrid)
+        {
+            return;
+        }
+
+        int headerCount = headerGrid.ColumnDefinitions.Count;
+        while (rowGrid.ColumnDefinitions.Count < headerCount)
+        {
+            rowGrid.ColumnDefinitions.Add(new ColumnDefinition());
+        }
+
+        while (rowGrid.ColumnDefinitions.Count > headerCount)
+        {
+            rowGrid.ColumnDefinitions.RemoveAt(rowGrid.ColumnDefinitions.Count - 1);
+        }
+
+        for (int i = 0; i < headerCount; i++)
+        {
+            rowGrid.ColumnDefinitions[i].Width = headerGrid.ColumnDefinitions[i].Width;
+        }
+    }
+
+    private void RegisterRowGrid(Grid rowGrid)
+    {
+        for (int i = _rowGrids.Count - 1; i >= 0; i--)
+        {
+            if (!_rowGrids[i].TryGetTarget(out var target))
+            {
+                _rowGrids.RemoveAt(i);
+            }
+            else if (ReferenceEquals(target, rowGrid))
+            {
+                return;
+            }
+        }
+
+        _rowGrids.Add(new WeakReference<Grid>(rowGrid));
     }
 }

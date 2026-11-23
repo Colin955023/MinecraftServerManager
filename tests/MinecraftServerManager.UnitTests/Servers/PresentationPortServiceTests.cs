@@ -24,45 +24,60 @@ public sealed class PresentationPortServiceTests : IDisposable
     public void Dispose() => _rootTemp.Dispose();
 
     [Fact]
-    public void LocalFileSystem_ReportsExistenceAndCreatesDirectories()
+    public async Task LocalFileSystem_Paths_ReportsExistenceAndCreates()
     {
         ILocalFileSystem fs = new LocalFileSystem();
         string dir = Path.Combine(_root, "created");
         string file = Path.Combine(_root, "a.txt");
         File.WriteAllText(file, "x");
 
-        Assert.False(fs.DirectoryExists(dir));
-        Assert.Null(fs.GetDirectoryLastWriteTime(dir));
-        fs.CreateDirectory(dir);
+        Assert.False(await fs.DirectoryExistsAsync(dir, TestContext.Current.CancellationToken));
+        Assert.Null(await fs.GetDirectoryLastWriteTimeAsync(dir, TestContext.Current.CancellationToken));
+        await fs.CreateDirectoryAsync(dir, TestContext.Current.CancellationToken);
 
-        Assert.True(fs.DirectoryExists(dir));
-        Assert.NotNull(fs.GetDirectoryLastWriteTime(dir));
-        Assert.True(fs.FileExists(file));
-        Assert.False(fs.FileExists(null));
-        Assert.False(fs.DirectoryExists("   "));
+        Assert.True(await fs.DirectoryExistsAsync(dir, TestContext.Current.CancellationToken));
+        Assert.NotNull(await fs.GetDirectoryLastWriteTimeAsync(dir, TestContext.Current.CancellationToken));
+        Assert.True(await fs.FileExistsAsync(file, TestContext.Current.CancellationToken));
+        Assert.False(await fs.FileExistsAsync(null, TestContext.Current.CancellationToken));
+        Assert.False(await fs.DirectoryExistsAsync("   ", TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public void ModFileService_ResolvesEnabledDisabledAndMissingFiles()
+    public async Task ModFileService_EnabledDisabledMissing_ResolvesPaths()
     {
         IModFileService service = new ModFileService();
         string serverDir = Path.Combine(_serversRoot, "ModServer");
-        string modsDir = service.EnsureModsDirectory(serverDir);
+        string modsDir = await service.EnsureModsDirectoryAsync(serverDir, TestContext.Current.CancellationToken);
         File.WriteAllText(Path.Combine(modsDir, "enabled.jar"), "x");
         File.WriteAllText(Path.Combine(modsDir, "off.jar.disabled"), "x");
 
         Assert.True(Directory.Exists(modsDir));
-        Assert.Equal(Path.Combine(modsDir, "enabled.jar"), service.ResolveModFilePath(serverDir, "enabled.jar"));
-        Assert.Equal(Path.Combine(modsDir, "off.jar.disabled"), service.ResolveModFilePath(serverDir, "off.jar"));
-        Assert.Equal(Path.Combine(serverDir, "mods"), service.ResolveModFilePath(serverDir, "missing.jar"));
+        Assert.Equal(Path.Combine(modsDir, "enabled.jar"), await service.ResolveModFilePathAsync(serverDir, "enabled.jar", TestContext.Current.CancellationToken));
+        Assert.Equal(Path.Combine(modsDir, "off.jar.disabled"), await service.ResolveModFilePathAsync(serverDir, "off.jar", TestContext.Current.CancellationToken));
+        Assert.Equal(Path.Combine(serverDir, "mods"), await service.ResolveModFilePathAsync(serverDir, "missing.jar", TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public void ModFileService_DeletesBothVariantsAndCleansStaging()
+    public async Task ModFileService_DeleteOutsideModsDirectory_Ignores()
     {
         IModFileService service = new ModFileService();
         string serverDir = Path.Combine(_serversRoot, "ModServer");
-        string modsDir = service.EnsureModsDirectory(serverDir);
+        await service.EnsureModsDirectoryAsync(serverDir, TestContext.Current.CancellationToken);
+        string outside = Path.Combine(serverDir, "server.jar");
+        File.WriteAllText(outside, "x");
+
+        await service.DeleteModFileVariantsAsync(serverDir, @"..\server.jar", TestContext.Current.CancellationToken);
+        await service.DeleteModFileVariantsAsync(serverDir, "notes.txt", TestContext.Current.CancellationToken);
+
+        Assert.True(File.Exists(outside));
+    }
+
+    [Fact]
+    public async Task ModFileService_DeleteBothVariants_CleansStaging()
+    {
+        IModFileService service = new ModFileService();
+        string serverDir = Path.Combine(_serversRoot, "ModServer");
+        string modsDir = await service.EnsureModsDirectoryAsync(serverDir, TestContext.Current.CancellationToken);
         File.WriteAllText(Path.Combine(modsDir, "old.jar"), "x");
         File.WriteAllText(Path.Combine(modsDir, "old.jar.disabled"), "x");
         File.WriteAllText(Path.Combine(modsDir, "keep.jar"), "x");
@@ -70,8 +85,8 @@ public sealed class PresentationPortServiceTests : IDisposable
         Directory.CreateDirectory(staging);
         File.WriteAllText(Path.Combine(staging, "partial.tmp"), "x");
 
-        service.DeleteModFileVariants(serverDir, "old.jar");
-        service.CleanupStagingDirectory(serverDir);
+        await service.DeleteModFileVariantsAsync(serverDir, "old.jar", TestContext.Current.CancellationToken);
+        await service.CleanupStagingDirectoryAsync(serverDir, TestContext.Current.CancellationToken);
 
         Assert.False(File.Exists(Path.Combine(modsDir, "old.jar")));
         Assert.False(File.Exists(Path.Combine(modsDir, "old.jar.disabled")));
@@ -83,7 +98,7 @@ public sealed class PresentationPortServiceTests : IDisposable
     [InlineData("https://cdn.modrinth.com/data/abc/versions/1/mod.jar", true)]
     [InlineData("https://example.com/mod.jar", false)]
     [InlineData(null, false)]
-    public void ModFileService_DelegatesOfficialSourceCheck(string? url, bool expected)
+    public void ModFileService_OfficialSourceCheck_Delegates(string? url, bool expected)
     {
         IModFileService service = new ModFileService();
 
@@ -91,73 +106,75 @@ public sealed class PresentationPortServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ServersRootService_ValidatesProbesAndRelocates()
+    public async Task ServersRootService_Operations_ValidatesProbesAndRelocates()
     {
         IServersRootService service = new ServersRootService();
         string serverDir = Path.Combine(_serversRoot, "Alpha");
         Directory.CreateDirectory(serverDir);
-        await File.WriteAllTextAsync(Path.Combine(serverDir, "server.jar"), "jar");
+        await File.WriteAllTextAsync(Path.Combine(serverDir, "server.jar"), "jar", TestContext.Current.CancellationToken);
         string newParent = Path.Combine(_root, "new-location");
 
-        var check = service.ValidateTargetRoot(_serversRoot, newParent);
+        var check = await service.ValidateTargetRootAsync(_serversRoot, newParent, TestContext.Current.CancellationToken);
 
         Assert.Equal(RelocationPathCheckResult.Valid, check.Result);
         Assert.Equal(Path.Combine(newParent, "servers"), check.NormalizedNew);
-        Assert.True(await service.HasStoredContentAsync(check.NormalizedCurrent));
-        Assert.True(await service.IsTargetDirectoryEmptyAsync(check.NormalizedNew));
+        Assert.True(await service.HasStoredContentAsync(check.NormalizedCurrent, TestContext.Current.CancellationToken));
+        Assert.True(await service.IsTargetDirectoryEmptyAsync(check.NormalizedNew, TestContext.Current.CancellationToken));
 
-        await service.RelocateAllContentAsync(check.NormalizedCurrent, check.NormalizedNew);
+        await service.RelocateAllContentAsync(check.NormalizedCurrent, check.NormalizedNew, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(File.Exists(Path.Combine(check.NormalizedNew, "Alpha", "server.jar")));
     }
 
     [Fact]
-    public void ServersRootService_DetectsSameRoot()
+    public async Task ServersRootService_SameRoot_Detects()
     {
         IServersRootService service = new ServersRootService();
 
-        var check = service.ValidateTargetRoot(_serversRoot, _root);
+        var check = await service.ValidateTargetRootAsync(_serversRoot, _root, TestContext.Current.CancellationToken);
 
         Assert.Equal(RelocationPathCheckResult.SameAsCurrent, check.Result);
     }
 
     [Fact]
-    public void BackupSummary_ReportsNotConfiguredMissingEmptyAndCounts()
+    public async Task BackupSummary_VariousStates_ReportsStatus()
     {
-        IServerBackupService service = new ServerBackupService(_serversRoot, static () => 10);
+        IServerBackupService service = new ServerBackupService(_serversRoot, static () => 10, TimeProvider.System);
 
-        Assert.Equal(ServerBackupSummaryStatus.NotConfigured, service.GetBackupSummary("Alpha", null).Status);
-        Assert.Equal(ServerBackupSummaryStatus.DirectoryMissing, service.GetBackupSummary("Alpha", _externalDir).Status);
+        Assert.Equal(ServerBackupSummaryStatus.NotConfigured, (await service.GetBackupSummaryAsync("Alpha", null, TestContext.Current.CancellationToken)).Status);
+        Assert.Equal(
+            ServerBackupSummaryStatus.DirectoryMissing,
+            (await service.GetBackupSummaryAsync("Alpha", _externalDir, TestContext.Current.CancellationToken)).Status);
 
         Directory.CreateDirectory(_externalDir);
-        Assert.Equal(ServerBackupSummaryStatus.NoBackups, service.GetBackupSummary("Alpha", _externalDir).Status);
+        Assert.Equal(ServerBackupSummaryStatus.NoBackups, (await service.GetBackupSummaryAsync("Alpha", _externalDir, TestContext.Current.CancellationToken)).Status);
 
         File.WriteAllText(Path.Combine(_externalDir, "backup-Alpha-20260101-000000.zip"), "z");
         File.WriteAllText(Path.Combine(_externalDir, "Alpha.zip"), "z");
         File.WriteAllText(Path.Combine(_externalDir, "backup-Beta-20260101-000000.zip"), "z");
 
-        var summary = service.GetBackupSummary("Alpha", _externalDir);
+        var summary = await service.GetBackupSummaryAsync("Alpha", _externalDir, TestContext.Current.CancellationToken);
         Assert.Equal(ServerBackupSummaryStatus.HasBackups, summary.Status);
         Assert.Equal(2, summary.Count);
         Assert.NotNull(summary.LatestWriteTime);
     }
 
     [Fact]
-    public void BackupDestination_RejectsPathsInsideServersRoot()
+    public async Task BackupDestination_InsideServersRoot_Rejects()
     {
-        IServerBackupService service = new ServerBackupService(_serversRoot, static () => 10);
+        IServerBackupService service = new ServerBackupService(_serversRoot, static () => 10, TimeProvider.System);
 
-        Assert.NotNull(service.ValidateBackupDestination(Path.Combine(_serversRoot, "Alpha", "backups")));
-        Assert.NotNull(service.ValidateBackupDestination(Path.Combine(_serversRoot, "a.zip")));
-        Assert.Null(service.ValidateBackupDestination(_externalDir));
+        Assert.NotNull(await service.ValidateBackupDestinationAsync(Path.Combine(_serversRoot, "Alpha", "backups"), TestContext.Current.CancellationToken));
+        Assert.NotNull(await service.ValidateBackupDestinationAsync(Path.Combine(_serversRoot, "a.zip"), TestContext.Current.CancellationToken));
+        Assert.Null(await service.ValidateBackupDestinationAsync(_externalDir, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public void PrepareBackupFilePath_CreatesDirectoryAndTimestampedName()
+    public async Task PrepareBackupFilePath_NewBackup_CreatesTimestampedPath()
     {
-        IServerBackupService service = new ServerBackupService(_serversRoot, static () => 10);
+        IServerBackupService service = new ServerBackupService(_serversRoot, static () => 10, TimeProvider.System);
 
-        string path = service.PrepareBackupFilePath("Alpha", _externalDir);
+        string path = await service.PrepareBackupFilePathAsync("Alpha", _externalDir, TestContext.Current.CancellationToken);
 
         Assert.True(Directory.Exists(_externalDir));
         Assert.Equal(_externalDir, Path.GetDirectoryName(path));

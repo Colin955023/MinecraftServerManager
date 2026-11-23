@@ -1,4 +1,3 @@
-using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
@@ -54,6 +53,38 @@ public sealed class ExportModListViewModelTests
 
         Assert.False(result);
         Assert.NotEmpty(fakeUi.ErrorMessages);
+        Assert.Equal(["匯出失敗"], fakeUi.ErrorTitles);
+    }
+
+    [Fact]
+    public async Task RunAsync_WhenUserCancelsFormatDialog_DoesNotExport()
+    {
+        var fakeUi = new ManualUiService();
+        var fakeExporter = new FakeExporter();
+        var vm = new ExportModListViewModel("TestServer", [], fakeExporter, NoOp.Create<IExternalLauncher>(), fakeUi);
+
+        await vm.RunAsync();
+
+        Assert.False(fakeExporter.ExportCalled);
+    }
+
+    [Fact]
+    public async Task RunAsync_WhenFirstSaveCancelledAndSecondSucceeds_RetriesAndExports()
+    {
+        var fakeUi = new QueueSavePickerUiService([null, @"C:\Exports\mods.html"])
+        {
+            ConfirmResult = false
+        };
+        fakeUi.ExportModListFormats.Enqueue(ModListExportFormat.Json);
+        fakeUi.ExportModListFormats.Enqueue(ModListExportFormat.Html);
+        var fakeExporter = new FakeExporter();
+        var vm = new ExportModListViewModel("TestServer", [], fakeExporter, NoOp.Create<IExternalLauncher>(), fakeUi);
+
+        await vm.RunAsync();
+
+        Assert.True(fakeExporter.ExportCalled);
+        Assert.Equal(@"C:\Exports\mods.html", fakeExporter.SavedPath);
+        Assert.Empty(fakeUi.ExportModListFormats);
     }
 
     [Fact]
@@ -92,5 +123,13 @@ public sealed class ExportModListViewModelTests
             SavedPath = filePath;
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class QueueSavePickerUiService(IEnumerable<string?> saveResults) : ManualUiService
+    {
+        private readonly Queue<string?> _saveResults = new(saveResults);
+
+        public override Task<string?> PickSaveFileAsync(string title, string defaultFileName, App.Services.FileTypeChoice fileType) =>
+            Task.FromResult(_saveResults.Count > 0 ? _saveResults.Dequeue() : null);
     }
 }

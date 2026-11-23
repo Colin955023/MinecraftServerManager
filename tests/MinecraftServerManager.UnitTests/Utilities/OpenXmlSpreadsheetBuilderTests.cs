@@ -7,7 +7,7 @@ namespace MinecraftServerManager.UnitTests.Utilities;
 public sealed class OpenXmlSpreadsheetBuilderTests
 {
     [Fact]
-    public void GetExcelColumnName_ReturnsCorrectColumnIdentifiers()
+    public void GetExcelColumnName_Index_ReturnsColumnIdentifier()
     {
         Assert.Equal("A", OpenXmlSpreadsheetBuilder.GetExcelColumnName(1));
         Assert.Equal("B", OpenXmlSpreadsheetBuilder.GetExcelColumnName(2));
@@ -19,7 +19,7 @@ public sealed class OpenXmlSpreadsheetBuilderTests
     }
 
     [Fact]
-    public void NormalizeSheetName_CleansSpecialCharsAndTruncates()
+    public void NormalizeSheetName_SpecialCharsAndLongName_CleansAndTruncates()
     {
         Assert.Equal("Sheet1", OpenXmlSpreadsheetBuilder.NormalizeSheetName(null));
         Assert.Equal("Sheet1", OpenXmlSpreadsheetBuilder.NormalizeSheetName("   "));
@@ -32,7 +32,7 @@ public sealed class OpenXmlSpreadsheetBuilderTests
     }
 
     [Fact]
-    public void SanitizeXmlText_RemovesControlCharactersAndKeepsEmoji()
+    public void SanitizeXmlText_ControlCharsAndEmoji_RemovesControlOnly()
     {
         string raw = "Hello\x00\x01\x08World\t\r\nEnd\x1F";
         Assert.Equal("HelloWorld\t\r\nEnd", OpenXmlSpreadsheetBuilder.SanitizeXmlText(raw));
@@ -40,7 +40,7 @@ public sealed class OpenXmlSpreadsheetBuilderTests
     }
 
     [Fact]
-    public void BuildWorkbook_ProducesValidZipWithRequiredOpenXmlEntries()
+    public void BuildWorkbook_Rows_ProducesRequiredEntries()
     {
         var rows = new List<IReadOnlyList<string>>
         {
@@ -77,7 +77,7 @@ public sealed class OpenXmlSpreadsheetBuilderTests
     }
 
     [Fact]
-    public void BuildWorkbook_EscapesSpecialCharactersIntoWellFormedXml()
+    public void BuildWorkbook_SpecialCharacters_ProducesWellFormedXml()
     {
         var rows = new List<IReadOnlyList<string>> { new[] { "A&B <C> \"D\" 'E'", "😀" } };
 

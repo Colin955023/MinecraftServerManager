@@ -31,6 +31,28 @@ internal sealed class StubHttpPort : IHttpPort
         TextHandler = textHandler;
     }
 
+    /// <summary>建立固定文字回應的替身（null 代表無回應）</summary>
+    public static StubHttpPort WithText(string? text) => new(text);
+
+    /// <summary>建立依 URI 決定文字回應的替身；<paramref name="respondToPost"/> 為真時 POST 與 GET 共用同一回應規則</summary>
+    public static StubHttpPort WithText(Func<Uri, string?> textHandler, bool respondToPost = false) =>
+        new(textHandler) { PostHandler = respondToPost ? (uri, _) => textHandler(uri) : static (_, _) => null };
+
+    /// <summary>建立下載成功的替身：將 <paramref name="content"/> 寫入目標路徑</summary>
+    public static StubHttpPort WithDownloadContent(string content) =>
+        new()
+        {
+            DownloadHandler = request =>
+            {
+                File.WriteAllText(request.TargetPath, content);
+                return Task.FromResult(new HttpResult(true, null, content.Length));
+            },
+        };
+
+    /// <summary>建立下載失敗的替身，不寫入任何檔案</summary>
+    public static StubHttpPort WithDownloadFailure(string error) =>
+        new() { DownloadHandler = _ => Task.FromResult(new HttpResult(false, error)) };
+
     /// <summary>GET 文字回應（回傳 null 代表無回應）；可擲出例外以模擬連線失敗</summary>
     public Func<Uri, string?> TextHandler { get; init; } = static _ => null;
 
@@ -47,9 +69,11 @@ internal sealed class StubHttpPort : IHttpPort
 
     public string? LastDownloadExpectedAlgorithm { get; private set; }
 
-    public async Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentAsync(Uri uri, CancellationToken cancellationToken = default)
+    public async Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentAsync(Uri uri, CancellationToken cancellationToken = default) =>
+        ToJsonResponse(await GetTextAsync(uri, cancellationToken).ConfigureAwait(false));
+
+    private static HttpJsonResponse<JsonDocument> ToJsonResponse(string? text)
     {
-        string? text = await GetTextAsync(uri, cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(text))
         {
             return new HttpJsonResponse<JsonDocument>(404, default, "not_found");
@@ -68,6 +92,11 @@ internal sealed class StubHttpPort : IHttpPort
     public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default)
     {
         Interlocked.Increment(ref _requestCount);
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled<string?>(cancellationToken);
+        }
+
         try
         {
             return Task.FromResult(TextHandler(uri));
@@ -78,8 +107,10 @@ internal sealed class StubHttpPort : IHttpPort
         }
     }
 
-    public Task<string?> PostJsonAsync(Uri uri, string jsonPayload, CancellationToken cancellationToken = default) =>
-        Task.FromResult(PostHandler(uri, jsonPayload));
+    public Task<HttpJsonResponse<JsonDocument>> PostJsonAsync(Uri uri, string jsonPayload, CancellationToken cancellationToken = default) =>
+        cancellationToken.IsCancellationRequested
+            ? Task.FromCanceled<HttpJsonResponse<JsonDocument>>(cancellationToken)
+            : Task.FromResult(ToJsonResponse(PostHandler(uri, jsonPayload)));
 
     public Task<HttpResult> DownloadAsync(
         Uri uri,
@@ -95,6 +126,11 @@ internal sealed class StubHttpPort : IHttpPort
         if (DownloadHandler is null)
         {
             throw new NotSupportedException("測試未設定下載行為");
+        }
+
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled<HttpResult>(cancellationToken);
         }
 
         return DownloadHandler(new StubDownload(uri, targetPath, progress, expectedHash, cancellationToken));

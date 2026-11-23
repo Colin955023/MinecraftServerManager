@@ -26,10 +26,12 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+using MinecraftServerManager.Domain.ValueObjects;
+
 namespace MinecraftServerManager.Domain.Mods;
 
 /// <summary>彈性版本比較（移植自 Prism Launcher，授權見檔案開頭與 COPYING.md）</summary>
-public sealed class FlexVersion
+public sealed class FlexVersion : IComparable<FlexVersion>
 {
     private enum SectionType : byte
     {
@@ -39,45 +41,19 @@ public sealed class FlexVersion
         PreRelease = 3,
     }
 
-    private readonly record struct Section(SectionType Type, string Value)
+    /// <summary>版本區段：記錄於原始字串之位置，避免配置子字串</summary>
+    private readonly record struct Section(SectionType Type, int Start, int Length)
     {
-        public static readonly Section Null = new(SectionType.Null, string.Empty);
-
-        public int CompareTo(Section other)
-        {
-            if (Type == SectionType.Numeric && other.Type == SectionType.Numeric)
-            {
-                if (Value.Length != other.Value.Length)
-                {
-                    return Value.Length.CompareTo(other.Value.Length);
-                }
-                return string.Compare(Value, other.Value, StringComparison.Ordinal);
-            }
-
-            if (Type == SectionType.Null && other.Type == SectionType.Null)
-            {
-                return 0;
-            }
-
-            // 正式版 (Null) 優先於 PreRelease 版
-            if (Type == SectionType.Null)
-            {
-                return other.Type == SectionType.PreRelease ? 1 : -1;
-            }
-            if (other.Type == SectionType.Null)
-            {
-                return Type == SectionType.PreRelease ? -1 : 1;
-            }
-
-            return string.CompareOrdinal(Value, other.Value);
-        }
+        public static readonly Section Null = new(SectionType.Null, 0, 0);
     }
 
+    private readonly string _raw;
     private readonly List<Section> _sections;
 
     public FlexVersion(string? raw)
     {
-        _sections = ParseSections(raw ?? string.Empty);
+        _raw = raw ?? string.Empty;
+        _sections = ParseSections(_raw);
     }
 
     /// <summary>比較兩個模組版本字串之新舊先後關係</summary>
@@ -88,11 +64,8 @@ public sealed class FlexVersion
             return 0;
         }
 
-        string cleanA = NormalizeModVersionString(a);
-        string cleanB = NormalizeModVersionString(b);
-
-        var vA = new FlexVersion(cleanA);
-        var vB = new FlexVersion(cleanB);
+        var vA = new FlexVersion(NormalizeModVersionString(a));
+        var vB = new FlexVersion(NormalizeModVersionString(b));
         return vA.CompareTo(vB);
     }
 
@@ -104,10 +77,10 @@ public sealed class FlexVersion
             return string.Empty;
         }
 
-        ReadOnlySpan<char> span = raw.Trim().AsSpan();
+        ReadOnlySpan<char> span = raw.AsSpan().Trim();
 
         // 去除開頭的 'v' 或 'V' (若其後直接接數字，例如 v1.2.0 -> 1.2.0)
-        if (span.StartsWith("v", StringComparison.OrdinalIgnoreCase) && span.Length > 1 && char.IsAsciiDigit(span[1]))
+        if (span.Length > 1 && span[0] is 'v' or 'V' && char.IsAsciiDigit(span[1]))
         {
             span = span[1..];
         }
@@ -116,7 +89,8 @@ public sealed class FlexVersion
         if (span.StartsWith("mc", StringComparison.OrdinalIgnoreCase) && span.Length > 2 && char.IsAsciiDigit(span[2]))
         {
             int sepIndex = span.IndexOfAny('-', '_');
-            if (sepIndex > 2 && sepIndex + 1 < span.Length && char.IsAsciiDigit(span[sepIndex + 1]))
+            if (sepIndex > 2 && sepIndex + 1 < span.Length && char.IsAsciiDigit(span[sepIndex + 1])
+                && IsMinecraftVersionPrefix(span[2..sepIndex]))
             {
                 span = span[(sepIndex + 1)..];
             }
@@ -126,9 +100,8 @@ public sealed class FlexVersion
             int firstDash = span.IndexOf('-');
             if (firstDash > 0 && firstDash + 1 < span.Length && char.IsAsciiDigit(span[firstDash + 1]))
             {
-                ReadOnlySpan<char> prefix = span[..firstDash];
                 ReadOnlySpan<char> remainder = span[(firstDash + 1)..];
-                if (prefix.StartsWith("1.") && remainder.Contains('.'))
+                if (IsMinecraftVersionPrefix(span[..firstDash]) && remainder.Contains('.'))
                 {
                     span = remainder;
                 }
@@ -136,6 +109,18 @@ public sealed class FlexVersion
         }
 
         return span.ToString();
+    }
+
+    /// <summary>判斷是否為 Minecraft 正式版號：1.x（x ≥ 2）或 26.x 以後之年份版號，最多三段純數字</summary>
+    private static bool IsMinecraftVersionPrefix(ReadOnlySpan<char> text)
+    {
+        Span<int> values = stackalloc int[3];
+        if (!DotSeparatedIntParser.TryParse(text, values, out int count) || count is < 2 or > 3)
+        {
+            return false;
+        }
+
+        return values[0] == 1 ? values[1] >= 2 : values[0] >= 26;
     }
 
     private static List<Section> ParseSections(string raw)
@@ -172,9 +157,8 @@ public sealed class FlexVersion
             while (i < len)
             {
                 char r = span[i];
-                if ((char.IsAsciiDigit(r) != (type == SectionType.Numeric))
-                    || (r == ' ' && type == SectionType.Numeric)
-                    || (r == '-' && type != SectionType.PreRelease)
+                if (char.IsAsciiDigit(r) != (type == SectionType.Numeric)
+                    || (r is '-' or ' ' && type != SectionType.PreRelease)
                     || r == '+')
                 {
                     break;
@@ -182,18 +166,52 @@ public sealed class FlexVersion
                 i++;
             }
 
-            ReadOnlySpan<char> secSpan = span[start..i];
-            if (!secSpan.IsEmpty)
+            int length = i - start;
+            if (type == SectionType.Numeric)
             {
-                if (type == SectionType.Numeric)
+                // 消除前導零
+                while (length > 0 && span[start] == '0')
                 {
-                    secSpan = secSpan.TrimStart('0');
+                    start++;
+                    length--;
                 }
-                sections.Add(new Section(type, secSpan.ToString()));
+            }
+
+            if (length > 0 || type == SectionType.Numeric)
+            {
+                sections.Add(new Section(type, start, length));
             }
         }
 
         return sections;
+    }
+
+    private int CompareSection(Section a, FlexVersion other, Section b)
+    {
+        ReadOnlySpan<char> valueA = _raw.AsSpan(a.Start, a.Length);
+        ReadOnlySpan<char> valueB = other._raw.AsSpan(b.Start, b.Length);
+
+        if (a.Type == SectionType.Numeric && b.Type == SectionType.Numeric)
+        {
+            return NumericSegmentComparer.Compare(valueA, valueB);
+        }
+
+        if (a.Type == SectionType.Null && b.Type == SectionType.Null)
+        {
+            return 0;
+        }
+
+        // 正式版 (Null) 優先於 PreRelease 版
+        if (a.Type == SectionType.Null)
+        {
+            return b.Type == SectionType.PreRelease ? 1 : -1;
+        }
+        if (b.Type == SectionType.Null)
+        {
+            return a.Type == SectionType.PreRelease ? -1 : 1;
+        }
+
+        return valueA.CompareTo(valueB, StringComparison.OrdinalIgnoreCase);
     }
 
     public int CompareTo(FlexVersion? other)
@@ -213,7 +231,7 @@ public sealed class FlexVersion
             var secA = i < _sections.Count ? _sections[i] : Section.Null;
             var secB = i < other._sections.Count ? other._sections[i] : Section.Null;
 
-            int cmp = secA.CompareTo(secB);
+            int cmp = CompareSection(secA, other, secB);
             if (cmp != 0)
             {
                 return cmp;
@@ -222,4 +240,30 @@ public sealed class FlexVersion
 
         return 0;
     }
+
+    public override bool Equals(object? obj) => obj is FlexVersion other && CompareTo(other) == 0;
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(_sections.Count);
+        foreach (var section in _sections)
+        {
+            hash.Add(string.GetHashCode(_raw.AsSpan(section.Start, section.Length), StringComparison.OrdinalIgnoreCase));
+        }
+
+        return hash.ToHashCode();
+    }
+
+    public static bool operator ==(FlexVersion? left, FlexVersion? right) => left is null ? right is null : left.Equals(right);
+
+    public static bool operator !=(FlexVersion? left, FlexVersion? right) => !(left == right);
+
+    public static bool operator <(FlexVersion? left, FlexVersion? right) => left is null ? right is not null : left.CompareTo(right) < 0;
+
+    public static bool operator <=(FlexVersion? left, FlexVersion? right) => left is null || left.CompareTo(right) <= 0;
+
+    public static bool operator >(FlexVersion? left, FlexVersion? right) => left is not null && left.CompareTo(right) > 0;
+
+    public static bool operator >=(FlexVersion? left, FlexVersion? right) => left is null ? right is null : left.CompareTo(right) >= 0;
 }

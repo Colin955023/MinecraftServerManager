@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using MinecraftServerManager.Infrastructure.Http;
 
 namespace MinecraftServerManager.UnitTests.Http;
@@ -33,4 +34,39 @@ public sealed class HttpUrlPolicyTests
     [InlineData("2001:20::1")]
     public void IsPublicAddress_NonPublicAddresses_ReturnsFalse(string text) =>
         Assert.False(HttpUrlPolicy.IsPublicAddress(IPAddress.Parse(text)));
+
+    [Fact]
+    public async Task ConnectAsync_MixedPublicAndPrivateAddresses_RejectsEntireBatch()
+    {
+        var exception = await Assert.ThrowsAsync<HttpSecurityException>(async () =>
+            await HttpUrlPolicy.ConnectAsync(
+                new DnsEndPoint("mixed.example", 443),
+                (_, _) => Task.FromResult(new[]
+                {
+                    IPAddress.Parse("8.8.8.8"),
+                    IPAddress.Parse("10.0.0.1"),
+                }),
+                TestContext.Current.CancellationToken));
+
+        Assert.Contains("非公開", exception.Message);
+    }
+
+    [Fact]
+    public async Task ConnectAsync_DnsResolutionFailure_ThrowsRetryableHttpRequestException()
+    {
+        int attempts = 0;
+
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(async () =>
+            await HttpUrlPolicy.ConnectAsync(
+                new DnsEndPoint("transient-dns.example", 443),
+                (_, _) =>
+                {
+                    attempts++;
+                    throw new SocketException((int)SocketError.TryAgain);
+                },
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(1, attempts);
+        Assert.IsType<SocketException>(exception.InnerException);
+    }
 }

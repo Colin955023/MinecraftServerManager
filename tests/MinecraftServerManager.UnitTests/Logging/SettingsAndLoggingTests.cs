@@ -1,21 +1,20 @@
 using Microsoft.Extensions.Logging;
 using MinecraftServerManager.Core.Errors;
 using MinecraftServerManager.Infrastructure.Settings;
-using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.UnitTests.Logging;
 
 public sealed class SettingsAndLoggingTests
 {
     [Fact]
-    public void SettingsRoundTripPreservesTypedValues()
+    public void Settings_SaveAndReload_PreservesTypedValues()
     {
         using var userDataTemp = new TempDirectory("msm-settings-");
         string userData = userDataTemp.FullName;
         var settings = new SettingsManager(userData);
         settings.SetServersRoot(Path.Combine(userData, "servers"));
-        settings.SetAutoUpdateEnabled(false);
-        settings.SetThemeMode("dark");
+        settings.UpdatePreferences(p => p with { AutoUpdateEnabled = false });
+        settings.UpdatePreferences(p => p with { ThemeMode = "dark" });
         settings.SetMainWindowSettings(1600, 900, 10, 20, maximized: true);
 
         var reloaded = new SettingsManager(userData);
@@ -29,12 +28,12 @@ public sealed class SettingsAndLoggingTests
     }
 
     [Fact]
-    public void SettingsNormalizeInvalidThemeAndCreateServersRoot()
+    public void Settings_InvalidThemeAndMissingRoot_Normalizes()
     {
         using var userDataTemp = new TempDirectory("msm-settings-");
         string userData = userDataTemp.FullName;
         var settings = new SettingsManager(userData);
-        settings.SetThemeMode("unknown");
+        settings.UpdatePreferences(p => p with { ThemeMode = "unknown" });
         settings.SetServersRoot(userData);
 
         Assert.Equal("system", settings.GetThemeMode());
@@ -47,7 +46,7 @@ public sealed class SettingsAndLoggingTests
     }
 
     [Fact]
-    public void SettingsRequireConfiguredServersRoot()
+    public void Settings_ServersRootNotConfigured_Throws()
     {
         using var userDataTemp = new TempDirectory("msm-settings-");
         string userData = userDataTemp.FullName;
@@ -59,7 +58,7 @@ public sealed class SettingsAndLoggingTests
     }
 
     [Fact]
-    public void ComponentLoggerForwardsMessageTemplateAndArguments()
+    public void ComponentLogger_Information_ForwardsTemplateAndArguments()
     {
         var logger = new CapturingLogger();
         var Logger = new ComponentLogger(logger);
@@ -103,7 +102,7 @@ public sealed class SettingsAndLoggingTests
     }
 
     [Fact]
-    public void BackupSettings_DefaultsAndRoundTrip()
+    public void BackupSettings_SaveAndReload_KeepsDefaultsAndValues()
     {
         using var temp = new TempDirectory("msm-settings-backup-");
         var settings = new SettingsManager(temp.FullName);
@@ -111,8 +110,8 @@ public sealed class SettingsAndLoggingTests
         Assert.False(settings.IsAutoBackupBeforeStartEnabled());
         Assert.Equal(10, settings.GetBackupRetentionCount());
 
-        settings.SetAutoBackupBeforeStartEnabled(true);
-        settings.SetBackupRetentionCount(25);
+        settings.UpdatePreferences(p => p with { AutoBackupBeforeStart = true });
+        settings.UpdatePreferences(p => p with { BackupRetentionCount = 25 });
 
         var reloaded = new SettingsManager(temp.FullName);
         Assert.True(reloaded.IsAutoBackupBeforeStartEnabled());
@@ -138,12 +137,12 @@ public sealed class SettingsAndLoggingTests
     [InlineData(1, 1)]
     [InlineData(100, 100)]
     [InlineData(500, 100)]
-    public void BackupRetentionCount_IsClampedToValidRange(int input, int expected)
+    public void BackupRetentionCount_OutOfRange_IsClamped(int input, int expected)
     {
         using var temp = new TempDirectory("msm-settings-backup-clamp-");
         var settings = new SettingsManager(temp.FullName);
 
-        settings.SetBackupRetentionCount(input);
+        settings.UpdatePreferences(p => p with { BackupRetentionCount = input });
 
         Assert.Equal(expected, settings.GetBackupRetentionCount());
     }

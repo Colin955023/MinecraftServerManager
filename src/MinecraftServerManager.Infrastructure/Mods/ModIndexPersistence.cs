@@ -1,5 +1,5 @@
-using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
@@ -13,11 +13,12 @@ public sealed class ModIndexPersistence
     private Dictionary<string, ModCacheEntry> _index = new(StringComparer.OrdinalIgnoreCase);
     private bool _dirty;
 
-    public ModIndexPersistence(string serverDirectory)
+    /// <summary>索引檔存放於 <paramref name="modsDirectory"/> 下的 <c>.modcache</c></summary>
+    public ModIndexPersistence(string modsDirectory)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
-        string stableServerDir = SafeFileSystem.ResolveStableDirectory(serverDirectory, create: true);
-        string cacheDir = Path.Combine(stableServerDir, ".modcache");
+        ArgumentException.ThrowIfNullOrWhiteSpace(modsDirectory);
+        string stableModsDir = SafeFileSystem.ResolveStableDirectory(modsDirectory, create: true);
+        string cacheDir = Path.Combine(stableModsDir, ".modcache");
         SafeFileSystem.ResolveStableDirectory(cacheDir, create: true);
 
         try
@@ -54,23 +55,17 @@ public sealed class ModIndexPersistence
                 entry = new ModCacheEntry();
                 _index[fileName] = entry;
             }
-            else if ((fileSizeBytes > 0 || lastWriteTimeUtcTicks > 0) &&
-                     (entry.FileSizeBytes != fileSizeBytes || entry.LastWriteTimeUtcTicks != lastWriteTimeUtcTicks))
+            else if (entry.FileSizeBytes != fileSizeBytes || entry.LastWriteTimeUtcTicks != lastWriteTimeUtcTicks)
             {
+                // 檔案已變更（含變為 0 位元組）：舊雜湊失效
                 entry.Hashes = null;
             }
 
             entry.Metadata = metadata is Dictionary<string, string> dict && dict.Comparer == StringComparer.OrdinalIgnoreCase
                 ? dict
                 : new Dictionary<string, string>(metadata, StringComparer.OrdinalIgnoreCase);
-            if (fileSizeBytes > 0)
-            {
-                entry.FileSizeBytes = fileSizeBytes;
-            }
-            if (lastWriteTimeUtcTicks > 0)
-            {
-                entry.LastWriteTimeUtcTicks = lastWriteTimeUtcTicks;
-            }
+            entry.FileSizeBytes = fileSizeBytes;
+            entry.LastWriteTimeUtcTicks = lastWriteTimeUtcTicks;
             _dirty = true;
         }
     }
@@ -130,7 +125,7 @@ public sealed class ModIndexPersistence
 
             try
             {
-                byte[]? utf8Bytes = JsonCodec.SerializeToUtf8Bytes(_index, indented: true);
+                byte[]? utf8Bytes = JsonCodec.SerializeToUtf8Bytes(_index, indented: false);
                 if (utf8Bytes is null)
                 {
                     return;
@@ -149,27 +144,10 @@ public sealed class ModIndexPersistence
     {
         lock (_lock)
         {
-            if (!SafeFileSystem.FileExists(_indexFilePath))
-            {
-                _index = new Dictionary<string, ModCacheEntry>(StringComparer.OrdinalIgnoreCase);
-                return;
-            }
-
-            try
-            {
-                byte[]? bytes = SafeFileSystem.ReadRegularFile(_indexFilePath, JsonCodec.DefaultMaxBytes);
-                var loaded = bytes is not null
-                    ? JsonCodec.Deserialize<Dictionary<string, ModCacheEntry>>(bytes)
-                    : null;
-                _index = loaded is not null
-                    ? new Dictionary<string, ModCacheEntry>(loaded, StringComparer.OrdinalIgnoreCase)
-                    : new Dictionary<string, ModCacheEntry>(StringComparer.OrdinalIgnoreCase);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Logger.Warning(ex, "讀取模組索引檔案失敗，重設為空索引: {IndexFilePath}", _indexFilePath);
-                _index = new Dictionary<string, ModCacheEntry>(StringComparer.OrdinalIgnoreCase);
-            }
+            var loaded = JsonCodec.TryReadOrPreserveCorrupt<Dictionary<string, ModCacheEntry>>(_indexFilePath);
+            _index = loaded is not null
+                ? new Dictionary<string, ModCacheEntry>(loaded, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, ModCacheEntry>(StringComparer.OrdinalIgnoreCase);
         }
     }
 }

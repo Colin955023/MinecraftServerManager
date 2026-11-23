@@ -8,6 +8,8 @@
 *.slnx text eol=crlf
 *.csproj text eol=crlf
 *.props text eol=crlf
+*.targets text eol=crlf
+*.manifest text eol=crlf
 *.xaml text eol=crlf
 
 # PowerShell：CRLF（Windows 標準）
@@ -20,11 +22,20 @@
 *.yml text eol=lf
 *.xml text eol=lf
 *.config text eol=lf
+.editorconfig text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf
+LICENSE text eol=lf
+.github/CODEOWNERS text eol=lf
+
+# NuGet 鎖定檔：CRLF（維持 Windows NuGet 工具輸出避免來回變動）
+packages.lock.json text eol=crlf
 
 # 網頁：LF
 *.html text eol=lf
 *.css text eol=lf
 *.js text eol=lf
+*.svg text eol=lf
 
 # 文件：LF
 *.md text eol=lf

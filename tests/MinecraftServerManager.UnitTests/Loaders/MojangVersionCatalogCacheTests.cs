@@ -18,7 +18,7 @@ public sealed class MojangVersionCatalogCacheTests
     }
 
     [Fact]
-    public void UpdateCachedVersions_AppliesChangeToLatestContent()
+    public void UpdateCachedVersions_ConcurrentChange_AppliesToLatest()
     {
         using var dirTemp = new TempDirectory("msm-vercache-");
         string path = MojangVersionCatalog.GetVersionsCachePath(dirTemp.FullName);

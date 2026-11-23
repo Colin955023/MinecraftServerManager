@@ -34,6 +34,12 @@ public static class UiBindHelpers
     /// <summary>項目數為 0 且非忙碌時為 true（表格空狀態用）</summary>
     public static bool IsIdleEmpty(int count, bool isBusy) => count == 0 && !isBusy;
 
+    /// <summary>項目數為 0 時為 true（無忙碌狀態之表格空狀態用）</summary>
+    public static bool IsEmpty(int count) => count == 0;
+
+    /// <summary>已載入且項目數為 0 時為 true（非同步載入表格空狀態用）</summary>
+    public static bool IsLoadedEmpty(int count, bool isLoaded) => count == 0 && isLoaded;
+
     /// <summary>錯誤轉 Error，否則 Success</summary>
     public static Microsoft.UI.Xaml.Controls.InfoBarSeverity ErrorSeverity(bool isError) =>
         isError ? Microsoft.UI.Xaml.Controls.InfoBarSeverity.Error : Microsoft.UI.Xaml.Controls.InfoBarSeverity.Success;
@@ -49,4 +55,7 @@ public static class UiBindHelpers
     /// <summary>相容狀態前景資源鍵</summary>
     public static string FormatStatusBrushKey(bool isRecommended) =>
         isRecommended ? SuccessTextBrushKey : MutedTextBrushKey;
+
+    /// <summary>組合表格列操作之無障礙名稱</summary>
+    public static string ActionFor(string action, string target) => $"{action} {target}";
 }

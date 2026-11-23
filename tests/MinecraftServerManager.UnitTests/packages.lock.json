@@ -212,7 +212,6 @@
         "dependencies": {
           "CommunityToolkit.Mvvm": "[8.4.2, )",
           "Microsoft.Windows.CsWinRT": "[2.3.1, )",
-          "Microsoft.WindowsAppSDK.DWrite": "[2.7.0, )",
           "Microsoft.WindowsAppSDK.Runtime": "[2.7.0, )",
           "Microsoft.WindowsAppSDK.WinUI": "[2.7.0, )",
           "MinecraftServerManager.Core": "[2.2.1, )",
@@ -261,15 +260,6 @@
         "requested": "[10.0.26100.9457, )",
         "resolved": "10.0.26100.9457",
         "contentHash": "l9cpRYSJzM7Qh7OgCGb6DgOKQ9UdgDSgMx8kxp13YUO3NeKne5ZrXIxp335IBcgXxp0FVNPFpBnLDJFbUcZLqQ=="
-      },
-      "Microsoft.WindowsAppSDK.DWrite": {
-        "type": "CentralTransitive",
-        "requested": "[2.7.0, )",
-        "resolved": "2.7.0",
-        "contentHash": "8p7Dq+KjbXBh29s/zbDmCauylblws9aF2px5T4q0wNDwiUaF5hKCyrPs3VU3ampO3kkZPSfn+FX0O0DAhLgnsg==",
-        "dependencies": {
-          "Microsoft.WindowsAppSDK.Base": "2.7.0"
-        }
       },
       "Microsoft.WindowsAppSDK.Runtime": {
         "type": "CentralTransitive",

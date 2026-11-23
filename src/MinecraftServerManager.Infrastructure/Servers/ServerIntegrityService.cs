@@ -11,11 +11,13 @@ public sealed class ServerIntegrityService : IServerIntegrityService
     private static readonly string[] EmptyList = [];
     private static readonly string[] DirectoryNotFoundMissingList = ["伺服器目錄不存在"];
     private static readonly string[] PaperMissingList = ["paper.jar"];
-    private static readonly string[] QuiltMissingList = ["quilt-server-launch.jar"];
-    private static readonly string[] ServerJarMissingList = ["server.jar"];
+    private static readonly string[] ServerJarMissingList = [ServerDefaults.ServerJarFileName];
     private static readonly string[] UnexpectedErrorMissingList = ["未預期的檔案系統錯誤"];
 
-    public ServerIntegrityResult CheckImportantFiles(string serverPath, LoaderKind loader)
+    public Task<ServerIntegrityResult> CheckImportantFilesAsync(string serverPath, LoaderKind loader, CancellationToken cancellationToken = default) =>
+        Task.Run(() => CheckImportantFiles(serverPath, loader), cancellationToken);
+
+    private static ServerIntegrityResult CheckImportantFiles(string serverPath, LoaderKind loader)
     {
         if (string.IsNullOrWhiteSpace(serverPath) || !SafeFileSystem.DirectoryExists(serverPath))
         {
@@ -29,7 +31,7 @@ public sealed class ServerIntegrityService : IServerIntegrityService
                 case LoaderKind.Paper:
                     {
                         bool hasPaper = SafeFileSystem.FileExists(Path.Combine(serverPath, "paper.jar")) ||
-                                        SafeFileSystem.FileExists(Path.Combine(serverPath, "server.jar")) ||
+                                        SafeFileSystem.FileExists(Path.Combine(serverPath, ServerDefaults.ServerJarFileName)) ||
                                         SafeFileSystem.HasAnyFile(serverPath, "paper*.jar");
                         return hasPaper
                             ? new ServerIntegrityResult(false, EmptyList)
@@ -38,50 +40,30 @@ public sealed class ServerIntegrityService : IServerIntegrityService
 
                 case LoaderKind.Vanilla:
                     {
-                        bool hasServer = SafeFileSystem.FileExists(Path.Combine(serverPath, "server.jar")) ||
+                        bool hasServer = SafeFileSystem.FileExists(Path.Combine(serverPath, ServerDefaults.ServerJarFileName)) ||
                                          SafeFileSystem.HasAnyFile(serverPath, "minecraft_server*.jar");
                         return hasServer
                             ? new ServerIntegrityResult(false, EmptyList)
                             : new ServerIntegrityResult(true, ServerJarMissingList);
                     }
 
+                // Fabric 與 Quilt 皆由啟動器 jar 載入原版 server.jar
                 case LoaderKind.Fabric:
-                    {
-                        var missing = new List<string>(2);
-                        if (!SafeFileSystem.FileExists(Path.Combine(serverPath, "fabric-server-launch.jar")))
-                        {
-                            missing.Add("fabric-server-launch.jar");
-                        }
-                        if (!SafeFileSystem.FileExists(Path.Combine(serverPath, "server.jar")))
-                        {
-                            missing.Add("server.jar");
-                        }
-                        return missing.Count == 0
-                            ? new ServerIntegrityResult(false, EmptyList)
-                            : new ServerIntegrityResult(true, missing);
-                    }
-
                 case LoaderKind.Quilt:
-                    {
-                        bool hasQuilt = SafeFileSystem.FileExists(Path.Combine(serverPath, "quilt-server-launch.jar")) ||
-                                        SafeFileSystem.FileExists(Path.Combine(serverPath, "server.jar"));
-                        return hasQuilt
-                            ? new ServerIntegrityResult(false, EmptyList)
-                            : new ServerIntegrityResult(true, QuiltMissingList);
-                    }
+                    return CheckLauncherWithServerJar(serverPath, LoaderLayout.For(loader).LauncherJarFileName);
 
                 case LoaderKind.NeoForge:
-                    return CheckForgeLike(serverPath, "neoforged", "neoforge");
+                    return CheckForgeLike(serverPath, LoaderKind.NeoForge);
 
                 case LoaderKind.Forge:
-                    return SafeFileSystem.HasAnyFile(serverPath, "forge*.jar")
+                    return HasForgeServerJar(serverPath)
                         ? new ServerIntegrityResult(false, EmptyList)
-                        : CheckForgeLike(serverPath, "minecraftforge", "forge");
+                        : CheckForgeLike(serverPath, LoaderKind.Forge);
 
                 default:
                     {
-                        bool hasAnyServer = SafeFileSystem.FileExists(Path.Combine(serverPath, "server.jar")) ||
-                                            SafeFileSystem.FileExists(Path.Combine(serverPath, "run.bat")) ||
+                        bool hasAnyServer = SafeFileSystem.FileExists(Path.Combine(serverPath, ServerDefaults.ServerJarFileName)) ||
+                                            SafeFileSystem.FileExists(Path.Combine(serverPath, ServerDefaults.RunBatFileName)) ||
                                             SafeFileSystem.HasAnyFile(serverPath, "*.jar", SearchOption.TopDirectoryOnly);
                         return hasAnyServer
                             ? new ServerIntegrityResult(false, EmptyList)
@@ -89,26 +71,47 @@ public sealed class ServerIntegrityService : IServerIntegrityService
                     }
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.Warning(ex, "檢查伺服器完整性時發生非預期例外: {Path}", serverPath);
             return new ServerIntegrityResult(true, UnexpectedErrorMissingList);
         }
     }
 
-    /// <summary>檢查啟動腳本與函式庫內的 win_args.txt</summary>
-    private static ServerIntegrityResult CheckForgeLike(string serverPath, string vendor, string artifact)
+    private static ServerIntegrityResult CheckLauncherWithServerJar(string serverPath, string launcherJar)
+    {
+        var missing = new List<string>(2);
+        if (!SafeFileSystem.FileExists(Path.Combine(serverPath, launcherJar)))
+        {
+            missing.Add(launcherJar);
+        }
+        if (!SafeFileSystem.FileExists(Path.Combine(serverPath, ServerDefaults.ServerJarFileName)))
+        {
+            missing.Add(ServerDefaults.ServerJarFileName);
+        }
+        return missing.Count == 0
+            ? new ServerIntegrityResult(false, EmptyList)
+            : new ServerIntegrityResult(true, missing);
+    }
+
+    /// <summary>舊版 Forge 根目錄伺服器 jar（排除安裝器）</summary>
+    private static bool HasForgeServerJar(string serverPath) =>
+        SafeFileSystem.EnumerateFiles(serverPath, LoaderLayout.For(LoaderKind.Forge).LaunchJarPrefix + "*.jar")
+            .Any(static path => !Path.GetFileNameWithoutExtension(path).EndsWith("-installer", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>檢查 Windows 啟動腳本與函式庫內的 win_args.txt</summary>
+    private static ServerIntegrityResult CheckForgeLike(string serverPath, LoaderKind loader)
     {
         var missing = new List<string>(2);
         if (!HasRunScript(serverPath))
         {
-            missing.Add("start_server.bat / run.bat");
+            missing.Add($"{ServerDefaults.StartServerBatFileName} / {ServerDefaults.RunBatFileName}");
         }
 
-        string library = Path.Combine(serverPath, "libraries", "net", vendor, artifact);
-        if (!SafeFileSystem.HasAnyFile(library, "*args.txt", SearchOption.AllDirectories))
+        string library = LoaderLayout.For(loader).GetLibraryDirectory(serverPath);
+        if (!SafeFileSystem.HasAnyFile(library, ServerDefaults.WinArgsFileName, SearchOption.AllDirectories))
         {
-            missing.Add("win_args.txt");
+            missing.Add(ServerDefaults.WinArgsFileName);
         }
 
         return missing.Count == 0
@@ -118,6 +121,5 @@ public sealed class ServerIntegrityService : IServerIntegrityService
 
     private static bool HasRunScript(string serverPath) =>
         SafeFileSystem.FileExists(Path.Combine(serverPath, ServerDefaults.StartServerBatFileName)) ||
-        SafeFileSystem.FileExists(Path.Combine(serverPath, "run.bat")) ||
-        SafeFileSystem.FileExists(Path.Combine(serverPath, "run.sh"));
+        SafeFileSystem.FileExists(Path.Combine(serverPath, ServerDefaults.RunBatFileName));
 }

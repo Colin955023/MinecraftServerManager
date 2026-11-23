@@ -13,7 +13,7 @@ public sealed class ServerPropertiesValidatorTests
     [InlineData("localhost", true)]
     [InlineData("invalid ip address!", false)]
     [InlineData("999.999.999.999", false)]
-    public void ValidateServerIp(string ip, bool expectedValid)
+    public void ValidateProperty_ServerIp_ReturnsExpected(string ip, bool expectedValid)
     {
         var (isValid, _) = ServerPropertiesValidator.ValidateProperty("server-ip", ip, "");
         Assert.Equal(expectedValid, isValid);
@@ -28,7 +28,7 @@ public sealed class ServerPropertiesValidatorTests
     [InlineData("-1", false)]
     [InlineData("65536", false)]
     [InlineData("not-a-port", false)]
-    public void ValidateServerPort(string port, bool expectedValid)
+    public void ValidateProperty_ServerPort_ReturnsExpected(string port, bool expectedValid)
     {
         var (isValid, _) = ServerPropertiesValidator.ValidateProperty("server-port", port, "25565");
         Assert.Equal(expectedValid, isValid);
@@ -41,7 +41,7 @@ public sealed class ServerPropertiesValidatorTests
     [InlineData("hard", true)]
     [InlineData("PEACEFUL", true)]
     [InlineData("invalid_difficulty", false)]
-    public void ValidateDifficulty(string diff, bool expectedValid)
+    public void ValidateProperty_Difficulty_ReturnsExpected(string diff, bool expectedValid)
     {
         var (isValid, _) = ServerPropertiesValidator.ValidateProperty("difficulty", diff, "easy");
         Assert.Equal(expectedValid, isValid);
@@ -54,7 +54,7 @@ public sealed class ServerPropertiesValidatorTests
     [InlineData("spectator", true)]
     [InlineData("SURVIVAL", true)]
     [InlineData("unknown_mode", false)]
-    public void ValidateGamemode(string gm, bool expectedValid)
+    public void ValidateProperty_Gamemode_ReturnsExpected(string gm, bool expectedValid)
     {
         var (isValid, _) = ServerPropertiesValidator.ValidateProperty("gamemode", gm, "survival");
         Assert.Equal(expectedValid, isValid);
@@ -67,7 +67,7 @@ public sealed class ServerPropertiesValidatorTests
     [InlineData("FALSE", true)]
     [InlineData("yes", false)]
     [InlineData("1", false)]
-    public void ValidateBooleanProperty(string val, bool expectedValid)
+    public void ValidateProperty_BooleanProperty_ReturnsExpected(string val, bool expectedValid)
     {
         var (isValid, _) = ServerPropertiesValidator.ValidateProperty("white-list", val, "false");
         Assert.Equal(expectedValid, isValid);
@@ -79,7 +79,7 @@ public sealed class ServerPropertiesValidatorTests
     [InlineData("100", true)]
     [InlineData("-1", false)]
     [InlineData("abc", false)]
-    public void ValidateMaxPlayers(string players, bool expectedValid)
+    public void ValidateProperty_MaxPlayers_ReturnsExpected(string players, bool expectedValid)
     {
         var (isValid, _) = ServerPropertiesValidator.ValidateProperty("max-players", players, "20");
         Assert.Equal(expectedValid, isValid);
@@ -91,7 +91,7 @@ public sealed class ServerPropertiesValidatorTests
     [InlineData("32", true)]
     [InlineData("1", false)]
     [InlineData("33", false)]
-    public void ValidateViewDistance(string dist, bool expectedValid)
+    public void ValidateProperty_ViewDistance_ReturnsExpected(string dist, bool expectedValid)
     {
         var (isValid, _) = ServerPropertiesValidator.ValidateProperty("view-distance", dist, "10");
         Assert.Equal(expectedValid, isValid);
@@ -101,7 +101,7 @@ public sealed class ServerPropertiesValidatorTests
     [InlineData("true", true)]
     [InlineData("false", true)]
     [InlineData("invalid", false)]
-    public void ValidateEnableCodeOfConduct(string val, bool expectedValid)
+    public void ValidateProperty_EnableCodeOfConduct_ReturnsExpected(string val, bool expectedValid)
     {
         string def = ServerPropertiesMetadata.GetDefault("enable-code-of-conduct");
         Assert.Equal("false", def);

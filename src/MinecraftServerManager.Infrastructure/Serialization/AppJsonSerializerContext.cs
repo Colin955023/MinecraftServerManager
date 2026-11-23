@@ -24,7 +24,7 @@ namespace MinecraftServerManager.Infrastructure.Serialization;
 [JsonSerializable(typeof(string[][]))]
 [JsonSerializable(typeof(ModrinthVersionFilesRequest))]
 [JsonSerializable(typeof(GitHubReleasePayload))]
-[JsonSerializable(typeof(List<ModJsonItem>))]
+[JsonSerializable(typeof(List<ModListExporter.CleanRow>))]
 [JsonSerializable(typeof(List<ServerUserCacheEntry>))]
 [JsonSerializable(typeof(List<ServerOperatorEntry>))]
 [JsonSerializable(typeof(List<ServerWhitelistEntry>))]

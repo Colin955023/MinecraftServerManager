@@ -3,25 +3,31 @@ using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
 /// <summary>模組頁：雜湊比對、更新候選篩選與批次更新</summary>
-public sealed partial class ModUpdateViewModel(
-    ModsContext context,
-    IModDependencyPlanner dependencyPlanner,
-    IModFileService modFileService,
-    IUiService uiService,
-    IModManager modManager,
-    IModrinthClient modrinthClient)
-    : ModQueueWorkflowViewModelBase(context, dependencyPlanner, modFileService, uiService, modManager, modrinthClient)
+public sealed partial class ModUpdateViewModel : ModQueueWorkflowViewModelBase
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModUpdateViewModel));
-    private static readonly string[] HashAlgorithms = ["sha512", "sha1"];
+    private static readonly string[] HashAlgorithms = [ModHelpers.Sha512HashAlgorithm, ModHelpers.Sha1HashAlgorithm];
+
+    public ModUpdateViewModel(
+        ModsContext context,
+        IModDependencyPlanner dependencyPlanner,
+        IModFileService modFileService,
+        IUiService uiService,
+        IModManager modManager,
+        IModrinthClient modrinthClient,
+        IServerRuntimeHost runtimeHost)
+        : base(context, dependencyPlanner, modFileService, uiService, modManager, modrinthClient, runtimeHost)
+    {
+    }
 
     /// <summary>檢查指定本地模組之相容更新，經使用者確認後批次更新</summary>
-    public async Task CheckModUpdatesAsync(IReadOnlyList<LocalModRowItem> targets)
+    public async Task CheckModUpdatesAsync(IReadOnlyList<LocalModRowItem> targets, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(targets);
         if (targets.Count == 0)
@@ -30,24 +36,23 @@ public sealed partial class ModUpdateViewModel(
             return;
         }
 
-        if (_context.Server is not { } server)
+        if (!_context.TryRequireServer(_ui, out var server, "請先選擇伺服器以檢查更新"))
         {
-            _ui.Notify("請先選擇伺服器以檢查更新", NotificationType.Warning);
             return;
         }
 
         Logger.Information("開始檢查已選取模組更新，共 {Count} 個模組（預設優先使用 Modrinth）", targets.Count);
 
-        string loader = _context.LoaderId ?? string.Empty;
+        LoaderKind loaderKind = server.LoaderType;
         string mcVer = server.MinecraftVersion.Value;
-        IReadOnlyList<LocalModInfo> installedMods = await _modManager.GetModsAsync(server.Path).ConfigureAwait(true);
 
-        IOperationProgress progressDialog = _ui.ShowModOperationProgress("檢查模組更新中", "正在大量比對檔案雜湊...");
+        IOperationProgress progressDialog = _ui.ShowOperationProgress("檢查模組更新中", "正在大量比對檔案雜湊...");
         List<ModUpdateCandidateItem> sortedCandidates = [];
         List<string> blocked = [];
         string? failure = null;
         try
         {
+            IReadOnlyList<LocalModInfo> installedMods = await _modManager.GetModsAsync(server.Path, cancellationToken: cancellationToken);
             progressDialog.UpdateProgress(0, targets.Count, $"正在向 Modrinth 批次查詢 {targets.Count} 個模組雜湊資訊...");
             // 本機掃描不含專案識別碼，先以雜湊反查，才能判定相依是否已安裝
             List<(string Hash, string Algorithm)> hashedFiles =
@@ -55,7 +60,7 @@ public sealed partial class ModUpdateViewModel(
                 .. installedMods.Select(static m => (m.CurrentHash, m.HashAlgorithm)),
                 .. targets.Select(static m => (m.CurrentHash, m.HashAlgorithm)),
             ];
-            var projectMapByHash = await LookupProjectIdsByHashAsync(_modrinthClient, hashedFiles).ConfigureAwait(true);
+            var projectMapByHash = await LookupProjectIdsByHashAsync(_modrinthClient, hashedFiles, cancellationToken);
             installedMods = installedMods.Select(m =>
                 string.IsNullOrWhiteSpace(m.PlatformId) && !string.IsNullOrWhiteSpace(m.CurrentHash) && projectMapByHash.TryGetValue(m.CurrentHash, out string? projectId)
                     ? m.WithPlatformId(projectId)
@@ -69,8 +74,8 @@ public sealed partial class ModUpdateViewModel(
             {
                 try
                 {
-                    var versions = await FindProjectVersionsAsync(modrinthClient, mod, projectMapByHash, loader, mcVer, token).ConfigureAwait(false);
-                    if (BuildProposal(mod, versions, mcVer, loader, installedMods) is { } proposal)
+                    var versions = await FindProjectVersionsAsync(modrinthClient, mod, projectMapByHash, loaderKind, mcVer, token).ConfigureAwait(false);
+                    if (BuildProposal(mod, versions, mcVer, loaderKind, installedMods) is { } proposal)
                     {
                         proposals.Add(proposal);
                     }
@@ -79,10 +84,10 @@ public sealed partial class ModUpdateViewModel(
                 {
                     Logger.Warning(ex, "檢查模組「{Name}」更新失敗", mod.Name);
                 }
-            }).ConfigureAwait(true);
+            }, cancellationToken);
 
             var ordered = proposals.OrderBy(static p => p.Candidate.ModName, StringComparer.Ordinal).ToList();
-            sortedCandidates = await ResolveProposalsAsync(ordered, mcVer, loader, installedMods, blocked, progressDialog).ConfigureAwait(true);
+            sortedCandidates = await ResolveProposalsAsync(ordered, mcVer, loaderKind, installedMods, blocked, progressDialog, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -116,16 +121,45 @@ public sealed partial class ModUpdateViewModel(
             return;
         }
 
-        if (await _ui.ShowModUpdatesAsync(sortedCandidates) is { Count: > 0 } toUpdate)
+        using var selectionVm = new ModUpdateSelectionViewModel(sortedCandidates);
+        if (await _ui.ShowModUpdatesAsync(selectionVm) is not { Count: > 0 } toUpdate || !EnsureServerStopped(server, "更新"))
         {
-            await PerformModUpdatesAsync(server.Path, toUpdate).ConfigureAwait(true);
-            await _context.NotifyModsChangedAsync().ConfigureAwait(true);
-            _ui.Notify($"已成功更新 {toUpdate.Count} 個模組！", NotificationType.Success);
+            return;
         }
+
+        var allowed = ModBatchOperations.ExcludeUnofficialSources(_ui, _modFileService, toUpdate, static u => u.ModName, static u => u.DownloadUrl, "模組更新");
+        if (allowed.Count == 0)
+        {
+            return;
+        }
+
+        var (succeeded, failures) = await ExecuteStagedDownloadsAsync(
+            server.Path,
+            allowed,
+            static item => new ModDownloadTask
+            {
+                DisplayName = item.ModName,
+                DownloadUrl = item.DownloadUrl,
+                FileName = item.FileName,
+                ExpectedHash = item.ExpectedHash,
+                HashAlgorithm = item.HashAlgorithm,
+                OldFileName = item.LocalMod?.FileName,
+                PreserveDisabledState = item.LocalMod is { IsEnabled: false }
+            },
+            "正在更新模組",
+            "更新",
+            Logger,
+            cancellationToken);
+
+        await _context.NotifyModsChangedAsync();
+        ModBatchOperations.NotifySummary(_ui, "更新", succeeded.Count, failures);
     }
 
     /// <summary>階段 1：以批次雜湊請求反查官方 ProjectId</summary>
-    private static async Task<Dictionary<string, string>> LookupProjectIdsByHashAsync(IModrinthClient client, IReadOnlyList<(string Hash, string Algorithm)> files)
+    private static async Task<Dictionary<string, string>> LookupProjectIdsByHashAsync(
+        IModrinthClient client,
+        IReadOnlyList<(string Hash, string Algorithm)> files,
+        CancellationToken cancellationToken = default)
     {
         var projectMapByHash = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (string algorithm in HashAlgorithms)
@@ -142,7 +176,7 @@ public sealed partial class ModUpdateViewModel(
 
             try
             {
-                var lookupResults = await client.LookupVersionsByHashesAsync(hashes, algorithm).ConfigureAwait(true);
+                var lookupResults = await client.LookupVersionsByHashesAsync(hashes, algorithm, cancellationToken);
                 foreach (var (hash, result) in lookupResults)
                 {
                     if (!string.IsNullOrWhiteSpace(result?.ProjectId))
@@ -165,7 +199,7 @@ public sealed partial class ModUpdateViewModel(
         IModrinthClient client,
         LocalModRowItem mod,
         Dictionary<string, string> projectMapByHash,
-        string loader,
+        LoaderKind loader,
         string mcVer,
         CancellationToken token)
     {
@@ -198,7 +232,7 @@ public sealed partial class ModUpdateViewModel(
         LocalModRowItem mod,
         IReadOnlyList<OnlineModVersion> versions,
         string mcVer,
-        string loader,
+        LoaderKind loader,
         IReadOnlyList<LocalModInfo> installedMods)
     {
         OnlineModVersion? compatibleLatest = null;
@@ -237,7 +271,7 @@ public sealed partial class ModUpdateViewModel(
             ModName = mod.Name,
             CurrentVersion = mod.Version,
             NewVersion = compatibleLatest.VersionNumber,
-            FileName = !string.IsNullOrWhiteSpace(primaryFile.Filename) ? primaryFile.Filename : $"{mod.Name}-{compatibleLatest.VersionNumber}.jar",
+            FileName = !string.IsNullOrWhiteSpace(primaryFile.FileName) ? primaryFile.FileName : $"{mod.Name}-{compatibleLatest.VersionNumber}.jar",
             DownloadUrl = primaryFile.Url,
             ExpectedHash = expectedHash,
             HashAlgorithm = expectedHash is not null ? resolvedAlgo : null,
@@ -250,16 +284,18 @@ public sealed partial class ModUpdateViewModel(
     private async Task<List<ModUpdateCandidateItem>> ResolveProposalsAsync(
         List<UpdateProposal> proposals,
         string mcVer,
-        string loader,
+        LoaderKind loader,
         IReadOnlyList<LocalModInfo> installedMods,
         List<string> blocked,
-        IOperationProgress progress)
+        IOperationProgress progress,
+        CancellationToken cancellationToken)
     {
         List<ModUpdateCandidateItem> accepted = [];
         Dictionary<string, (ModDependencyPlanItem Plan, List<string> RequiredBy)> dependencies = new(StringComparer.OrdinalIgnoreCase);
 
         for (int i = 0; i < proposals.Count; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var proposal = proposals[i];
             string name = proposal.Candidate.ModName;
             var report = proposal.Report;
@@ -273,12 +309,13 @@ public sealed partial class ModUpdateViewModel(
             {
                 progress.UpdateProgress(i, proposals.Count, $"正在解析「{name}」新版本所需的相依模組...");
                 var plans = await _dependencyPlanner.ResolveDependenciesRecursivelyAsync(
-                    _modrinthClient,
                     proposal.Version.Dependencies,
                     mcVer,
                     loader,
                     installedMods,
-                    upgradeInstalled: false).ConfigureAwait(true);
+                    proposal.Version.ProjectId,
+                    upgradeInstalled: false,
+                    cancellationToken: cancellationToken);
 
                 List<string> unresolved = [.. report.MissingRequiredDependencies.Where(missing => !plans.Any(plan => Covers(plan.TargetVersion, missing)))];
                 if (unresolved.Count > 0)
@@ -289,7 +326,7 @@ public sealed partial class ModUpdateViewModel(
 
                 foreach (var plan in plans.Where(static p => p.Action == ModInstallAction.Install && p.TargetVersion.PrimaryFile is not null))
                 {
-                    string key = plan.TargetVersion.PrimaryFile!.Filename;
+                    string key = plan.TargetVersion.PrimaryFile!.FileName;
                     if (!dependencies.TryGetValue(key, out var entry))
                     {
                         entry = (plan, []);
@@ -305,7 +342,7 @@ public sealed partial class ModUpdateViewModel(
 
         if (dependencies.Count > 0)
         {
-            accepted.AddRange(await BuildDependencyItemsAsync(dependencies.Values).ConfigureAwait(true));
+            accepted.AddRange(await BuildDependencyItemsAsync(dependencies.Values, cancellationToken));
         }
 
         return accepted;
@@ -314,9 +351,11 @@ public sealed partial class ModUpdateViewModel(
     private static bool Covers(OnlineModVersion version, string dependencyKey) =>
         string.Equals(version.ProjectId, dependencyKey, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(version.VersionId, dependencyKey, StringComparison.OrdinalIgnoreCase) ||
-        version.Files.Any(file => string.Equals(file.Filename, dependencyKey, StringComparison.OrdinalIgnoreCase));
+        version.Files.Any(file => string.Equals(file.FileName, dependencyKey, StringComparison.OrdinalIgnoreCase));
 
-    private async Task<List<ModUpdateCandidateItem>> BuildDependencyItemsAsync(IEnumerable<(ModDependencyPlanItem Plan, List<string> RequiredBy)> dependencies)
+    private async Task<List<ModUpdateCandidateItem>> BuildDependencyItemsAsync(
+        IEnumerable<(ModDependencyPlanItem Plan, List<string> RequiredBy)> dependencies,
+        CancellationToken cancellationToken)
     {
         List<(ModDependencyPlanItem Plan, List<string> RequiredBy)> list = [.. dependencies];
         IReadOnlyDictionary<string, string> titles = new Dictionary<string, string>();
@@ -324,7 +363,7 @@ public sealed partial class ModUpdateViewModel(
         {
             titles = await _modrinthClient.GetProjectTitlesAsync(
                 list.Select(static d => d.Plan.TargetVersion.ProjectId).Where(static id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-                CancellationToken.None).ConfigureAwait(true);
+                cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -338,14 +377,14 @@ public sealed partial class ModUpdateViewModel(
             var file = version.PrimaryFile!;
             string title = titles.TryGetValue(version.ProjectId, out string? found) && !string.IsNullOrWhiteSpace(found)
                 ? found
-                : ModHelpers.ModFilenameStem(file.Filename);
+                : ModHelpers.ModFilenameStem(file.FileName);
             string? expectedHash = ModHelpers.ResolveHash(file, out string algorithm);
             items.Add(new ModUpdateCandidateItem
             {
                 ModName = $"{title}（{string.Join("、", requiredBy.Distinct(StringComparer.Ordinal))} 需要）",
                 CurrentVersion = "未安裝",
                 NewVersion = version.VersionNumber,
-                FileName = file.Filename,
+                FileName = file.FileName,
                 DownloadUrl = file.Url,
                 ExpectedHash = expectedHash,
                 HashAlgorithm = expectedHash is not null ? algorithm : null,
@@ -357,76 +396,4 @@ public sealed partial class ModUpdateViewModel(
     }
 
     private sealed record UpdateProposal(ModUpdateCandidateItem Candidate, OnlineModVersion Version, OnlineModCompatibilityReport Report);
-
-    private async Task PerformModUpdatesAsync(string serverPath, IReadOnlyList<ModUpdateCandidateItem> items)
-    {
-        if (items.Count == 0)
-        {
-            return;
-        }
-
-        if (!await ModBatchOperations.ConfirmUnofficialSourcesAsync(_ui, _modFileService, items, static u => u.ModName, static u => u.DownloadUrl, "模組更新", "更新"))
-        {
-            return;
-        }
-
-        using IOperationProgress updateProgressDialog = _ui.ShowModOperationProgress("正在更新模組", "準備下載新版本...");
-        try
-        {
-            IModManager modManager = _modManager;
-            updateProgressDialog.UpdateProgress(0, items.Count, "已啟動模組並行下載更新佇列...");
-
-            await ModBatchOperations.RunWithProgressAsync(items, 3, updateProgressDialog, "更新模組", static item => item.ModName, async (item, token) =>
-            {
-                try
-                {
-                    await UpdateSingleModAsync(modManager, serverPath, item, token).ConfigureAwait(false);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    Logger.Error(ex, "更新模組「{Name}」失敗", item.ModName);
-                }
-            }).ConfigureAwait(true);
-        }
-        finally
-        {
-            _modFileService.CleanupStagingDirectory(serverPath);
-        }
-    }
-
-    private static async Task UpdateSingleModAsync(IModManager modManager, string serverPath, ModUpdateCandidateItem item, CancellationToken token)
-    {
-        var installResult = await modManager.InstallOnlineModAsync(
-            serverPath,
-            item.DownloadUrl,
-            item.FileName,
-            item.ExpectedHash,
-            item.HashAlgorithm,
-            cancellationToken: token).ConfigureAwait(false);
-
-        if (installResult?.Completed != true)
-        {
-            Logger.Warning("更新模組「{Name}」失敗: {Error}", item.ModName, installResult?.Message ?? "未知錯誤");
-            return;
-        }
-
-        if (item.LocalMod is null)
-        {
-            Logger.Information("已安裝更新所需的相依模組「{Name}」({Version})", item.ModName, item.NewVersion);
-            return;
-        }
-
-        if (!item.LocalMod.IsEnabled)
-        {
-            await modManager.SetModStateAsync(serverPath, item.FileName, false, token).ConfigureAwait(false);
-        }
-
-        if (!string.Equals(item.LocalMod.FileName, item.FileName, StringComparison.OrdinalIgnoreCase))
-        {
-            string oldTarget = !string.IsNullOrEmpty(item.LocalMod.FileName) ? item.LocalMod.FileName : item.LocalMod.Id;
-            await modManager.DeleteModsAsync(serverPath, (string[])[oldTarget], cancellationToken: token).ConfigureAwait(false);
-        }
-
-        Logger.Information("成功更新模組「{Name}」至版本 {Version}", item.ModName, item.NewVersion);
-    }
 }

@@ -1,2 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <!-- A9：純邏輯層禁止隱含引用 I/O、網路與行程命名空間 -->
+    <Using Remove="System.IO" />
+    <Using Remove="System.Net.Http" />
+    <Using Remove="System.Diagnostics" />
+  </ItemGroup>
 </Project>

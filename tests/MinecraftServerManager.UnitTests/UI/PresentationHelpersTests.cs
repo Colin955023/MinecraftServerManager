@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using Microsoft.UI.Xaml.Controls;
 using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Controls;
@@ -17,7 +18,7 @@ public sealed partial class PresentationHelpersTests
     private static partial Regex SortPropertyNameRegex();
 
     [Fact]
-    public void LogLineBuffer_DropsOldestWhenFull()
+    public void LogLineBuffer_Full_DropsOldest()
     {
         var buffer = new LogLineBuffer(3);
         foreach (string line in (string[])["a", "b", "c", "d", "e"])
@@ -32,7 +33,7 @@ public sealed partial class PresentationHelpersTests
     }
 
     [Fact]
-    public void LogLineBuffer_DrainRespectsMaxLines()
+    public void LogLineBuffer_DrainWithLimit_RespectsMaxLines()
     {
         var buffer = new LogLineBuffer(10);
         for (int i = 0; i < 5; i++)
@@ -47,7 +48,7 @@ public sealed partial class PresentationHelpersTests
     }
 
     [Fact]
-    public void LogLineBuffer_FlushTrimsToLowWatermark()
+    public void LogLineBuffer_FlushOverHighWatermark_TrimsToLowWatermark()
     {
         var buffer = new LogLineBuffer(100);
         var target = new BulkObservableCollection<string>();
@@ -64,7 +65,7 @@ public sealed partial class PresentationHelpersTests
     }
 
     [Fact]
-    public void LogLineBuffer_ClearDiscardsPending()
+    public void LogLineBuffer_Clear_DiscardsPending()
     {
         var buffer = new LogLineBuffer(10);
         buffer.Post("x");
@@ -79,7 +80,7 @@ public sealed partial class PresentationHelpersTests
     [InlineData(NotificationType.Success, false, InfoBarSeverity.Success, 3)]
     [InlineData(NotificationType.Warning, false, InfoBarSeverity.Warning, 8)]
     [InlineData(NotificationType.Error, true, InfoBarSeverity.Informational, 3)]
-    public void Notification_ErrorsUseDialogsAndOthersUseInfoBar(NotificationType type, bool usesDialog, InfoBarSeverity severity, int seconds)
+    public void NotificationPresentation_Type_ChoosesDialogOrInfoBar(NotificationType type, bool usesDialog, InfoBarSeverity severity, int seconds)
     {
         Assert.Equal(usesDialog, NotificationPresentation.UsesDialog(type));
         Assert.Equal(severity, NotificationPresentation.ToSeverity(type));
@@ -91,11 +92,11 @@ public sealed partial class PresentationHelpersTests
     [InlineData(NotificationType.Success, "完成")]
     [InlineData(NotificationType.Warning, "警告")]
     [InlineData(NotificationType.Error, "錯誤")]
-    public void Notification_DefaultTitleMatchesType(NotificationType type, string title) =>
+    public void GetDefaultTitle_Type_MatchesType(NotificationType type, string title) =>
         Assert.Equal(title, NotificationPresentation.GetDefaultTitle(type));
 
     [Fact]
-    public void UiBindHelpers_ReturnThemeResourceKeys()
+    public void UiBindHelpers_States_ReturnThemeResourceKeys()
     {
         Assert.Equal(UiBindHelpers.DangerTextBrushKey, UiBindHelpers.ErrorBrushKey(true));
         Assert.Equal(UiBindHelpers.MutedTextBrushKey, UiBindHelpers.ErrorBrushKey(false));
@@ -104,13 +105,27 @@ public sealed partial class PresentationHelpersTests
     }
 
     [Fact]
-    public void ThemeResourceKeys_AreDefinedInBothThemeDictionaries()
+    public void ThemeResourceKeys_AllKeys_DefinedInBothThemes()
     {
         string appXaml = File.ReadAllText(Path.Combine(SourceScanner.SolutionRoot, "src", "MinecraftServerManager.App", "App.xaml"));
-        foreach (string key in (string[])[UiBindHelpers.SuccessTextBrushKey, UiBindHelpers.DangerTextBrushKey, UiBindHelpers.WarningTextBrushKey, UiBindHelpers.MutedTextBrushKey, "NotificationBackgroundBrush"])
+        var doc = XDocument.Parse(SourceScanner.StripXamlComments(appXaml));
+        XNamespace xNs = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        var themeDictionaries = doc.Descendants().Where(static e => e.Name.LocalName == "ResourceDictionary" && e.Parent?.Name.LocalName == "ResourceDictionary.ThemeDictionaries").ToList();
+        var defaultDict = themeDictionaries.FirstOrDefault(e => (string?)e.Attribute(xNs + "Key") == "Default");
+        var lightDict = themeDictionaries.FirstOrDefault(e => (string?)e.Attribute(xNs + "Key") == "Light");
+
+        Assert.NotNull(defaultDict);
+        Assert.NotNull(lightDict);
+
+        string[] requiredKeys = [UiBindHelpers.SuccessTextBrushKey, UiBindHelpers.DangerTextBrushKey, UiBindHelpers.WarningTextBrushKey, UiBindHelpers.MutedTextBrushKey, "NotificationBackgroundBrush"];
+        foreach (string key in requiredKeys)
         {
-            int count = Regex.Count(appXaml, $"x:Key=\"{key}\"");
-            Assert.True(count >= 2, $"主題資源 {key} 必須同時定義於深色與淺色主題字典（目前 {count} 處）");
+            bool inDefault = defaultDict.Descendants().Any(e => (string?)e.Attribute(xNs + "Key") == key);
+            bool inLight = lightDict.Descendants().Any(e => (string?)e.Attribute(xNs + "Key") == key);
+
+            Assert.True(inDefault, $"主題資源 {key} 必須定義於深色 (Default) 主題字典");
+            Assert.True(inLight, $"主題資源 {key} 必須定義於淺色 (Light) 主題字典");
         }
     }
 
@@ -119,42 +134,46 @@ public sealed partial class PresentationHelpersTests
     {
         "ManageServerView.xaml" => TableSortKeys.Servers.TryGetSelector(column, out _),
         "ModsView.xaml" => TableSortKeys.LocalMods.TryGetSelector(column, out _) || TableSortKeys.OnlineMods.TryGetSelector(column, out _),
-        "ModInstallQueueDialog.xaml" => TableSortKeys.InstallQueue.TryGetSelector(column, out _),
-        "ModUpdatesDialog.xaml" => TableSortKeys.UpdateCandidates.TryGetSelector(column, out _),
-        "ModVersionPickerDialog.xaml" => TableSortKeys.ModVersions.TryGetSelector(column, out _),
-        "ManageJavaDialog.xaml" => TableSortKeys.Javas.TryGetSelector(column, out _),
-        "RestoreBackupDialog.xaml" => TableSortKeys.Backups.TryGetSelector(column, out _),
-        "PlayerManagementDialog.xaml" => TableSortKeys.Operators.TryGetSelector(column, out _)
+        "ModInstallQueueWindow.xaml" => TableSortKeys.InstallQueue.TryGetSelector(column, out _),
+        "ModUpdatesWindow.xaml" => TableSortKeys.UpdateCandidates.TryGetSelector(column, out _),
+        "ModVersionPickerWindow.xaml" => TableSortKeys.ModVersions.TryGetSelector(column, out _),
+        "ManageJavaWindow.xaml" => TableSortKeys.Javas.TryGetSelector(column, out _),
+        "RestoreBackupWindow.xaml" => TableSortKeys.Backups.TryGetSelector(column, out _),
+        "PlayerManagementWindow.xaml" => TableSortKeys.Operators.TryGetSelector(column, out _)
             || TableSortKeys.Whitelist.TryGetSelector(column, out _)
             || TableSortKeys.BannedPlayers.TryGetSelector(column, out _)
             || TableSortKeys.BannedIps.TryGetSelector(column, out _),
         _ => throw new ArgumentOutOfRangeException(nameof(viewFile), viewFile, "未知的檢視檔"),
     };
 
-    [Theory]
-    [InlineData("ManageServerView.xaml")]
-    [InlineData("ModsView.xaml")]
-    [InlineData("ModInstallQueueDialog.xaml")]
-    [InlineData("ModUpdatesDialog.xaml")]
-    [InlineData("ModVersionPickerDialog.xaml")]
-    [InlineData("ManageJavaDialog.xaml")]
-    [InlineData("RestoreBackupDialog.xaml")]
-    [InlineData("PlayerManagementDialog.xaml")]
-    public void TableSortKeys_CoverEverySortableHeader(string viewFile)
+    [Fact]
+    public void TableSortKeys_AllSortableHeaders_AreCovered()
     {
-        string xaml = File.ReadAllText(Path.Combine(SourceScanner.SolutionRoot, "src", "MinecraftServerManager.App", "Views", viewFile));
+        var viewFiles = SourceScanner.GetSourceFiles("src/MinecraftServerManager.App/Views", "*.xaml");
+        Assert.NotEmpty(viewFiles);
 
-        var missing = SortPropertyNameRegex().Matches(xaml)
-            .Select(static m => m.Groups["name"].Value)
-            .Where(name => !IsSortKeyRegistered(viewFile, name))
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+        foreach (var (relativePath, fullPath) in viewFiles)
+        {
+            string fileName = Path.GetFileName(fullPath);
+            string xaml = File.ReadAllText(fullPath);
+            var matches = SortPropertyNameRegex().Matches(xaml);
+            if (matches.Count == 0)
+            {
+                continue;
+            }
 
-        Assert.True(missing.Count == 0, $"{viewFile} 的排序欄位未登錄於 TableSortKeys：{string.Join(", ", missing)}");
+            var missing = matches
+                .Select(static m => m.Groups["name"].Value)
+                .Where(name => !IsSortKeyRegistered(fileName, name))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            Assert.True(missing.Count == 0, $"{fileName} 的排序欄位未登錄於 TableSortKeys：{string.Join(", ", missing)}");
+        }
     }
 
     [Fact]
-    public void ServerSizeSortKey_UsesRawBytesSoPlaceholderSortsFirst()
+    public void ServerSizeSortKey_Placeholder_SortsFirstByRawBytes()
     {
         var items = new List<ServerRowItem>
         {
@@ -170,7 +189,7 @@ public sealed partial class PresentationHelpersTests
     }
 
     [Fact]
-    public void CompareSortKeys_HandlesNullsAndMixedTypes()
+    public void CompareSortKeys_NullsAndMixedTypes_OrdersConsistently()
     {
         Assert.Equal(0, NaturalSortHelper.CompareSortKeys(null, null));
         Assert.True(NaturalSortHelper.CompareSortKeys(null, "a") < 0);
@@ -185,7 +204,7 @@ public sealed partial class PresentationHelpersTests
     }
 
     [Fact]
-    public void NaturalSortOrdersStringWithNumbersNaturally()
+    public void NaturalSort_StringsWithNumbers_OrdersNaturally()
     {
         var items = new List<NamedItem>
         {
@@ -201,7 +220,7 @@ public sealed partial class PresentationHelpersTests
     }
 
     [Fact]
-    public void NaturalSortOrdersFileSizeByRawFileSize()
+    public void NaturalSort_FileSize_OrdersByRawBytes()
     {
         var items = new List<LocalModRowItem>
         {
@@ -217,7 +236,7 @@ public sealed partial class PresentationHelpersTests
     }
 
     [Fact]
-    public void NaturalSortOrdersDownloadsByRawCount()
+    public void NaturalSort_Downloads_OrdersByRawCount()
     {
         var items = new List<OnlineModRowItem>
         {
@@ -233,7 +252,7 @@ public sealed partial class PresentationHelpersTests
     }
 
     [Fact]
-    public void TableSortExtensionsSortsNaturallyInBothDirections()
+    public void TableSortExtensions_BothDirections_SortsNaturally()
     {
         var items = new ObservableCollection<NamedItem>
         {
@@ -254,28 +273,51 @@ public sealed partial class PresentationHelpersTests
         Assert.Equal(["Server 10", "Server 2", "Server 1"], items.Select(static i => i.Name));
     }
 
+    private static double MeasureTenPerChar(string text) => text.Length * 10.0;
+
     [Theory]
-    [InlineData("01234567890123456789", 202.0)]
-    [InlineData("0123456789", 117.0)]
-    [InlineData("測試伺服器名稱說明文字", 197.0)]
-    public void CalculateAutoFitWidth_EstimatesWidestItem(string value, double expected) =>
-        Assert.Equal(expected, SortableTableHeader.CalculateAutoFitWidth(100.0, [value]));
+    [InlineData("01234567890123456789", 232.0)]
+    [InlineData("0123456789", 132.0)]
+    [InlineData("短", 100.0)]
+    public void CalculateAutoFitWidth_Items_UsesWidestMeasurement(string value, double expected) =>
+        Assert.Equal(expected, SortableTableHeader.CalculateAutoFitWidth(100.0, [value], MeasureTenPerChar));
+
+    [Fact]
+    public void CalculateAutoFitWidth_WideHeader_IncludesHeaderText() =>
+        Assert.Equal(160.0, SortableTableHeader.CalculateAutoFitWidth(100.0, ["a"], MeasureTenPerChar, new string('h', 12)));
 
     [Fact]
     public void CalculateAutoFitWidth_WithEmptyOrNullValues_KeepsDefaultWidth() =>
-        Assert.Equal(100.0, SortableTableHeader.CalculateAutoFitWidth(100.0, [null, string.Empty, "   "]));
+        Assert.Equal(100.0, SortableTableHeader.CalculateAutoFitWidth(100.0, [null, string.Empty, "   "], MeasureTenPerChar));
 
     [Fact]
     public void CalculateAutoFitWidth_WhenWidthExceedsMaxCap_ClampsToMaxColumnWidth() =>
-        Assert.Equal(SortableTableHeader.DefaultMaxColumnWidth, SortableTableHeader.CalculateAutoFitWidth(100.0, [new string('伺', 100)]));
+        Assert.Equal(SortableTableHeader.DefaultMaxColumnWidth, SortableTableHeader.CalculateAutoFitWidth(100.0, [new string('伺', 200)], MeasureTenPerChar));
 
     [Fact]
-    public void GetDisplayTexts_PrefersDisplayOverrideThenStringSortKey()
+    public void GetDisplayTexts_OverrideAndSortKey_PrefersOverride()
     {
         ServerRowItem[] rows = [new() { Name = "Alpha", Size = "1.5 GB", RawSizeBytes = 1_500_000_000 }];
+        LocalModRowItem[] mods = [new() { IsEnabled = true }];
 
         Assert.Equal(["1.5 GB"], TableSortKeys.Servers.GetDisplayTexts(rows, "Size"));
         Assert.Equal(["Alpha"], TableSortKeys.Servers.GetDisplayTexts(rows, "Name"));
         Assert.Empty(TableSortKeys.Servers.GetDisplayTexts(rows, "Unknown"));
+        Assert.Equal([bool.TrueString], TableSortKeys.LocalMods.GetDisplayTexts(mods, "IsEnabled"));
+    }
+
+    [Fact]
+    public void LogLineBuffer_FlushBelowHighWatermark_KeepsExisting()
+    {
+        var buffer = new LogLineBuffer(100);
+        var target = new BulkObservableCollection<string>(["A", "B"]);
+        for (int i = 0; i < 5; i++)
+        {
+            buffer.Post($"L{i}");
+        }
+
+        Assert.True(buffer.FlushTo(target, highWatermark: 20, lowWatermark: 10));
+        Assert.Equal(["A", "B", "L0", "L1", "L2", "L3", "L4"], target);
+        Assert.Equal(0, buffer.Count);
     }
 }

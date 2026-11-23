@@ -8,27 +8,32 @@
 
   <Grid HorizontalAlignment="Stretch"
     VerticalAlignment="Stretch">
-    <Button Click="OnHeaderClicked"
-      DoubleTapped="OnButtonDoubleTapped"
+    <Button x:Name="HeaderButton"
+      Padding="8,6"
+      HorizontalAlignment="Stretch"
+      VerticalAlignment="Stretch"
+      HorizontalContentAlignment="Left"
       Background="Transparent"
       BorderThickness="0"
       CornerRadius="{StaticResource ControlCornerRadius}"
-      Padding="8,6"
-      HorizontalAlignment="Stretch"
-      HorizontalContentAlignment="Left"
-      VerticalAlignment="Stretch">
+      Click="OnHeaderClicked"
+      KeyDown="OnHeaderKeyDown"
+      AutomationProperties.Name="{x:Bind Text, Mode=OneWay}"
+      AutomationProperties.ItemStatus="{x:Bind SortStatusText}">
       <StackPanel Orientation="Horizontal"
         Spacing="4">
-        <TextBlock Text="{x:Bind Text, Mode=OneWay}"
+        <TextBlock VerticalAlignment="Center"
+          Text="{x:Bind Text, Mode=OneWay}"
+          FontSize="{StaticResource CaptionTextBlockFontSize}"
           FontWeight="SemiBold"
-          FontSize="{StaticResource CaptionTextBlockFontSize}"
-          TextTrimming="CharacterEllipsis"
-          VerticalAlignment="Center" />
+          TextTrimming="CharacterEllipsis" />
         <FontIcon Glyph="{x:Bind SortGlyph}"
+          FontFamily="{StaticResource SymbolThemeFontFamily}"
           FontSize="{StaticResource CaptionTextBlockFontSize}"
-          Opacity="0.7"
           VerticalAlignment="Center"
-          Visibility="{x:Bind SortIndicatorVisibility}" />
+          Opacity="0.7"
+          Visibility="{x:Bind SortIndicatorVisibility}"
+          AutomationProperties.AccessibilityView="Raw" />
       </StackPanel>
     </Button>
 

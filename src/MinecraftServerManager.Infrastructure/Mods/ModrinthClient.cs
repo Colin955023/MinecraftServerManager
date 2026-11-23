@@ -1,27 +1,38 @@
-using MinecraftServerManager.Infrastructure.Logging;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
+using MinecraftServerManager.Domain.Servers;
+using MinecraftServerManager.Domain.ValueObjects;
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
-public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
+public sealed class ModrinthClient : IModrinthClient
 {
-    private static string GetStringOrEmpty(JsonElement element, string propertyName) =>
-        element.TryGetProperty(propertyName, out var value) ? value.GetString() ?? string.Empty : string.Empty;
+    private const string BaseUrl = "https://api.modrinth.com/v2";
+    /// <summary>Modrinth 批次查詢單次上限</summary>
+    private const int MaxBatchSize = 50;
 
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModrinthClient));
-    private const string BaseUrl = "https://api.modrinth.com/v2";
     private static readonly string[] ProjectTypeFacet = ["project_type:mod"];
-    private readonly ConcurrentDictionary<string, string> _projectTitleCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly string[] ServerSideFacet = ["server_side:required", "server_side:optional"];
+
+    private readonly IHttpPort _httpPort;
+    private readonly ConcurrentDictionary<string, string> _projectTitleCache = new(StringComparer.OrdinalIgnoreCase);
+
+    public ModrinthClient(IHttpPort httpPort)
+    {
+        ArgumentNullException.ThrowIfNull(httpPort);
+        _httpPort = httpPort;
+    }
 
     public async Task<IReadOnlyList<OnlineModInfo>> SearchModsAsync(
         string query,
-        string? loader = null,
+        LoaderKind? loader = null,
         string? minecraftVersion = null,
         int limit = 20,
         int offset = 0,
@@ -35,13 +46,13 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
             ProjectTypeFacet,
             ServerSideFacet
         };
-        if (!string.IsNullOrWhiteSpace(loader) && !loader.Equals("unknown", StringComparison.OrdinalIgnoreCase) && !loader.Equals("vanilla", StringComparison.OrdinalIgnoreCase))
+        if (loader is { } loaderKind && loaderKind is not (LoaderKind.Unknown or LoaderKind.Vanilla))
         {
-            facets.Add([$"categories:{loader.Trim().ToLowerInvariant()}"]);
+            facets.Add([$"categories:{LoaderKinds.ToModrinthId(loaderKind)}"]);
         }
-        if (!string.IsNullOrWhiteSpace(minecraftVersion) && !minecraftVersion.Equals("unknown", StringComparison.OrdinalIgnoreCase))
+        if (MinecraftVersion.TryParse(minecraftVersion, out var parsedVersion))
         {
-            facets.Add([$"versions:{minecraftVersion.Trim()}"]);
+            facets.Add([$"versions:{parsedVersion.Value}"]);
         }
 
         string facetsParam = Uri.EscapeDataString(JsonCodec.Serialize(facets.ToArray()));
@@ -81,53 +92,63 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         return results;
     }
 
+    /// <summary>依 <see cref="MaxBatchSize"/> 分批執行批次非同步查詢並處理例外</summary>
+    private static async Task ExecuteBatchedAsync<TItem>(
+        IEnumerable<TItem> items,
+        Func<TItem[], CancellationToken, Task> processBatchAsync,
+        string warningMessage,
+        CancellationToken cancellationToken)
+    {
+        foreach (TItem[] chunk in items.Chunk(MaxBatchSize))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                await processBatchAsync(chunk, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Logger.Warning(ex, warningMessage);
+            }
+        }
+    }
+
     private async Task<Dictionary<string, string>> FetchVersionNumbersBatchAsync(
         IReadOnlyList<string> versionIds,
         CancellationToken cancellationToken)
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (string[] chunk in versionIds.Chunk(50))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
+        await ExecuteBatchedAsync(
+            versionIds,
+            async (chunk, ct) =>
             {
                 string idsParam = Uri.EscapeDataString(JsonCodec.Serialize(chunk));
                 string url = $"{BaseUrl}/versions?ids={idsParam}";
-                using var doc = await GetDocumentAsync(url, cancellationToken).ConfigureAwait(false);
-                if (doc is null)
+                using var doc = await GetDocumentAsync(url, ct).ConfigureAwait(false);
+                if (doc is null || doc.RootElement.ValueKind != JsonValueKind.Array)
                 {
-                    continue;
+                    return;
                 }
 
-                if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                foreach (var elem in doc.RootElement.EnumerateArray())
                 {
-                    foreach (var elem in doc.RootElement.EnumerateArray())
+                    string? id = elem.GetStringOrNull("id");
+                    string? vn = elem.GetStringOrNull("version_number");
+                    if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(vn))
                     {
-                        if (elem.TryGetProperty("id", out var idProp) &&
-                            elem.TryGetProperty("version_number", out var vnProp))
-                        {
-                            string? id = idProp.GetString();
-                            string? vn = vnProp.GetString();
-                            if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(vn))
-                            {
-                                result[id] = vn;
-                            }
-                        }
+                        result[id] = vn;
                     }
                 }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Logger.Warning(ex, "批次取得專案最新版本失敗");
-            }
-        }
+            },
+            "批次取得專案最新版本失敗",
+            cancellationToken).ConfigureAwait(false);
 
         return result;
     }
 
     public async Task<IReadOnlyList<OnlineModVersion>> GetProjectVersionsAsync(
         string projectIdOrSlug,
-        string? loader = null,
+        LoaderKind? loader = null,
         string? minecraftVersion = null,
         CancellationToken cancellationToken = default)
     {
@@ -135,13 +156,13 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         cancellationToken.ThrowIfCancellationRequested();
 
         var queryParams = new List<string>();
-        if (!string.IsNullOrWhiteSpace(loader) && !loader.Equals("unknown", StringComparison.OrdinalIgnoreCase) && !loader.Equals("vanilla", StringComparison.OrdinalIgnoreCase))
+        if (loader is { } loaderKind && loaderKind is not (LoaderKind.Unknown or LoaderKind.Vanilla))
         {
-            queryParams.Add($"loaders={Uri.EscapeDataString(JsonCodec.Serialize(new[] { loader.Trim().ToLowerInvariant() }))}");
+            queryParams.Add($"loaders={Uri.EscapeDataString(JsonCodec.Serialize<string[]>([LoaderKinds.ToModrinthId(loaderKind)]))}");
         }
-        if (!string.IsNullOrWhiteSpace(minecraftVersion) && !minecraftVersion.Equals("unknown", StringComparison.OrdinalIgnoreCase))
+        if (MinecraftVersion.TryParse(minecraftVersion, out var parsedVersion))
         {
-            queryParams.Add($"game_versions={Uri.EscapeDataString(JsonCodec.Serialize(new[] { minecraftVersion.Trim() }))}");
+            queryParams.Add($"game_versions={Uri.EscapeDataString(JsonCodec.Serialize<string[]>([parsedVersion.Value]))}");
         }
 
         string queryString = queryParams.Count > 0 ? $"?{string.Join("&", queryParams)}" : string.Empty;
@@ -149,6 +170,26 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
 
         using var doc = await GetDocumentAsync(url, cancellationToken).ConfigureAwait(false);
         return doc is null ? [] : ParseVersionList(doc.RootElement);
+    }
+
+    public async Task<OnlineModVersion?> GetVersionAsync(string versionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(versionId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        using var doc = await GetDocumentAsync($"{BaseUrl}/version/{Uri.EscapeDataString(versionId.Trim())}", cancellationToken).ConfigureAwait(false);
+        if (doc is null || doc.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var version = ParseVersionOrNull(doc.RootElement);
+        if (version is null)
+        {
+            Logger.Warning("Modrinth 版本 {VersionId} 格式異常", versionId);
+        }
+
+        return version;
     }
 
     public async Task<IReadOnlyDictionary<string, string>> GetProjectTitlesAsync(
@@ -171,49 +212,48 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
             }
         }
 
-        foreach (string[] chunk in pending.Chunk(50))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
+        await ExecuteBatchedAsync(
+            pending,
+            async (chunk, ct) =>
             {
                 string idsParam = Uri.EscapeDataString(JsonCodec.Serialize(chunk));
-                using var doc = await GetDocumentAsync($"{BaseUrl}/projects?ids={idsParam}", cancellationToken).ConfigureAwait(false);
+                using var doc = await GetDocumentAsync($"{BaseUrl}/projects?ids={idsParam}", ct).ConfigureAwait(false);
                 if (doc is null || doc.RootElement.ValueKind != JsonValueKind.Array)
                 {
-                    continue;
+                    return;
                 }
 
                 foreach (var project in doc.RootElement.EnumerateArray())
                 {
-                    string title = GetStringOrEmpty(project, "title");
+                    string title = project.GetStringOrEmpty("title");
                     if (title.Length == 0)
                     {
                         continue;
                     }
 
                     // 呼叫端可能傳入 ID 或 slug，兩者皆建立對應
-                    foreach (string key in new[] { GetStringOrEmpty(project, "id"), GetStringOrEmpty(project, "slug") })
-                    {
-                        if (key.Length > 0)
-                        {
-                            _projectTitleCache[key] = title;
-                            result[key] = title;
-                        }
-                    }
+                    CacheTitle(result, project.GetStringOrNull("id"), title);
+                    CacheTitle(result, project.GetStringOrNull("slug"), title);
                 }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Logger.Warning(ex, "批次取得專案名稱失敗，改以代碼顯示");
-            }
-        }
+            },
+            "批次取得專案名稱失敗，改以代碼顯示",
+            cancellationToken).ConfigureAwait(false);
 
         return result;
     }
 
+    private void CacheTitle(Dictionary<string, string> result, string? key, string title)
+    {
+        if (!string.IsNullOrEmpty(key))
+        {
+            _projectTitleCache[key] = title;
+            result[key] = title;
+        }
+    }
+
     public async Task<IReadOnlyDictionary<string, ModrinthVersionLookupResult>> LookupVersionsByHashesAsync(
         IReadOnlyList<string> hashes,
-        string algorithm = "sha512",
+        string algorithm = ModHelpers.PreferredHashAlgorithm,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -225,54 +265,74 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         var cleanHashes = hashes.Select(static h => h.Trim().ToLowerInvariant()).Where(static h => !string.IsNullOrEmpty(h)).Distinct().ToList();
         var result = new Dictionary<string, ModrinthVersionLookupResult>(StringComparer.OrdinalIgnoreCase);
 
-        // 每批最多 50 個
-        foreach (string[] chunk in cleanHashes.Chunk(50))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var payload = new ModrinthVersionFilesRequest(chunk, algorithm);
-            string postJson = JsonCodec.Serialize(payload);
-
-            string? responseJson = await httpPort.PostJsonAsync(new Uri($"{BaseUrl}/version_files"), postJson, cancellationToken).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(responseJson))
+        await ExecuteBatchedAsync(
+            cleanHashes,
+            async (chunk, ct) =>
             {
-                continue;
-            }
+                var payload = new ModrinthVersionFilesRequest(chunk, algorithm);
+                string postJson = JsonCodec.Serialize(payload);
 
-            try
-            {
-                using var doc = JsonCodec.ParseDocument(responseJson);
-                foreach (var prop in doc.RootElement.EnumerateObject())
+                using var response = await _httpPort.PostJsonAsync(new Uri($"{BaseUrl}/version_files"), postJson, ct).ConfigureAwait(false);
+                if (!response.IsSuccess)
                 {
-                    string fileHash = prop.Name;
-                    var version = ParseSingleVersion(prop.Value);
-                    string projectId = GetStringOrEmpty(prop.Value, "project_id");
-                    result[fileHash] = new ModrinthVersionLookupResult(algorithm, projectId, version);
+                    LogFailedResponse(response, "version_files");
+                    return;
                 }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Logger.Warning(ex, "批次取得專案最新版本失敗");
-            }
-        }
+
+                var root = response.Payload!.RootElement;
+                if (root.ValueKind != JsonValueKind.Object)
+                {
+                    Logger.Warning("Modrinth 雜湊查詢回應格式異常: {ValueKind}", root.ValueKind);
+                    return;
+                }
+
+                foreach (var prop in root.EnumerateObject())
+                {
+                    // 單筆格式異常只略過該筆
+                    var version = ParseVersionOrNull(prop.Value);
+                    if (version is null)
+                    {
+                        Logger.Warning("略過格式異常的雜湊查詢結果: {Hash}", prop.Name);
+                        continue;
+                    }
+
+                    result[prop.Name] = new ModrinthVersionLookupResult(algorithm, version.ProjectId, version);
+                }
+            },
+            "批次依雜湊查詢 Modrinth 版本失敗",
+            cancellationToken).ConfigureAwait(false);
 
         return result;
     }
 
-    /// <summary>GET 並解析 JSON；非成功回應或內容無效回傳 null（無效內容記錄警告）</summary>
+    /// <summary>GET 並解析 JSON；非成功回應回傳 null，<c>not_found</c> 以外的失敗記錄警告</summary>
     private async Task<JsonDocument?> GetDocumentAsync(string url, CancellationToken cancellationToken)
     {
-        var response = await httpPort.GetJsonDocumentAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
+        var response = await _httpPort.GetJsonDocumentAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
         if (response.IsSuccess)
         {
             return response.Payload;
         }
 
-        if (response.ErrorKind == "invalid_response")
-        {
-            Logger.Warning("Modrinth 回應內容無效: {Url}", url);
-        }
-
+        LogFailedResponse(response, url);
+        response.Dispose();
         return null;
+    }
+
+    private static void LogFailedResponse(HttpJsonResponse<JsonDocument> response, string target)
+    {
+        switch (response.ErrorKind)
+        {
+            case "not_found":
+                return;
+            case "rate_limited":
+                // HTTP 層已依 Retry-After 重試，仍受限代表短時間請求過多
+                Logger.Warning("Modrinth 請求頻率受限（HTTP 429），已達重試上限: {Target}", target);
+                return;
+            default:
+                Logger.Warning("Modrinth 請求失敗: {Target}，狀態碼 {StatusCode}，類型 {ErrorKind}", target, response.StatusCode, response.ErrorKind);
+                return;
+        }
     }
 
     private static List<OnlineModInfo> ParseSearchResults(JsonElement root)
@@ -280,7 +340,7 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         var list = new List<OnlineModInfo>();
         try
         {
-            if (!root.TryGetProperty("hits", out var hitsElem))
+            if (!root.TryGetProperty("hits", JsonValueKind.Array, out var hitsElem))
             {
                 return list;
             }
@@ -288,19 +348,19 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
             foreach (var hit in hitsElem.EnumerateArray())
             {
                 // 單筆格式異常只略過該筆
-                string projectId = GetStringOrEmpty(hit, "project_id");
+                string projectId = hit.GetStringOrEmpty("project_id");
                 if (projectId.Length == 0)
                 {
                     continue;
                 }
 
-                string slug = GetStringOrEmpty(hit, "slug");
-                string title = GetStringOrEmpty(hit, "title");
-                string author = GetStringOrEmpty(hit, "author");
-                string desc = GetStringOrEmpty(hit, "description");
-                string latestVer = GetStringOrEmpty(hit, "latest_version");
-                int downloads = hit.TryGetProperty("downloads", out var dlElem) && dlElem.TryGetInt64(out long dl) ? (int)Math.Min(dl, int.MaxValue) : 0;
-                string serverSide = GetStringOrEmpty(hit, "server_side");
+                string slug = hit.GetStringOrEmpty("slug");
+                string title = hit.GetStringOrEmpty("title");
+                string author = hit.GetStringOrEmpty("author");
+                string desc = hit.GetStringOrEmpty("description");
+                string latestVer = hit.GetStringOrEmpty("latest_version");
+                long downloads = hit.TryGetProperty("downloads", JsonValueKind.Number, out var dlElem) && dlElem.TryGetInt64(out long dl) ? Math.Max(0, dl) : 0;
+                string serverSide = hit.GetStringOrEmpty("server_side");
 
                 if (serverSide.Equals("unsupported", StringComparison.OrdinalIgnoreCase))
                 {
@@ -329,15 +389,15 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
 
             foreach (var elem in root.EnumerateArray())
             {
-                try
+                // 單筆格式異常只略過該筆，不可讓整份版本清單遺失
+                var version = ParseVersionOrNull(elem);
+                if (version is null)
                 {
-                    list.Add(ParseSingleVersion(elem));
+                    Logger.Warning("略過格式異常的 Modrinth 版本項目");
+                    continue;
                 }
-                catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException or FormatException)
-                {
-                    // 單筆格式異常只略過該筆，不可讓整份版本清單遺失
-                    Logger.Warning(ex, "略過格式異常的 Modrinth 版本項目");
-                }
+
+                list.Add(version);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -347,66 +407,94 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         return list;
     }
 
-    private static OnlineModVersion ParseSingleVersion(JsonElement elem)
+    /// <summary>解析單一版本；缺少必要欄位（id、檔案 url/filename）時回傳 null</summary>
+    private static OnlineModVersion? ParseVersionOrNull(JsonElement elem)
     {
-        string id = elem.GetProperty("id").GetString() ?? string.Empty;
-        string versionNumber = GetStringOrEmpty(elem, "version_number");
-        string name = elem.TryGetProperty("name", out var n) ? n.GetString() ?? versionNumber : versionNumber;
-        string versionType = elem.TryGetProperty("version_type", out var vt) ? vt.GetString() ?? "release" : "release";
-        string datePublished = GetStringOrEmpty(elem, "date_published");
+        string? id = elem.GetStringOrNull("id");
+        if (string.IsNullOrEmpty(id))
+        {
+            return null;
+        }
 
-        var gameVersions = elem.TryGetProperty("game_versions", out var gv)
-            ? [.. gv.EnumerateArray().Select(static v => v.GetString() ?? string.Empty)]
-            : new List<string>();
-
-        var loaders = elem.TryGetProperty("loaders", out var ld)
-            ? [.. ld.EnumerateArray().Select(static l => l.GetString() ?? string.Empty)]
-            : new List<string>();
+        string versionNumber = elem.GetStringOrEmpty("version_number");
+        string name = elem.GetStringOrNull("name") ?? versionNumber;
+        string versionType = elem.GetStringOrNull("version_type") ?? "release";
+        string datePublished = elem.GetStringOrEmpty("date_published");
 
         var files = new List<ModFile>();
-        if (elem.TryGetProperty("files", out var filesElem))
+        if (elem.TryGetProperty("files", JsonValueKind.Array, out var filesElem))
         {
             foreach (var f in filesElem.EnumerateArray())
             {
-                string url = f.GetProperty("url").GetString() ?? string.Empty;
-                string filename = f.GetProperty("filename").GetString() ?? string.Empty;
-                bool primary = f.TryGetProperty("primary", out var pr) && pr.GetBoolean();
-                long size = f.TryGetProperty("size", out var sz) ? sz.GetInt64() : 0;
+                string? url = f.GetStringOrNull("url");
+                string? filename = f.GetStringOrNull("filename");
+                if (string.IsNullOrEmpty(url) || string.IsNullOrEmpty(filename))
+                {
+                    return null;
+                }
+
+                bool primary = f.GetBooleanOrNull("primary") ?? false;
+                long size = f.TryGetProperty("size", JsonValueKind.Number, out var sz) && sz.TryGetInt64(out long parsedSize) ? Math.Max(0, parsedSize) : 0;
                 var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                if (f.TryGetProperty("hashes", out var hashesElem))
+                if (f.TryGetProperty("hashes", JsonValueKind.Object, out var hashesElem))
                 {
                     foreach (var h in hashesElem.EnumerateObject())
                     {
-                        hashes[h.Name] = h.Value.GetString() ?? string.Empty;
+                        if (h.Value.GetStringValue() is { } hashValue)
+                        {
+                            hashes[h.Name] = hashValue;
+                        }
                     }
                 }
+
                 files.Add(new ModFile(filename, url, primary, size, hashes));
             }
         }
 
         var dependencies = new List<OnlineModDependency>();
-        if (elem.TryGetProperty("dependencies", out var depElem))
+        if (elem.TryGetProperty("dependencies", JsonValueKind.Array, out var depElem))
         {
             foreach (var d in depElem.EnumerateArray())
             {
-                string? vId = d.TryGetProperty("version_id", out var vi) ? vi.GetString() : null;
-                string? pId = d.TryGetProperty("project_id", out var pi) ? pi.GetString() : null;
-                string? fn = d.TryGetProperty("file_name", out var fne) ? fne.GetString() : null;
-                string depTypeStr = d.TryGetProperty("dependency_type", out var dt) ? dt.GetString() ?? "required" : "required";
-                var depType = depTypeStr switch
+                var depType = d.GetStringOrNull("dependency_type") switch
                 {
                     "optional" => ModDependencyType.Optional,
                     "incompatible" => ModDependencyType.Incompatible,
                     "embedded" => ModDependencyType.Embedded,
                     _ => ModDependencyType.Required
                 };
-                dependencies.Add(new OnlineModDependency(vId, pId, fn, depType));
+                dependencies.Add(new OnlineModDependency(d.GetStringOrNull("version_id"), d.GetStringOrNull("project_id"), d.GetStringOrNull("file_name"), depType));
             }
         }
 
-        string projectId = GetStringOrEmpty(elem, "project_id");
+        return new OnlineModVersion(
+            id,
+            versionNumber,
+            name,
+            ReadStringArray(elem, "game_versions"),
+            ReadStringArray(elem, "loaders"),
+            versionType,
+            datePublished,
+            files,
+            dependencies,
+            projectId: elem.GetStringOrEmpty("project_id"));
+    }
 
-        return new OnlineModVersion(id, versionNumber, name, gameVersions, loaders, versionType, datePublished, files, dependencies, projectId: projectId);
+    private static List<string> ReadStringArray(JsonElement elem, string propertyName)
+    {
+        var list = new List<string>();
+        if (elem.TryGetProperty(propertyName, JsonValueKind.Array, out var array))
+        {
+            foreach (var item in array.EnumerateArray())
+            {
+                if (item.GetStringValue() is { Length: > 0 } value)
+                {
+                    list.Add(value);
+                }
+            }
+        }
+
+        return list;
     }
 }
 

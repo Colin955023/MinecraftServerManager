@@ -7,6 +7,7 @@ namespace MinecraftServerManager.UnitTests.TestSupport;
 internal sealed class FakeServerRuntime : IServerRuntime
 {
     public int Pid => 1234;
+    public long? StartedTimestamp { get; set; }
     public bool IsRunning { get; set; }
     public bool IsReady { get; set; }
     public int? ExitCode { get; set; } = 0;
@@ -14,6 +15,7 @@ internal sealed class FakeServerRuntime : IServerRuntime
     public Queue<ProcessExitResult?> WaitResults { get; } = new();
     public int StartCount { get; private set; }
     public int StopCount { get; private set; }
+    public bool ThrowOnStop { get; set; }
     public ServerLaunchPlan? LastPlan { get; private set; }
 
     public int SubscriberCount =>
@@ -25,12 +27,11 @@ internal sealed class FakeServerRuntime : IServerRuntime
     public event Action<string>? OutputLineReceived;
     public event Action<int>? ServerExited;
     public event Action? ServerReady;
-    public event Action? ServerStarted;
+    public event Action<int>? ServerStarted;
 
     public void RaiseOutputLine(string line) => OutputLineReceived?.Invoke(line);
     public void RaiseExited(int exitCode) => ServerExited?.Invoke(exitCode);
     public void RaiseReady() => ServerReady?.Invoke();
-    public void RaiseStarted() => ServerStarted?.Invoke();
 
     public Task StartAsync(ServerLaunchPlan plan, CancellationToken cancellationToken = default)
     {
@@ -52,6 +53,11 @@ internal sealed class FakeServerRuntime : IServerRuntime
         _ = gracefulTimeout;
         _ = cancellationToken;
         StopCount++;
+        if (ThrowOnStop)
+        {
+            throw new InvalidOperationException("停止伺服器失敗 (測試用例外)");
+        }
+
         IsRunning = false;
         return Task.FromResult(new ProcessExitResult(0, false));
     }

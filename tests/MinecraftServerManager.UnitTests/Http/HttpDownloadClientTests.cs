@@ -1,7 +1,5 @@
 using System.Net;
 using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Infrastructure.Http;
@@ -11,49 +9,21 @@ namespace MinecraftServerManager.UnitTests.Http;
 public sealed class HttpDownloadClientTests
 {
     [Fact]
-    public void UrlPolicyRejectsInsecureAndPrivateTargets()
+    public async Task DownloadAsync_Success_WritesAtomicallyAndReportsProgress()
     {
-        Assert.Throws<HttpSecurityException>(static () => HttpUrlPolicy.ValidateStatic(new Uri("http://example.com/file")));
-        Assert.Throws<HttpSecurityException>(static () => HttpUrlPolicy.ValidateStatic(new Uri("https://user:pass@example.com/file")));
-        Assert.Throws<HttpSecurityException>(static () => HttpUrlPolicy.ValidateStatic(new Uri("https://127.0.0.1/file")));
-    }
-
-    [Fact]
-    public async Task ConnectCallbackRejectsPrivateDnsResultBeforeConnecting()
-    {
-        int resolveCount = 0;
-
-        var exception = await Assert.ThrowsAsync<HttpSecurityException>(async () =>
-            await HttpUrlPolicy.ConnectAsync(
-                new DnsEndPoint("rebind.example", 443),
-                (_, _) =>
-                {
-                    resolveCount++;
-                    return Task.FromResult(new[] { IPAddress.Loopback });
-                },
-                CancellationToken.None));
-
-        Assert.Contains("非公開", exception.Message);
-        Assert.Equal(1, resolveCount);
-    }
-
-    [Fact]
-    public async Task DownloadStreamsToAtomicTargetAndReportsProgress()
-    {
-        using var temp = new TempDirectory("msm-http-");
-        string target = temp.Combine("download.bin");
         using var fixture = new DownloadFixture(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new ByteArrayContent("下載內容"u8.ToArray()),
         });
-        var (_, downloader) = fixture;
+        string target = fixture.TargetPath;
         var progress = new List<HttpProgress>();
 
-        var result = await downloader.DownloadAsync(
+        var result = await fixture.Client.DownloadAsync(
             new Uri("https://example.com/file"),
             target,
             new HttpDownloadOptions { MaxBytes = 1024 },
-            new SynchronousProgress<HttpProgress>(progress.Add));
+            new SynchronousProgress<HttpProgress>(progress.Add),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal("下載內容", File.ReadAllText(target));
@@ -61,51 +31,64 @@ public sealed class HttpDownloadClientTests
         Assert.Equal(result.BytesProcessed, progress[^1].BytesDownloaded);
     }
 
-    [Fact]
-    public async Task DownloadRejectsOversizedResponseWithoutOverwritingTarget()
+    [Theory]
+    [InlineData("oversized")]
+    [InlineData("hash_mismatch")]
+    public async Task DownloadAsync_ValidationFailure_KeepsExistingTarget(string failureKind)
     {
-        using var temp = new TempDirectory("msm-http-");
-        string target = temp.Combine("download.bin");
-        File.WriteAllText(target, "保留內容");
+        byte[] payload = failureKind == "oversized" ? "太大的內容"u8.ToArray() : "遭竄改內容"u8.ToArray();
         using var fixture = new DownloadFixture(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new ByteArrayContent("太大的內容"u8.ToArray()),
+            Content = new ByteArrayContent(payload),
         });
-        var (_, downloader) = fixture;
+        string target = fixture.TargetPath;
+        await File.WriteAllTextAsync(target, "保留內容", TestContext.Current.CancellationToken);
 
-        var result = await downloader.DownloadAsync(
+        var options = new HttpDownloadOptions
+        {
+            MaxBytes = failureKind == "oversized" ? 1 : 1024,
+            MaxAttempts = 1,
+        };
+        string? expectedHash = failureKind == "hash_mismatch" ? new string('a', 64) : null;
+
+        var result = await fixture.Client.DownloadAsync(
             new Uri("https://example.com/file"),
             target,
-            new HttpDownloadOptions { MaxBytes = 1 });
+            options,
+            expectedHash: expectedHash,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
-        Assert.Equal("保留內容", File.ReadAllText(target));
+        if (failureKind == "hash_mismatch")
+        {
+            Assert.Contains("雜湊", result.Error);
+        }
+        Assert.Equal("保留內容", await File.ReadAllTextAsync(target, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task DownloadAllowsCompressedResponseContentSafely()
+    public async Task DownloadAsync_CompressedContent_Succeeds()
     {
-        using var temp = new TempDirectory("msm-http-");
-        string target = temp.Combine("download.bin");
         var content = new ByteArrayContent("解壓縮後的內容"u8.ToArray());
         content.Headers.ContentEncoding.Add("gzip");
         using var fixture = new DownloadFixture(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = content,
         });
-        var (_, downloader) = fixture;
+        string target = fixture.TargetPath;
 
-        var result = await downloader.DownloadAsync(
+        var result = await fixture.Client.DownloadAsync(
             new Uri("https://example.com/file"),
             target,
-            new HttpDownloadOptions { MaxBytes = 1024 });
+            new HttpDownloadOptions { MaxBytes = 1024 },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal("解壓縮後的內容", File.ReadAllText(target));
     }
 
     [Fact]
-    public async Task DownloadRetriesTransientStatus()
+    public async Task DownloadAsync_TransientStatus_Retries()
     {
         using var temp = new TempDirectory("msm-http-");
         string target = temp.Combine("download.bin");
@@ -117,14 +100,15 @@ public sealed class HttpDownloadClientTests
         var result = await downloader.DownloadAsync(
             new Uri("https://example.com/file"),
             target,
-            new HttpDownloadOptions { MaxAttempts = 2, RetryDelay = TimeSpan.Zero });
+            new HttpDownloadOptions { MaxAttempts = 2, RetryDelay = TimeSpan.Zero },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(2, handler.RequestCount);
     }
 
     [Fact]
-    public async Task DownloadRejectsUnsafeRedirect()
+    public async Task DownloadAsync_UnsafeRedirect_Rejects()
     {
         using var temp = new TempDirectory("msm-http-");
         string target = temp.Combine("download.bin");
@@ -133,153 +117,17 @@ public sealed class HttpDownloadClientTests
         using var fixture = new DownloadFixture(redirect);
         var (handler, downloader) = fixture;
 
-        var result = await downloader.DownloadAsync(new Uri("https://example.com/file"), target);
+        var result = await downloader.DownloadAsync(
+            new Uri("https://example.com/file"),
+            target,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.Equal(1, handler.RequestCount);
     }
 
     [Fact]
-    public async Task GetJsonDocumentAsyncDeserializesValidResponse()
-    {
-        string json = """{"name": "Minecraft", "version": 2}""";
-        using var fixture = new DownloadFixture(new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent(json, Encoding.UTF8, "application/json"),
-        });
-        var (_, http) = fixture;
-
-        var response = await http.GetJsonDocumentAsync(new Uri("https://example.com/api"));
-
-        Assert.True(response.IsSuccess);
-        Assert.Equal(200, response.StatusCode);
-        Assert.NotNull(response.Payload);
-        using var doc = response.Payload;
-        Assert.Equal("Minecraft", doc.RootElement.GetProperty("name").GetString());
-        Assert.Equal(2, doc.RootElement.GetProperty("version").GetInt32());
-        Assert.Empty(response.ErrorKind);
-    }
-
-    [Theory]
-    [InlineData(HttpStatusCode.NotFound, "not_found")]
-    [InlineData(HttpStatusCode.BadRequest, "invalid_request")]
-    [InlineData(HttpStatusCode.InternalServerError, "transient")]
-    public async Task GetJsonDocumentAsyncClassifiesStatusCodes(HttpStatusCode statusCode, string expectedErrorKind)
-    {
-        using var fixture = new DownloadFixture(
-            new HttpResponseMessage(statusCode),
-            new HttpResponseMessage(statusCode),
-            new HttpResponseMessage(statusCode));
-        var (_, http) = fixture;
-
-        var response = await http.GetJsonDocumentAsync(new Uri("https://example.com/api"));
-
-        Assert.False(response.IsSuccess);
-        Assert.Equal((int)statusCode, response.StatusCode);
-        Assert.Equal(expectedErrorKind, response.ErrorKind);
-        Assert.Null(response.Payload);
-    }
-
-    [Fact]
-    public async Task GetJsonDocumentAsyncRetriesRateLimitedThenFails()
-    {
-        using var fixture = new DownloadFixture(
-            new HttpResponseMessage(HttpStatusCode.TooManyRequests),
-            new HttpResponseMessage(HttpStatusCode.TooManyRequests),
-            new HttpResponseMessage(HttpStatusCode.TooManyRequests));
-        var (handler, http) = fixture;
-
-        var response = await http.GetJsonDocumentAsync(new Uri("https://example.com/api"));
-
-        Assert.False(response.IsSuccess);
-        Assert.Equal(429, response.StatusCode);
-        Assert.Equal("rate_limited", response.ErrorKind);
-        Assert.Equal(3, handler.RequestCount);
-    }
-
-    [Fact]
-    public async Task GetJsonDocumentAsyncRejectsInvalidJson()
-    {
-        using var fixture = new DownloadFixture(new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent("not a valid json", Encoding.UTF8, "application/json"),
-        });
-        var (_, http) = fixture;
-
-        var response = await http.GetJsonDocumentAsync(new Uri("https://example.com/api"));
-
-        Assert.False(response.IsSuccess);
-        Assert.Equal("invalid_response", response.ErrorKind);
-    }
-
-    [Fact]
-    public async Task GetJsonDocumentAsyncAllowsCompressedResponseContentSafely()
-    {
-        var content = new StringContent("""{"name": "test", "version": 1}""", Encoding.UTF8, "application/json");
-        content.Headers.ContentEncoding.Add("gzip");
-        using var fixture = new DownloadFixture(new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = content,
-        });
-        var (_, http) = fixture;
-
-        var response = await http.GetJsonDocumentAsync(new Uri("https://example.com/api"));
-
-        Assert.True(response.IsSuccess);
-        Assert.NotNull(response.Payload);
-        using var doc = response.Payload;
-        Assert.Equal("test", doc.RootElement.GetProperty("name").GetString());
-        Assert.Equal(1, doc.RootElement.GetProperty("version").GetInt32());
-    }
-
-    [Fact]
-    public async Task GetTextAsyncReturnsContentAndEnforcesLimits()
-    {
-        using var fixture = new DownloadFixture(new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent("純文字內容", Encoding.UTF8, "text/plain"),
-        });
-        var (_, http) = fixture;
-
-        string? text = await http.GetTextAsync(new Uri("https://example.com/text"));
-
-        Assert.Equal("純文字內容", text);
-    }
-
-    [Fact]
-    public async Task GetTextAsyncReturnsNullOnOversizedContent()
-    {
-        var response = new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new ByteArrayContent(new byte[100]),
-        };
-        response.Content.Headers.ContentLength = HttpDownloadClient.MaxTextBytes + 1;
-        using var fixture = new DownloadFixture(response);
-        var (_, http) = fixture;
-
-        string? text = await http.GetTextAsync(new Uri("https://example.com/text"));
-
-        Assert.Null(text);
-    }
-
-    [Fact]
-    public async Task RequestInjectsDefaultUserAgent()
-    {
-        using var fixture = new DownloadFixture(new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent("{}", Encoding.UTF8, "application/json"),
-        });
-        var (handler, http) = fixture;
-
-        await http.GetJsonDocumentAsync(new Uri("https://example.com/api"));
-
-        Assert.NotNull(handler.LastRequest);
-        string userAgent = handler.LastRequest.Headers.UserAgent.ToString();
-        Assert.Contains($"MinecraftServerManager/{Core.AppInfo.Version}", userAgent);
-    }
-
-    [Fact]
-    public async Task IHttpPortDownloadAsyncBridgesCorrectly()
+    public async Task HttpPortDownloadAsync_Success_BridgesResult()
     {
         using var temp = new TempDirectory("msm-http-");
         string target = temp.Combine("port_download.bin");
@@ -293,7 +141,8 @@ public sealed class HttpDownloadClientTests
         var result = await http.DownloadAsync(
             new Uri("https://example.com/port-file"),
             target,
-            new SynchronousProgress<HttpProgress>(progressReports.Add));
+            new SynchronousProgress<HttpProgress>(progressReports.Add),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal("介面下載", File.ReadAllText(target));
@@ -302,69 +151,7 @@ public sealed class HttpDownloadClientTests
     }
 
     [Fact]
-    public async Task PostJsonAsyncReturnsResponseOnSuccess()
-    {
-        using var fixture = new DownloadFixture(new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent("{\"status\":\"ok\"}", Encoding.UTF8, "application/json"),
-        });
-        var (handler, http) = fixture;
-
-        string? response = await http.PostJsonAsync(new Uri("https://example.com/api"), "{\"test\":true}");
-
-        Assert.NotNull(response);
-        Assert.Equal("{\"status\":\"ok\"}", response);
-        Assert.Equal(1, handler.RequestCount);
-    }
-
-    [Fact]
-    public async Task PostJsonAsyncRejectsPrivateIpAndReturnsNull()
-    {
-        using var fixture = new DownloadFixture(new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent("{\"status\":\"ok\"}", Encoding.UTF8, "application/json"),
-        });
-        var (handler, http) = fixture;
-
-        string? response = await http.PostJsonAsync(new Uri("https://127.0.0.1/api"), "{}");
-
-        Assert.Null(response);
-        Assert.Equal(0, handler.RequestCount);
-    }
-
-    [Fact]
-    public async Task PostJsonAsyncFailsClosedOnRedirect()
-    {
-        var redirect = new HttpResponseMessage(HttpStatusCode.Redirect);
-        redirect.Headers.Location = new Uri("https://example.com/other");
-        using var fixture = new DownloadFixture(redirect);
-        var (handler, http) = fixture;
-
-        string? response = await http.PostJsonAsync(new Uri("https://example.com/api"), "{}");
-
-        Assert.Null(response);
-        Assert.Equal(1, handler.RequestCount);
-    }
-
-    [Fact]
-    public async Task PostJsonAsyncReturnsNullWhenResponseOversized()
-    {
-        var oversizedResponse = new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new ByteArrayContent(new byte[100]),
-        };
-        oversizedResponse.Content.Headers.ContentLength = HttpDownloadClient.MaxJsonBytes + 1;
-        using var fixture = new DownloadFixture(oversizedResponse);
-        var (handler, http) = fixture;
-
-        string? response = await http.PostJsonAsync(new Uri("https://example.com/api"), "{}");
-
-        Assert.Null(response);
-        Assert.Equal(1, handler.RequestCount);
-    }
-
-    [Fact]
-    public async Task DownloadRejectsIPv6LoopbackAndPrivateIp()
+    public async Task DownloadAsync_IPv6Loopback_ThrowsBeforeRequest()
     {
         using var temp = new TempDirectory("msm-http-");
         string target = temp.Combine("file.bin");
@@ -372,35 +159,41 @@ public sealed class HttpDownloadClientTests
         var (handler, http) = fixture;
 
         var exception = await Assert.ThrowsAsync<HttpSecurityException>(() =>
-            http.DownloadAsync(new Uri("https://[::1]/download"), target));
+            http.DownloadAsync(new Uri("https://[::1]/download"), target, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Contains("非公開", exception.Message);
         Assert.Equal(0, handler.RequestCount);
     }
 
     [Fact]
-    public async Task GetJsonDocumentAsyncRejectsRedirectLimitExceeded()
+    public async Task DownloadAsync_ConnectRejectedBySecurityPolicy_FailsWithoutRetry()
     {
-        var redirect = new HttpResponseMessage(HttpStatusCode.Redirect);
-        redirect.Headers.Location = new Uri("https://example.com/api");
-        using var fixture = new DownloadFixture(
-            redirect, redirect, redirect, redirect, redirect,
-            redirect, redirect, redirect, redirect, redirect, redirect);
-        var (_, http) = fixture;
+        using var temp = new TempDirectory("msm-http-");
+        var handler = new QueueHandler
+        {
+            SendException = new HttpRequestException("連線失敗", new HttpSecurityException("目標解析為非公開位址")),
+        };
+        using var client = new HttpClient(handler);
+        var downloader = new HttpDownloadClient(client, TimeProvider.System);
 
-        var response = await http.GetJsonDocumentAsync(new Uri("https://example.com/api"));
+        var result = await downloader.DownloadAsync(
+            new Uri("https://example.com/file"),
+            temp.Combine("download.bin"),
+            new HttpDownloadOptions { MaxAttempts = 3, RetryDelay = TimeSpan.Zero },
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.False(response.IsSuccess);
-        Assert.Equal("invalid_request", response.ErrorKind);
+        Assert.False(result.Success);
+        Assert.Equal("目標解析為非公開位址", result.Error);
+        Assert.Equal(1, handler.RequestCount);
     }
 
     [Fact]
-    public async Task DownloadResumesFromExistingPartialFileWhenServerReturns206()
+    public async Task DownloadAsync_PartialFileWith206_Resumes()
     {
         using var temp = new TempDirectory("msm-http-");
         string target = temp.Combine("download.bin");
         string partial = target + ".part";
-        await File.WriteAllTextAsync(partial, "Part1");
+        await File.WriteAllTextAsync(partial, "Part1", TestContext.Current.CancellationToken);
 
         var response = new HttpResponseMessage(HttpStatusCode.PartialContent)
         {
@@ -415,21 +208,22 @@ public sealed class HttpDownloadClientTests
         var result = await downloader.DownloadAsync(
             new Uri("https://example.com/file"),
             target,
-            expectedHash: Convert.ToHexStringLower(SHA256.HashData("Part1Part2"u8)));
+            expectedHash: Convert.ToHexStringLower(SHA256.HashData("Part1Part2"u8)),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
-        Assert.Equal("Part1Part2", await File.ReadAllTextAsync(target));
+        Assert.Equal("Part1Part2", await File.ReadAllTextAsync(target, TestContext.Current.CancellationToken));
         Assert.NotNull(handler.LastRequest?.Headers.Range);
         Assert.Equal(5, handler.LastRequest!.Headers.Range!.Ranges.First().From);
     }
 
     [Fact]
-    public async Task DownloadFallsBackToFullDownloadWhenServerReturns200ForRangeRequest()
+    public async Task DownloadAsync_RangeAnsweredWith200_DownloadsFull()
     {
         using var temp = new TempDirectory("msm-http-");
         string target = temp.Combine("download.bin");
         string partial = target + ".part";
-        await File.WriteAllTextAsync(partial, "OldCorruptContent");
+        await File.WriteAllTextAsync(partial, "OldCorruptContent", TestContext.Current.CancellationToken);
 
         using var fixture = new DownloadFixture(new HttpResponseMessage(HttpStatusCode.OK)
         {
@@ -437,21 +231,19 @@ public sealed class HttpDownloadClientTests
         });
         var (_, downloader) = fixture;
 
-        var result = await downloader.DownloadAsync(
-            new Uri("https://example.com/file"),
-            target);
+        var result = await downloader.DownloadAsync(new Uri("https://example.com/file"), target, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
-        Assert.Equal("FreshFullContent", await File.ReadAllTextAsync(target));
+        Assert.Equal("FreshFullContent", await File.ReadAllTextAsync(target, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task DownloadResetsTemporaryFileWhenServerReturns416()
+    public async Task DownloadAsync_RangeAnsweredWith416_ResetsPartialFile()
     {
         using var temp = new TempDirectory("msm-http-");
         string target = temp.Combine("download.bin");
         string partial = target + ".part";
-        await File.WriteAllTextAsync(partial, "StaleBytes");
+        await File.WriteAllTextAsync(partial, "StaleBytes", TestContext.Current.CancellationToken);
 
         using var fixture = new DownloadFixture(
             new HttpResponseMessage(HttpStatusCode.RequestedRangeNotSatisfiable),
@@ -461,19 +253,20 @@ public sealed class HttpDownloadClientTests
         var result = await downloader.DownloadAsync(
             new Uri("https://example.com/file"),
             target,
-            new HttpDownloadOptions { MaxAttempts = 2, RetryDelay = TimeSpan.Zero });
+            new HttpDownloadOptions { MaxAttempts = 2, RetryDelay = TimeSpan.Zero },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
-        Assert.Equal("FreshData", await File.ReadAllTextAsync(target));
+        Assert.Equal("FreshData", await File.ReadAllTextAsync(target, TestContext.Current.CancellationToken));
         Assert.Equal(2, handler.RequestCount);
     }
 
     [Fact]
-    public async Task DownloadDiscardsStalePartialFileWhenNoExpectedHash()
+    public async Task DownloadAsync_StalePartialWithoutHash_DiscardsPartial()
     {
         using var temp = new TempDirectory("msm-http-");
         string target = temp.Combine("download.bin");
-        await File.WriteAllTextAsync(target + ".part", "StaleBytes");
+        await File.WriteAllTextAsync(target + ".part", "StaleBytes", TestContext.Current.CancellationToken);
 
         using var fixture = new DownloadFixture(new HttpResponseMessage(HttpStatusCode.OK)
         {
@@ -481,20 +274,20 @@ public sealed class HttpDownloadClientTests
         });
         var (handler, downloader) = fixture;
 
-        var result = await downloader.DownloadAsync(new Uri("https://example.com/file"), target);
+        var result = await downloader.DownloadAsync(new Uri("https://example.com/file"), target, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
-        Assert.Equal("FreshContent", await File.ReadAllTextAsync(target));
+        Assert.Equal("FreshContent", await File.ReadAllTextAsync(target, TestContext.Current.CancellationToken));
         Assert.Null(handler.LastRequest?.Headers.Range);
     }
 
     [Fact]
-    public async Task DownloadDiscardsPartialFileWhenETagChanges()
+    public async Task DownloadAsync_ETagChanged_DiscardsPartial()
     {
         using var temp = new TempDirectory("msm-http-");
         string target = temp.Combine("download.bin");
         string partial = target + ".part";
-        await File.WriteAllTextAsync(partial, "OldVersionPart");
+        await File.WriteAllTextAsync(partial, "OldVersionPart", TestContext.Current.CancellationToken);
 
         var initialResponse = new HttpResponseMessage(HttpStatusCode.PartialContent)
         {
@@ -519,14 +312,47 @@ public sealed class HttpDownloadClientTests
             new Uri("https://example.com/file"),
             target,
             new HttpDownloadOptions { MaxAttempts = 3, RetryDelay = TimeSpan.Zero },
-            expectedHash: Convert.ToHexStringLower(SHA256.HashData("BrandNewVersionContent"u8)));
+            expectedHash: Convert.ToHexStringLower(SHA256.HashData("BrandNewVersionContent"u8)),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
-        Assert.Equal("BrandNewVersionContent", await File.ReadAllTextAsync(target));
+        Assert.Equal("BrandNewVersionContent", await File.ReadAllTextAsync(target, TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DownloadAsync_ResumeAfterRetry_SendsIfRangeOnlyForStrongETag(bool isWeak)
+    {
+        using var temp = new TempDirectory("msm-http-");
+        string target = temp.Combine("download.bin");
+        await File.WriteAllTextAsync(target + ".part", "Hello", TestContext.Current.CancellationToken);
+
+        var rateLimited = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+        rateLimited.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"v1\"", isWeak);
+        var partial = new HttpResponseMessage(HttpStatusCode.PartialContent)
+        {
+            Content = new ByteArrayContent("World"u8.ToArray()),
+        };
+        partial.Content.Headers.ContentRange = new System.Net.Http.Headers.ContentRangeHeaderValue(5, 9, 10);
+        using var fixture = new DownloadFixture(rateLimited, partial);
+        var (handler, downloader) = fixture;
+
+        var result = await downloader.DownloadAsync(
+            new Uri("https://example.com/file"),
+            target,
+            new HttpDownloadOptions { MaxAttempts = 2, RetryDelay = TimeSpan.Zero },
+            expectedHash: Convert.ToHexStringLower(SHA256.HashData("HelloWorld"u8)),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success);
+        Assert.Equal("HelloWorld", await File.ReadAllTextAsync(target, TestContext.Current.CancellationToken));
+        Assert.Equal(5, handler.LastRequest?.Headers.Range?.Ranges.Single().From);
+        Assert.Equal(isWeak ? null : "\"v1\"", handler.LastRequest?.Headers.IfRange?.EntityTag?.Tag);
     }
 
     [Fact]
-    public async Task DownloadFailsWithTimeoutWhenBodyStallsBeyondIdleTimeout()
+    public async Task DownloadAsync_BodyStallsBeyondIdleTimeout_FailsWithTimeout()
     {
         using var temp = new TempDirectory("msm-http-");
         string target = temp.Combine("download.bin");
@@ -539,7 +365,8 @@ public sealed class HttpDownloadClientTests
         var result = await downloader.DownloadAsync(
             new Uri("https://example.com/file"),
             target,
-            new HttpDownloadOptions { Timeout = TimeSpan.FromMilliseconds(300), MaxAttempts = 1 });
+            new HttpDownloadOptions { Timeout = TimeSpan.FromMilliseconds(300), MaxAttempts = 1 },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.Equal("HTTP 請求逾時", result.Error);
@@ -547,43 +374,132 @@ public sealed class HttpDownloadClientTests
     }
 
     [Fact]
-    public async Task DownloadSucceedsWhenTotalTimeExceedsTimeoutButDataKeepsArriving()
+    public async Task DownloadAsync_SlowButSteadyBody_Succeeds()
     {
         using var temp = new TempDirectory("msm-http-");
         string target = temp.Combine("download.bin");
         using var fixture = new DownloadFixture(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StreamContent(new PacedStream(chunks: 4, delay: TimeSpan.FromMilliseconds(250), stallAfterLastChunk: false)),
+            // 單段延遲 100 ms 遠小於逾時 600 ms（約 6 倍裕度）；總時長 700 ms 超過逾時，確認判定為閒置而非總時長
+            Content = new StreamContent(new PacedStream(chunks: 8, delay: TimeSpan.FromMilliseconds(100), stallAfterLastChunk: false)),
         });
         var (_, downloader) = fixture;
 
         var result = await downloader.DownloadAsync(
             new Uri("https://example.com/file"),
             target,
-            new HttpDownloadOptions { Timeout = TimeSpan.FromMilliseconds(600), MaxAttempts = 1 });
+            new HttpDownloadOptions { Timeout = TimeSpan.FromMilliseconds(600), MaxAttempts = 1 },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
-        Assert.Equal(4, new FileInfo(target).Length);
+        Assert.Equal(8, new FileInfo(target).Length);
+    }
+
+    [Fact]
+    public async Task DownloadAsync_CallerCancelled_ThrowsOperationCanceledException()
+    {
+        using var temp = new TempDirectory("msm-http-");
+        string target = temp.Combine("download.bin");
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        using var fixture = new DownloadFixture(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new CancelOnSecondReadStream(cts)),
+        });
+        var (_, downloader) = fixture;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            downloader.DownloadAsync(
+                new Uri("https://example.com/file"),
+                target,
+                new HttpDownloadOptions { MaxAttempts = 3 },
+                cancellationToken: cts.Token));
+        Assert.False(File.Exists(target));
+    }
+
+    [Fact]
+    public async Task DownloadAsync_SafeHttpsRedirect_DownloadsTarget()
+    {
+        using var temp = new TempDirectory("msm-http-");
+        string target = temp.Combine("download.bin");
+        var redirect = new HttpResponseMessage(HttpStatusCode.Found);
+        redirect.Headers.Location = new Uri("https://cdn.example.com/actual.bin");
+        using var fixture = new DownloadFixture(
+            redirect,
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent("重導向成功"u8.ToArray()) });
+        var (handler, downloader) = fixture;
+
+        var result = await downloader.DownloadAsync(
+            new Uri("https://example.com/file"),
+            target,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success);
+        Assert.Equal(2, handler.RequestCount);
+        Assert.Equal("重導向成功", await File.ReadAllTextAsync(target, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task DownloadAsync_ChunkedStreamExceedsMaxBytesWithoutContentLength_AbortsAndFails()
+    {
+        using var temp = new TempDirectory("msm-http-");
+        string target = temp.Combine("download.bin");
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new UnknownLengthContent("0123456789"u8.ToArray()),
+        };
+        Assert.Null(response.Content.Headers.ContentLength);
+
+        using var fixture = new DownloadFixture(response);
+        var (_, downloader) = fixture;
+
+        var result = await downloader.DownloadAsync(
+            new Uri("https://example.com/file"),
+            target,
+            new HttpDownloadOptions { MaxBytes = 4, MaxAttempts = 1 },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Contains("大小上限", result.Error);
+        Assert.False(File.Exists(target));
+    }
+
+    private sealed class UnknownLengthContent(byte[] data) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            stream.WriteAsync(data, 0, data.Length);
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellationToken) =>
+            stream.WriteAsync(data.AsMemory(), cancellationToken).AsTask();
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+    }
+
+    private sealed class CancelOnSecondReadStream(CancellationTokenSource cts) : AsyncReadOnlyStream
+    {
+        private int _reads;
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_reads++ == 0)
+            {
+                buffer.Span[0] = (byte)'A';
+                return ValueTask.FromResult(1);
+            }
+
+            cts.Cancel();
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(0);
+        }
     }
 
     /// <summary>每次讀出一個位元組並於區塊間延遲；可於最後一塊後永久停滯</summary>
-    private sealed class PacedStream(int chunks, TimeSpan delay, bool stallAfterLastChunk) : Stream
+    private sealed class PacedStream(int chunks, TimeSpan delay, bool stallAfterLastChunk) : AsyncReadOnlyStream
     {
         private int _sent;
-
-        public override bool CanRead => true;
-
-        public override bool CanSeek => false;
-
-        public override bool CanWrite => false;
-
-        public override long Length => throw new NotSupportedException();
-
-        public override long Position
-        {
-            get => throw new NotSupportedException();
-            set => throw new NotSupportedException();
-        }
 
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
@@ -606,61 +522,5 @@ public sealed class HttpDownloadClientTests
             _sent++;
             return 1;
         }
-
-        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-
-        public override void Flush()
-        {
-        }
-
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-
-        public override void SetLength(long value) => throw new NotSupportedException();
-
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
-
-    /// <summary>以佇列回應組成的下載客戶端；Dispose 時釋放 HttpClient</summary>
-    private sealed class DownloadFixture : IDisposable
-    {
-        private readonly HttpClient _client;
-
-        public DownloadFixture(params HttpResponseMessage[] responses)
-        {
-            Handler = new QueueHandler(responses);
-            _client = new HttpClient(Handler);
-            Client = new HttpDownloadClient(_client);
-        }
-
-        public QueueHandler Handler { get; }
-
-        public HttpDownloadClient Client { get; }
-
-        public void Deconstruct(out QueueHandler handler, out HttpDownloadClient client)
-        {
-            handler = Handler;
-            client = Client;
-        }
-
-        public void Dispose() => _client.Dispose();
-    }
-
-    private sealed class QueueHandler(params HttpResponseMessage[] responses) : HttpMessageHandler
-    {
-        private readonly Queue<HttpResponseMessage> _responses = new(responses);
-
-        public int RequestCount { get; private set; }
-
-        public HttpRequestMessage? LastRequest { get; private set; }
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            RequestCount++;
-            LastRequest = request;
-            return Task.FromResult(_responses.Count > 0
-                ? _responses.Dequeue()
-                : new HttpResponseMessage(HttpStatusCode.InternalServerError));
-        }
-    }
-
 }

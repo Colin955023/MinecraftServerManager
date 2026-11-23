@@ -1,14 +1,14 @@
 using System.Collections.Frozen;
-using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Core.Errors;
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Java;
 
 /// <summary>透過 Windows winget 套件管理員自動安裝 Java</summary>
-public sealed class JavaWingetInstaller(IProcessRunner processRunner) : IJavaInstaller
+public sealed class JavaWingetInstaller : IJavaInstaller
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(JavaWingetInstaller));
+    private static readonly TimeSpan AvailabilityProbeTimeout = TimeSpan.FromSeconds(15);
 
     private static readonly FrozenDictionary<uint, string> WingetErrorMessages = new Dictionary<uint, string>
     {
@@ -29,20 +29,36 @@ public sealed class JavaWingetInstaller(IProcessRunner processRunner) : IJavaIns
 
     private static readonly string[] WingetVersionArgs = ["--version"];
 
-    private async Task<bool> IsWingetAvailableAsync(CancellationToken cancellationToken = default)
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(JavaWingetInstaller));
+
+    private readonly IProcessRunner _processRunner;
+
+    public JavaWingetInstaller(IProcessRunner processRunner)
     {
         ArgumentNullException.ThrowIfNull(processRunner);
+        _processRunner = processRunner;
+    }
 
+    private async Task<bool> IsWingetAvailableAsync(CancellationToken cancellationToken)
+    {
+        // 首次執行 winget 可能卡在來源初始化，設逾時避免安裝流程無限等待
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(AvailabilityProbeTimeout);
         try
         {
-            var process = await processRunner.StartAsync(
+            var process = await _processRunner.StartAsync(
                 new ProcessStartSpec("winget", WingetVersionArgs),
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken: timeoutCts.Token).ConfigureAwait(false);
             await using (process.ConfigureAwait(false))
             {
-                var result = await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+                var result = await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
                 return result.ExitCode == 0;
             }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            Logger.Warning("偵測 winget 可用性逾時 ({Timeout})", AvailabilityProbeTimeout);
+            return false;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -55,8 +71,6 @@ public sealed class JavaWingetInstaller(IProcessRunner processRunner) : IJavaIns
         int majorVersion,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(processRunner);
-
         if (!await IsWingetAvailableAsync(cancellationToken).ConfigureAwait(false))
         {
             throw new JavaInstallException("無法呼叫 winget 工具，請確認系統已安裝「應用程式安裝程式 (App Installer)」");
@@ -66,13 +80,14 @@ public sealed class JavaWingetInstaller(IProcessRunner processRunner) : IJavaIns
 
         try
         {
-            var process = await processRunner.StartAsync(
+            // 以 --id/--exact 精確比對並限定官方 winget 來源，避免名稱模糊比對安裝到其他套件
+            var process = await _processRunner.StartAsync(
                 new ProcessStartSpec(
                     "winget",
-                    ["install", "--accept-package-agreements", "--accept-source-agreements", packageId],
+                    ["install", "--id", packageId, "--exact", "--source", "winget", "--accept-package-agreements", "--accept-source-agreements"],
                     CreateNoWindow: false,
                     UseShellExecute: true),
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken: cancellationToken).ConfigureAwait(false);
             await using (process.ConfigureAwait(false))
             {
                 var result = await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
@@ -91,7 +106,7 @@ public sealed class JavaWingetInstaller(IProcessRunner processRunner) : IJavaIns
                 return result;
             }
         }
-        catch (Exception ex) when (ex is not JavaInstallException)
+        catch (Exception ex) when (ex is not JavaInstallException and not OperationCanceledException)
         {
             throw new JavaInstallException($"透過 winget 安裝 {packageId} 發生例外：{ex.Message}", ex);
         }

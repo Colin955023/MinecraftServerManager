@@ -88,11 +88,11 @@ public static class TableSortKeys
     public static readonly SortKeyMap<ServerBannedPlayerEntry> BannedPlayers = new(
         ("Name", static r => r.Name),
         ("Reason", static r => r.Reason),
-        ("FormattedCreated", static r => r.FormattedCreated),
+        ("Created", static r => PlayerTimeFormatter.Format(r.Created)),
         ("Uuid", static r => r.Uuid));
 
     public static readonly SortKeyMap<ServerBannedIpEntry> BannedIps = new(
         ("Ip", static r => r.Ip),
         ("Reason", static r => r.Reason),
-        ("FormattedCreated", static r => r.FormattedCreated));
+        ("Created", static r => PlayerTimeFormatter.Format(r.Created)));
 }

@@ -18,13 +18,13 @@ public sealed class MainViewModelTests : IDisposable
     private MainViewModel CreateIsolatedViewModel(string themeMode = "dark", IUiService? uiService = null, Core.Ports.IRunningServerRegistry? registry = null)
     {
         var settings = new Infrastructure.Settings.SettingsManager(_testDir);
-        settings.SetThemeMode(themeMode);
+        settings.UpdatePreferences(p => p with { ThemeMode = themeMode });
         var deps = TestDependencies.Create(_testDir, uiService, settings: settings, runningServerRegistry: registry);
         return TestDependencies.CreateMainViewModel(deps);
     }
 
     [Fact]
-    public void InitialStateShouldShowCreateServerPage()
+    public void Constructor_Default_ShowsCreateServerPage()
     {
         var vm = CreateIsolatedViewModel();
 
@@ -39,7 +39,7 @@ public sealed class MainViewModelTests : IDisposable
     [InlineData("manage", typeof(ManageServerViewModel), "管理現有伺服器")]
     [InlineData("mods", typeof(ModsViewModel), "模組管理")]
     [InlineData("about_preferences", typeof(AboutPreferencesViewModel), "關於與設定")]
-    public void NavigateShouldSwitchCurrentPageWhenKeyIsValid(string key, Type expectedType, string expectedTitle)
+    public void Navigate_ValidKey_SwitchesPage(string key, Type expectedType, string expectedTitle)
     {
         var vm = CreateIsolatedViewModel();
 
@@ -50,7 +50,7 @@ public sealed class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public void NavigateShouldShowErrorNotificationWhenKeyIsInvalid()
+    public void Navigate_InvalidKey_ShowsError()
     {
         var ui = new ManualUiService();
         var vm = CreateIsolatedViewModel(uiService: ui);
@@ -64,13 +64,27 @@ public sealed class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public void ActionCommandsShouldTriggerNotifications()
+    public async Task ImportServer_WhenDialogConfirmedWithoutInputs_DoesNotReportSuccess()
     {
         var ui = new ManualUiService { ImportServerResult = true };
         var vm = CreateIsolatedViewModel(uiService: ui);
 
-        vm.ImportServerCommand.Execute(null);
-        Assert.Contains("匯入", ui.LastNotification?.Message);
+        await vm.ImportServerCommand.ExecuteAsync(null);
+
+        Assert.DoesNotContain(ui.Notifications, n => n.Type == NotificationType.Success);
+    }
+
+    [Fact]
+    public async Task DisposePagesAsync_PendingPreferenceSave_Flushes()
+    {
+        var vm = CreateIsolatedViewModel();
+        vm.Navigate("about_preferences");
+        var about = Assert.IsType<AboutPreferencesViewModel>(vm.CurrentPage);
+        about.BackupRetentionCount = 7;
+
+        await vm.DisposePagesAsync();
+
+        Assert.Equal(7, new Infrastructure.Settings.SettingsManager(_testDir).GetBackupRetentionCount());
     }
 
     private sealed class OrphanRegistry(params Core.Ports.TrackedServerProcess[] orphans) : Core.Ports.IRunningServerRegistry
@@ -89,6 +103,8 @@ public sealed class MainViewModelTests : IDisposable
             Terminated.Add(process);
             return Task.FromResult(true);
         }
+
+        public Task FlushAsync() => Task.CompletedTask;
     }
 
     [Fact]
@@ -97,7 +113,7 @@ public sealed class MainViewModelTests : IDisposable
         var ui = new ManualUiService();
         var vm = CreateIsolatedViewModel(uiService: ui, registry: new OrphanRegistry());
 
-        await vm.CheckOrphanedServersOnStartupAsync();
+        await vm.CheckOrphanedServersOnStartupAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(ui.ChoiceMessages);
     }
@@ -110,7 +126,7 @@ public sealed class MainViewModelTests : IDisposable
         var registry = new OrphanRegistry(new Core.Ports.TrackedServerProcess("A", 100, 1), new Core.Ports.TrackedServerProcess("B", 200, 2));
         var vm = CreateIsolatedViewModel(uiService: ui, registry: registry);
 
-        await vm.CheckOrphanedServersOnStartupAsync();
+        await vm.CheckOrphanedServersOnStartupAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(2, registry.Terminated.Count);
         Assert.Contains("PID 100", ui.ChoiceMessages[0].Message, StringComparison.Ordinal);
@@ -125,7 +141,7 @@ public sealed class MainViewModelTests : IDisposable
         var registry = new OrphanRegistry(new Core.Ports.TrackedServerProcess("A", 100, 1));
         var vm = CreateIsolatedViewModel(uiService: ui, registry: registry);
 
-        await vm.CheckOrphanedServersOnStartupAsync();
+        await vm.CheckOrphanedServersOnStartupAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(registry.Terminated);
     }

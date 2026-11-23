@@ -1,5 +1,5 @@
-using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Mods;
 
 namespace MinecraftServerManager.UnitTests.Mods;
@@ -7,7 +7,7 @@ namespace MinecraftServerManager.UnitTests.Mods;
 public sealed class ModrinthClientTests
 {
     [Fact]
-    public async Task SearchModsAsyncShouldParseResponseCorrectly()
+    public async Task SearchModsAsync_ValidResponse_ParsesHits()
     {
         string jsonResponse = """
         {
@@ -60,7 +60,7 @@ public sealed class ModrinthClientTests
         });
         var client = new ModrinthClient(fakeHttp);
 
-        var results = await client.SearchModsAsync("fabric-api", loader: "fabric", minecraftVersion: "1.20.1");
+        var results = await client.SearchModsAsync("fabric-api", loader: LoaderKind.Fabric, minecraftVersion: "1.20.1", cancellationToken: TestContext.Current.CancellationToken);
 
         var mod = Assert.Single(results);
         Assert.Equal("AANobbMI", mod.ProjectId);
@@ -74,7 +74,7 @@ public sealed class ModrinthClientTests
     }
 
     [Fact]
-    public async Task SearchModsAsyncFiltersOutUnsupportedServerSideMods()
+    public async Task SearchModsAsync_ServerSideUnsupported_FiltersOut()
     {
         string jsonResponse = """
         {
@@ -102,12 +102,12 @@ public sealed class ModrinthClientTests
         var fakeHttp = CreateHttpPort(uri => uri.AbsoluteUri.Contains("/search") ? jsonResponse : null);
         var client = new ModrinthClient(fakeHttp);
 
-        var results = await client.SearchModsAsync("sodium", loader: "fabric", minecraftVersion: "1.20.1");
+        var results = await client.SearchModsAsync("sodium", loader: LoaderKind.Fabric, minecraftVersion: "1.20.1", cancellationToken: TestContext.Current.CancellationToken);
         Assert.Empty(results);
     }
 
     [Fact]
-    public async Task SearchModsAsyncSkipsHitsWithoutProjectId()
+    public async Task SearchModsAsync_HitWithoutProjectId_Skips()
     {
         string jsonResponse = """
         {
@@ -121,13 +121,13 @@ public sealed class ModrinthClientTests
         var fakeHttp = CreateHttpPort(uri => uri.AbsoluteUri.Contains("/search") ? jsonResponse : null);
         var client = new ModrinthClient(fakeHttp);
 
-        var results = await client.SearchModsAsync("good", loader: "fabric", minecraftVersion: "1.20.1");
+        var results = await client.SearchModsAsync("good", loader: LoaderKind.Fabric, minecraftVersion: "1.20.1", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("ok1", Assert.Single(results).ProjectId);
     }
 
     [Fact]
-    public async Task GetProjectVersionsAsyncSkipsMalformedEntriesAndKeepsTheRest()
+    public async Task GetProjectVersionsAsync_MalformedEntries_SkipsThem()
     {
         string jsonResponse = """
         [
@@ -139,13 +139,13 @@ public sealed class ModrinthClientTests
 
         var client = new ModrinthClient(CreateHttpPort(uri => uri.AbsoluteUri.Contains("/version") ? jsonResponse : null));
 
-        var versions = await client.GetProjectVersionsAsync("sodium");
+        var versions = await client.GetProjectVersionsAsync("sodium", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("good", Assert.Single(versions).VersionId);
     }
 
     [Fact]
-    public async Task GetProjectVersionsAsyncShouldParseVersionsAndDependencies()
+    public async Task GetProjectVersionsAsync_ValidResponse_ParsesVersionsAndDependencies()
     {
         string jsonResponse = """
         [
@@ -185,13 +185,13 @@ public sealed class ModrinthClientTests
         var fakeHttp = CreateHttpPort(uri => uri.AbsoluteUri.Contains("/version") ? jsonResponse : null);
         var client = new ModrinthClient(fakeHttp);
 
-        var versions = await client.GetProjectVersionsAsync("sodium");
+        var versions = await client.GetProjectVersionsAsync("sodium", cancellationToken: TestContext.Current.CancellationToken);
 
         var ver = Assert.Single(versions);
         Assert.Equal("v12345", ver.VersionId);
         Assert.Equal("0.5.8", ver.VersionNumber);
         var file = Assert.Single(ver.Files);
-        Assert.Equal("sodium-fabric-0.5.8.jar", file.Filename);
+        Assert.Equal("sodium-fabric-0.5.8.jar", file.FileName);
         Assert.Equal("https://cdn.modrinth.com/data/sodium.jar", file.Url);
         var dep = Assert.Single(ver.Dependencies);
         Assert.Equal("P7dR8mSH", dep.ProjectId);
@@ -199,7 +199,7 @@ public sealed class ModrinthClientTests
     }
 
     [Fact]
-    public async Task LookupVersionsByHashesAsyncShouldReturnMatchingVersion()
+    public async Task LookupVersionsByHashesAsync_KnownHash_ReturnsVersion()
     {
         string jsonResponse = """
         {
@@ -227,33 +227,33 @@ public sealed class ModrinthClientTests
         var fakeHttp = CreateHttpPort(uri => uri.AbsoluteUri.Contains("/version_files") ? jsonResponse : null);
         var client = new ModrinthClient(fakeHttp);
 
-        var result = await client.LookupVersionsByHashesAsync(["testsha1"], "sha1");
+        var result = await client.LookupVersionsByHashesAsync(["testsha1"], "sha1", TestContext.Current.CancellationToken);
 
         var ver = Assert.Single(result).Value;
         Assert.Equal("v999", ver.Version.VersionId);
         Assert.Equal("proj1", ver.ProjectId);
-        Assert.Equal("mod.jar", ver.Version.Files[0].Filename);
+        Assert.Equal("mod.jar", ver.Version.Files[0].FileName);
     }
 
 
     [Fact]
-    public async Task MalformedJsonResponse_ShouldNotThrowAndReturnSafeFallbacks()
+    public async Task AllQueries_MalformedJson_ReturnSafeFallbacks()
     {
         string malformedJson = "{ invalid json content: true,,, ";
         var fakeHttp = CreateHttpPort(_ => malformedJson);
         var client = new ModrinthClient(fakeHttp);
 
         // 1. 搜尋在遭遇畸形 JSON 時，安全記錄並回傳空清單，不擲出未攔截例外
-        var searchResults = await client.SearchModsAsync("test");
+        var searchResults = await client.SearchModsAsync("test", cancellationToken: TestContext.Current.CancellationToken);
         Assert.Empty(searchResults);
 
         // 2. 批次雜湊查詢在遭遇畸形 JSON 時，安全回傳空字典
-        var batchHashResult = await client.LookupVersionsByHashesAsync(["hash1", "hash2"]);
+        var batchHashResult = await client.LookupVersionsByHashesAsync(["hash1", "hash2"], cancellationToken: TestContext.Current.CancellationToken);
         Assert.Empty(batchHashResult);
     }
 
     [Fact]
-    public async Task GetProjectTitlesAsyncMapsIdAndSlugToTitleAndCachesResults()
+    public async Task GetProjectTitlesAsync_IdsAndSlugs_MapsAndCaches()
     {
         var fakeHttp = CreateHttpPort(uri =>
             uri.AbsoluteUri.Contains("/projects?ids=", StringComparison.Ordinal)
@@ -261,8 +261,8 @@ public sealed class ModrinthClientTests
                 : null);
         var client = new ModrinthClient(fakeHttp);
 
-        var first = await client.GetProjectTitlesAsync(["7tEfOcA7", "unknown-project"]);
-        var second = await client.GetProjectTitlesAsync(["geckolib"]);
+        var first = await client.GetProjectTitlesAsync(["7tEfOcA7", "unknown-project"], TestContext.Current.CancellationToken);
+        var second = await client.GetProjectTitlesAsync(["geckolib"], TestContext.Current.CancellationToken);
 
         Assert.Equal("GeckoLib", first["7tEfOcA7"]);
         Assert.False(first.ContainsKey("unknown-project"));
@@ -270,6 +270,5 @@ public sealed class ModrinthClientTests
         Assert.Equal(1, fakeHttp.RequestCount);
     }
 
-    private static StubHttpPort CreateHttpPort(Func<Uri, string?> handler) =>
-        new() { TextHandler = handler, PostHandler = (uri, _) => handler(uri) };
+    private static StubHttpPort CreateHttpPort(Func<Uri, string?> handler) => StubHttpPort.WithText(handler, respondToPost: true);
 }

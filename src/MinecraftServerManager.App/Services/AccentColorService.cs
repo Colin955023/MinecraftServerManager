@@ -7,57 +7,43 @@ using Windows.UI.ViewManagement;
 namespace MinecraftServerManager.App.Services;
 
 /// <summary>應用程式強調色彩管理服務：支援 Windows 系統強調色與自訂色彩動態覆蓋</summary>
-public static class AccentColorService
+public sealed partial class AccentColorService : IAccentColorService, IDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AccentColorService));
-    private static readonly UISettings UiSettings = new();
-    private static string? s_currentCustomHex;
 
-    private static readonly string[] SelectionAccentKeys =
+    private static readonly string[] SelectionAccentBases =
     [
         "CheckBoxCheckBackgroundFillChecked", "CheckBoxCheckBackgroundStrokeChecked", "CheckBoxCheckBackgroundFillIndeterminate",
         "RadioButtonOuterEllipseCheckedFill", "RadioButtonOuterEllipseCheckedStroke",
         "ToggleSwitchFillOn", "ToggleSwitchStrokeOn",
     ];
 
-    private static readonly string[] SelectionAccentPointerOverKeys =
+    // 選取狀態前景：一般、滑鼠停留與按下各依對應底色獨立計算可讀色
+    private static readonly string[] SelectionGlyphBases =
     [
-        "CheckBoxCheckBackgroundFillCheckedPointerOver", "CheckBoxCheckBackgroundStrokeCheckedPointerOver", "CheckBoxCheckBackgroundFillIndeterminatePointerOver",
-        "RadioButtonOuterEllipseCheckedFillPointerOver", "RadioButtonOuterEllipseCheckedStrokePointerOver",
-        "ToggleSwitchFillOnPointerOver", "ToggleSwitchStrokeOnPointerOver",
+        "CheckBoxCheckGlyphForegroundChecked", "CheckBoxCheckGlyphForegroundIndeterminate", "RadioButtonCheckGlyphFill", "ToggleSwitchKnobFillOn",
     ];
 
-    private static readonly string[] SelectionAccentPressedKeys =
-    [
-        "CheckBoxCheckBackgroundFillCheckedPressed", "CheckBoxCheckBackgroundStrokeCheckedPressed", "CheckBoxCheckBackgroundFillIndeterminatePressed",
-        "RadioButtonOuterEllipseCheckedFillPressed", "RadioButtonOuterEllipseCheckedStrokePressed",
-        "ToggleSwitchFillOnPressed", "ToggleSwitchStrokeOnPressed",
-    ];
-
-    private static readonly string[] SelectionGlyphKeys =
-    [
-        "CheckBoxCheckGlyphForegroundChecked", "CheckBoxCheckGlyphForegroundCheckedPointerOver", "CheckBoxCheckGlyphForegroundCheckedPressed",
-        "CheckBoxCheckGlyphForegroundIndeterminate", "CheckBoxCheckGlyphForegroundIndeterminatePointerOver", "CheckBoxCheckGlyphForegroundIndeterminatePressed",
-        "RadioButtonCheckGlyphFill", "RadioButtonCheckGlyphFillPointerOver", "RadioButtonCheckGlyphFillPressed",
-        "ToggleSwitchKnobFillOn", "ToggleSwitchKnobFillOnPointerOver", "ToggleSwitchKnobFillOnPressed",
-    ];
     // 文字對比基準：取各主題卡片與頁面中對比最差的底色
     private static readonly Color LightTextBackground = Color.FromArgb(255, 0xF3, 0xF3, 0xF3);
     private static readonly Color DarkTextBackground = Color.FromArgb(255, 0x2C, 0x2C, 0x2C);
-    private static Action<Action>? s_postToUi;
 
-    static AccentColorService()
+    private readonly UISettings _uiSettings = new();
+    private readonly Action<Action> _postToUi;
+    private volatile string? _currentCustomHex;
+    private volatile bool _disposed;
+    private bool _subscribed;
+
+    /// <summary>建立服務並監聽系統色彩變更</summary>
+    /// <param name="postToUi">派送至 UI 執行緒之委派（UISettings 事件於背景執行緒觸發）</param>
+    public AccentColorService(Action<Action> postToUi)
     {
+        ArgumentNullException.ThrowIfNull(postToUi);
+        _postToUi = postToUi;
         try
         {
-            UiSettings.ColorValuesChanged += (sender, args) =>
-            {
-                // UISettings 事件於背景執行緒觸發，資源字典僅能於 UI 執行緒更新
-                if (string.IsNullOrEmpty(s_currentCustomHex) && s_postToUi is { } postToUi)
-                {
-                    postToUi(() => ApplyAccentColor(null));
-                }
-            };
+            _uiSettings.ColorValuesChanged += OnSystemColorValuesChanged;
+            _subscribed = true;
         }
         catch (Exception ex)
         {
@@ -65,19 +51,42 @@ public static class AccentColorService
         }
     }
 
-    /// <summary>設定 UI 執行緒派送委派</summary>
-    public static void SetUiDispatcher(Action<Action> postToUi) =>
-        s_postToUi = postToUi ?? throw new ArgumentNullException(nameof(postToUi));
+    public event Action? AccentColorChanged;
 
-    /// <summary>當強調色彩變更時觸發</summary>
-    public static event Action? AccentColorChanged;
+    public void Dispose()
+    {
+        _disposed = true;
+        if (!_subscribed)
+        {
+            return;
+        }
 
-    /// <summary>取得目前 Windows 系統的強調色彩</summary>
-    public static Color GetSystemAccentColor()
+        _subscribed = false;
+        _uiSettings.ColorValuesChanged -= OnSystemColorValuesChanged;
+    }
+
+    private void OnSystemColorValuesChanged(UISettings sender, object args)
+    {
+        // 資源字典僅能於 UI 執行緒更新；自訂色彩或已處置時不執行
+        if (!_disposed && string.IsNullOrEmpty(_currentCustomHex))
+        {
+            _postToUi(() =>
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                ApplyAccentColor(null);
+            });
+        }
+    }
+
+    public Color GetSystemAccentColor()
     {
         try
         {
-            return UiSettings.GetColorValue(UIColorType.Accent);
+            return _uiSettings.GetColorValue(UIColorType.Accent);
         }
         catch (Exception ex)
         {
@@ -87,12 +96,12 @@ public static class AccentColorService
     }
 
     /// <summary>取得系統強調色及其明暗色階，失敗時改用計算值</summary>
-    private static (Color Accent, Color Hover, Color Pressed) GetSystemAccentShades()
+    private (Color Accent, Color Hover, Color Pressed) GetSystemAccentShades()
     {
         Color accent = GetSystemAccentColor();
         try
         {
-            return (accent, UiSettings.GetColorValue(UIColorType.AccentLight1), UiSettings.GetColorValue(UIColorType.AccentDark1));
+            return (accent, _uiSettings.GetColorValue(UIColorType.AccentLight1), _uiSettings.GetColorValue(UIColorType.AccentDark1));
         }
         catch (Exception ex)
         {
@@ -101,12 +110,11 @@ public static class AccentColorService
         }
     }
 
-    /// <summary>套用強調色彩（若 customHex 為空則使用系統色彩與系統原生色階）</summary>
-    public static void ApplyAccentColor(string? customHex)
+    public void ApplyAccentColor(string? customHex)
     {
         try
         {
-            s_currentCustomHex = customHex;
+            _currentCustomHex = customHex;
             (Color color, Color hoverColor, Color pressedColor) = ParseColor(customHex) is { } custom
                 ? (custom, CalculateHoverColor(custom), CalculatePressedColor(custom))
                 : GetSystemAccentShades();
@@ -139,7 +147,7 @@ public static class AccentColorService
                 }
             }
 
-            Logger.Information("套用強調色彩: {Hex} (RGB: {R},{G},{B})", customHex ?? "系統預設", color.R, color.G, color.B);
+            Logger.Information("套用強調色彩：{Hex}（RGB：{R},{G},{B}）", customHex ?? "系統預設", color.R, color.G, color.B);
             AccentColorChanged?.Invoke();
         }
         catch (System.Runtime.InteropServices.COMException ex)
@@ -172,24 +180,24 @@ public static class AccentColorService
         UpdateBrush(dict, "AccentButtonForegroundPressed", GetReadableForeground(pressedColor));
 
         // 輕量樣式鍵：核取方塊、選項按鈕與切換開關的選取狀態跟隨強調色
-        foreach (string key in SelectionAccentKeys)
-        {
-            UpdateBrush(dict, key, color);
-        }
+        (string Suffix, Color Accent, Color Glyph)[] states =
+        [
+            (string.Empty, color, GetReadableForeground(color)),
+            ("PointerOver", hoverColor, GetReadableForeground(hoverColor)),
+            ("Pressed", pressedColor, GetReadableForeground(pressedColor)),
+        ];
 
-        foreach (string key in SelectionAccentPointerOverKeys)
+        foreach (var (suffix, accentVal, glyphVal) in states)
         {
-            UpdateBrush(dict, key, hoverColor);
-        }
+            foreach (string baseKey in SelectionAccentBases)
+            {
+                UpdateBrush(dict, baseKey + suffix, accentVal);
+            }
 
-        foreach (string key in SelectionAccentPressedKeys)
-        {
-            UpdateBrush(dict, key, pressedColor);
-        }
-
-        foreach (string key in SelectionGlyphKeys)
-        {
-            UpdateBrush(dict, key, GetReadableForeground(color));
+            foreach (string baseKey in SelectionGlyphBases)
+            {
+                UpdateBrush(dict, baseKey + suffix, glyphVal);
+            }
         }
     }
 
@@ -235,7 +243,8 @@ public static class AccentColorService
     private static double ToLinear(byte channel)
     {
         double value = channel / 255d;
-        return value <= 0.03928 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
+        // WCAG 2.1 sRGB 線性化門檻
+        return value <= 0.04045 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
     }
 
     private static void UpdateBrush(ResourceDictionary dict, string key, Color color)

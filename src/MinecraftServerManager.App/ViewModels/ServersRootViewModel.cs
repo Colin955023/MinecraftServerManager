@@ -13,14 +13,14 @@ public sealed partial class ServersRootViewModel : ViewModelBase
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServersRootViewModel));
 
     private readonly IUiService _ui;
-    private readonly SettingsManager _settingsManager;
+    private readonly ISettingsManager _settingsManager;
     private readonly IServersRootService _rootService;
     private readonly IServerRuntimeHost _runtimeHost;
     private readonly ILocalFileSystem _fileSystem;
     private readonly ServerListViewModel _list;
 
     public ServersRootViewModel(
-        SettingsManager settingsManager,
+        ISettingsManager settingsManager,
         IServersRootService rootService,
         IServerRuntimeHost runtimeHost,
         ILocalFileSystem fileSystem,
@@ -32,6 +32,7 @@ public sealed partial class ServersRootViewModel : ViewModelBase
         ArgumentNullException.ThrowIfNull(runtimeHost);
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(list);
+        ArgumentNullException.ThrowIfNull(uiService);
 
         _ui = uiService;
         _settingsManager = settingsManager;
@@ -44,20 +45,19 @@ public sealed partial class ServersRootViewModel : ViewModelBase
     [RelayCommand]
     public async Task ChangeServersRootAsync()
     {
-        if (_runtimeHost.IsAnyRunning)
+        if (!_ui.EnsureServerStopped(_runtimeHost.IsAnyRunning, "目前有伺服器正在執行中，請先停止伺服器後再修改存放路徑。", "無法修改路徑"))
         {
-            _ui.ShowNotification("目前有伺服器正在執行中，請先停止伺服器後再修改存放路徑。", "無法修改路徑", NotificationType.Warning);
             return;
         }
 
-        string currentPath = _list.ResolveServersDirectory();
-        string? pickedFolder = await _ui.PickFolderAsync("選擇伺服器存放主資料夾", _fileSystem.DirectoryExists(currentPath) ? currentPath : null).ConfigureAwait(true);
+        string currentPath = await _list.ResolveServersDirectoryAsync();
+        string? pickedFolder = await _ui.PickFolderAsync("選擇伺服器存放主資料夾", await _fileSystem.DirectoryExistsAsync(currentPath) ? currentPath : null);
         if (string.IsNullOrWhiteSpace(pickedFolder))
         {
             return;
         }
 
-        var check = _rootService.ValidateTargetRoot(currentPath, pickedFolder);
+        var check = await _rootService.ValidateTargetRootAsync(currentPath, pickedFolder);
         switch (check.Result)
         {
             case RelocationPathCheckResult.SameAsCurrent:
@@ -73,10 +73,10 @@ public sealed partial class ServersRootViewModel : ViewModelBase
         string normalizedNew = check.NormalizedNew;
 
         // 新路徑一律為「所選資料夾\servers」；位於原路徑內時只改設定
-        bool hasContent = await _rootService.HasStoredContentAsync(normalizedCurrent).ConfigureAwait(true);
+        bool hasContent = await _rootService.HasStoredContentAsync(normalizedCurrent);
         if (!hasContent || check.Result == RelocationPathCheckResult.SubdirectoryOfCurrent)
         {
-            await ApplySettingOnlyAsync(normalizedNew, $"伺服器存放路徑已更新為：\n{normalizedNew}\n\n應用程式將重新啟動以套用新路徑設定。").ConfigureAwait(true);
+            await ApplySettingOnlyAsync(normalizedNew, $"伺服器存放路徑已更新為：\n{normalizedNew}");
             return;
         }
 
@@ -85,7 +85,7 @@ public sealed partial class ServersRootViewModel : ViewModelBase
             "是否遷移伺服器資料",
             "是，遷移資料",
             "否，僅改設定",
-            "取消").ConfigureAwait(true);
+            "取消");
 
         if (decision is null)
         {
@@ -94,11 +94,11 @@ public sealed partial class ServersRootViewModel : ViewModelBase
 
         if (decision == false)
         {
-            await ApplySettingOnlyAsync(normalizedNew, $"伺服器存放路徑已更新為：\n{normalizedNew}\n（原路徑資料已保留於原處）\n\n應用程式將重新啟動以套用新路徑設定。").ConfigureAwait(true);
+            await ApplySettingOnlyAsync(normalizedNew, $"伺服器存放路徑已更新為：\n{normalizedNew}\n（原路徑資料已保留於原處）");
             return;
         }
 
-        bool isTargetEmpty = await _rootService.IsTargetDirectoryEmptyAsync(normalizedNew).ConfigureAwait(true);
+        bool isTargetEmpty = await _rootService.IsTargetDirectoryEmptyAsync(normalizedNew);
         if (!isTargetEmpty)
         {
             _ui.ShowNotification(
@@ -111,53 +111,63 @@ public sealed partial class ServersRootViewModel : ViewModelBase
         try
         {
             IReadOnlyList<string> leftovers;
-            using (var progressDialog = _ui.ShowModOperationProgress("遷移伺服器存放資料", "正在準備遷移伺服器資料..."))
+            using (var progressDialog = _ui.ShowOperationProgress("遷移伺服器存放資料", "正在準備遷移伺服器資料..."))
             {
-                var progress = new Progress<(int Percent, string Message)>(report =>
-                    progressDialog.UpdateProgress(report.Percent, 100, report.Message));
+                var progress = progressDialog.CreateProgress();
 
-                leftovers = await _rootService.RelocateAllContentAsync(normalizedCurrent, normalizedNew, progress).ConfigureAwait(true);
+                leftovers = await _rootService.RelocateAllContentAsync(normalizedCurrent, normalizedNew, progress);
             }
 
-            _settingsManager.SetExactServersRoot(normalizedNew);
-            _list.DetectPath = normalizedNew;
+            await SaveServersRootAsync(normalizedNew);
 
             string leftoverNote = leftovers.Count == 0
                 ? string.Empty
                 : $"\n\n下列原位置項目已複製到新路徑，但無法刪除（可能被其他程式占用），請自行移除：\n{string.Join('\n', leftovers)}";
-            await _ui.ConfirmAsync(
-                $"伺服器資料已成功遷移至新路徑：\n{normalizedNew}{leftoverNote}\n\n應用程式將重新啟動以套用新路徑設定。",
-                "遷移完成",
-                UiMessageLevel.Information).ConfigureAwait(true);
-            await RestartAfterRootChangeAsync().ConfigureAwait(true);
+            await PromptRestartAsync($"伺服器資料已成功遷移至新路徑：\n{normalizedNew}{leftoverNote}", "遷移完成");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.Error(ex, "遷移伺服器存放資料失敗");
-            await _ui.ShowErrorAsync($"遷移伺服器存放資料失敗（已自動復原原路徑資料）：\n{ex.Message}", "遷移失敗").ConfigureAwait(true);
+            await _ui.ShowErrorAsync($"遷移伺服器存放資料失敗（已自動復原原路徑資料）：\n{ex.Message}", "遷移失敗");
         }
     }
 
-    /// <summary>僅修改存放路徑設定（不搬移資料）並重新啟動應用程式</summary>
-    private async Task ApplySettingOnlyAsync(string normalizedNew, string confirmMessage)
+    /// <summary>僅修改存放路徑設定（不搬移資料）並詢問是否重新啟動</summary>
+    private async Task ApplySettingOnlyAsync(string normalizedNew, string message)
     {
         try
         {
-            _settingsManager.SetExactServersRoot(normalizedNew);
-            _list.DetectPath = normalizedNew;
-            await _ui.ConfirmAsync(confirmMessage, "路徑已更新", UiMessageLevel.Information).ConfigureAwait(true);
-            await RestartAfterRootChangeAsync().ConfigureAwait(true);
+            await SaveServersRootAsync(normalizedNew);
+            await PromptRestartAsync(message, "路徑已更新");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.Error(ex, "修改伺服器存放路徑失敗");
-            await _ui.ShowErrorAsync($"修改伺服器存放路徑失敗：\n{ex.Message}", "修改失敗").ConfigureAwait(true);
+            await _ui.ShowErrorAsync($"修改伺服器存放路徑失敗：\n{ex.Message}", "修改失敗");
         }
     }
 
-    /// <summary>路徑設定完成後重新啟動；失敗時請使用者手動重新開啟</summary>
-    private async Task RestartAfterRootChangeAsync()
+    /// <summary>於背景執行緒寫入設定檔後更新清單偵測路徑</summary>
+    private async Task SaveServersRootAsync(string normalizedNew)
     {
+        await Task.Run(() => _settingsManager.SetExactServersRoot(normalizedNew));
+        _list.DetectPath = normalizedNew;
+    }
+
+    /// <summary>詢問是否立即重新啟動以套用新路徑；選擇稍後時提示下次啟動才完整套用</summary>
+    private async Task PromptRestartAsync(string message, string title)
+    {
+        if (!await _ui.ConfirmChoiceAsync(
+            $"{message}\n\n需重新啟動應用程式才能完整套用新路徑設定。",
+            title,
+            "立即重新啟動",
+            "稍後",
+            UiMessageLevel.Information))
+        {
+            _ui.Notify("新的伺服器存放路徑將於下次啟動應用程式後完整套用", NotificationType.Info);
+            return;
+        }
+
         try
         {
             _ui.RestartApplication();
@@ -167,7 +177,7 @@ public sealed partial class ServersRootViewModel : ViewModelBase
             Logger.Error(ex, "重新啟動應用程式失敗");
             await _ui.ShowErrorAsync(
                 $"新路徑設定已儲存，但無法自動重新啟動：\n{ex.Message}\n\n請關閉後手動重新開啟程式以套用新路徑。",
-                "重新啟動失敗").ConfigureAwait(true);
+                "重新啟動失敗");
         }
     }
 }

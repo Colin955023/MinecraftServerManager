@@ -1,0 +1,11 @@
+# Gitleaks 安全掃描設定檔
+# 延伸官方預設規則集，並排除非原始碼之暫存建置輸出、本機資料庫與二進位檔案
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "排除非原始碼與暫存建置輸出目錄"
+paths = [
+    '''(?i)(^|[/\\])(output|\.codegraph|bin|obj|TestResults)([/\\]|$)''',
+    '''(?i)\.(exe|dll|pdb|db|sqlite|zip|jar|spdx\.json)$'''
+]

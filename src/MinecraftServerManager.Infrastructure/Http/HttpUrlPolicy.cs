@@ -28,16 +28,19 @@ public static class HttpUrlPolicy
         IPNetwork.Parse("240.0.0.0/4"),
     ];
 
-    private static readonly IPNetwork[] PrivateIPv6Networks =
+    // IPv6 採白名單：只允許全球單播 2000::/3，再扣除其中的保留段
+    private static readonly IPNetwork GlobalUnicastIPv6 = IPNetwork.Parse("2000::/3");
+
+    private static readonly IPNetwork[] ReservedGlobalUnicastIPv6Networks =
     [
-        IPNetwork.Parse("fc00::/7"),
-        IPNetwork.Parse("ff00::/8"),
-        IPNetwork.Parse("2001:db8::/32"),
-        IPNetwork.Parse("2001:10::/28"),
-        IPNetwork.Parse("2001:20::/28"),
-        IPNetwork.Parse("64:ff9b:1::/48"),
-        IPNetwork.Parse("100::/64"),
+        IPNetwork.Parse("2001::/23"),     // IETF 協定指派（含 Teredo、ORCHID、基準測試）
+        IPNetwork.Parse("2001:db8::/32"), // 文件範例
+        IPNetwork.Parse("3fff::/20"),     // 文件範例
     ];
+
+    // 公開 NAT64 前綴（RFC 6052）：以內嵌 IPv4 判定
+    private static readonly IPNetwork WellKnownNat64 = IPNetwork.Parse("64:ff9b::/96");
+    private static readonly IPNetwork SixToFour = IPNetwork.Parse("2002::/16");
 
     /// <summary><see cref="SocketsHttpHandler.ConnectCallback"/> 的連線進入點</summary>
     public static async ValueTask<Stream> ConnectAsync(
@@ -68,13 +71,14 @@ public static class HttpUrlPolicy
         SocketException? lastException = null;
         foreach (IPAddress address in addresses)
         {
-            // 啟用 NoDelay，與 SocketsHttpHandler 預設一致
-            var socket = (Socket?)new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            Socket? socket = null;
             using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             attemptCts.CancelAfter(PerAddressConnectTimeout);
             try
             {
-                await socket!.ConnectAsync(new IPEndPoint(address, endpoint.Port), attemptCts.Token).ConfigureAwait(false);
+                // 啟用 NoDelay，與 SocketsHttpHandler 預設一致
+                socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+                await socket.ConnectAsync(new IPEndPoint(address, endpoint.Port), attemptCts.Token).ConfigureAwait(false);
                 var stream = new NetworkStream(socket, ownsSocket: true);
                 socket = null;
                 return stream;
@@ -149,11 +153,12 @@ public static class HttpUrlPolicy
             }
             catch (SocketException exception)
             {
-                throw new HttpSecurityException("URL hostname 無法解析", exception);
+                // DNS 失敗屬暫時性網路錯誤，交由重試邏輯處理，不視為安全違規
+                throw new HttpRequestException($"無法解析主機名稱：{host}", exception);
             }
         }
 
-        if (addresses.Length == 0 || addresses.Any(static address => !IsPublicAddress(address)))
+        if (addresses.Length == 0 || !Array.TrueForAll(addresses, IsPublicAddress))
         {
             throw new HttpSecurityException("URL hostname 解析至非公開位址");
         }
@@ -187,40 +192,33 @@ public static class HttpUrlPolicy
         var span = bytes[..bytesWritten];
         if (normalized.AddressFamily == AddressFamily.InterNetwork)
         {
-            return !PrivateIPv4Networks.Any(net => net.Contains(normalized));
+            return !ContainsAny(PrivateIPv4Networks, normalized);
         }
 
-        if (IsIPv4Compatible(span))
-        {
-            var ipv4 = new IPAddress(span.Slice(12, 4));
-            return IsPublicAddress(ipv4);
-        }
-
-        // 6to4 與 NAT64 內嵌 IPv4，以內嵌位址判定
-        if (span[0] == 0x20 && span[1] == 0x02)
-        {
-            return IsPublicAddress(new IPAddress(span.Slice(2, 4)));
-        }
-
-        if (span[0] == 0x00 && span[1] == 0x64 && span[2] == 0xFF && span[3] == 0x9B && span[4..12].IndexOfAnyExcept((byte)0) < 0)
+        // NAT64 與 6to4 內嵌 IPv4，以內嵌位址判定
+        if (WellKnownNat64.Contains(normalized))
         {
             return IsPublicAddress(new IPAddress(span.Slice(12, 4)));
         }
 
-        return !normalized.IsIPv6LinkLocal
-            && !normalized.IsIPv6SiteLocal
-            && !normalized.IsIPv6Teredo
-            && !PrivateIPv6Networks.Any(net => net.Contains(normalized));
-    }
-
-    private static bool IsIPv4Compatible(ReadOnlySpan<byte> bytes)
-    {
-        if (bytes.Length != 16)
+        if (SixToFour.Contains(normalized))
         {
-            return false;
+            return IsPublicAddress(new IPAddress(span.Slice(2, 4)));
         }
 
-        return bytes[..12].IndexOfAnyExcept((byte)0) < 0
-            && !(bytes[12] == 0 && bytes[13] == 0 && bytes[14] == 0 && bytes[15] <= 1);
+        return GlobalUnicastIPv6.Contains(normalized) && !ContainsAny(ReservedGlobalUnicastIPv6Networks, normalized);
+    }
+
+    private static bool ContainsAny(IPNetwork[] networks, IPAddress address)
+    {
+        foreach (IPNetwork network in networks)
+        {
+            if (network.Contains(address))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

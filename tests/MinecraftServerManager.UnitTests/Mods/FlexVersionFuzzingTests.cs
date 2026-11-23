@@ -110,7 +110,7 @@ public sealed class FlexVersionFuzzingTests
     }
 
     [Fact]
-    public void BuildMetadataFuzzing_MetadataDoesNotAffectComparison()
+    public void Compare_RandomBuildMetadata_IgnoresMetadata()
     {
         var random = new Random(2024);
         string[] baseVersions = ["1.0.0", "2.15.4", "0.102.0", "15.1.5", "7.0.0"];
@@ -137,7 +137,7 @@ public sealed class FlexVersionFuzzingTests
     }
 
     [Fact]
-    public void LeadingZerosFuzzing_ProducesIdenticalOrdering()
+    public void Compare_RandomLeadingZeros_KeepsOrdering()
     {
         var random = new Random(888);
         for (int i = 0; i < 200; i++)
@@ -156,7 +156,7 @@ public sealed class FlexVersionFuzzingTests
     }
 
     [Fact]
-    public void ExtremelyLargeNumbersFuzzing_DoesNotOverflow()
+    public void Compare_ExtremelyLargeNumbers_DoesNotOverflow()
     {
         string large99 = new('9', 150);
         string large100 = "1" + new string('0', 150);

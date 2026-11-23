@@ -5,7 +5,7 @@ namespace MinecraftServerManager.UnitTests.Java;
 public sealed class JavaVersionParserTests
 {
     [Fact]
-    public void ReturnsNullWhenVersionIsMissing() => Assert.Null(JavaVersionParser.ParseDetails("不是 Java 版本輸出"));
+    public void ParseDetails_MissingVersion_ReturnsNull() => Assert.Null(JavaVersionParser.ParseDetails("不是 Java 版本輸出"));
 
     [Theory]
     [InlineData("openjdk version \"21.0.4\" 2024-07-16\nOpenJDK 64-Bit Server VM Microsoft-9825471", 21, true, "Microsoft")]
@@ -14,7 +14,7 @@ public sealed class JavaVersionParserTests
     [InlineData("openjdk version \"21.0.2\" 2024-01-16 LTS\nOpenJDK 64-Bit Server VM Corretto-21.0.2.13.1", 21, true, "Amazon Corretto")]
     [InlineData("java version \"1.8.0_351\"\nJava(TM) SE Runtime Environment (build 1.8.0_351-b10)\nJava HotSpot(TM) 64-Bit Server VM", 8, true, "Oracle")]
     [InlineData("openjdk version \"1.8.0_345\"\nOpenJDK Runtime Environment\nOpenJDK 32-Bit Client VM", 8, false, "OpenJDK")]
-    public void ParsesDetailedRuntimeInformation(string output, int expectedMajor, bool expected64Bit, string? expectedVendor)
+    public void ParseDetails_FullOutput_ReturnsRuntimeDetails(string output, int expectedMajor, bool expected64Bit, string? expectedVendor)
     {
         var details = JavaVersionParser.ParseDetails(output);
         Assert.NotNull(details);
@@ -23,4 +23,3 @@ public sealed class JavaVersionParserTests
         Assert.Equal(expectedVendor, details.Value.Vendor);
     }
 }
-

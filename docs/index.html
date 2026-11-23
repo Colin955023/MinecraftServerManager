@@ -8,12 +8,17 @@
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
   <script src="assets/js/theme-init.js"></script>
-  <title>Minecraft 伺服器管理器 v2.2.1 — Windows 11 原生管理工具</title>
+  <title data-app-version>Minecraft 伺服器管理器 v2.2.1 — Windows 11 原生管理工具</title>
   <meta name="description"
     content="以 C# 14、.NET 10 與原生 WinUI 3 打造的 Windows 11 Minecraft 伺服器管理工具：支援 Paper、Fabric、Quilt、Forge、NeoForge、Modrinth 相依解析與可回復式安全備份。">
   <meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
   <link rel="canonical" href="https://colin955023.github.io/MinecraftServerManager/">
+  <meta property="og:image" content="https://colin955023.github.io/MinecraftServerManager/assets/og-image.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Minecraft 伺服器管理器的管理伺服器頁面">
+  <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <meta property="og:type" content="website">
   <meta property="og:locale" content="zh_TW">
@@ -42,7 +47,7 @@
           <use href="#icon-gear" />
         </svg>
         <span>Minecraft 伺服器管理器</span>
-        <span class="brand-version">v2.2.1</span>
+        <span class="brand-version" data-app-version>v2.2.1</span>
       </a>
 
       <nav class="site-nav" aria-label="主導覽">
@@ -62,12 +67,12 @@
       </nav>
 
       <div class="nav-actions">
-        <button type="button" id="site-theme-toggle" class="btn btn-sm theme-toggle" aria-label="切換深淺色彩主題">
+        <button type="button" id="site-theme-toggle" class="btn btn-sm theme-toggle" aria-pressed="false">
           <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
             <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5" />
             <path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" />
           </svg>
-          <span id="site-theme-label">跟隨系統</span>
+          <span>深色主題</span>
         </button>
         <a class="btn btn-primary btn-sm"
           href="https://github.com/Colin955023/MinecraftServerManager/releases/latest/download/MinecraftServerManager.exe"
@@ -117,7 +122,7 @@
         <hgroup class="section-header">
           <h2>操作流程互動模擬器</h2>
           <p class="section-lead">
-            依主程式實機版面與運作邏輯重現。您可直接點擊左側導覽切換四個主要頁面、對伺服器列點兩下或按右鍵開啟進階選單，也可直接開啟各獨立子視窗試用表單與設定。
+            依主程式實機版面與運作邏輯重現。您可直接按一下左側導覽切換四個主要頁面、對伺服器列按兩下或按右鍵開啟進階選單，也可直接開啟各獨立子視窗試用表單與設定。
           </p>
         </hgroup>
 
@@ -148,11 +153,6 @@
           <div class="winui-shell">
             <aside class="winui-sidebar" aria-label="主程式左側導覽">
               <div>
-                <div class="winui-brand-block">
-                  <span class="winui-brand-kicker">MINECRAFT</span>
-                  <span class="winui-brand-title">Server Manager</span>
-                </div>
-
                 <div class="winui-nav-group">
                   <button type="button" class="winui-nav-btn" data-sim-nav="create" aria-current="page">
                     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor"
@@ -301,7 +301,7 @@
                 </div>
 
                 <div class="winui-input-row mt-2 winui-justify-end">
-                  <button type="button" class="winui-btn winui-btn-danger" id="sim-reset-create">重設表單</button>
+                  <button type="button" class="winui-btn" id="sim-reset-create">重設表單</button>
                   <button type="button" class="winui-btn winui-btn-accent" id="sim-submit-create">建立伺服器</button>
                 </div>
               </div>
@@ -337,21 +337,25 @@
                       <thead>
                         <tr>
                           <th scope="col"><button type="button" class="winui-sort-btn" data-sort-table="servers"
-                              data-sort-key="name">名稱 <span class="sort-ind"></span></button></th>
+                              data-sort-key="name">名稱 <span class="sort-ind" aria-hidden="true"></span></button></th>
                           <th scope="col"><button type="button" class="winui-sort-btn" data-sort-table="servers"
-                              data-sort-key="version">版本 <span class="sort-ind"></span></button></th>
+                              data-sort-key="version">版本 <span class="sort-ind" aria-hidden="true"></span></button></th>
                           <th scope="col"><button type="button" class="winui-sort-btn" data-sort-table="servers"
-                              data-sort-key="loader">載入器 <span class="sort-ind"></span></button></th>
+                              data-sort-key="loader">載入器 <span class="sort-ind" aria-hidden="true"></span></button></th>
                           <th scope="col"><button type="button" class="winui-sort-btn" data-sort-table="servers"
-                              data-sort-key="running">狀態 <span class="sort-ind"></span></button></th>
+                              data-sort-key="running">狀態 <span class="sort-ind" aria-hidden="true"></span></button></th>
                           <th scope="col"><button type="button" class="winui-sort-btn" data-sort-table="servers"
-                              data-sort-key="sizeBytes">目錄大小 <span class="sort-ind"></span></button></th>
+                              data-sort-key="sizeBytes">目錄大小 <span class="sort-ind" aria-hidden="true"></span></button>
+                          </th>
                           <th scope="col"><button type="button" class="winui-sort-btn" data-sort-table="servers"
-                              data-sort-key="modified">修改日期 <span class="sort-ind"></span></button></th>
+                              data-sort-key="modified">修改日期 <span class="sort-ind" aria-hidden="true"></span></button>
+                          </th>
                           <th scope="col"><button type="button" class="winui-sort-btn" data-sort-table="servers"
-                              data-sort-key="backupsCount">備份狀態 <span class="sort-ind"></span></button></th>
+                              data-sort-key="backupsCount">備份狀態 <span class="sort-ind"
+                                aria-hidden="true"></span></button></th>
                           <th scope="col"><button type="button" class="winui-sort-btn" data-sort-table="servers"
-                              data-sort-key="relPath">相對路徑 <span class="sort-ind"></span></button></th>
+                              data-sort-key="relPath">相對路徑 <span class="sort-ind" aria-hidden="true"></span></button>
+                          </th>
                         </tr>
                       </thead>
                       <tbody id="sim-server-tbody"></tbody>
@@ -395,10 +399,11 @@
                   </div>
                 </div>
 
-                <div class="winui-tab-row">
-                  <button type="button" class="winui-btn winui-btn-accent" aria-pressed="true"
+                <div class="winui-tab-row" role="tablist">
+                  <button type="button" class="winui-btn winui-btn-accent" role="tab" aria-selected="true" tabindex="0"
                     data-mod-tab="local">本地模組</button>
-                  <button type="button" class="winui-btn" aria-pressed="false" data-mod-tab="online">線上瀏覽</button>
+                  <button type="button" class="winui-btn" role="tab" aria-selected="false" tabindex="-1"
+                    data-mod-tab="online">線上瀏覽</button>
                 </div>
 
                 <div id="sim-mods-local-pane">
@@ -417,7 +422,7 @@
                         data-sim-action="mod-delete" disabled>刪除已選取模組</button>
                     </div>
                     <div class="winui-input-row">
-                      <input id="sim-mod-search" class="winui-input winui-max-w-170" type="search"
+                      <input id="sim-mod-search" class="winui-input winui-max-w-170" type="search" aria-label="搜尋本地模組"
                         placeholder="搜尋模組名稱或檔名...">
                       <select id="sim-mod-filter" class="winui-select winui-max-w-110" aria-label="篩選模組啟用狀態">
                         <option value="全部" selected>全部</option>
@@ -427,7 +432,7 @@
                       <button type="button" class="winui-btn" data-sim-action="mod-export">匯出模組清單</button>
                     </div>
                   </div>
-                  <div class="winui-sub-label" id="sim-mod-selection-hint">支援 Ctrl+點擊多選或按「全選」以解鎖批次切換與檢查更新；右鍵列可複製資訊或刪除
+                  <div class="winui-sub-label" id="sim-mod-selection-hint">支援 Ctrl+按一下多選或按「全選」以解鎖批次切換與檢查更新；右鍵列可複製資訊或刪除
                   </div>
                   <div class="winui-table-scroll">
                     <table class="winui-table">
@@ -435,15 +440,16 @@
                         <tr>
                           <th scope="col">啟用</th>
                           <th scope="col"><button type="button" class="winui-sort-btn" data-sort-table="localMods"
-                              data-sort-key="name">模組名稱 <span class="sort-ind"></span></button></th>
+                              data-sort-key="name">模組名稱 <span class="sort-ind" aria-hidden="true"></span></button></th>
                           <th scope="col"><button type="button" class="winui-sort-btn" data-sort-table="localMods"
-                              data-sort-key="version">版本 <span class="sort-ind"></span></button></th>
+                              data-sort-key="version">版本 <span class="sort-ind" aria-hidden="true"></span></button></th>
                           <th scope="col"><button type="button" class="winui-sort-btn" data-sort-table="localMods"
-                              data-sort-key="author">作者 <span class="sort-ind"></span></button></th>
+                              data-sort-key="author">作者 <span class="sort-ind" aria-hidden="true"></span></button></th>
                           <th scope="col"><button type="button" class="winui-sort-btn" data-sort-table="localMods"
-                              data-sort-key="loader">載入器 <span class="sort-ind"></span></button></th>
+                              data-sort-key="loader">載入器 <span class="sort-ind" aria-hidden="true"></span></button></th>
                           <th scope="col"><button type="button" class="winui-sort-btn" data-sort-table="localMods"
-                              data-sort-key="platform">來源平台 <span class="sort-ind"></span></button></th>
+                              data-sort-key="platform">來源平台 <span class="sort-ind" aria-hidden="true"></span></button>
+                          </th>
                           <th scope="col">檔案大小</th>
                           <th scope="col">修改時間</th>
                           <th scope="col">描述</th>
@@ -457,7 +463,7 @@
                 <div id="sim-mods-online-pane" hidden>
                   <div class="winui-card mb-1 winui-text-sm" id="sim-online-hint"></div>
                   <div class="winui-input-row mb-1">
-                    <input id="sim-online-query" class="winui-input" type="search"
+                    <input id="sim-online-query" class="winui-input" type="search" aria-label="搜尋線上模組"
                       placeholder="搜尋 Modrinth 模組名稱 (例如 Sodium, FerriteCore, Lithium)...">
                     <label for="sim-online-platform" class="winui-sub-label">平台：</label>
                     <select id="sim-online-platform" class="winui-select winui-max-w-135">
@@ -512,7 +518,7 @@
                     <div>
                       <div class="winui-page-title winui-title-md">Minecraft Server Manager</div>
                       <div class="winui-sub-label mt-1">Minecraft 伺服器管理器</div>
-                      <div class="winui-sub-label">版本 2.2.1</div>
+                      <div class="winui-sub-label" data-app-version>版本 2.2.1</div>
                     </div>
 
                     <div class="winui-card">
@@ -537,9 +543,9 @@
 
                     <div class="winui-card">
                       <div class="winui-card-heading">更新設定</div>
-                      <div class="winui-sub-label mb-1">更新檔僅接受 GitHub Release 提供的 SHA-256 digest 驗證</div>
+                      <div class="winui-sub-label mb-1">更新檔僅接受 GitHub Release 提供的 SHA-256 雜湊驗證</div>
                       <label class="winui-input-row winui-check-label">
-                        <input type="checkbox" id="sim-pref-autoupdate" checked>
+                        <input type="checkbox" class="winui-toggle" role="switch" id="sim-pref-autoupdate" checked>
                         <span>自動檢查更新</span>
                       </label>
                       <button type="button" class="winui-btn mt-1" id="sim-check-update-btn" hidden>檢查更新</button>
@@ -555,8 +561,7 @@
                       <div class="winui-card-heading">主視窗設定</div>
                       <div class="winui-sub-label" id="sim-screen-res-text">目前螢幕解析度：1920 × 1080</div>
                       <div class="winui-sub-label" id="sim-window-size-text">目前主視窗大小：1350 × 820</div>
-                      <button type="button" class="winui-btn winui-btn-danger mt-1"
-                        data-sim-action="reset-window-size">重設為預設大小</button>
+                      <button type="button" class="winui-btn mt-1" data-sim-action="reset-window-size">重設為預設大小</button>
                     </div>
 
                     <div class="winui-card">
@@ -584,7 +589,7 @@
                     <div class="winui-card">
                       <div class="winui-card-heading">備份設定</div>
                       <label class="winui-input-row mb-1 winui-check-label">
-                        <input type="checkbox" id="sim-pref-autobackup">
+                        <input type="checkbox" class="winui-toggle" role="switch" id="sim-pref-autobackup">
                         <span>啟動伺服器前自動備份</span>
                       </label>
                       <div class="winui-input-row">
@@ -651,7 +656,7 @@
           <article class="shot-card">
             <button type="button" class="shot-thumb-btn" command="show-modal" commandfor="screenshot-lightbox"
               data-shot-src="assets/screenshots/manage-servers.avif" data-shot-title="管理伺服器（ManageServerView）"
-              data-shot-desc="清單支援拖曳欄寬與自然排序；點選列顯示詳細資訊與操作列，點兩下列開啟監控視窗，右鍵可調整記憶體或備份路徑。">
+              data-shot-desc="清單支援拖曳欄寬與自然排序；點選列顯示詳細資訊與操作列，按兩下列開啟監控視窗，右鍵可調整記憶體或備份路徑。">
               <img
                 srcset="assets/screenshots/manage-servers-640.avif 640w, assets/screenshots/manage-servers.avif 1669w"
                 sizes="(width >= 40rem) 400px, 100vw" src="assets/screenshots/manage-servers-640.avif" width="1669"
@@ -745,7 +750,7 @@
           <li class="spec-item">
             <h3>安全啟動與行程偵測</h3>
             <p>統一產生含絕對路徑 Java 的 <code>start_server.bat</code>，並主動排除
-              <code>-XX:OnError</code>、<code>-XX:OnOutOfMemoryError</code>、<code>-agentpath</code>、<code>-agentlib</code>
+              <code>@argfile</code>、<code>-XX:OnError</code>、<code>-XX:OnOutOfMemoryError</code>、<code>-XX:VMOptionsFile</code>、<code>-XX:OptionsFile</code>、<code>-XX:Flags</code>、<code>-javaagent:</code>、<code>-agentpath</code>、<code>-agentlib</code>、<code>-Xrun</code>
               與 <code>-Xbootclasspath</code> 等參數；程式會登記執行中 PID 與時間戳以便重開後清理遺留行程。
             </p>
           </li>
@@ -820,12 +825,12 @@
               <li>自 <a href="https://github.com/Colin955023/MinecraftServerManager/releases" target="_blank"
                   rel="noopener noreferrer">GitHub Releases</a> 下載 <a
                   href="https://github.com/Colin955023/MinecraftServerManager/releases/latest/download/MinecraftServerManager.exe"
-                  target="_blank" rel="noopener noreferrer"><code>MinecraftServerManager.exe</code></a>（v2.1.1 舊版名為
-                <code>MinecraftServerManager-self-contained.exe</code>），Windows 11 x64 可直接執行。
+                  target="_blank" rel="noopener noreferrer"><code>MinecraftServerManager.exe</code></a>，Windows 11 x64
+                可直接執行。
               </li>
               <li>首次啟動指定伺服器根目錄，程式會在其中建立或沿用 <code>servers\</code> 子目錄與 <code>servers.json</code>。</li>
-              <li>於「建立伺服器」選擇載入器（建議 <strong>Paper</strong>）與版本後點擊建立（操作即同意 Minecraft EULA），依提示完成首次初始化。</li>
-              <li>於「管理伺服器」點選伺服器以操作啟動、設定與名單，按兩下列表可開啟主控台；備份前先停止伺服器並指定外部備份目錄。</li>
+              <li>於「建立伺服器」選擇載入器（建議 <strong>Paper</strong>）與版本後按一下建立（操作即同意 Minecraft EULA），依提示完成首次初始化。</li>
+              <li>於「管理伺服器」點選伺服器以操作啟動、設定與名單，按兩下清單可開啟主控台；備份前先停止伺服器並指定外部備份目錄。</li>
             </ol>
           </div>
 
@@ -854,7 +859,7 @@
 pwsh -NoProfile -File scripts\dotnet_quality_gate.ps1
 pwsh -NoProfile -File scripts\dotnet_publish.ps1</code></pre>
             <p class="code-foot">
-              專案採 <code>App → Core → Domain</code> 與 <code>Infrastructure → Core / Domain</code> 四層分離並附 A1～A35
+              專案採 <code>App → Core → Domain</code> 與 <code>Infrastructure → Core / Domain</code> 四層分離並附 A1～A45
               自動架構測試；開發分工詳見 <a
                 href="https://github.com/Colin955023/MinecraftServerManager/blob/master/docs/TECHNICAL_OVERVIEW.md"
                 target="_blank" rel="noopener noreferrer">TECHNICAL_OVERVIEW.md</a>。
@@ -886,7 +891,7 @@ pwsh -NoProfile -File scripts\dotnet_publish.ps1</code></pre>
               <tr>
                 <th scope="row">執行中伺服器清單</th>
                 <td><code>%LOCALAPPDATA%\Programs\MinecraftServerManager\running_servers.json</code></td>
-                <td>紀錄執行中伺服器 PID 與啟動時間，供重啟時辨識遺留行程</td>
+                <td>紀錄執行中伺服器 PID 與啟動時間，供重新啟動時辨識遺留行程</td>
               </tr>
               <tr>
                 <th scope="row">版本與安裝器快取</th>
@@ -921,7 +926,7 @@ pwsh -NoProfile -File scripts\dotnet_publish.ps1</code></pre>
             <summary>執行主程式需要預先安裝 .NET Desktop Runtime 或 Visual Studio 嗎？</summary>
             <div class="faq-body">
               <p>不需要。發布版本 <code>MinecraftServerManager.exe</code> 為針對 Windows 11 x64（21H2 / Build 22000
-                以上）裁剪編譯之單一自包含執行檔，下載後點兩下即可直接執行。</p>
+                以上）裁剪編譯之單一自包含執行檔，下載後按兩下即可直接執行。</p>
             </div>
           </details>
 
@@ -936,7 +941,7 @@ pwsh -NoProfile -File scripts\dotnet_publish.ps1</code></pre>
           </details>
 
           <details class="faq-item">
-            <summary>還原伺服器備份時會不會覆蓋掉先前的崩潰日誌或除錯紀錄？</summary>
+            <summary>還原伺服器備份時會不會覆蓋掉先前的當機日誌或除錯紀錄？</summary>
             <div class="faq-body">
               <p>不會。進行還原前程式會先解壓檢查壓縮檔安全並建立目前目錄快照，同時暫存現有的 <code>logs/</code> 與
                 <code>crash-reports/</code>，還原完成後再合併移回。若中途發生檔案鎖定或寫入失敗，會自動從快照復原。
@@ -956,7 +961,7 @@ pwsh -NoProfile -File scripts\dotnet_publish.ps1</code></pre>
             <summary>如何將伺服器搬移至其他磁碟，或指定額外的外部備份資料夾？</summary>
             <div class="faq-body">
               <p>在所有伺服器皆停止時，進入「管理伺服器」點選「修改路徑」挑選新資料夾（程式會在其下使用
-                <code>servers\</code>）；若原路徑已有伺服器，可選擇「是，遷移資料（新路徑須為空資料夾）」、「否，僅改設定」或「取消」，完成後自動重啟套用。備份路徑則對該伺服器列按右鍵
+                <code>servers\</code>）；若原路徑已有伺服器，可選擇「是，遷移資料（新路徑須為空資料夾）」、「否，僅改設定」或「取消」，完成後可由使用者選擇立即重新啟動或稍後套用。備份路徑則對該伺服器列按右鍵
                 →「修改備份路徑」。
               </p>
             </div>
@@ -969,8 +974,8 @@ pwsh -NoProfile -File scripts\dotnet_publish.ps1</code></pre>
   <footer class="site-footer">
     <div class="container footer-flex">
       <div>
-        <strong>Minecraft 伺服器管理器</strong> v2.2.1 · Copyright (C) 2025-2026 Colin955023 · <a
-          href="https://github.com/Colin955023/MinecraftServerManager/blob/master/LICENSE" target="_blank"
+        <strong>Minecraft 伺服器管理器</strong> <span data-app-version>v2.2.1</span> · Copyright (C) 2025-2026 Colin955023 ·
+        <a href="https://github.com/Colin955023/MinecraftServerManager/blob/master/LICENSE" target="_blank"
           rel="noopener noreferrer">GPL-3.0-only</a>
       </div>
       <div>

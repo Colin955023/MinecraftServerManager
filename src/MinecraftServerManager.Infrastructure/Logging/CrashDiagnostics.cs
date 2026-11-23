@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Process;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Logging;
@@ -28,7 +29,7 @@ public static class CrashDiagnostics
     private static int s_installed;
     private static int s_trackedThreadId;
     private static int s_recordedCount;
-    private static string s_logDir = string.Empty;
+    private static volatile string s_logDir = string.Empty;
 
     [ThreadStatic]
     private static bool t_inHandler;
@@ -80,6 +81,11 @@ public static class CrashDiagnostics
         }
 
         string? logFile = parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]) ? parts[2] : null;
+        if (logFile is not null && !IsInsideDirectory(logFile, logDir))
+        {
+            // 標記可能遭竄改：只讀取記錄目錄內的檔案
+            logFile = null;
+        }
 
         IReadOnlyList<string> tail = [];
         if (logFile is not null && SafeFileSystem.FileExists(logFile))
@@ -100,7 +106,7 @@ public static class CrashDiagnostics
 
     internal static void WriteSessionMarker(string logDir, int processId, string? logFilePath)
     {
-        string startedAt = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+        string startedAt = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
         string content = string.Create(CultureInfo.InvariantCulture, $"{processId}|{startedAt}|{logFilePath}");
         if (!AtomicFileWriter.WriteText(Path.Combine(logDir, SessionMarkerFileName), content))
         {
@@ -133,7 +139,21 @@ public static class CrashDiagnostics
         return content.Split('|', 3, StringSplitOptions.TrimEntries);
     }
 
-    /// <summary>標記所屬行程是否仍存活；行程啟動時間晚於標記時間代表識別碼已被其他行程重用</summary>
+    private static bool IsInsideDirectory(string filePath, string directory)
+    {
+        try
+        {
+            string fileDirectory = Path.GetDirectoryName(Path.GetFullPath(filePath)) ?? string.Empty;
+            string expected = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+            return string.Equals(fileDirectory, expected, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>標記所屬行程是否仍存活；行程啟動時間晚於標記時間代表識別碼已被其他行程重用，時間無法解析視為已結束</summary>
     internal static bool IsMarkerOwnerAlive(string processId, string startedAt)
     {
         if (!int.TryParse(processId, NumberStyles.None, CultureInfo.InvariantCulture, out int pid))
@@ -141,21 +161,9 @@ public static class CrashDiagnostics
             return false;
         }
 
-        try
-        {
-            using var process = System.Diagnostics.Process.GetProcessById(pid);
-            if (process.HasExited)
-            {
-                return false;
-            }
-
-            return !DateTime.TryParseExact(startedAt, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime markerTime) ||
-                process.StartTime <= markerTime.AddSeconds(2);
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
-        {
-            return false;
-        }
+        return ProcessRunner.QueryStartTimeUtc(pid) is { } processStart &&
+            DateTimeOffset.TryParseExact(startedAt, "O", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset markerTime) &&
+            processStart <= markerTime.AddSeconds(2);
     }
 
     /// <summary>將例外與目前呼叫堆疊整理為單筆診斷文字</summary>
@@ -234,9 +242,17 @@ public static class CrashDiagnostics
                 Logger.Warning("UI 執行緒例外追蹤已達本次上限 {MaxFirstChanceRecords} 筆，後續不再記錄", MaxFirstChanceRecords);
             }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
-            Logger.Warning(ex, "記錄 UI 執行緒例外追蹤失敗");
+            // 例外事件處理常式不得擲出任何例外（含取消），否則會干擾原本的例外流程
+            try
+            {
+                Logger.Warning(ex, "記錄 UI 執行緒例外追蹤失敗");
+            }
+            catch (Exception)
+            {
+                // 記錄失敗已無其他管道可回報
+            }
         }
         finally
         {

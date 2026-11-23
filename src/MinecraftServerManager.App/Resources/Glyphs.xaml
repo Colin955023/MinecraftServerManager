@@ -35,4 +35,8 @@
   <x:String x:Key="IconQuestion">&#xE897;</x:String> <!-- 詢問 -->
   <x:String x:Key="IconSelectAll">&#xE8B3;</x:String> <!-- 全選 -->
   <x:String x:Key="IconToggle">&#xE8AB;</x:String> <!-- 切換 -->
+  <x:String x:Key="IconSortAscending">&#xE70E;</x:String> <!-- 遞增排序 -->
+  <x:String x:Key="IconSortDescending">&#xE70D;</x:String> <!-- 遞減排序 -->
+  <x:String x:Key="IconCheckUpdate">&#xE895;</x:String> <!-- 檢查更新 -->
+  <x:String x:Key="IconExport">&#xEDE1;</x:String> <!-- 匯出清單 -->
 </ResourceDictionary>

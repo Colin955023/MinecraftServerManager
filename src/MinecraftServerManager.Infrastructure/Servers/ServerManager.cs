@@ -11,13 +11,15 @@ using MinecraftServerManager.Infrastructure.Utilities;
 namespace MinecraftServerManager.Infrastructure.Servers;
 
 /// <summary>伺服器集中管理服務實作</summary>
-public sealed partial class ServerManager : IServerManager
+public sealed class ServerManager : IServerManager
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerManager));
     private readonly string _serversRoot;
     private readonly ServerRegistryStore _registry;
     private readonly ServerImportWorkflow _importWorkflow;
-    private readonly Lazy<Task> _recovery;
+    private readonly Lock _recoveryLock = new();
+    private Task? _recovery;
+    private readonly KeyedAsyncLock _nameGates = new();
     private readonly IServerInspector _inspector;
     private readonly ILoaderInstallerService _loaderInstaller;
     private readonly IJavaRuntimeDetector _javaDetector;
@@ -44,11 +46,21 @@ public sealed partial class ServerManager : IServerManager
 
         _importWorkflow = new ServerImportWorkflow(_serversRoot, _registry, _inspector, ResolveJavaExecutableAsync);
 
-        // 墓碑復原延後至首次存取時於背景執行，避免阻塞建構（UI 執行緒）
-        _recovery = new Lazy<Task>(() => Task.Run(() => ServerTombstoneManager.RecoverDeleteTombstones(_serversRoot, _registry.FindPath)));
     }
 
-    private Task EnsureRecoveredAsync() => _recovery.Value;
+    /// <summary>墓碑復原延後至首次存取時於背景執行，避免阻塞建構（UI 執行緒）；失敗時下次存取重試</summary>
+    private Task EnsureRecoveredAsync()
+    {
+        lock (_recoveryLock)
+        {
+            if (_recovery is null || _recovery.IsFaulted || _recovery.IsCanceled)
+            {
+                _recovery = Task.Run(() => ServerTombstoneManager.RecoverDeleteTombstones(_serversRoot, _registry.FindPath));
+            }
+
+            return _recovery;
+        }
+    }
 
     public async Task<IReadOnlyList<ServerConfig>> GetAllServersAsync(CancellationToken cancellationToken = default)
     {
@@ -65,15 +77,31 @@ public sealed partial class ServerManager : IServerManager
         return await Task.Run(() => _registry.Find(name), cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<ServerCreationResult> CreateServerAsync(
+    private async Task<T> RunWithServerGateAsync<T>(
+        string serverName,
+        Func<CancellationToken, Task<T>> action,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await EnsureRecoveredAsync().ConfigureAwait(false);
+        using var gate = await _nameGates.AcquireAsync(serverName, cancellationToken).ConfigureAwait(false);
+        return await action(cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<ServerCreationResult> CreateServerAsync(
         ServerCreationPlan plan,
         IProgress<ServerCreationProgressReport>? progress = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        cancellationToken.ThrowIfCancellationRequested();
-        await EnsureRecoveredAsync().ConfigureAwait(false);
+        return RunWithServerGateAsync(plan.Config.Name.Value, ct => CreateServerCoreAsync(plan, progress, ct), cancellationToken);
+    }
 
+    private async Task<ServerCreationResult> CreateServerCoreAsync(
+        ServerCreationPlan plan,
+        IProgress<ServerCreationProgressReport>? progress,
+        CancellationToken cancellationToken)
+    {
         // ── Phase 1: Validate (0% ~ 5%) ──
         progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.Validate, 0, "正在驗證伺服器名稱與目錄..."));
 
@@ -84,9 +112,9 @@ public sealed partial class ServerManager : IServerManager
         }
 
         string serverDir = Path.Combine(_serversRoot, plan.Config.Name.Value);
-        if (SafeFileSystem.DirectoryExists(serverDir) && !SafeFileSystem.IsDirectoryEmpty(serverDir))
+        if (ServerSetupHelpers.ValidateEmptyTargetDirectory(serverDir, out bool targetExisted) is { } targetError)
         {
-            return ServerCreationResult.Failed($"目標目錄已存在且非空：{serverDir}");
+            return ServerCreationResult.Failed(targetError);
         }
 
         string? insufficientSpace = ServerSetupHelpers.CheckFreeSpace(_serversRoot, 500L * 1024 * 1024);
@@ -95,22 +123,17 @@ public sealed partial class ServerManager : IServerManager
             return ServerCreationResult.Failed(insufficientSpace);
         }
 
-        bool createdDir = false;
-        string stagingDir = Path.Combine(_serversRoot, $"{ServerDefaults.InternalPrefix}create-staging-{Guid.NewGuid():N}");
-
         Logger.Information("開始建立伺服器「{Name}」 (MC: {McVer}, 載入器: {Loader} {LoaderVer}, 記憶體: {MemMax}MB)", plan.Config.Name.Value, plan.Config.MinecraftVersion.Value, plan.Config.LoaderType, plan.Config.LoaderVersion, plan.Config.MemoryMaxMb);
+
+        using EphemeralStagingScope staging = new(_serversRoot, serverDir, targetExisted, "create-staging");
+        string stableStaging = staging.StableStaging;
 
         try
         {
             // ── Phase 2: Stage (5% ~ 15%) ──
             progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.Stage, 5, "正在建立暫存目錄與初始設定檔..."));
 
-            string stableStaging = SafeFileSystem.ResolveStableDirectory(stagingDir, create: true);
-            createdDir = true;
-
-            // 寫入 eula.txt
-            string eulaPath = Path.Combine(stableStaging, ServerDefaults.EulaFileName);
-            AtomicFileWriter.WriteTextOrThrow(eulaPath, "eula=true\n");
+            staging.EnsureEula();
 
             // 寫入初始 server.properties（含 MOTD 與 Port）
             string propertiesPath = Path.Combine(stableStaging, ServerDefaults.ServerPropertiesFileName);
@@ -128,8 +151,8 @@ public sealed partial class ServerManager : IServerManager
             // ── Phase 3: Artifact (15% ~ 85%) ──
             progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.Artifact, 15, "正在下載伺服器核心..."));
 
-            string? resolvedJavaPath = await ResolveJavaExecutableAsync(plan.UserJavaPath, plan.Config.MinecraftVersion.Value, plan.Config.LoaderType, cancellationToken).ConfigureAwait(false);
-            if (resolvedJavaPath is null)
+            ResolvedJavaRuntime? resolvedJava = await ResolveJavaExecutableAsync(plan.UserJavaPath, plan.Config.MinecraftVersion.Value, cancellationToken).ConfigureAwait(false);
+            if (resolvedJava is null)
             {
                 return ServerCreationResult.Failed($"本機找不到與 Minecraft {plan.Config.MinecraftVersion.Value} 官方指定 major 完全一致的 Java，已阻擋建立；請先安裝所需的 Java 版本");
             }
@@ -153,7 +176,7 @@ public sealed partial class ServerManager : IServerManager
                 minecraftVersion: plan.Config.MinecraftVersion.Value,
                 loaderVersion: plan.Config.LoaderVersion,
                 serverDirectory: stableStaging,
-                javaExecutablePath: resolvedJavaPath,
+                javaExecutablePath: resolvedJava.ExecutablePath,
                 progress: loaderProgress,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
 
@@ -168,30 +191,26 @@ public sealed partial class ServerManager : IServerManager
                 return ServerCreationResult.Failed("找不到可用的啟動 JAR 或參數設定檔，伺服器核心可能下載失敗");
             }
 
-            StartScriptWriter.Write(stableStaging, launchJar, plan.Config.MemoryMaxMb, plan.Config.MemoryMinMb ?? ServerDefaults.DefaultMemoryMinMb, resolvedJavaPath, plan.Config.JvmArgs, plan.Config.LoaderType);
-            ServerSetupHelpers.CleanupRedundantStartupScripts(stableStaging);
+            ServerSetupHelpers.FinalizeLaunchScripts(stableStaging, launchJar, plan.Config.MemoryMaxMb, plan.Config.MemoryMinMb, resolvedJava.ExecutablePath, plan.Config.JvmArgs, plan.Config.LoaderType, resolvedJava.MajorVersion);
             progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.LaunchScript, 95, "啟動腳本已產生並通過完整性驗證"));
 
             // ── Phase 5: Commit (95% ~ 100%) ──
             progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.Commit, 95, "正在登錄伺服器設定..."));
 
-            if (SafeFileSystem.DirectoryExists(serverDir))
+            var configForStaging = plan.Config.WithPath(stableStaging);
+            if (StartScriptWriter.UsesUserJvmArgsFile(plan.Config.LoaderType, stableStaging))
             {
-                SafeFileSystem.DeleteDirectory(serverDir, recursive: false);
+                StartScriptWriter.UpdateUserJvmArgs(stableStaging, configForStaging);
             }
 
-            if (!SafeFileSystem.MoveWithin(_serversRoot, stableStaging, serverDir))
+            if (!staging.TryCommitToTarget())
             {
                 return ServerCreationResult.Failed("原子移動暫存目錄至正式伺服器目錄失敗");
             }
 
             var config = plan.Config.WithPath(serverDir);
-            if (StartScriptWriter.UsesUserJvmArgsFile(plan.Config.LoaderType, serverDir))
-            {
-                StartScriptWriter.UpdateUserJvmArgs(serverDir, config);
-            }
-
             _registry.Set(plan.Config.Name.Value, config);
+            staging.Complete();
 
             progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.Commit, 100, "伺服器建立完成！"));
             Logger.Information("伺服器「{Name}」建立成功！路徑: {Path}", plan.Config.Name.Value, serverDir);
@@ -200,50 +219,26 @@ public sealed partial class ServerManager : IServerManager
         catch (OperationCanceledException)
         {
             Logger.Information("使用者已取消建立伺服器「{Name}」", plan.Config.Name.Value);
-            if (createdDir)
-            {
-                CleanupCreationDirectories(stagingDir, serverDir);
-            }
-
             return ServerCreationResult.Failed("已取消建立伺服器");
         }
         catch (Exception ex)
         {
             Logger.Error(ex, "建立伺服器「{Name}」失敗", plan.Config.Name.Value);
-            if (createdDir)
-            {
-                CleanupCreationDirectories(stagingDir, serverDir);
-            }
             return ServerCreationResult.Failed($"建立伺服器時發生例外：{ex.Message}");
         }
-        finally
-        {
-            // 清理殘留暫存目錄（DeleteWithin 對不存在的路徑與失敗皆自行處理並記錄）
-            if (createdDir)
-            {
-                SafeFileSystem.DeleteWithin(_serversRoot, stagingDir);
-            }
-        }
-    }
-
-    private void CleanupCreationDirectories(string stagingDir, string serverDir)
-    {
-        SafeFileSystem.DeleteWithin(_serversRoot, stagingDir);
-        SafeFileSystem.DeleteWithin(_serversRoot, serverDir);
     }
 
     /// <summary>解析符合官方 Java major 的執行檔；找不到回傳 null</summary>
-    private async Task<string?> ResolveJavaExecutableAsync(
+    private async Task<ResolvedJavaRuntime?> ResolveJavaExecutableAsync(
         string? configuredJava,
         string minecraftVersion,
-        LoaderKind loader = LoaderKind.Unknown,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            int targetMajor = await _javaRequirementService.GetRequiredJavaMajorAsync(minecraftVersion, loader, cancellationToken).ConfigureAwait(false);
+            int targetMajor = await _javaRequirementService.GetRequiredJavaMajorAsync(minecraftVersion, cancellationToken).ConfigureAwait(false);
 
-            if (!string.IsNullOrWhiteSpace(configuredJava) && !string.Equals(configuredJava.Trim(), "java", StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(configuredJava) && !string.Equals(configuredJava.Trim(), ServerDefaults.DefaultJavaCommand, StringComparison.OrdinalIgnoreCase))
             {
                 string trimmed = configuredJava.Trim();
                 var detected = await _javaDetector.DetectAsync(forceRefresh: false, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -251,30 +246,32 @@ public sealed partial class ServerManager : IServerManager
                                       string.Equals(j.ExecutablePath, trimmed, StringComparison.OrdinalIgnoreCase)) &&
                     SafeFileSystem.FileExists(trimmed))
                 {
-                    return trimmed;
+                    return new ResolvedJavaRuntime(trimmed, targetMajor);
                 }
             }
 
             var match = await _javaDetector.FindBestMatchAsync(targetMajor, cancellationToken).ConfigureAwait(false);
             if (match is not null && match.MajorVersion == targetMajor && SafeFileSystem.FileExists(match.ExecutablePath))
             {
-                return match.ExecutablePath;
+                return new ResolvedJavaRuntime(match.ExecutablePath, targetMajor);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning(ex, "依 Minecraft {Version} 與載入器 {Loader} 尋找符合官方指定 major 的 Java 失敗", minecraftVersion, loader);
+            Logger.Warning(ex, "依 Minecraft {Version} 尋找符合官方指定 major 的 Java 失敗", minecraftVersion);
         }
 
         return null;
     }
 
-    public async Task<ServerOperationResult> DeleteServerAsync(string name, CancellationToken cancellationToken = default)
+    public Task<ServerOperationResult> DeleteServerAsync(string name, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        cancellationToken.ThrowIfCancellationRequested();
-        await EnsureRecoveredAsync().ConfigureAwait(false);
+        return RunWithServerGateAsync(name, ct => DeleteServerCoreAsync(name, ct), cancellationToken);
+    }
 
+    private async Task<ServerOperationResult> DeleteServerCoreAsync(string name, CancellationToken cancellationToken)
+    {
         var config = await GetServerAsync(name, cancellationToken).ConfigureAwait(false);
         if (config is null)
         {
@@ -306,23 +303,31 @@ public sealed partial class ServerManager : IServerManager
             Logger.Information("伺服器「{Name}」已完全刪除並清理完畢", name);
             return ServerOperationResult.Ok($"成功刪除伺服器：{name}");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.Error(ex, "刪除伺服器「{Name}」失敗", name);
             return ServerOperationResult.Fail($"刪除伺服器失敗：{ex.Message}");
         }
     }
 
-    public async Task<ServerOperationResult> UpdateServerAsync(ServerConfig config, CancellationToken cancellationToken = default)
+    public Task<ServerOperationResult> UpdateServerAsync(ServerConfig config, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(config);
-        cancellationToken.ThrowIfCancellationRequested();
-        await EnsureRecoveredAsync().ConfigureAwait(false);
+        return RunWithServerGateAsync(config.Name.Value, ct => UpdateServerCoreAsync(config, ct), cancellationToken);
+    }
 
+    private async Task<ServerOperationResult> UpdateServerCoreAsync(ServerConfig config, CancellationToken cancellationToken)
+    {
         var existing = await GetServerAsync(config.Name.Value, cancellationToken).ConfigureAwait(false);
         if (existing is null)
         {
             return ServerOperationResult.Fail($"找不到要更新的伺服器：{config.Name.Value}");
+        }
+
+        // 先驗證再寫入清單，避免設定與啟動腳本不一致
+        if (StartScriptWriter.DescribeRejectedJvmArgument(config.JvmArgs) is { } rejectedReason)
+        {
+            return ServerOperationResult.Fail(rejectedReason);
         }
 
         _registry.Set(config.Name.Value, config);
@@ -333,6 +338,10 @@ public sealed partial class ServerManager : IServerManager
             {
                 StartScriptWriter.UpdateUserJvmArgs(config.Path, config);
             }
+            else
+            {
+                StartScriptWriter.UpdateScriptJvmArgs(config.Path, config);
+            }
 
             StartScriptWriter.UpdateMemory(config.Path, config);
         }
@@ -342,7 +351,7 @@ public sealed partial class ServerManager : IServerManager
         return ServerOperationResult.Ok("更新伺服器設定成功");
     }
 
-    public async Task<ServerImportResult> ImportServerAsync(
+    public Task<ServerImportResult> ImportServerAsync(
         string sourceDirectory,
         string targetName,
         ImportTransferMode mode = ImportTransferMode.Copy,
@@ -351,9 +360,7 @@ public sealed partial class ServerManager : IServerManager
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(targetName);
-        cancellationToken.ThrowIfCancellationRequested();
-        await EnsureRecoveredAsync().ConfigureAwait(false);
-        return await _importWorkflow.ImportAsync(sourceDirectory, targetName, mode, progress, cancellationToken).ConfigureAwait(false);
+        return RunWithServerGateAsync(targetName, ct => _importWorkflow.ImportAsync(sourceDirectory, targetName, mode, progress, ct), cancellationToken);
     }
 
     public async Task<ServerScanReport> ScanAndRegisterAsync(CancellationToken cancellationToken = default)
@@ -398,7 +405,7 @@ public sealed partial class ServerManager : IServerManager
             {
                 inspection = await _inspector.InspectAsync(directory, cancellationToken: cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 Logger.Warning(exception, "偵測目錄「{Path}」失敗，已跳過", directory);
                 skipped++;
@@ -418,25 +425,37 @@ public sealed partial class ServerManager : IServerManager
                 continue;
             }
 
-            var loaderKind = LoaderKinds.ParseOrDefault(inspection.LoaderType, LoaderKind.Vanilla);
+            if (inspection.MinecraftVersion is null)
+            {
+                Logger.Warning("目錄「{Name}」無法辨識 Minecraft 版本，已跳過", folderName);
+                skipped++;
+                continue;
+            }
+
+            var loaderKind = inspection.LoaderType is LoaderKind.Unknown ? LoaderKind.Vanilla : inspection.LoaderType;
             var config = ServerSetupHelpers.CreateConfigFromInspection(serverName, loaderKind, inspection, directory);
 
             newConfigs.Add((folderName, config));
-            newlyAdded++;
             Logger.Information("偵測並預備註冊新伺服器「{Name}」：MC {MC} / {Loader}", folderName, config.MinecraftVersion.Value, loaderKind);
         }
 
         if (newConfigs.Count > 0)
         {
-            _registry.Update<object?>(registry =>
+            // 掃描期間可能有同名伺服器被建立或匯入，不覆寫既有條目
+            newlyAdded = _registry.Update(registry =>
             {
+                int added = 0;
                 foreach (var (folderName, config) in newConfigs)
                 {
-                    registry[folderName] = ServerConfigPayload.FromDomain(config);
+                    if (registry.TryAdd(folderName, ServerConfigPayload.FromDomain(config)))
+                    {
+                        added++;
+                    }
                 }
 
-                return null;
+                return added;
             });
+            alreadyManaged += newConfigs.Count - newlyAdded;
         }
 
         Logger.Information("伺服器偵測完成：已管理 {Managed}，新增 {Added}，跳過 {Skipped}", alreadyManaged, newlyAdded, skipped);

@@ -1,6 +1,6 @@
 using MinecraftServerManager.App.ViewModels;
-using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
+using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
@@ -21,7 +21,7 @@ public sealed class ModVersionPickerViewModelTests
         };
 
         var client = new StubModrinthClient { Versions = { ["proj-1"] = versions } };
-        var vm = new ModVersionPickerViewModel(client, "proj-1", "Test Mod", loader: "fabric", minecraftVersion: "1.20.4");
+        using var vm = new ModVersionPickerViewModel(client, "proj-1", "Test Mod", loader: LoaderKind.Fabric, minecraftVersion: "1.20.4");
 
         await vm.LoadVersionsAsync();
 
@@ -33,7 +33,7 @@ public sealed class ModVersionPickerViewModelTests
     }
 
     [Fact]
-    public async Task LoadVersionsAsync_OnlyRequiredDependenciesAreKept()
+    public async Task LoadVersionsAsync_MixedDependencies_KeepsOnlyRequired()
     {
         var versions = new List<OnlineModVersion>
         {
@@ -51,7 +51,7 @@ public sealed class ModVersionPickerViewModelTests
                 ])
         };
 
-        var vm = new ModVersionPickerViewModel(new StubModrinthClient { Versions = { ["proj-1"] = versions } }, "proj-1", "Test Mod");
+        using var vm = new ModVersionPickerViewModel(new StubModrinthClient { Versions = { ["proj-1"] = versions } }, "proj-1", "Test Mod");
         await vm.LoadVersionsAsync();
 
         Assert.Equal(["req-lib"], Assert.Single(vm.Versions).Dependencies);
@@ -61,7 +61,7 @@ public sealed class ModVersionPickerViewModelTests
     public async Task LoadVersionsAsync_WhenNoVersions_SetsEmptyStatusMessage()
     {
         var client = new StubModrinthClient();
-        var vm = new ModVersionPickerViewModel(client, "proj-empty", "Empty Mod");
+        using var vm = new ModVersionPickerViewModel(client, "proj-empty", "Empty Mod");
 
         await vm.LoadVersionsAsync();
 
@@ -71,7 +71,7 @@ public sealed class ModVersionPickerViewModelTests
     }
 
     [Fact]
-    public async Task InstallCommand_SetsQueuedVersionAndFlags()
+    public async Task InstallCommand_VersionSelected_SetsQueuedVersionAndFlags()
     {
         var versions = new List<OnlineModVersion>
         {
@@ -83,7 +83,7 @@ public sealed class ModVersionPickerViewModelTests
         };
 
         var client = new StubModrinthClient { Versions = { ["proj-1"] = versions } };
-        var vm = new ModVersionPickerViewModel(client, "proj-1", "Test Mod");
+        using var vm = new ModVersionPickerViewModel(client, "proj-1", "Test Mod");
         await vm.LoadVersionsAsync();
 
         bool closed = false;

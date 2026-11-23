@@ -6,6 +6,8 @@ namespace MinecraftServerManager.UnitTests.Services;
 
 public sealed class AppUpdateServiceTests : IDisposable
 {
+    private const string TrustedAssetBase = Core.AppInfo.RepositoryUrl + "/releases/download/v2.0.1/";
+
     private readonly TempDirectory _testDirTemp = new("msm_update_test_");
     private readonly string _testDir;
 
@@ -68,18 +70,10 @@ public sealed class AppUpdateServiceTests : IDisposable
         var fakeHttp = CreateHttpPort(null, null);
         var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
 
-        var update = new UpdateCheckResult(
-            HasUpdate: true,
-            CurrentVersion: Core.AppInfo.Version,
-            LatestVersion: "2.0.1",
-            ReleaseTitle: "2.0.1",
-            ReleaseNotes: "測試",
-            DownloadUrl: null,
-            Sha256ChecksumUrl: null,
-            ReleasePageUrl: "https://example.com");
+        var update = TestUpdateResults.Create(downloadUrl: null, sha256ChecksumUrl: null);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.DownloadAndVerifyUpdateAsync(update));
+            service.DownloadAndVerifyUpdateAsync(update, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -92,17 +86,11 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
 
-        var update = new UpdateCheckResult(
-            HasUpdate: true,
-            CurrentVersion: Core.AppInfo.Version,
-            LatestVersion: "2.0.1",
-            ReleaseTitle: "2.0.1",
-            ReleaseNotes: "測試",
-            DownloadUrl: "https://example.com/MinecraftServerManager-2.0.1.exe",
-            Sha256ChecksumUrl: "https://example.com/MinecraftServerManager-2.0.1.exe.sha256",
-            ReleasePageUrl: "https://example.com");
+        var update = TestUpdateResults.Create(
+            downloadUrl: TrustedAssetBase + "MinecraftServerManager-2.0.1.exe",
+            sha256ChecksumUrl: TrustedAssetBase + "MinecraftServerManager-2.0.1.exe.sha256");
 
-        string resultPath = await service.DownloadAndVerifyUpdateAsync(update);
+        string resultPath = await service.DownloadAndVerifyUpdateAsync(update, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(File.Exists(resultPath));
         Assert.True(fakeHttp.DownloadCount > 0);
@@ -110,24 +98,19 @@ public sealed class AppUpdateServiceTests : IDisposable
 
     [Theory]
     [InlineData(null, null)]
-    [InlineData("https://example.com/update.exe.sha256", "not-a-hash")]
+    [InlineData(TrustedAssetBase + "update.exe.sha256", "not-a-hash")]
+    [InlineData("https://example.com/update.exe.sha256", null)]
     public async Task DownloadAndVerifyUpdateAsync_WhenChecksumIsMissingOrInvalid_RejectsDownload(
         string? checksumUrl,
         string? checksumResponse)
     {
         var fakeHttp = CreateHttpPort(checksumResponse, CreateValidPeBytes());
         var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
-        var update = new UpdateCheckResult(
-            HasUpdate: true,
-            CurrentVersion: Core.AppInfo.Version,
-            LatestVersion: "2.0.1",
-            ReleaseTitle: "2.0.1",
-            ReleaseNotes: "測試",
-            DownloadUrl: "https://example.com/MinecraftServerManager-2.0.1.exe",
-            Sha256ChecksumUrl: checksumUrl,
-            ReleasePageUrl: "https://example.com");
+        var update = TestUpdateResults.Create(
+            downloadUrl: TrustedAssetBase + "MinecraftServerManager-2.0.1.exe",
+            sha256ChecksumUrl: checksumUrl);
 
-        await Assert.ThrowsAsync<InvalidDataException>(() => service.DownloadAndVerifyUpdateAsync(update));
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.DownloadAndVerifyUpdateAsync(update, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal(0, fakeHttp.DownloadCount);
         Assert.False(File.Exists(Path.Combine(_testDir, "MinecraftServerManager-2.0.1.exe")));
@@ -138,17 +121,11 @@ public sealed class AppUpdateServiceTests : IDisposable
     {
         var fakeHttp = CreateHttpPort(null, CreateValidPeBytes(), new IOException("checksum unavailable"));
         var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
-        var update = new UpdateCheckResult(
-            HasUpdate: true,
-            CurrentVersion: Core.AppInfo.Version,
-            LatestVersion: "2.0.1",
-            ReleaseTitle: "2.0.1",
-            ReleaseNotes: "測試",
-            DownloadUrl: "https://example.com/MinecraftServerManager-2.0.1.exe",
-            Sha256ChecksumUrl: "https://example.com/MinecraftServerManager-2.0.1.exe.sha256",
-            ReleasePageUrl: "https://example.com");
+        var update = TestUpdateResults.Create(
+            downloadUrl: TrustedAssetBase + "MinecraftServerManager-2.0.1.exe",
+            sha256ChecksumUrl: TrustedAssetBase + "MinecraftServerManager-2.0.1.exe.sha256");
 
-        await Assert.ThrowsAsync<IOException>(() => service.DownloadAndVerifyUpdateAsync(update));
+        await Assert.ThrowsAsync<IOException>(() => service.DownloadAndVerifyUpdateAsync(update, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal(0, fakeHttp.DownloadCount);
     }
@@ -163,47 +140,39 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
 
-        var update = new UpdateCheckResult(
-            HasUpdate: true,
-            CurrentVersion: Core.AppInfo.Version,
-            LatestVersion: "2.0.1",
-            ReleaseTitle: "2.0.1",
-            ReleaseNotes: "測試",
-            DownloadUrl: "https://example.com/MinecraftServerManager-2.0.1.exe",
-            Sha256ChecksumUrl: "https://example.com/MinecraftServerManager-2.0.1.exe.sha256",
-            ReleasePageUrl: "https://example.com");
+        var update = TestUpdateResults.Create(
+            downloadUrl: TrustedAssetBase + "MinecraftServerManager-2.0.1.exe",
+            sha256ChecksumUrl: TrustedAssetBase + "MinecraftServerManager-2.0.1.exe.sha256");
 
-        await Assert.ThrowsAnyAsync<Exception>(() =>
-            service.DownloadAndVerifyUpdateAsync(update));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.DownloadAndVerifyUpdateAsync(update, cancellationToken: TestContext.Current.CancellationToken));
 
         string targetFile = Path.Combine(_testDir, "MinecraftServerManager-2.0.1.exe");
         Assert.False(File.Exists(targetFile));
     }
 
-    [Fact]
-    public async Task DownloadAndVerifyUpdateAsync_WhenPeHeaderInvalid_DeletesFileAndThrows()
+    [Theory]
+    [InlineData("not_pe")]
+    [InlineData("dos_only")]
+    public async Task DownloadAndVerifyUpdateAsync_WhenPeHeaderInvalid_DeletesFileAndThrows(string kind)
     {
-        byte[] invalidPe = new byte[128];
-        invalidPe[0] = 0x00;
-        invalidPe[1] = 0x00;
+        byte[] invalidPe = kind switch
+        {
+            "dos_only" => [0x4D, 0x5A, .. new byte[254]],
+            _ => new byte[128],
+        };
         string sha256 = Convert.ToHexStringLower(SHA256.HashData(invalidPe));
 
         var fakeHttp = CreateHttpPort(sha256, invalidPe);
 
         var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
 
-        var update = new UpdateCheckResult(
-            HasUpdate: true,
-            CurrentVersion: Core.AppInfo.Version,
-            LatestVersion: "2.0.1",
-            ReleaseTitle: "2.0.1",
-            ReleaseNotes: "測試",
-            DownloadUrl: "https://example.com/MinecraftServerManager-2.0.1.exe",
-            Sha256ChecksumUrl: "https://example.com/MinecraftServerManager-2.0.1.exe.sha256",
-            ReleasePageUrl: "https://example.com");
+        var update = TestUpdateResults.Create(
+            downloadUrl: TrustedAssetBase + "MinecraftServerManager-2.0.1.exe",
+            sha256ChecksumUrl: TrustedAssetBase + "MinecraftServerManager-2.0.1.exe.sha256");
 
         await Assert.ThrowsAsync<InvalidDataException>(() =>
-            service.DownloadAndVerifyUpdateAsync(update));
+            service.DownloadAndVerifyUpdateAsync(update, cancellationToken: TestContext.Current.CancellationToken));
 
         string targetFile = Path.Combine(_testDir, "MinecraftServerManager-2.0.1.exe");
         Assert.False(File.Exists(targetFile));
@@ -222,19 +191,31 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
 
-        var update = new UpdateCheckResult(
-            HasUpdate: true,
-            CurrentVersion: Core.AppInfo.Version,
-            LatestVersion: "2.0.1",
-            ReleaseTitle: "2.0.1",
-            ReleaseNotes: "測試",
-            DownloadUrl: "https://example.com/MinecraftServerManager-2.0.1.exe",
-            Sha256ChecksumUrl: "https://example.com/MinecraftServerManager-2.0.1.exe.sha256",
-            ReleasePageUrl: "https://example.com");
+        var update = TestUpdateResults.Create(
+            downloadUrl: TrustedAssetBase + "MinecraftServerManager-2.0.1.exe",
+            sha256ChecksumUrl: TrustedAssetBase + "MinecraftServerManager-2.0.1.exe.sha256");
 
-        string resultPath = await service.DownloadAndVerifyUpdateAsync(update);
+        string resultPath = await service.DownloadAndVerifyUpdateAsync(update, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(targetFile, resultPath);
+        Assert.Equal(0, fakeHttp.DownloadCount);
+    }
+
+    [Theory]
+    [InlineData("https://example.com/MinecraftServerManager-2.0.1.exe")]
+    [InlineData("https://github.com/Other/Repo/releases/download/v2.0.1/MinecraftServerManager-2.0.1.exe")]
+    [InlineData("https://github.com:8443/Colin955023/MinecraftServerManager/releases/download/v2.0.1/MinecraftServerManager-2.0.1.exe")]
+    [InlineData("https://user:pass@github.com/Colin955023/MinecraftServerManager/releases/download/v2.0.1/MinecraftServerManager-2.0.1.exe")]
+    public async Task DownloadAndVerifyUpdateAsync_WhenDownloadUrlNotOfficialRelease_RejectsDownload(string downloadUrl)
+    {
+        var fakeHttp = CreateHttpPort(new string('a', 64), CreateValidPeBytes());
+        var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
+        var update = TestUpdateResults.Create(
+            downloadUrl: downloadUrl,
+            sha256ChecksumUrl: TrustedAssetBase + "MinecraftServerManager-2.0.1.exe.sha256");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.DownloadAndVerifyUpdateAsync(update, cancellationToken: TestContext.Current.CancellationToken));
+
         Assert.Equal(0, fakeHttp.DownloadCount);
     }
 
@@ -245,30 +226,6 @@ public sealed class AppUpdateServiceTests : IDisposable
         var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
 
         Assert.Throws<FileNotFoundException>(() =>
-            service.ApplyUpdateAndRestart(Path.Combine(_testDir, "non_existent.exe")));
-    }
-
-    [Fact]
-    public async Task DownloadAndVerifyUpdateAsync_WhenOnlyDosHeaderPresent_RejectsFile()
-    {
-        byte[] dosOnly = new byte[256];
-        dosOnly[0] = 0x4D;
-        dosOnly[1] = 0x5A;
-        string sha256 = Convert.ToHexStringLower(SHA256.HashData(dosOnly));
-        var fakeHttp = CreateHttpPort(sha256, dosOnly);
-        var service = new AppUpdateService(fakeHttp, _testDir, NoOp.Create<IProcessRunner>());
-        var update = new UpdateCheckResult(
-            HasUpdate: true,
-            CurrentVersion: Core.AppInfo.Version,
-            LatestVersion: "2.0.1",
-            ReleaseTitle: "2.0.1",
-            ReleaseNotes: "測試",
-            DownloadUrl: "https://example.com/MinecraftServerManager-2.0.1.exe",
-            Sha256ChecksumUrl: "https://example.com/MinecraftServerManager-2.0.1.exe.sha256",
-            ReleasePageUrl: "https://example.com");
-
-        await Assert.ThrowsAsync<InvalidDataException>(() => service.DownloadAndVerifyUpdateAsync(update));
-
-        Assert.False(File.Exists(Path.Combine(_testDir, "MinecraftServerManager-2.0.1.exe")));
+            service.ApplyUpdateAndRestart(Path.Combine(_testDir, "non_existent.exe"), static launch => launch()));
     }
 }

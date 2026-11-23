@@ -39,7 +39,8 @@ public static class ComboBoxScrollHelper
             return;
         }
 
-        if (comboBox.IsDropDownOpen)
+        // 未取得焦點時讓滾輪捲動外層頁面，避免游標掠過即誤改選項
+        if (comboBox.IsDropDownOpen || comboBox.FocusState == FocusState.Unfocused)
         {
             return;
         }

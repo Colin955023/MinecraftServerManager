@@ -18,7 +18,7 @@ public sealed class JsonCodecPersistedOutputTests
     private static string Lf(string text) => text.ReplaceLineEndings("\n");
 
     [Fact]
-    public void SerializeProducesStableCompactOutputForPersistedTypes()
+    public void Serialize_PersistedTypes_ProducesStableCompactOutput()
     {
         Assert.Equal(
             """{"name":"A","minecraftVersion":"1.21","loaderType":"Vanilla","loaderVersion":"","memoryMaxMb":2048,"memoryMinMb":null,"path":"C:\\s","jvmArgs":["-Da"],"backupPath":""}""",
@@ -43,7 +43,7 @@ public sealed class JsonCodecPersistedOutputTests
     }
 
     [Fact]
-    public void SerializeProducesStableIndentedAndRelaxedOutput()
+    public void Serialize_IndentedAndRelaxed_ProducesStableOutput()
     {
         Assert.Equal(
             Lf("""
@@ -82,9 +82,9 @@ public sealed class JsonCodecPersistedOutputTests
             Lf("""
             [
               {
+                "enabled": true,
                 "name": "中文",
                 "version": "1",
-                "enabled": true,
                 "minecraftVersion": "m",
                 "loaderType": "l",
                 "author": "a",
@@ -96,11 +96,11 @@ public sealed class JsonCodecPersistedOutputTests
               }
             ]
             """),
-            JsonCodec.SerializeRelaxed(new List<ModJsonItem> { new("中文", "1", true, "m", "l", "a", "f", "i", "s", "t", "d") }).ReplaceLineEndings("\n"));
+            JsonCodec.SerializeRelaxed(new List<ModListExporter.CleanRow> { new(true, "中文", "1", "m", "l", "a", "f", "i", "s", "t", "d") }).ReplaceLineEndings("\n"));
     }
 
     [Fact]
-    public void DeserializeIsCaseInsensitiveAndRoundTripsNestedTypes()
+    public void Deserialize_MixedCaseNested_RoundTrips()
     {
         var settings = JsonCodec.Deserialize<UserSettings>("""{"SERVERS_ROOT":"x","Window_Preferences":{"THEME_MODE":"dark"}}""");
         Assert.NotNull(settings);
@@ -118,7 +118,7 @@ public sealed class JsonCodecPersistedOutputTests
     }
 
     [Fact]
-    public void TryReadFileReturnsNullForMissingOversizedOrInvalidFilesAndValueForValidFile()
+    public void TryReadFile_VariousFiles_ReturnsValueOrNull()
     {
         using var temp = new TempDirectory("msm-json-");
         string valid = temp.Combine("valid.json");

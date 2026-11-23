@@ -5,7 +5,7 @@ namespace MinecraftServerManager.UnitTests.Servers;
 public sealed class ServerPropertiesMigrationTests
 {
     [Fact]
-    public void PlanMigrationShouldRenameTexturePackToResourcePack()
+    public void PlanMigration_TexturePack_RenamesToResourcePack()
     {
         var input = new Dictionary<string, string>
         {
@@ -21,7 +21,7 @@ public sealed class ServerPropertiesMigrationTests
     }
 
     [Fact]
-    public void PlanMigrationShouldConvertNumericGamemodeAndDifficulty()
+    public void PlanMigration_NumericModes_ConvertsToNames()
     {
         var input = new Dictionary<string, string>
         {
@@ -38,7 +38,7 @@ public sealed class ServerPropertiesMigrationTests
     }
 
     [Fact]
-    public void PlanMigrationShouldConvertLevelTypeOnVersion119AndAbove()
+    public void PlanMigration_LevelTypeOn119Plus_Converts()
     {
         var input = new Dictionary<string, string>
         {
@@ -55,7 +55,7 @@ public sealed class ServerPropertiesMigrationTests
     }
 
     [Fact]
-    public void PlanMigrationShouldRemoveDeprecatedProperties()
+    public void PlanMigration_DeprecatedProperties_Removes()
     {
         var input = new Dictionary<string, string>
         {
@@ -76,7 +76,7 @@ public sealed class ServerPropertiesMigrationTests
     }
 
     [Fact]
-    public void PlanMigrationWithCleanPropertiesShouldReportNoMigration()
+    public void PlanMigration_CleanProperties_ReportsNoMigration()
     {
         var input = new Dictionary<string, string>
         {
@@ -89,5 +89,50 @@ public sealed class ServerPropertiesMigrationTests
 
         Assert.False(plan.NeedsMigration);
         Assert.Empty(plan.Changes);
+    }
+
+    [Fact]
+    public void PlanMigration_DuplicateHellworld_Records()
+    {
+        var plan = ServerPropertiesMigrationService.PlanMigration(new Dictionary<string, string>
+        {
+            ["hellworld"] = "false",
+            ["allow-nether"] = "true",
+        }, "1.20.4");
+
+        Assert.True(plan.NeedsMigration);
+        Assert.False(plan.MigratedProperties.ContainsKey("hellworld"));
+        Assert.Equal("true", plan.MigratedProperties["allow-nether"]);
+        Assert.Contains(plan.Changes, static c => c.Contains("hellworld", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void PlanMigration_LegacyVersion_KeepsNumericModes()
+    {
+        var plan = ServerPropertiesMigrationService.PlanMigration(new Dictionary<string, string>
+        {
+            ["gamemode"] = "1",
+            ["difficulty"] = "2",
+        }, "1.12.2");
+
+        Assert.False(plan.NeedsMigration);
+        Assert.Equal("1", plan.MigratedProperties["gamemode"]);
+        Assert.Equal("2", plan.MigratedProperties["difficulty"]);
+    }
+
+    [Fact]
+    public void PlanMigration_Legacy112Version_KeepsMaxBuildHeightAndSnooperEnabled()
+    {
+        var plan = ServerPropertiesMigrationService.PlanMigration(new Dictionary<string, string>
+        {
+            ["max-build-height"] = "256",
+            ["snooper-enabled"] = "true",
+            ["announce-player-achievements"] = "true",
+        }, "1.12.2");
+
+        Assert.True(plan.NeedsMigration);
+        Assert.Equal("256", plan.MigratedProperties["max-build-height"]);
+        Assert.Equal("true", plan.MigratedProperties["snooper-enabled"]);
+        Assert.False(plan.MigratedProperties.ContainsKey("announce-player-achievements"));
     }
 }

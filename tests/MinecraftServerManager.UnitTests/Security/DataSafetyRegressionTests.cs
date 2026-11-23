@@ -45,7 +45,7 @@ public sealed class DataSafetyRegressionTests : IDisposable
         File.WriteAllText(registryPath, "{ broken");
 
         var manager = TestServerManagers.Create(serversRoot);
-        var servers = await manager.GetAllServersAsync();
+        var servers = await manager.GetAllServersAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(servers);
         Assert.Equal("{ broken", File.ReadAllText(registryPath + ".bad"));
@@ -55,19 +55,19 @@ public sealed class DataSafetyRegressionTests : IDisposable
     [InlineData("-Xmx2g", 2048)]
     [InlineData("-Xmx512m", 512)]
     [InlineData("-Xmx1t", 1_048_576)]
-    public void ParseMemorySetting_ValidUnits(string text, int expectedMb) =>
-        Assert.Equal(expectedMb, MemoryUtils.ParseMemorySetting(text));
+    public void ParseMemorySetting_ValidUnits_ReturnsMegabytes(string text, int expectedMb) =>
+        Assert.Equal(expectedMb, MemoryHelpers.ParseMemorySetting(text));
 
     [Theory]
     [InlineData("-Xmx99999999999g")]
     [InlineData("-Xmx9999999999t")]
-    public void ParseMemorySetting_OverflowingValuesAreRejected(string text) =>
-        Assert.Null(MemoryUtils.ParseMemorySetting(text));
+    public void ParseMemorySetting_OverflowingValue_Rejects(string text) =>
+        Assert.Null(MemoryHelpers.ParseMemorySetting(text));
 
     [Theory]
     [InlineData("-Xmx2G", "-Xmx2G")]
     [InlineData("-Dpath=C:\\Program Files\\x", "\"-Dpath=C:\\Program Files\\x\"")]
-    public void FormatBatchArgument_QuotesOnlyArgumentsContainingWhitespace(string argument, string expected) =>
+    public void FormatBatchArgument_ContainsWhitespace_QuotesArgument(string argument, string expected) =>
         Assert.Equal(expected, StartScriptWriter.FormatBatchArgument(argument));
 
     [Fact]
@@ -96,7 +96,7 @@ public sealed class DataSafetyRegressionTests : IDisposable
     }
 
     [Fact]
-    public void LaunchPlanner_RejectsJavaPathThatIsNotAnExistingJavaExecutable()
+    public void LaunchPlanner_JavaPathNotJavaExecutable_Rejects()
     {
         string serverDir = Path.Combine(_root, "srv");
         Directory.CreateDirectory(serverDir);
@@ -117,7 +117,7 @@ public sealed class DataSafetyRegressionTests : IDisposable
     [Theory]
     [InlineData("server.jar")]
     [InlineData("run.bat")]
-    public void LaunchPlanner_RejectsCommandExecutionJvmArgsForJarAndScriptTargets(string launchTarget)
+    public void LaunchPlanner_CommandExecutionJvmArgs_Rejects(string launchTarget)
     {
         string serverDir = Path.Combine(_root, "srv-jvm");
         Directory.CreateDirectory(serverDir);

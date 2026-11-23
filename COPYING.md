@@ -1,6 +1,6 @@
 Minecraft Server Manager
 Copyright (C) 2025-2026 Minecraft Server Manager Team
-Copyright (C) 2025-2026 Colin955023 <colin960924@gmail.com>
+Copyright (C) 2025-2026 Colin955023
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -49,3 +49,18 @@ The update-check flow (resolving only missing required dependencies of the new
 versions and treating installed dependencies as satisfied) follows the behavior
 of Prism Launcher's mod update dialog. No code was copied for it; it is
 credited here as a courtesy.
+
+---
+
+## Bundled third-party components
+
+The single-file self-contained executable bundles the following components,
+each distributed under its own license:
+
+| Component | License |
+| --- | --- |
+| .NET Runtime | MIT (<https://github.com/dotnet/runtime/blob/main/LICENSE.TXT>) |
+| CommunityToolkit.Mvvm | MIT (<https://github.com/CommunityToolkit/dotnet/blob/main/License.md>) |
+| Microsoft.Extensions.Logging.Abstractions, Microsoft.Extensions.DependencyInjection.Abstractions | MIT (<https://github.com/dotnet/runtime/blob/main/LICENSE.TXT>) |
+| Microsoft.Windows.CsWinRT | MIT (<https://github.com/microsoft/CsWinRT/blob/master/LICENSE>) |
+| Microsoft.WindowsAppSDK.WinUI, Microsoft.WindowsAppSDK.Runtime | Microsoft Software License Terms (<https://www.nuget.org/packages/Microsoft.WindowsAppSDK/License>) |

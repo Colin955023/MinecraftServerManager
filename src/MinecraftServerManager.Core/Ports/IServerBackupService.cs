@@ -28,7 +28,7 @@ public enum ServerBackupSummaryStatus
 public sealed record ServerBackupSummary(
     ServerBackupSummaryStatus Status,
     int Count = 0,
-    DateTime? LatestWriteTime = null);
+    DateTimeOffset? LatestWriteTime = null);
 
 /// <summary>伺服器備份與還原管理介面</summary>
 public interface IServerBackupService
@@ -62,12 +62,12 @@ public interface IServerBackupService
         string? backupDirectory = null,
         CancellationToken cancellationToken = default);
 
-    /// <summary>取得外部備份資料夾內指定伺服器的備份摘要（同步執行，呼叫端應於背景執行緒呼叫）</summary>
-    public ServerBackupSummary GetBackupSummary(string serverName, string? backupDirectory);
+    /// <summary>取得外部備份資料夾內指定伺服器的備份摘要</summary>
+    public Task<ServerBackupSummary> GetBackupSummaryAsync(string serverName, string? backupDirectory, CancellationToken cancellationToken = default);
 
     /// <summary>驗證備份目的地；合法回傳 null，否則回傳阻擋訊息</summary>
-    public string? ValidateBackupDestination(string destinationPath);
+    public Task<string?> ValidateBackupDestinationAsync(string destinationPath, CancellationToken cancellationToken = default);
 
     /// <summary>建立備份目的資料夾並產生帶時間戳記的備份檔案完整路徑</summary>
-    public string PrepareBackupFilePath(string serverName, string destinationDirectory);
+    public Task<string> PrepareBackupFilePathAsync(string serverName, string destinationDirectory, CancellationToken cancellationToken = default);
 }

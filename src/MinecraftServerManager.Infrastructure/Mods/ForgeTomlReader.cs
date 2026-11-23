@@ -6,6 +6,8 @@ namespace MinecraftServerManager.Infrastructure.Mods;
 /// <summary>讀取 <c>mods.toml</c> 中模組掃描所需的欄位</summary>
 internal static partial class ForgeTomlReader
 {
+    internal const string DependenciesHeader = "[[dependencies";
+
     internal static string? ExtractMinecraftDependency(string content)
     {
         if (string.IsNullOrWhiteSpace(content))
@@ -13,10 +15,12 @@ internal static partial class ForgeTomlReader
             return null;
         }
 
-        int idx = 0;
-        while ((idx = content.IndexOf("[[dependencies", idx, StringComparison.OrdinalIgnoreCase)) >= 0)
+        content = StripCommentLines(content);
+        int idx = FindTableHeader(content, DependenciesHeader, 0);
+        while (idx >= 0)
         {
-            int nextSection = content.IndexOf("[[", idx + 14, StringComparison.Ordinal);
+            // 區段延伸至下一個行首表頭（[[...]] 或 [...]）
+            int nextSection = FindTableHeader(content, "[", idx + 1);
             string section = nextSection >= 0 ? content[idx..nextSection] : content[idx..];
             if (ForgeMinecraftModIdRegex().IsMatch(section))
             {
@@ -26,11 +30,8 @@ internal static partial class ForgeTomlReader
                     return CleanTomlValue(match.Groups[1].Value);
                 }
             }
-            if (nextSection < 0)
-            {
-                break;
-            }
-            idx = nextSection;
+
+            idx = FindTableHeader(content, DependenciesHeader, idx + 1);
         }
 
         var directMatch = ForgeMcDepRegex().Match(content);
@@ -40,6 +41,55 @@ internal static partial class ForgeTomlReader
         }
 
         return null;
+    }
+
+    /// <summary>移除整行註解（行首空白後為 <c>#</c>），保留其餘行</summary>
+    internal static string StripCommentLines(string content)
+    {
+        if (!content.Contains('#'))
+        {
+            return content;
+        }
+
+        var builder = new StringBuilder(content.Length);
+        foreach (var line in content.AsSpan().EnumerateLines())
+        {
+            if (!line.TrimStart().StartsWith('#'))
+            {
+                builder.Append(line).Append('\n');
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>自 <paramref name="start"/> 起尋找行首（允許前導空白）以 <paramref name="header"/> 開頭的表頭，回傳其位置；找不到回傳 -1</summary>
+    internal static int FindTableHeader(string content, string header, int start)
+    {
+        int lineStart = start <= 0 ? 0 : content.LastIndexOf('\n', start - 1) + 1;
+        while (lineStart < content.Length)
+        {
+            int pos = lineStart;
+            while (pos < content.Length && content[pos] is ' ' or '\t')
+            {
+                pos++;
+            }
+
+            if (pos >= start && content.AsSpan(pos).StartsWith(header, StringComparison.OrdinalIgnoreCase))
+            {
+                return pos;
+            }
+
+            int newline = content.IndexOf('\n', pos);
+            if (newline < 0)
+            {
+                break;
+            }
+
+            lineStart = newline + 1;
+        }
+
+        return -1;
     }
 
     internal static string? ExtractValueAt(string content, int pos, ref int nextIndex)
@@ -56,76 +106,37 @@ internal static partial class ForgeTomlReader
 
         if (pos + 3 <= content.Length && content.AsSpan(pos, 3).SequenceEqual("'''"))
         {
+            // 多行常值字串：不解跳脫
             int end = content.IndexOf("'''", pos + 3, StringComparison.Ordinal);
-            if (end >= 0)
-            {
-                nextIndex = Math.Max(nextIndex, end + 3);
-                return content[(pos + 3)..end].Trim();
-            }
-            nextIndex = content.Length;
-            return content[(pos + 3)..].Trim();
+            nextIndex = end >= 0 ? Math.Max(nextIndex, end + 3) : content.Length;
+            return (end >= 0 ? content[(pos + 3)..end] : content[(pos + 3)..]).Trim();
         }
 
         if (pos + 3 <= content.Length && content.AsSpan(pos, 3).SequenceEqual("\"\"\""))
         {
-            int end = content.IndexOf("\"\"\"", pos + 3, StringComparison.Ordinal);
-            if (end >= 0)
-            {
-                nextIndex = Math.Max(nextIndex, end + 3);
-                return content[(pos + 3)..end].Trim();
-            }
-            nextIndex = content.Length;
-            return content[(pos + 3)..].Trim();
+            // 多行基本字串：需解跳脫
+            int end = FindUnescapedQuote(content, pos + 3, "\"\"\"");
+            nextIndex = end >= 0 ? Math.Max(nextIndex, end + 3) : content.Length;
+            return UnescapeTomlString((end >= 0 ? content[(pos + 3)..end] : content[(pos + 3)..]).Trim());
         }
 
         if (content[pos] == '\'')
         {
             int end = content.IndexOf('\'', pos + 1);
-            if (end >= 0)
-            {
-                nextIndex = Math.Max(nextIndex, end + 1);
-                return content[(pos + 1)..end].Trim();
-            }
-            return content[(pos + 1)..].Trim();
+            nextIndex = end >= 0 ? Math.Max(nextIndex, end + 1) : content.Length;
+            return (end >= 0 ? content[(pos + 1)..end] : content[(pos + 1)..]).Trim();
         }
 
         if (content[pos] == '"')
         {
-            int end = -1;
-            for (int i = pos + 1; i < content.Length; i++)
-            {
-                if (content[i] == '"')
-                {
-                    int backslashes = 0;
-                    for (int j = i - 1; j > pos && content[j] == '\\'; j--)
-                    {
-                        backslashes++;
-                    }
-                    if (backslashes % 2 == 0)
-                    {
-                        end = i;
-                        break;
-                    }
-                }
-            }
-            if (end >= 0)
-            {
-                nextIndex = Math.Max(nextIndex, end + 1);
-                return UnescapeTomlString(content[(pos + 1)..end].Trim());
-            }
-            return UnescapeTomlString(content[(pos + 1)..].Trim());
+            int end = FindUnescapedQuote(content, pos + 1, "\"");
+            nextIndex = end >= 0 ? Math.Max(nextIndex, end + 1) : content.Length;
+            return UnescapeTomlString((end >= 0 ? content[(pos + 1)..end] : content[(pos + 1)..]).Trim());
         }
 
         int eol = content.IndexOf('\n', pos);
         string rawVal = eol >= 0 ? content[pos..eol] : content[pos..];
-        if (eol >= 0)
-        {
-            nextIndex = Math.Max(nextIndex, eol + 1);
-        }
-        else
-        {
-            nextIndex = content.Length;
-        }
+        nextIndex = eol >= 0 ? Math.Max(nextIndex, eol + 1) : content.Length;
 
         int hashIdx = rawVal.IndexOf('#');
         if (hashIdx >= 0)
@@ -134,6 +145,35 @@ internal static partial class ForgeTomlReader
         }
 
         return rawVal.Trim();
+    }
+
+    /// <summary>自 <paramref name="start"/> 起尋找未被反斜線跳脫的引號序列</summary>
+    private static int FindUnescapedQuote(string content, int start, string quote)
+    {
+        int index = start;
+        while ((index = content.IndexOf(quote, index, StringComparison.Ordinal)) >= 0)
+        {
+            if (!IsEscaped(content, index, start))
+            {
+                return index;
+            }
+
+            index++;
+        }
+
+        return -1;
+    }
+
+    /// <summary>位置前方連續反斜線為奇數個時該字元被跳脫</summary>
+    private static bool IsEscaped(string text, int index, int lowerBound)
+    {
+        int backslashes = 0;
+        for (int j = index - 1; j >= lowerBound && text[j] == '\\'; j--)
+        {
+            backslashes++;
+        }
+
+        return backslashes % 2 == 1;
     }
 
     private static string UnescapeTomlString(string value)
@@ -183,7 +223,7 @@ internal static partial class ForgeTomlReader
         for (int i = 0; i < val.Length; i++)
         {
             char c = val[i];
-            if ((c == '"' || c == '\'') && (i == 0 || val[i - 1] != '\\'))
+            if ((c == '"' || c == '\'') && !IsEscaped(val, i, 0))
             {
                 if (!inQuotes)
                 {
@@ -210,12 +250,12 @@ internal static partial class ForgeTomlReader
         return val.Trim('\'', '"', ' ', '\r', '\n', '\t');
     }
 
-    [GeneratedRegex(@"(?m)^\s*modId\s*=\s*[""']minecraft[""']\s*\n\s*versionRange\s*=\s*(.+)$")]
+    [GeneratedRegex(@"(?m)^\s*modId\s*=\s*[""']minecraft[""']\s*\n\s*versionRange\s*=\s*(.+)$", RegexOptions.CultureInvariant)]
     private static partial Regex ForgeMcDepRegex();
 
-    [GeneratedRegex(@"modId\s*=\s*[""']minecraft[""']", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"modId\s*=\s*[""']minecraft[""']", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ForgeMinecraftModIdRegex();
 
-    [GeneratedRegex(@"versionRange\s*=\s*(.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"versionRange\s*=\s*(.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ForgeVersionRangeRegex();
 }

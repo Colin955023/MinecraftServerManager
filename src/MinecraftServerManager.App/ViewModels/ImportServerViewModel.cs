@@ -1,6 +1,6 @@
-using MinecraftServerManager.App.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
@@ -8,12 +8,21 @@ using MinecraftServerManager.Infrastructure.Logging;
 namespace MinecraftServerManager.App.ViewModels;
 
 /// <summary>匯入伺服器對話方塊 ViewModel</summary>
-public sealed partial class ImportServerViewModel(IServerManager serverManager,
-    IUiService uiService) : ObservableObject
+public sealed partial class ImportServerViewModel : ViewModelBase
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ImportServerViewModel));
-    private readonly IUiService _ui = uiService;
-    private readonly IServerManager _serverManager = serverManager;
+
+    private readonly IServerManager _serverManager;
+    private readonly IUiService _ui;
+
+    public ImportServerViewModel(IServerManager serverManager, IUiService uiService)
+    {
+        ArgumentNullException.ThrowIfNull(serverManager);
+        ArgumentNullException.ThrowIfNull(uiService);
+
+        _serverManager = serverManager;
+        _ui = uiService;
+    }
 
     [ObservableProperty]
     public partial string SourcePath { get; set; } = string.Empty;
@@ -58,7 +67,7 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
     [RelayCommand]
     public async Task BrowseZipAsync()
     {
-        if (await _ui.PickFilesAsync("選取 Minecraft 伺服器 ZIP 壓縮檔", FileTypeChoice.Zip).ConfigureAwait(true) is { Count: > 0 } picked)
+        if (await _ui.PickFilesAsync("選取 Minecraft 伺服器 ZIP 壓縮檔", FileTypeChoice.Zip) is { Count: > 0 } picked)
         {
             SourcePath = picked[0];
             ServerName = Path.GetFileNameWithoutExtension(picked[0]);
@@ -68,10 +77,10 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
     [RelayCommand]
     public async Task BrowseFolderAsync()
     {
-        if (await _ui.PickFolderAsync("選取 Minecraft 伺服器目錄").ConfigureAwait(true) is { } folder)
+        if (await _ui.PickFolderAsync("選取 Minecraft 伺服器目錄") is { } folder)
         {
-            SourcePath = folder;
-            ServerName = Path.GetFileName(folder);
+            SourcePath = Path.TrimEndingDirectorySeparator(folder);
+            ServerName = Path.GetFileName(SourcePath);
         }
     }
 
@@ -103,14 +112,14 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
         }
 
         string targetName = ServerName.Trim();
-        string source = SourcePath.Trim();
+        string source = Path.TrimEndingDirectorySeparator(SourcePath.Trim());
 
         if (TransferMode == ImportTransferMode.Move)
         {
             bool confirmed = await _ui.ConfirmAsync(
                 $"您選擇了「遷移」模式，匯入完成後將會移除原始來源：\n{source}\n\n確定要繼續遷移匯入嗎？",
                 "確認遷移匯入",
-                UiMessageLevel.Warning).ConfigureAwait(true);
+                UiMessageLevel.Warning);
             if (!confirmed)
             {
                 return false;
@@ -128,7 +137,7 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
                     source,
                     targetName,
                     TransferMode,
-                    progressDialog.Progress).ConfigureAwait(true);
+                    progressDialog.Progress);
             }
 
             if (result.Completed)
@@ -139,12 +148,13 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
             else
             {
                 StatusMessage = $"匯入失敗：{result.Message}";
-                await _ui.ShowErrorAsync($"匯入伺服器被拒絕或失敗：\n{result.Message}", "匯入伺服器失敗").ConfigureAwait(true);
+                await _ui.ShowErrorAsync($"匯入伺服器被拒絕或失敗：\n{result.Message}", "匯入伺服器失敗");
                 return false;
             }
         }
         catch (OperationCanceledException)
         {
+            Logger.Information("伺服器「{Name}」匯入已取消", targetName);
             StatusMessage = "匯入已取消";
             return false;
         }
@@ -152,7 +162,7 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
         {
             Logger.Error(ex, "匯入伺服器失敗");
             StatusMessage = $"匯入失敗：{ex.Message}";
-            await _ui.ShowErrorAsync($"匯入伺服器時發生錯誤：\n{ex.Message}", "匯入伺服器失敗").ConfigureAwait(true);
+            await _ui.ShowErrorAsync($"匯入伺服器時發生錯誤：\n{ex.Message}", "匯入伺服器失敗");
             return false;
         }
     }

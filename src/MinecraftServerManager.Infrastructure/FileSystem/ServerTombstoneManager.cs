@@ -1,7 +1,7 @@
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
-using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Infrastructure.FileSystem;
 
@@ -64,8 +64,16 @@ public static class ServerTombstoneManager
             throw new IOException($"無法寫入刪除紀錄： {journalPath}");
         }
 
-        // 嚴格在邊界內移動目錄至 tombstone
-        SafeFileSystem.MoveWithinStrict(root, original, tombstonePath);
+        // 嚴格在邊界內移動目錄至 tombstone；失敗時清除剛寫入的紀錄，避免留下孤兒 journal
+        try
+        {
+            SafeFileSystem.MoveWithinStrict(root, original, tombstonePath);
+        }
+        catch (Exception)
+        {
+            SafeFileSystem.DeleteWithin(root, journalPath);
+            throw;
+        }
 
         // 寫入內部標記
         string internalMarker = Path.Combine(tombstonePath, DeleteMarker);
@@ -90,11 +98,21 @@ public static class ServerTombstoneManager
 
         string root = SafeFileSystem.ResolveStableDirectory(serversRoot);
         var entries = SafeFileSystem.ListBoundedDirectory(root, rejectReparse: false);
+        var tombstoneNames = entries
+            .Where(static entry => entry.IsDirectory)
+            .Select(static entry => Path.GetFileName(entry.FullPath))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in entries)
         {
             string dirName = Path.GetFileName(entry.FullPath);
-            if (!entry.IsDirectory || SafeFileSystem.IsReparsePoint(entry.FullPath))
+            if (!entry.IsDirectory)
+            {
+                CleanOrphanJournal(root, entry, dirName, tombstoneNames);
+                continue;
+            }
+
+            if (SafeFileSystem.IsReparsePoint(entry.FullPath))
             {
                 continue;
             }
@@ -125,6 +143,7 @@ public static class ServerTombstoneManager
             if (record == null || record.SchemaVersion != 1 || string.IsNullOrWhiteSpace(record.ServerName))
             {
                 // 無法驗證的項目保留以避免誤刪
+                Logger.Warning("刪除暫存目錄缺少有效紀錄，予以保留供人工檢視: {Path}", entry.FullPath);
                 continue;
             }
 
@@ -142,6 +161,7 @@ public static class ServerTombstoneManager
             if (SafeFileSystem.DirectoryExists(targetOriginal))
             {
                 // 原目錄已存在，保留暫存目錄以避免覆蓋
+                Logger.Warning("原伺服器目錄 {OriginalPath} 已存在，保留刪除暫存目錄: {Path}", targetOriginal, entry.FullPath);
                 continue;
             }
 
@@ -151,10 +171,30 @@ public static class ServerTombstoneManager
                 SafeFileSystem.DeleteWithin(targetOriginal, Path.Combine(targetOriginal, DeleteMarker));
                 SafeFileSystem.DeleteWithin(root, journalPath);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Logger.Warning(ex, "還原伺服器目錄失敗，保留目錄供管理員檢視");
+                Logger.Warning(ex, "還原伺服器目錄 {OriginalPath} 失敗，保留暫存目錄供人工檢視: {Path}", targetOriginal, entry.FullPath);
             }
+        }
+    }
+
+    /// <summary>刪除對應 tombstone 目錄已不存在的 journal（搬移失敗或清理中斷所遺留）</summary>
+    private static void CleanOrphanJournal(string root, FileSystemEntry entry, string fileName, HashSet<string> tombstoneNames)
+    {
+        if (!fileName.StartsWith(DeletePrefix, StringComparison.OrdinalIgnoreCase) ||
+            !fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
+            tombstoneNames.Contains(Path.GetFileNameWithoutExtension(fileName)))
+        {
+            return;
+        }
+
+        if (SafeFileSystem.DeleteWithin(root, entry.FullPath))
+        {
+            Logger.Information("已清理孤兒刪除紀錄: {Path}", entry.FullPath);
+        }
+        else
+        {
+            Logger.Warning("清理孤兒刪除紀錄失敗: {Path}", entry.FullPath);
         }
     }
 

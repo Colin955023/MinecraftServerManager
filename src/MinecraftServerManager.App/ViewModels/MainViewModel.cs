@@ -1,6 +1,6 @@
-using MinecraftServerManager.App.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Settings;
@@ -12,34 +12,18 @@ public sealed partial class MainViewModel : ViewModelBase
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(MainViewModel));
     private readonly IUiService _ui;
-    private readonly SettingsManager _settingsManager;
+    private readonly ISettingsManager _settingsManager;
+    private readonly IExternalLauncher _launcher;
     private readonly PageViewModelFactory _pageViewModelFactory;
     private readonly ILocalFileSystem _fileSystem;
     private readonly IRunningServerRegistry _runningServerRegistry;
     private readonly Dictionary<string, PageViewModel> _pages = new(StringComparer.OrdinalIgnoreCase);
-    private WindowMetrics? _windowMetrics;
     private readonly Dictionary<string, Func<PageViewModel>> _pageFactories = new(StringComparer.OrdinalIgnoreCase);
-
-    [ObservableProperty]
-    public partial PageViewModel CurrentPage { get; set; }
-
-    private readonly IExternalLauncher _launcher;
-    private readonly IUpdateCheckerService _updateChecker;
-
-    [ObservableProperty]
-    public partial string ThemeMode { get; set; } = "system";
-
-    public event Action? ResetWindowSizeRequested;
-
-    public event Action<string>? ThemeModeChanged;
-
-    /// <summary>偵測到新版本時觸發，由視窗負責詢問使用者</summary>
-    public event Action<UpdateCheckResult>? UpdateAvailable;
+    private WindowMetrics? _windowMetrics;
 
     public MainViewModel(
         IUiService uiService,
-        SettingsManager settingsManager,
-        IUpdateCheckerService updateChecker,
+        ISettingsManager settingsManager,
         IExternalLauncher launcher,
         ILocalFileSystem fileSystem,
         IRunningServerRegistry runningServerRegistry,
@@ -47,7 +31,6 @@ public sealed partial class MainViewModel : ViewModelBase
     {
         ArgumentNullException.ThrowIfNull(uiService);
         ArgumentNullException.ThrowIfNull(settingsManager);
-        ArgumentNullException.ThrowIfNull(updateChecker);
         ArgumentNullException.ThrowIfNull(launcher);
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(runningServerRegistry);
@@ -57,7 +40,6 @@ public sealed partial class MainViewModel : ViewModelBase
         _settingsManager = settingsManager;
         _launcher = launcher;
         _fileSystem = fileSystem;
-        _updateChecker = updateChecker;
         _runningServerRegistry = runningServerRegistry;
         _pageViewModelFactory = pages;
 
@@ -73,11 +55,11 @@ public sealed partial class MainViewModel : ViewModelBase
             }
         });
 
-        _pages["create"] = createVm;
-        _pageFactories["manage"] = () => pages.CreateManagePage(Navigate);
-        _pageFactories["mods"] = pages.CreateModsPage;
+        _pages[PageKeys.Create] = createVm;
+        _pageFactories[PageKeys.Manage] = () => pages.CreateManagePage(Navigate);
+        _pageFactories[PageKeys.Mods] = pages.CreateModsPage;
 
-        _pageFactories["about_preferences"] = () =>
+        _pageFactories[PageKeys.AboutPreferences] = () =>
         {
             var about = pages.CreateAboutPage(ApplyThemeMode, () => ResetWindowSizeRequested?.Invoke());
             if (_windowMetrics is { } metrics)
@@ -92,13 +74,22 @@ public sealed partial class MainViewModel : ViewModelBase
         ApplyInitialTheme();
     }
 
-    public SettingsManager Settings => _settingsManager;
+    public event Action? ResetWindowSizeRequested;
+
+    public event Action<string>? ThemeModeChanged;
+
+    [ObservableProperty]
+    public partial PageViewModel CurrentPage { get; set; }
+
+    [ObservableProperty]
+    public partial string ThemeMode { get; set; } = "system";
+
 
     /// <summary>記錄主視窗最新尺寸並同步至「關於與設定」頁（頁面尚未建立時於建立時套用）</summary>
     public void UpdateWindowMetrics(WindowMetrics metrics)
     {
         _windowMetrics = metrics;
-        if (_pages.TryGetValue("about_preferences", out var page) && page is AboutPreferencesViewModel about)
+        if (_pages.TryGetValue(PageKeys.AboutPreferences, out var page) && page is AboutPreferencesViewModel about)
         {
             about.UpdateWindowMetrics(metrics);
         }
@@ -131,7 +122,7 @@ public sealed partial class MainViewModel : ViewModelBase
     {
         try
         {
-            var orphans = await _runningServerRegistry.FindOrphansAsync(cancellationToken).ConfigureAwait(true);
+            var orphans = await _runningServerRegistry.FindOrphansAsync(cancellationToken);
             if (orphans.Count == 0)
             {
                 return;
@@ -143,7 +134,7 @@ public sealed partial class MainViewModel : ViewModelBase
                 "偵測到遺留的伺服器行程",
                 primaryText: "強制終止",
                 closeText: "暫不處理",
-                UiMessageLevel.Warning).ConfigureAwait(true);
+                UiMessageLevel.Warning);
             if (!terminate)
             {
                 return;
@@ -152,7 +143,7 @@ public sealed partial class MainViewModel : ViewModelBase
             var failed = new List<TrackedServerProcess>();
             foreach (var orphan in orphans)
             {
-                if (!await _runningServerRegistry.TerminateAsync(orphan, cancellationToken).ConfigureAwait(true))
+                if (!await _runningServerRegistry.TerminateAsync(orphan, cancellationToken))
                 {
                     failed.Add(orphan);
                 }
@@ -165,55 +156,31 @@ public sealed partial class MainViewModel : ViewModelBase
             else
             {
                 string failedList = string.Join("\n", failed.Select(static o => $"• {o.ServerName}（PID {o.Pid}）"));
-                await _ui.ShowErrorAsync($"下列伺服器行程無法終止，請至工作管理員手動結束：\n{failedList}", "終止遺留行程失敗").ConfigureAwait(true);
+                await _ui.ShowErrorAsync($"下列伺服器行程無法終止，請至工作管理員手動結束：\n{failedList}", "終止遺留行程失敗");
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             Logger.Information("啟動檢查遺留伺服器行程操作已取消");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.Warning(ex, "啟動檢查遺留伺服器行程失敗");
         }
     }
 
-    /// <summary>依設定檢查更新，有新版本時觸發 <see cref="UpdateAvailable"/></summary>
-    public async Task CheckForUpdateOnStartupAsync(CancellationToken cancellationToken = default)
-    {
-        if (!_settingsManager.IsAutoUpdateEnabled())
-        {
-            return;
-        }
-
-        try
-        {
-            UpdateCheckResult result = await _updateChecker.CheckForUpdateAsync(cancellationToken).ConfigureAwait(true);
-            if (result.HasUpdate)
-            {
-                UpdateAvailable?.Invoke(result);
-                if (GetOrCreatePage("about_preferences") is AboutPreferencesViewModel aboutPreferences)
-                {
-                    await aboutPreferences.HandleUpdateResultAsync(result, cancellationToken).ConfigureAwait(true);
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            Logger.Information("啟動自動檢查更新操作已取消");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning(ex, "啟動自動檢查更新失敗");
-        }
-    }
+    /// <summary>啟動時自動檢查更新（由「關於與設定」頁處理詢問與套用）</summary>
+    public Task CheckForUpdateOnStartupAsync(CancellationToken cancellationToken = default) =>
+        GetOrCreatePage(PageKeys.AboutPreferences) is AboutPreferencesViewModel aboutPreferences
+            ? aboutPreferences.CheckForUpdateOnStartupAsync(cancellationToken)
+            : Task.CompletedTask;
 
     public void Navigate(string pageKey)
     {
         switch (ShowPage(pageKey))
         {
             case ManageServerViewModel manageVm:
-                _ = RunSafeAsync(manageVm.List.RefreshServers, "重新整理伺服器清單", Logger);
+                _ = RunSafeAsync(manageVm.List.RefreshServersAsync, "重新整理伺服器清單", Logger);
                 break;
             case ModsViewModel modsVm:
                 _ = RunSafeAsync(modsVm.RefreshServersAsync, "重新整理模組頁面伺服器清單", Logger);
@@ -243,7 +210,7 @@ public sealed partial class MainViewModel : ViewModelBase
         var targetPage = GetOrCreatePage(pageKey);
         if (targetPage is null)
         {
-            ShowNotification($"找不到頁面：{pageKey}", NotificationType.Error);
+            _ui.Notify($"找不到頁面：{pageKey}", NotificationType.Error);
             return null;
         }
 
@@ -255,57 +222,41 @@ public sealed partial class MainViewModel : ViewModelBase
     public async Task ImportServerAsync()
     {
         var vm = _pageViewModelFactory.CreateImportServerDialog();
-        if (await _ui.ShowImportServerAsync(vm).ConfigureAwait(true) == true)
+        // 未完成匯入（驗證失敗、取消或錯誤）時由 ExecuteImportAsync 自行提示，不得誤報成功
+        if (await _ui.ShowImportServerAsync(vm) != true
+            || !await vm.ExecuteImportAsync()
+            || vm.ImportedServerName is not { } importedName)
         {
-            bool success = true;
-            if (!string.IsNullOrWhiteSpace(vm.SourcePath) && !string.IsNullOrWhiteSpace(vm.ServerName))
-            {
-                success = await vm.ExecuteImportAsync().ConfigureAwait(true);
-            }
-
-            if (success)
-            {
-                ShowNotification("伺服器匯入成功！已更新至伺服器管理清單", NotificationType.Success);
-                if (string.IsNullOrWhiteSpace(vm.ImportedServerName))
-                {
-                    Navigate("manage");
-                }
-                else
-                {
-                    NavigateAndSelectServer("manage", vm.ImportedServerName);
-                }
-            }
+            return;
         }
+
+        _ui.Notify("伺服器匯入成功！已更新至伺服器管理清單", NotificationType.Success);
+        NavigateAndSelectServer(PageKeys.Manage, importedName);
     }
 
     [RelayCommand]
-    public void OpenServersFolder()
+    public async Task OpenServersFolderAsync()
     {
         string path = _settingsManager.GetServersRoot();
         if (string.IsNullOrWhiteSpace(path))
         {
-            ShowNotification("尚未設定伺服器資料夾", NotificationType.Warning);
+            _ui.Notify("尚未設定伺服器資料夾", NotificationType.Warning);
             return;
         }
 
         try
         {
-            _fileSystem.CreateDirectory(path);
+            await _fileSystem.CreateDirectoryAsync(path);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.Error(ex, "建立伺服器資料夾失敗");
-            ShowNotification($"無法建立伺服器資料夾：{ex.Message}", NotificationType.Error);
+            _ui.Notify($"無法建立伺服器資料夾：{ex.Message}", NotificationType.Error);
             return;
         }
 
-        if (!_launcher.OpenFolder(path))
-        {
-            ShowNotification($"無法開啟資料夾：{path}", NotificationType.Warning);
-        }
+        _ui.OpenFolderOrWarn(_launcher, path);
     }
-
-    public void ShowNotification(string message, NotificationType type = NotificationType.Info) => _ui.Notify(message, type);
 
     /// <summary>套用主題（不寫入設定）</summary>
     public void ApplyThemeMode(string mode)
@@ -316,8 +267,14 @@ public sealed partial class MainViewModel : ViewModelBase
 
     private void ApplyInitialTheme() => ApplyThemeMode(_settingsManager.GetThemeMode());
 
-    public void DisposePages()
+    /// <summary>寫入尚未儲存的偏好設定後處置全部頁面</summary>
+    public async Task DisposePagesAsync()
     {
+        if (_pages.TryGetValue(PageKeys.AboutPreferences, out var aboutPage) && aboutPage is AboutPreferencesViewModel about)
+        {
+            await about.FlushPendingSaveAsync();
+        }
+
         foreach (var page in _pages.Values)
         {
             if (page is IDisposable d)

@@ -1,5 +1,6 @@
 namespace MinecraftServerManager.Core.Servers;
 
+/// <summary>server.properties 讀取狀態</summary>
 public enum ServerPropertiesReadStatus
 {
     Ok,
@@ -9,6 +10,7 @@ public enum ServerPropertiesReadStatus
     Unreadable,
 }
 
+/// <summary>server.properties 更新失敗類型</summary>
 public enum ServerPropertiesUpdateError
 {
     None,
@@ -29,6 +31,7 @@ public sealed record ServerPropertiesSnapshot(
     public bool Readable => Status is ServerPropertiesReadStatus.Ok or ServerPropertiesReadStatus.Empty or ServerPropertiesReadStatus.Missing;
 }
 
+/// <summary>server.properties 更新操作結果</summary>
 public sealed record ServerPropertiesUpdateResult(
     bool Success,
     ServerPropertiesSnapshot Snapshot,

@@ -1,38 +1,12 @@
-using System.Globalization;
 using System.Text.Json.Serialization;
 
 namespace MinecraftServerManager.Domain.Servers;
 
-/// <summary>名單時間格式化（GMT+8，yyyy-MM-dd HH:mm:ss）</summary>
-public static class ServerPlayerTimeFormatter
-{
-    private static readonly TimeSpan Gmt8Offset = TimeSpan.FromHours(8);
-
-    public static string FormatToGmt8(string? rawTime)
-    {
-        if (string.IsNullOrWhiteSpace(rawTime))
-        {
-            return string.Empty;
-        }
-
-        if (DateTimeOffset.TryParse(rawTime, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dto))
-        {
-            return dto.ToOffset(Gmt8Offset).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
-        }
-
-        return rawTime;
-    }
-}
-
-/// <summary>伺服器本地玩家連線快取項目 (usercache.json)</summary>
+/// <summary>伺服器本機玩家連線快取項目 (usercache.json)</summary>
 public sealed record ServerUserCacheEntry(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("uuid")] string Uuid,
-    [property: JsonPropertyName("expiresOn")] string? ExpiresOn)
-{
-    [JsonIgnore]
-    public string FormattedExpiresOn => ServerPlayerTimeFormatter.FormatToGmt8(ExpiresOn);
-}
+    [property: JsonPropertyName("expiresOn")] string? ExpiresOn);
 
 /// <summary>伺服器營運管理員設定項目 (ops.json)</summary>
 public sealed record ServerOperatorEntry(
@@ -53,11 +27,7 @@ public sealed record ServerBannedPlayerEntry(
     [property: JsonPropertyName("created")] string Created,
     [property: JsonPropertyName("source")] string Source,
     [property: JsonPropertyName("expires")] string Expires,
-    [property: JsonPropertyName("reason")] string Reason)
-{
-    [JsonIgnore]
-    public string FormattedCreated => ServerPlayerTimeFormatter.FormatToGmt8(Created);
-}
+    [property: JsonPropertyName("reason")] string Reason);
 
 /// <summary>伺服器封鎖 IP 項目 (banned-ips.json)</summary>
 public sealed record ServerBannedIpEntry(
@@ -65,11 +35,7 @@ public sealed record ServerBannedIpEntry(
     [property: JsonPropertyName("created")] string Created,
     [property: JsonPropertyName("source")] string Source,
     [property: JsonPropertyName("expires")] string Expires,
-    [property: JsonPropertyName("reason")] string Reason)
-{
-    [JsonIgnore]
-    public string FormattedCreated => ServerPlayerTimeFormatter.FormatToGmt8(Created);
-}
+    [property: JsonPropertyName("reason")] string Reason);
 
 /// <summary>伺服器玩家與設定檔案完整集合套件</summary>
 public sealed record ServerPlayerConfigBundle(

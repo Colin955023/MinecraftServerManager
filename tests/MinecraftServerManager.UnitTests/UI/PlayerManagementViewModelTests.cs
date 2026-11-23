@@ -1,4 +1,4 @@
-using MinecraftServerManager.App.Services;
+using MinecraftServerManager.App.Controls;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
@@ -8,7 +8,7 @@ namespace MinecraftServerManager.UnitTests.UI;
 public sealed class PlayerManagementViewModelTests
 {
     [Fact]
-    public async Task InitializeAsync_LoadsBundleAndInitializesCollections()
+    public async Task InitializeAsync_BundleExists_InitializesCollections()
     {
         var fakeStore = new FakePlayerConfigStore(new ServerPlayerConfigBundle(
             UserCache: [new ServerUserCacheEntry("Steve", "1111-2222", "2026-01-01")],
@@ -27,11 +27,13 @@ public sealed class PlayerManagementViewModelTests
         Assert.False(vm.HasUnsavedChanges);
     }
 
-    [Fact]
-    public async Task Cancel_WhenHasChangesAndUserDeclinesDiscard_DoesNotClose()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Cancel_WhenHasChanges_ClosesOnlyWhenUserConfirms(bool confirmDiscard)
     {
         var fakeStore = new FakePlayerConfigStore(new ServerPlayerConfigBundle([], [], [], [], []));
-        var fakeUi = new ManualUiService { ConfirmResult = false };
+        var fakeUi = new ManualUiService { ConfirmResult = confirmDiscard };
 
         var vm = new PlayerManagementViewModel("TestServer", "C:\\fake\\server", fakeStore, fakeUi);
         await vm.InitializeAsync();
@@ -40,36 +42,23 @@ public sealed class PlayerManagementViewModelTests
         vm.AddBannedIpCommand.Execute(null);
         Assert.True(vm.HasUnsavedChanges);
 
-        bool closeInvoked = false;
-        vm.RequestClose += _ => closeInvoked = true;
-
-        vm.CancelCommand.Execute(null);
-
-        Assert.False(closeInvoked);
-    }
-
-    [Fact]
-    public async Task Cancel_WhenHasChangesAndUserConfirmsDiscard_ClosesWithFalse()
-    {
-        var fakeStore = new FakePlayerConfigStore(new ServerPlayerConfigBundle([], [], [], [], []));
-        var fakeUi = new ManualUiService { ConfirmResult = true };
-
-        var vm = new PlayerManagementViewModel("TestServer", "C:\\fake\\server", fakeStore, fakeUi);
-        await vm.InitializeAsync();
-
-        vm.BanIpAddress = "10.0.0.1";
-        vm.AddBannedIpCommand.Execute(null);
-
         bool? closeResult = null;
         vm.RequestClose += res => closeResult = res;
 
         vm.CancelCommand.Execute(null);
 
-        Assert.False(closeResult);
+        if (confirmDiscard)
+        {
+            Assert.False(closeResult);
+        }
+        else
+        {
+            Assert.Null(closeResult);
+        }
     }
 
     [Fact]
-    public async Task SaveAsync_SavesBundleAndClosesWithTrue()
+    public async Task SaveAsync_Edited_SavesAndClosesWithTrue()
     {
         var fakeStore = new FakePlayerConfigStore(new ServerPlayerConfigBundle([], [], [], [], []));
         var vm = new PlayerManagementViewModel("TestServer", "C:\\fake\\server", fakeStore, NoOpUiService.Instance);
@@ -179,31 +168,66 @@ public sealed class PlayerManagementViewModelTests
     }
 
     [Fact]
-    public void ServerPlayerTimeFormatter_FormatsToGmt8WithoutOffset()
+    public void PlayerTimeFormatter_Format_ConvertsToLocalTimeZone()
     {
-        // 台灣時區 GMT+8 格式（原本尾綴有 +0800）
-        string formatted1 = ServerPlayerTimeFormatter.FormatToGmt8("2025-07-05 23:23:35 +0800");
-        Assert.Equal("2025-07-05 23:23:35", formatted1);
+        string expected = new DateTimeOffset(2025, 7, 5, 15, 23, 35, TimeSpan.Zero)
+            .ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
 
-        // UTC 時間轉換至 GMT+8
-        string formatted2 = ServerPlayerTimeFormatter.FormatToGmt8("2025-07-05 15:23:35 +0000");
-        Assert.Equal("2025-07-05 23:23:35", formatted2);
+        // 名單檔常見格式（尾綴時區偏移）
+        Assert.Equal(expected, PlayerTimeFormatter.Format("2025-07-05 23:23:35 +0800"));
+        Assert.Equal(expected, PlayerTimeFormatter.Format("2025-07-05 15:23:35 +0000"));
 
         // ISO 8601
-        string formatted3 = ServerPlayerTimeFormatter.FormatToGmt8("2025-07-05T15:23:35Z");
-        Assert.Equal("2025-07-05 23:23:35", formatted3);
+        Assert.Equal(expected, PlayerTimeFormatter.Format("2025-07-05T15:23:35Z"));
 
-        // 空字串或 null
-        Assert.Empty(ServerPlayerTimeFormatter.FormatToGmt8(null));
-        Assert.Empty(ServerPlayerTimeFormatter.FormatToGmt8("   "));
+        // 無法解析時原樣回傳；空字串或 null 回傳空字串
+        Assert.Equal("forever", PlayerTimeFormatter.Format("forever"));
+        Assert.Empty(PlayerTimeFormatter.Format(null));
+        Assert.Empty(PlayerTimeFormatter.Format("   "));
+    }
+
+    [Fact]
+    public async Task SaveCommand_LoadFails_IsDisabled()
+    {
+        var fakeStore = new FakePlayerConfigStore(new ServerPlayerConfigBundle([], [], [], [], [])) { LoadFails = true };
+        var vm = new PlayerManagementViewModel("TestServer", "C:\\fake\\server", fakeStore, NoOpUiService.Instance);
+
+        await vm.InitializeAsync();
+        await vm.SaveAsync();
+
+        Assert.False(vm.IsLoaded);
+        Assert.False(vm.SaveCommand.CanExecute(null));
+        Assert.Null(fakeStore.SavedBundle);
+    }
+
+    [Fact]
+    public async Task AddWhitelist_EmptyUuid_DedupesByName()
+    {
+        var offline = new ServerUserCacheEntry("Alex", string.Empty, "2026-01-01");
+        var fakeStore = new FakePlayerConfigStore(new ServerPlayerConfigBundle(
+            UserCache: [offline],
+            Operators: [],
+            Whitelist: [new ServerWhitelistEntry(string.Empty, "alex")],
+            BannedPlayers: [],
+            BannedIps: []));
+        var vm = new PlayerManagementViewModel("TestServer", "C:\\fake\\server", fakeStore, NoOpUiService.Instance);
+        await vm.InitializeAsync();
+
+        vm.SelectedWhitelistCandidate = offline;
+        vm.AddWhitelist();
+
+        Assert.Single(vm.Whitelist);
+        Assert.False(vm.HasUnsavedChanges);
     }
 
     private sealed class FakePlayerConfigStore(ServerPlayerConfigBundle bundle) : IServerPlayerConfigStore
     {
         public ServerPlayerConfigBundle? SavedBundle { get; private set; }
 
+        public bool LoadFails { get; init; }
+
         public Task<ServerPlayerConfigBundle> LoadBundleAsync(string serverPath, CancellationToken cancellationToken = default) =>
-            Task.FromResult(bundle);
+            LoadFails ? Task.FromException<ServerPlayerConfigBundle>(new IOException("讀取失敗")) : Task.FromResult(bundle);
 
         public Task SaveBundleAsync(string serverPath, ServerPlayerConfigBundle bundleToSave, CancellationToken cancellationToken = default)
         {

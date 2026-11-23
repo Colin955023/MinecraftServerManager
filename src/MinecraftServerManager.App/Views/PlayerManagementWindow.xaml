@@ -1,0 +1,543 @@
+<Window
+  x:Class="MinecraftServerManager.App.Views.PlayerManagementWindow"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:controls="using:MinecraftServerManager.App.Controls"
+  xmlns:vm="using:MinecraftServerManager.App.ViewModels"
+  xmlns:servers="using:MinecraftServerManager.Domain.Servers">
+
+  <Grid Style="{StaticResource DialogRootGridStyle}">
+    <Grid.Resources>
+      <DataTemplate x:Key="CandidateNameTemplate"
+        x:DataType="servers:ServerUserCacheEntry">
+        <TextBlock Text="{x:Bind Name}" />
+      </DataTemplate>
+    </Grid.Resources>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- 說明 -->
+    <TextBlock Grid.Row="0"
+      Style="{StaticResource SecondaryCaptionTextStyle}"
+      Text="管理 Minecraft 伺服器之營運管理員 (ops.json)、白名單 (whitelist.json) 及封鎖清單 (banned-players.json / banned-ips.json)" />
+
+    <!-- 主內容雙側區域 -->
+    <Grid Grid.Row="1"
+      ColumnSpacing="14">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="320" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+
+      <!-- 左側：曾連線玩家名冊 (usercache.json) 唯讀參考清單 -->
+      <Border Grid.Column="0"
+        Style="{StaticResource PanelCardStyle}">
+        <Grid RowSpacing="8">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+
+          <TextBlock Grid.Row="0"
+            Style="{StaticResource SubtitleTextBlockStyle}"
+            Text="曾連線玩家名冊 (usercache)" />
+          <TextBox Grid.Row="1"
+            Text="{x:Bind ViewModel.PlayerSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+            PlaceholderText="搜尋玩家名稱..."
+            controls:TextBoxShortcuts.FocusOnCtrlF="True"
+            AutomationProperties.Name="搜尋玩家" />
+
+          <ListView Grid.Row="2"
+            ItemsSource="{x:Bind ViewModel.FilteredUserCache}"
+            SelectedItem="{x:Bind ViewModel.SelectedUserCacheEntry, Mode=TwoWay}"
+            SelectionMode="Single"
+            controls:ListViewBehaviors.ClearOnOutsidePress="True"
+            AutomationProperties.Name="玩家快取">
+            <ListView.ItemTemplate>
+              <DataTemplate x:DataType="servers:ServerUserCacheEntry">
+                <StackPanel Padding="4,4"
+                  Spacing="2">
+                  <TextBlock Style="{StaticResource BodyTextBlockStyle}"
+                    Text="{x:Bind Name}"
+                    FontWeight="Bold" />
+                  <TextBlock Style="{StaticResource SecondaryCaptionTextStyle}"
+                    Text="{x:Bind Uuid}"
+                    TextTrimming="CharacterEllipsis"
+                    ToolTipService.ToolTip="{x:Bind Uuid}" />
+                  <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="{x:Bind controls:PlayerTimeFormatter.Format(ExpiresOn)}"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                </StackPanel>
+              </DataTemplate>
+            </ListView.ItemTemplate>
+          </ListView>
+
+          <TextBlock Grid.Row="3"
+            Style="{StaticResource SecondaryCaptionTextStyle}"
+            Text="提示：左側為本地快取玩家，右側各分頁可直接選取加入名單"
+            TextWrapping="Wrap" />
+        </Grid>
+      </Border>
+
+      <!-- 右側：4 個分頁標籤管理設定檔案 -->
+      <TabView Grid.Column="1"
+        CanDragTabs="False"
+        CanReorderTabs="False"
+        IsAddTabButtonVisible="False"
+        TabWidthMode="SizeToContent"
+        SelectionChanged="OnTabSelectionChanged">
+        <TabView.TabItems>
+          <!-- 分頁 1：管理員名單 (ops.json) -->
+          <TabViewItem Header="管理員名單 (ops.json)"
+            IsClosable="False">
+            <TabViewItem.IconSource>
+              <FontIconSource Glyph="{StaticResource IconAdmin}" />
+            </TabViewItem.IconSource>
+            <Grid Margin="12"
+              RowSpacing="10">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+              </Grid.RowDefinitions>
+
+              <!-- 說明指南區 -->
+              <Border Grid.Row="0"
+                Style="{StaticResource PanelCardStyle}">
+                <StackPanel Spacing="3">
+                  <TextBlock Style="{StaticResource BodyTextBlockStyle}"
+                    Text="【管理員權限等級（Level）指南】"
+                    FontWeight="Bold" />
+                  <TextBlock Style="{StaticResource SecondaryCaptionTextStyle}"
+                    Text="• Level 4：完整控制權限，可使用 /stop、/save-all、/save-off 等伺服器維護指令。" />
+                  <TextBlock Style="{StaticResource SecondaryCaptionTextStyle}"
+                    Text="• Level 3：玩家管理權限，可使用 /op、/deop、/kick、/ban、/pardon 等名單管理指令。" />
+                  <TextBlock Style="{StaticResource SecondaryCaptionTextStyle}"
+                    Text="• Level 2：基礎管理員與指令方塊，可使用 /gamemode、/tp、/give、/gamerule 等指令。" />
+                  <TextBlock Style="{StaticResource SecondaryCaptionTextStyle}"
+                    Text="• Level 1：僅略過出生點方塊保護，無任何作弊指令權限。" />
+                </StackPanel>
+              </Border>
+
+              <!-- 全玩家可控管理員名單 ListView -->
+              <controls:TableFrame Grid.Row="1"
+                SortTarget="{x:Bind OperatorSort}"
+                IsEmpty="{x:Bind controls:UiBindHelpers.IsLoadedEmpty(ViewModel.OperatorRows.Count, ViewModel.IsLoaded), Mode=OneWay}"
+                EmptyText="尚無管理員">
+                <controls:TableFrame.Header>
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="75" />
+                      <ColumnDefinition Width="140" />
+                      <ColumnDefinition Width="110" />
+                      <ColumnDefinition Width="120" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <controls:SortableTableHeader Grid.Column="0"
+                      Text="管理員"
+                      SortPropertyName="IsOp" />
+                    <controls:SortableTableHeader Grid.Column="1"
+                      Text="玩家名稱"
+                      SortPropertyName="Name" />
+                    <controls:SortableTableHeader Grid.Column="2"
+                      Text="權限等級"
+                      SortPropertyName="Level" />
+                    <controls:SortableTableHeader Grid.Column="3"
+                      Text="略過人數限制"
+                      SortPropertyName="BypassesPlayerLimit" />
+                    <controls:SortableTableHeader Grid.Column="4"
+                      Text="UUID"
+                      SortPropertyName="Uuid" />
+                  </Grid>
+                </controls:TableFrame.Header>
+                <ListView Style="{StaticResource TableListViewStyle}"
+                  ItemsSource="{x:Bind ViewModel.OperatorRows}"
+                  SelectionMode="None"
+                  AutomationProperties.Name="管理員">
+                  <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="vm:OperatorRowItem">
+                      <Grid>
+                        <Border Grid.Column="0"
+                          Style="{StaticResource TableCellBorderStyle}"
+                          Padding="4,2">
+                          <CheckBox MinWidth="0"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            IsChecked="{x:Bind IsOp, Mode=TwoWay}"
+                            AutomationProperties.Name="{x:Bind controls:UiBindHelpers.ActionFor('管理員', Name)}" />
+                        </Border>
+                        <controls:TableCell Grid.Column="1"
+                          Text="{x:Bind Name}" />
+                        <Border Grid.Column="2"
+                          Style="{StaticResource TableCellBorderStyle}"
+                          Padding="6,2">
+                          <ComboBox HorizontalAlignment="Stretch"
+                            VerticalAlignment="Center"
+                            ItemsSource="{x:Bind AvailableLevels}"
+                            SelectedItem="{x:Bind Level, Mode=TwoWay}"
+                            IsEnabled="{x:Bind IsOp, Mode=OneWay}"
+                            AutomationProperties.Name="{x:Bind controls:UiBindHelpers.ActionFor('權限等級', Name)}" />
+                        </Border>
+                        <Border Grid.Column="3"
+                          Style="{StaticResource TableCellBorderStyle}"
+                          Padding="4,2">
+                          <CheckBox MinWidth="0"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            IsChecked="{x:Bind BypassesPlayerLimit, Mode=TwoWay}"
+                            IsEnabled="{x:Bind IsOp, Mode=OneWay}"
+                            AutomationProperties.Name="{x:Bind controls:UiBindHelpers.ActionFor('略過人數上限', Name)}" />
+                        </Border>
+                        <controls:TableCell Grid.Column="4"
+                          Text="{x:Bind Uuid}"
+                          ShowRightBorder="False" />
+                      </Grid>
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+              </controls:TableFrame>
+            </Grid>
+          </TabViewItem>
+
+          <!-- 分頁 2：白名單 (whitelist.json) -->
+          <TabViewItem Header="白名單 (whitelist.json)"
+            IsClosable="False">
+            <TabViewItem.IconSource>
+              <FontIconSource Glyph="{StaticResource IconList}" />
+            </TabViewItem.IconSource>
+            <Grid x:Name="WhitelistTabContent"
+              x:Load="False"
+              Margin="12"
+              RowSpacing="10">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+              </Grid.RowDefinitions>
+
+              <Border Grid.Row="0"
+                Style="{StaticResource PanelCardStyle}">
+                <TextBlock Style="{StaticResource SecondaryCaptionTextStyle}"
+                  Text="白名單用途：當伺服器屬性 (server.properties) 開啟 white-list=true 時，只有被加入白名單的玩家才能連入伺服器。"
+                  TextWrapping="Wrap" />
+              </Border>
+
+              <controls:WrapPanel Grid.Row="1"
+                ItemSpacing="8"
+                LineSpacing="8">
+                <TextBlock VerticalAlignment="Center"
+                  Text="選擇玩家：" />
+                <ComboBox Width="160"
+                  VerticalAlignment="Center"
+                  ItemsSource="{x:Bind ViewModel.AvailableCandidates}"
+                  SelectedItem="{x:Bind ViewModel.SelectedWhitelistCandidate, Mode=TwoWay}"
+                  ItemTemplate="{StaticResource CandidateNameTemplate}"
+                  AutomationProperties.Name="選擇玩家" />
+                <Button Style="{StaticResource PrimaryButtonStyle}"
+                  VerticalAlignment="Center"
+                  Content="加入白名單"
+                  Command="{x:Bind ViewModel.AddWhitelistCommand}" />
+              </controls:WrapPanel>
+
+              <controls:TableFrame Grid.Row="2"
+                SortTarget="{x:Bind WhitelistSort}"
+                IsEmpty="{x:Bind controls:UiBindHelpers.IsLoadedEmpty(ViewModel.Whitelist.Count, ViewModel.IsLoaded), Mode=OneWay}"
+                EmptyText="白名單是空的">
+                <controls:TableFrame.Header>
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="180" />
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="90" />
+                    </Grid.ColumnDefinitions>
+                    <controls:SortableTableHeader Grid.Column="0"
+                      Text="玩家名稱"
+                      SortPropertyName="Name" />
+                    <controls:SortableTableHeader Grid.Column="1"
+                      Text="UUID"
+                      SortPropertyName="Uuid" />
+                    <controls:SortableTableHeader Grid.Column="2"
+                      Text="操作" />
+                  </Grid>
+                </controls:TableFrame.Header>
+                <ListView Style="{StaticResource TableListViewStyle}"
+                  ItemsSource="{x:Bind ViewModel.Whitelist}"
+                  SelectionMode="None"
+                  AutomationProperties.Name="白名單">
+                  <ListView.ItemTemplate>
+                    <DataTemplate
+                      x:DataType="servers:ServerWhitelistEntry">
+                      <Grid>
+                        <controls:TableCell Grid.Column="0"
+                          Text="{x:Bind Name}" />
+                        <controls:TableCell Grid.Column="1"
+                          Text="{x:Bind Uuid}" />
+                        <Border Grid.Column="2"
+                          Padding="6,2">
+                          <Button HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Content="移除"
+                            Click="OnRemoveWhitelistClicked"
+                            AutomationProperties.Name="{x:Bind controls:UiBindHelpers.ActionFor('移除白名單', Name)}" />
+                        </Border>
+                      </Grid>
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+              </controls:TableFrame>
+            </Grid>
+          </TabViewItem>
+
+          <!-- 分頁 3：封鎖玩家 (banned-players.json) -->
+          <TabViewItem Header="封鎖玩家 (banned-players.json)"
+            IsClosable="False">
+            <TabViewItem.IconSource>
+              <FontIconSource Glyph="{StaticResource IconBlocked}" />
+            </TabViewItem.IconSource>
+            <Grid x:Name="BannedPlayersTabContent"
+              x:Load="False"
+              Margin="12"
+              RowSpacing="10">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+              </Grid.RowDefinitions>
+
+              <Border Grid.Row="0"
+                Style="{StaticResource PanelCardStyle}">
+                <TextBlock Style="{StaticResource SecondaryCaptionTextStyle}"
+                  Text="封鎖玩家用途：將指定的玩家帳號加入黑名單，連線時將顯示封鎖原因並予以拒絕連線。"
+                  TextWrapping="Wrap" />
+              </Border>
+
+              <controls:WrapPanel Grid.Row="1"
+                ItemSpacing="8"
+                LineSpacing="8">
+                <TextBlock VerticalAlignment="Center"
+                  Text="玩家：" />
+                <ComboBox Width="140"
+                  VerticalAlignment="Center"
+                  ItemsSource="{x:Bind ViewModel.AvailableCandidates}"
+                  SelectedItem="{x:Bind ViewModel.SelectedBanCandidate, Mode=TwoWay}"
+                  ItemTemplate="{StaticResource CandidateNameTemplate}"
+                  AutomationProperties.Name="玩家" />
+                <TextBlock VerticalAlignment="Center"
+                  Text="原因：" />
+                <TextBox Width="200"
+                  VerticalAlignment="Center"
+                  Text="{x:Bind ViewModel.BanPlayerReason, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                  controls:TextBoxShortcuts.EnterCommand="{x:Bind ViewModel.AddBannedPlayerCommand}"
+                  AutomationProperties.Name="封鎖原因" />
+                <Button Style="{StaticResource DangerButtonStyle}"
+                  VerticalAlignment="Center"
+                  Content="封鎖玩家"
+                  Command="{x:Bind ViewModel.AddBannedPlayerCommand}" />
+              </controls:WrapPanel>
+
+              <controls:TableFrame Grid.Row="2"
+                SortTarget="{x:Bind BannedPlayerSort}"
+                IsEmpty="{x:Bind controls:UiBindHelpers.IsLoadedEmpty(ViewModel.BannedPlayers.Count, ViewModel.IsLoaded), Mode=OneWay}"
+                EmptyText="尚無封鎖的玩家">
+                <controls:TableFrame.Header>
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="140" />
+                      <ColumnDefinition Width="180" />
+                      <ColumnDefinition Width="155" />
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="95" />
+                    </Grid.ColumnDefinitions>
+                    <controls:SortableTableHeader Grid.Column="0"
+                      Text="玩家名稱"
+                      SortPropertyName="Name" />
+                    <controls:SortableTableHeader Grid.Column="1"
+                      Text="封鎖原因"
+                      SortPropertyName="Reason" />
+                    <controls:SortableTableHeader Grid.Column="2"
+                      Text="封鎖時間"
+                      SortPropertyName="Created" />
+                    <controls:SortableTableHeader Grid.Column="3"
+                      Text="UUID"
+                      SortPropertyName="Uuid" />
+                    <controls:SortableTableHeader Grid.Column="4"
+                      Text="操作" />
+                  </Grid>
+                </controls:TableFrame.Header>
+                <ListView Style="{StaticResource TableListViewStyle}"
+                  ItemsSource="{x:Bind ViewModel.BannedPlayers}"
+                  SelectionMode="None"
+                  AutomationProperties.Name="封鎖的玩家">
+                  <ListView.ItemTemplate>
+                    <DataTemplate
+                      x:DataType="servers:ServerBannedPlayerEntry">
+                      <Grid>
+                        <controls:TableCell Grid.Column="0"
+                          Text="{x:Bind Name}" />
+                        <controls:TableCell Grid.Column="1"
+                          Text="{x:Bind Reason}" />
+                        <controls:TableCell Grid.Column="2"
+                          Text="{x:Bind controls:PlayerTimeFormatter.Format(Created)}" />
+                        <controls:TableCell Grid.Column="3"
+                          Text="{x:Bind Uuid}" />
+                        <Border Grid.Column="4"
+                          Padding="6,2">
+                          <Button HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Content="解除封鎖"
+                            Click="OnRemoveBannedPlayerClicked"
+                            AutomationProperties.Name="{x:Bind controls:UiBindHelpers.ActionFor('解除封鎖玩家', Name)}" />
+                        </Border>
+                      </Grid>
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+              </controls:TableFrame>
+            </Grid>
+          </TabViewItem>
+
+          <!-- 分頁 4：封鎖 IP (banned-ips.json) -->
+          <TabViewItem Header="封鎖 IP (banned-ips.json)"
+            IsClosable="False">
+            <TabViewItem.IconSource>
+              <FontIconSource Glyph="{StaticResource IconGlobe}" />
+            </TabViewItem.IconSource>
+            <Grid x:Name="BannedIpsTabContent"
+              x:Load="False"
+              Margin="12"
+              RowSpacing="10">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+              </Grid.RowDefinitions>
+
+              <Border Grid.Row="0"
+                Style="{StaticResource PanelCardStyle}">
+                <StackPanel Spacing="3">
+                  <TextBlock Style="{StaticResource BodyTextBlockStyle}"
+                    Text="【封鎖 IP 用途與官方查詢指引】"
+                    FontWeight="Bold" />
+                  <TextBlock Style="{StaticResource SecondaryCaptionTextStyle}"
+                    Text="• 封鎖指定的 IPv4 或 IPv6 位址，來自該網路位址的所有玩家均無法連線至此伺服器。" />
+                  <TextBlock Style="{StaticResource SecondaryCaptionTextStyle}"
+                    Text="• 主控台指令：於伺服器主控台輸入 /ban-ip &lt;玩家名稱&gt;，伺服器會自動查詢最後登入 IP 並加入封鎖。" />
+                  <TextBlock Style="{StaticResource SecondaryCaptionTextStyle}"
+                    Text="• 記錄檔查詢：開啟 logs/latest.log 搜尋玩家名稱，尋找「logged in」紀錄即可取得真實 IP。" />
+                </StackPanel>
+              </Border>
+
+              <controls:WrapPanel Grid.Row="1"
+                ItemSpacing="8"
+                LineSpacing="8">
+                <TextBlock VerticalAlignment="Center"
+                  Text="IP 位址：" />
+                <TextBox Width="140"
+                  VerticalAlignment="Center"
+                  Text="{x:Bind ViewModel.BanIpAddress, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                  controls:TextBoxShortcuts.EnterCommand="{x:Bind ViewModel.AddBannedIpCommand}"
+                  AutomationProperties.Name="IP 位址" />
+                <TextBlock VerticalAlignment="Center"
+                  Text="原因：" />
+                <TextBox Width="180"
+                  VerticalAlignment="Center"
+                  Text="{x:Bind ViewModel.BanIpReason, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                  controls:TextBoxShortcuts.EnterCommand="{x:Bind ViewModel.AddBannedIpCommand}"
+                  AutomationProperties.Name="封鎖原因" />
+                <Button Style="{StaticResource DangerButtonStyle}"
+                  VerticalAlignment="Center"
+                  Content="封鎖 IP"
+                  Command="{x:Bind ViewModel.AddBannedIpCommand}" />
+              </controls:WrapPanel>
+
+              <controls:TableFrame Grid.Row="2"
+                SortTarget="{x:Bind BannedIpSort}"
+                IsEmpty="{x:Bind controls:UiBindHelpers.IsLoadedEmpty(ViewModel.BannedIps.Count, ViewModel.IsLoaded), Mode=OneWay}"
+                EmptyText="尚無封鎖的 IP">
+                <controls:TableFrame.Header>
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="180" />
+                      <ColumnDefinition Width="200" />
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="95" />
+                    </Grid.ColumnDefinitions>
+                    <controls:SortableTableHeader Grid.Column="0"
+                      Text="IP 位址"
+                      SortPropertyName="Ip" />
+                    <controls:SortableTableHeader Grid.Column="1"
+                      Text="封鎖原因"
+                      SortPropertyName="Reason" />
+                    <controls:SortableTableHeader Grid.Column="2"
+                      Text="封鎖時間"
+                      SortPropertyName="Created" />
+                    <controls:SortableTableHeader Grid.Column="3"
+                      Text="操作" />
+                  </Grid>
+                </controls:TableFrame.Header>
+                <ListView Style="{StaticResource TableListViewStyle}"
+                  ItemsSource="{x:Bind ViewModel.BannedIps}"
+                  SelectionMode="None"
+                  AutomationProperties.Name="封鎖的 IP">
+                  <ListView.ItemTemplate>
+                    <DataTemplate
+                      x:DataType="servers:ServerBannedIpEntry">
+                      <Grid>
+                        <controls:TableCell Grid.Column="0"
+                          Text="{x:Bind Ip}" />
+                        <controls:TableCell Grid.Column="1"
+                          Text="{x:Bind Reason}" />
+                        <controls:TableCell Grid.Column="2"
+                          Text="{x:Bind controls:PlayerTimeFormatter.Format(Created)}" />
+                        <Border Grid.Column="3"
+                          Padding="6,2">
+                          <Button HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Content="解除封鎖"
+                            Click="OnRemoveBannedIpClicked"
+                            AutomationProperties.Name="{x:Bind controls:UiBindHelpers.ActionFor('解除封鎖 IP', Ip)}" />
+                        </Border>
+                      </Grid>
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+              </controls:TableFrame>
+            </Grid>
+          </TabViewItem>
+        </TabView.TabItems>
+      </TabView>
+    </Grid>
+
+    <!-- 底部列：狀態訊息與操作按鈕 -->
+    <Grid Grid.Row="2">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <TextBlock Grid.Column="0"
+        Style="{StaticResource SecondaryCaptionTextStyle}"
+        VerticalAlignment="Center"
+        Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+        TextTrimming="CharacterEllipsis"
+        AutomationProperties.LiveSetting="Polite" />
+
+      <StackPanel Grid.Column="1"
+        HorizontalAlignment="Right"
+        Orientation="Horizontal"
+        Spacing="10">
+        <Button Style="{StaticResource PrimaryButtonStyle}"
+          MinWidth="100"
+          Content="儲存變更"
+          Command="{x:Bind ViewModel.SaveCommand}" />
+        <Button MinWidth="80"
+          Content="取消"
+          Command="{x:Bind ViewModel.CancelCommand}" />
+      </StackPanel>
+    </Grid>
+  </Grid>
+</Window>

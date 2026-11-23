@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.App.ViewModels;
@@ -10,11 +12,25 @@ public sealed class ModsContext
     /// <summary>目前選取伺服器設定快照；未選取時為 null</summary>
     public ServerConfig? Server { get; private set; }
 
-    /// <summary>Modrinth 查詢用之載入器識別碼（小寫）</summary>
-    public string? LoaderId => Server?.LoaderType.ToString().ToLowerInvariant();
+    /// <summary>目前伺服器之載入器種類</summary>
+    public LoaderKind? LoaderType => Server?.LoaderType;
 
     /// <summary>目前伺服器之 Minecraft 版本</summary>
     public string? MinecraftVersion => Server?.MinecraftVersion.Value;
+
+    /// <summary>檢查目前是否已選取伺服器；未選取時以警告通知使用者並回傳 false</summary>
+    public bool TryRequireServer(IUiService ui, [NotNullWhen(true)] out ServerConfig? server, string? customMessage = null)
+    {
+        ArgumentNullException.ThrowIfNull(ui);
+        server = Server;
+        if (server is null)
+        {
+            ui.Notify(customMessage ?? "請先選擇伺服器", NotificationType.Warning);
+            return false;
+        }
+
+        return true;
+    }
 
     /// <summary>選取伺服器變更時觸發</summary>
     public event Action? ServerChanged;
@@ -38,7 +54,7 @@ public sealed class ModsContext
     {
         foreach (var handler in _modsChangedHandlers.ToArray())
         {
-            await handler().ConfigureAwait(true);
+            await handler();
         }
     }
 }

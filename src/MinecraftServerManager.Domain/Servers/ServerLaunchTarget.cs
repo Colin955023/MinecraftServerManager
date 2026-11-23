@@ -23,6 +23,8 @@ public sealed record ServerLaunchTarget
         Reason = reason ?? string.Empty;
     }
 
+    private static readonly ServerLaunchTarget EmptyNone = new(LaunchTargetKind.None);
+
     public static ServerLaunchTarget None(string reason = "") =>
-        new(LaunchTargetKind.None, reason: reason);
+        string.IsNullOrEmpty(reason) ? EmptyNone : new(LaunchTargetKind.None, reason: reason);
 }

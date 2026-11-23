@@ -34,7 +34,7 @@ public sealed class CrashDiagnosticsTests
     }
 
     [Fact]
-    public void ClearSessionMarker_RemovesMarkerSoNextStartIsClean()
+    public void ClearSessionMarker_AfterMarkerWritten_NextStartIsClean()
     {
         using var dirTemp = new TempDirectory("msm-crash-");
         string dir = dirTemp.FullName;
@@ -77,7 +77,7 @@ public sealed class CrashDiagnosticsTests
     }
 
     [Fact]
-    public void FormatFirstChance_IncludesTypeMessageHResultAndLimitedStack()
+    public void FormatFirstChance_DeepStack_IncludesDetailsAndLimitsStack()
     {
         var ex = new InvalidOperationException("測試例外");
         string stack = string.Join('\n', Enumerable.Range(1, 30).Select(static i => $"   at Frame{i}()"));

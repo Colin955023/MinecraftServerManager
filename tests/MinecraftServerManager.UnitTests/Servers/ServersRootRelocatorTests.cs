@@ -2,7 +2,6 @@ using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Servers;
-using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.UnitTests.Servers;
 
@@ -17,7 +16,7 @@ public sealed class ServersRootRelocatorTests : IDisposable
     private static string ToJson(string path) => "\"" + path.Replace("\\", "\\\\") + "\"";
 
     [Fact]
-    public void ValidateTargetRoot_RejectsEmptyAndFileTargets()
+    public void ValidateTargetRoot_EmptyOrFileTarget_Rejects()
     {
         string file = Path.Combine(_temp.FullName, "servers");
         File.WriteAllText(file, "x");
@@ -27,7 +26,7 @@ public sealed class ServersRootRelocatorTests : IDisposable
     }
 
     [Fact]
-    public void HasStoredContent_IgnoresMissingEmptyAndEmptyRegistry()
+    public void HasStoredContent_MissingOrEmpty_ReturnsFalse()
     {
         Assert.False(ServersRootRelocator.HasStoredContent(Root("missing")));
 
@@ -40,7 +39,7 @@ public sealed class ServersRootRelocatorTests : IDisposable
     }
 
     [Fact]
-    public void HasStoredContent_DetectsRegisteredServersAndOtherFiles()
+    public void HasStoredContent_ServersOrFiles_ReturnsTrue()
     {
         string withServers = Root("with-servers");
         Directory.CreateDirectory(withServers);
@@ -56,7 +55,7 @@ public sealed class ServersRootRelocatorTests : IDisposable
     }
 
     [Fact]
-    public void IsTargetDirectoryEmpty_ReflectsContents()
+    public void IsTargetDirectoryEmpty_VariousContents_ReflectsState()
     {
         Assert.True(ServersRootRelocator.IsTargetDirectoryEmpty(Root("not-created")));
 
@@ -69,7 +68,7 @@ public sealed class ServersRootRelocatorTests : IDisposable
     }
 
     [Fact]
-    public void RelocateAllContent_MovesContentRewritesRegistryAndRemovesEmptySource()
+    public void RelocateAllContent_ValidTarget_MovesAndRewritesRegistry()
     {
         string oldRoot = Root("old");
         string newRoot = Path.Combine(Root("new"), "servers");
@@ -84,7 +83,7 @@ public sealed class ServersRootRelocatorTests : IDisposable
         File.WriteAllText(Path.Combine(oldRoot, ServerDefaults.RegistryFileName), registry);
         var reports = new List<int>();
 
-        ServersRootRelocator.RelocateAllContent(oldRoot, newRoot, new SynchronousProgress<(int Percent, string Message)>(r => reports.Add(r.Percent)));
+        ServersRootRelocator.RelocateAllContent(oldRoot, newRoot, new SynchronousProgress<(int Percent, string Message)>(r => reports.Add(r.Percent)), TestContext.Current.CancellationToken);
 
         Assert.Equal("data", File.ReadAllText(Path.Combine(newRoot, "Alpha", "world.txt")));
         Assert.False(Directory.Exists(oldRoot));
@@ -112,7 +111,7 @@ public sealed class ServersRootRelocatorTests : IDisposable
         using (new FileStream(lockedFile, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
             // 檔案被占用：目錄無法直接移動，改走複製後刪除，刪除失敗不得讓整個遷移失敗
-            leftovers = ServersRootRelocator.RelocateAllContent(oldRoot, newRoot);
+            leftovers = ServersRootRelocator.RelocateAllContent(oldRoot, newRoot, cancellationToken: TestContext.Current.CancellationToken);
         }
 
         Assert.Equal(serverDir, Assert.Single(leftovers));
@@ -160,7 +159,7 @@ public sealed class ServersRootRelocatorTests : IDisposable
     }
 
     [Fact]
-    public void RelocateAllContent_RejectsNonEmptyTarget()
+    public void RelocateAllContent_NonEmptyTarget_Rejects()
     {
         string oldRoot = Root("old");
         string newRoot = Path.Combine(Root("new"), "servers");
@@ -168,7 +167,7 @@ public sealed class ServersRootRelocatorTests : IDisposable
         Directory.CreateDirectory(newRoot);
         File.WriteAllText(Path.Combine(newRoot, "existing.txt"), "x");
 
-        Assert.Throws<InvalidOperationException>(() => ServersRootRelocator.RelocateAllContent(oldRoot, newRoot));
+        Assert.Throws<InvalidOperationException>(() => ServersRootRelocator.RelocateAllContent(oldRoot, newRoot, cancellationToken: TestContext.Current.CancellationToken));
         Assert.True(Directory.Exists(Path.Combine(oldRoot, "Alpha")));
     }
 
@@ -201,6 +200,23 @@ public sealed class ServersRootRelocatorTests : IDisposable
             Assert.Equal(name, File.ReadAllText(Path.Combine(oldRoot, name, "f.txt")));
         }
 
-        Assert.Empty(Directory.EnumerateFileSystemEntries(newRoot));
+        // 遷移前不存在的目標資料夾於回滾後一併移除
+        Assert.False(Directory.Exists(newRoot));
+    }
+
+    [Fact]
+    public void RelocateAllContent_WhenRegistryIsCorrupt_RollsBack()
+    {
+        string oldRoot = Root("old");
+        string newRoot = Root("new");
+        Directory.CreateDirectory(Path.Combine(oldRoot, "A"));
+        File.WriteAllText(Path.Combine(oldRoot, "A", "f.txt"), "A");
+        File.WriteAllText(Path.Combine(oldRoot, "servers.json"), "{ not json");
+
+        Assert.Throws<InvalidDataException>(() => ServersRootRelocator.RelocateAllContent(oldRoot, newRoot, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal("A", File.ReadAllText(Path.Combine(oldRoot, "A", "f.txt")));
+        Assert.True(File.Exists(Path.Combine(oldRoot, "servers.json")));
+        Assert.False(Directory.Exists(Path.Combine(newRoot, "servers")));
     }
 }

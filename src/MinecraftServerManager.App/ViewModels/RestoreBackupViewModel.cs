@@ -19,21 +19,15 @@ public sealed class BackupDisplayItem(string fileName, long sizeBytes, DateTimeO
 }
 
 /// <summary>備份還原與管理對話方塊 ViewModel</summary>
-public sealed partial class RestoreBackupViewModel : ViewModelBase
+public sealed partial class RestoreBackupViewModel : DialogViewModelBase
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(RestoreBackupViewModel));
-    private readonly IUiService _ui;
 
+    private readonly IUiService _ui;
     private readonly IServerBackupService _backupService;
     private readonly string _serverName;
     private readonly string _backupDirectory;
     private readonly Func<bool> _isServerRunningCheck;
-
-    [ObservableProperty]
-    public partial BackupDisplayItem? SelectedBackup { get; set; }
-
-    [ObservableProperty]
-    public partial string StatusMessage { get; set; } = string.Empty;
 
     public RestoreBackupViewModel(
         IServerBackupService backupService,
@@ -42,6 +36,9 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
         string? backupDirectory,
         Func<bool> isServerRunningCheck)
     {
+        ArgumentNullException.ThrowIfNull(backupService);
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverName);
+        ArgumentNullException.ThrowIfNull(uiService);
         ArgumentNullException.ThrowIfNull(isServerRunningCheck);
         _ui = uiService;
         _backupService = backupService;
@@ -53,122 +50,173 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
         _ = RunSafeAsync(RefreshBackupsAsync, "重新整理備份清單", Logger);
     }
 
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RestoreCommand), nameof(DeleteCommand))]
+    public partial BackupDisplayItem? SelectedBackup { get; set; }
+
+    /// <summary>還原或刪除進行中；期間鎖定操作避免重複執行</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RestoreCommand), nameof(DeleteCommand))]
+    public partial bool IsOperating { get; private set; }
+
+    [ObservableProperty]
+    public partial string StatusMessage { get; set; } = string.Empty;
+
     public BulkObservableCollection<BackupDisplayItem> Backups { get; }
 
-    public event Action<bool>? RequestClose;
+    private bool CanOperate => !IsOperating && SelectedBackup is not null;
 
     public async Task RefreshBackupsAsync()
     {
         StatusMessage = "正在讀取備份清單...";
         try
         {
-            var list = await _backupService.ListBackupsAsync(_serverName, _backupDirectory).ConfigureAwait(true);
+            var list = await _backupService.ListBackupsAsync(_serverName, _backupDirectory);
             var displayItems = list.Select(static b => new BackupDisplayItem(b.FileName, b.SizeBytes, b.CreatedAt));
             Backups.ReplaceAll(displayItems);
 
-            if (Backups.Count > 0)
-            {
-                SelectedBackup = Backups[0];
-                StatusMessage = $"共找到 {Backups.Count} 份備份";
-            }
-            else
-            {
-                StatusMessage = "此伺服器目前尚無任何備份檔案";
-            }
+            SelectedBackup = Backups.FirstOrDefault();
+            StatusMessage = Backups.Count > 0
+                ? $"共找到 {Backups.Count} 份備份"
+                : "此伺服器目前尚無任何備份檔案";
         }
-        catch (OperationCanceledException)
-        {
-            Logger.Information("備份操作已取消");
-        }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.Warning(ex, "讀取備份清單失敗");
             StatusMessage = $"讀取備份失敗：{ex.Message}";
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanOperate))]
     public async Task RestoreAsync()
     {
-        if (SelectedBackup is null)
+        if (IsOperating)
+        {
+            return;
+        }
+
+        // 取快照：確認對話框期間使用者可能變更選取
+        if (SelectedBackup is not { } target)
         {
             StatusMessage = "請先選擇要還原的備份檔案";
             return;
         }
 
-        if (_isServerRunningCheck())
-        {
-            StatusMessage = "伺服器正在執行中，無法還原備份！請先停止伺服器。";
-            _ui.ShowNotification("伺服器正在執行中，請先停止伺服器後再還原備份。", "無法還原", NotificationType.Warning);
-            return;
-        }
-
-        if (!await _ui.ConfirmAsync(
-            $"確定要將備份「{SelectedBackup.FileName}」還原至伺服器「{_serverName}」嗎？\n\n此操作將以備份內容覆蓋現有伺服器檔案，且無法復原。",
-            "確認還原備份",
-            UiMessageLevel.Warning).ConfigureAwait(true))
+        if (!EnsureStoppedForRestore())
         {
             return;
         }
 
-        StatusMessage = $"正在還原備份「{SelectedBackup.FileName}」...";
-
+        IsOperating = true;
         try
         {
-            bool success;
-            using (var progressDialog = _ui.ShowServerBackupProgress(_serverName, "還原"))
+            if (!await _ui.ConfirmAsync(
+                $"確定要將備份「{target.FileName}」還原至伺服器「{_serverName}」嗎？\n\n此操作將以備份內容覆蓋現有伺服器檔案，且無法復原。",
+                "確認還原備份",
+                UiMessageLevel.Warning))
             {
-                success = await _backupService.RestoreBackupAsync(
-                    _serverName,
-                    SelectedBackup.FileName,
-                    _backupDirectory,
-                    progressDialog.Progress).ConfigureAwait(true);
+                return;
             }
 
-            if (success)
+            // 確認期間伺服器可能已被啟動，送出前再檢查一次
+            if (!EnsureStoppedForRestore())
             {
-                _ui.ShowNotification($"伺服器「{_serverName}」已成功還原備份「{SelectedBackup.FileName}」！", "還原完成", NotificationType.Success);
-                RequestClose?.Invoke(true);
+                return;
             }
-            else
-            {
-                StatusMessage = "還原失敗，伺服器資料未變更";
-                await _ui.ShowErrorAsync("還原失敗，伺服器檔案未變更。", "還原失敗").ConfigureAwait(true);
-            }
+
+            await RestoreCoreAsync(target);
         }
-        catch (OperationCanceledException)
+        finally
         {
-            StatusMessage = "已取消備份還原操作";
-        }
-        catch (Exception ex)
-        {
-            Logger.Error(ex, "還原備份失敗");
-            StatusMessage = $"還原失敗：{ex.Message}";
-            await _ui.ShowErrorAsync($"還原過程發生未預期例外：{ex.Message}", "還原失敗").ConfigureAwait(true);
+            IsOperating = false;
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanOperate))]
     public async Task DeleteAsync()
     {
-        if (SelectedBackup is null)
+        if (IsOperating)
+        {
+            return;
+        }
+
+        if (SelectedBackup is not { } toDelete)
         {
             StatusMessage = "請先選擇要刪除的備份檔案";
             return;
         }
 
-        var toDelete = SelectedBackup;
-        if (!await _ui.ConfirmAsync(
-            $"確定要永久刪除備份檔案「{toDelete.FileName}」嗎？\n此操作無法復原。",
-            "確認刪除備份",
-            UiMessageLevel.Warning).ConfigureAwait(true))
+        IsOperating = true;
+        try
         {
-            return;
+            if (await _ui.ConfirmAsync(
+                $"確定要永久刪除備份檔案「{toDelete.FileName}」嗎？\n此操作無法復原。",
+                "確認刪除備份",
+                UiMessageLevel.Warning))
+            {
+                await DeleteCoreAsync(toDelete);
+            }
         }
+        finally
+        {
+            IsOperating = false;
+        }
+    }
+
+    [RelayCommand]
+    public void Cancel() => Close(false);
+
+    private bool EnsureStoppedForRestore()
+    {
+        if (_ui.EnsureServerStopped(_isServerRunningCheck(), "伺服器正在執行中，請先停止伺服器後再還原備份。", "無法還原"))
+        {
+            return true;
+        }
+
+        StatusMessage = "伺服器正在執行中，無法還原備份！請先停止伺服器。";
+        return false;
+    }
+
+    private async Task RestoreCoreAsync(BackupDisplayItem target)
+    {
+        StatusMessage = $"正在還原備份「{target.FileName}」...";
 
         try
         {
-            bool success = await _backupService.DeleteBackupAsync(_serverName, toDelete.FileName, _backupDirectory).ConfigureAwait(true);
+            bool success;
+            using (var progressDialog = _ui.ShowServerBackupProgress(_serverName, isRestore: true))
+            {
+                success = await _backupService.RestoreBackupAsync(
+                    _serverName,
+                    target.FileName,
+                    _backupDirectory,
+                    progressDialog.Progress);
+            }
+
+            if (success)
+            {
+                _ui.ShowNotification($"伺服器「{_serverName}」已成功還原備份「{target.FileName}」！", "還原完成", NotificationType.Success);
+                Close(true);
+            }
+            else
+            {
+                StatusMessage = "還原失敗，伺服器資料未變更";
+                await _ui.ShowErrorAsync("還原失敗，伺服器檔案未變更。", "還原失敗");
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Error(ex, "還原備份失敗");
+            StatusMessage = $"還原失敗：{ex.Message}";
+            await _ui.ShowErrorAsync($"還原過程發生未預期例外：{ex.Message}", "還原失敗");
+        }
+    }
+
+    private async Task DeleteCoreAsync(BackupDisplayItem toDelete)
+    {
+        try
+        {
+            bool success = await _backupService.DeleteBackupAsync(_serverName, toDelete.FileName, _backupDirectory);
             if (success)
             {
                 Backups.Remove(toDelete);
@@ -178,20 +226,14 @@ public sealed partial class RestoreBackupViewModel : ViewModelBase
             else
             {
                 StatusMessage = "刪除備份失敗";
+                _ui.ShowNotification($"無法刪除備份檔案「{toDelete.FileName}」", "刪除失敗", NotificationType.Warning);
             }
         }
-        catch (OperationCanceledException)
-        {
-            Logger.Information("備份操作已取消");
-        }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.Error(ex, "刪除備份失敗");
             StatusMessage = $"刪除失敗：{ex.Message}";
-            await _ui.ShowErrorAsync($"刪除備份失敗：{ex.Message}", "刪除失敗").ConfigureAwait(true);
+            await _ui.ShowErrorAsync($"刪除備份失敗：{ex.Message}", "刪除失敗");
         }
     }
-
-    [RelayCommand]
-    public void Cancel() => RequestClose?.Invoke(false);
 }

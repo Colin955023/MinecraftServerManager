@@ -98,8 +98,7 @@
           Style="{StaticResource SectionHeaderTextStyle}"
           Margin="0,0,0,6" />
         <TextBlock Text="更新檔僅接受 GitHub Release 提供的 SHA-256 digest 驗證"
-          FontSize="{StaticResource CaptionTextBlockFontSize}"
-          Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+          Style="{StaticResource SecondaryCaptionTextStyle}"
           TextWrapping="Wrap"
           Margin="0,0,0,8" />
         <ToggleSwitch Header="自動檢查更新"
@@ -109,8 +108,7 @@
           Command="{x:Bind ViewModel.CheckForUpdatesCommand}"
           Visibility="{x:Bind ViewModel.IsManualCheckVisible, Mode=OneWay}"
           HorizontalAlignment="Left"
-          Width="100"
-          Height="32" />
+          Width="100" />
       </StackPanel>
 
       <Border Grid.Column="1"
@@ -141,8 +139,8 @@
         </Border>
         <Button Content="重設為預設大小"
           Command="{x:Bind ViewModel.ResetToDefaultSizeCommand}"
+          Style="{StaticResource DangerButtonStyle}"
           HorizontalAlignment="Left"
-          Height="32"
           Margin="0,0,0,20" />
 
         <TextBlock Text="顯示設定"
@@ -158,11 +156,12 @@
             VerticalAlignment="Center"
             Foreground="{ThemeResource TextFillColorPrimaryBrush}"
             Margin="0,0,12,0" />
-          <ComboBox AutomationProperties.Name="主題模式" Grid.Column="1"
-            SelectedIndex="{x:Bind ViewModel.SelectedThemeModeIndex, Mode=TwoWay}"
-            ItemsSource="{x:Bind vm:AboutPreferencesViewModel.ThemeModes}"
+          <ComboBox Grid.Column="1"
             Width="160"
-            HorizontalAlignment="Left" />
+            HorizontalAlignment="Left"
+            ItemsSource="{x:Bind ViewModel.ThemeModes}"
+            SelectedIndex="{x:Bind ViewModel.SelectedThemeModeIndex, Mode=TwoWay}"
+            AutomationProperties.Name="主題模式" />
         </Grid>
 
         <Border Style="{StaticResource CardBorderStyle}"
@@ -193,13 +192,13 @@
             </Grid>
             <controls:WrapPanel ItemSpacing="8"
               LineSpacing="8">
-              <Button Height="32"
-                Padding="{StaticResource CompactButtonPadding}"
+              <Button Padding="{StaticResource CompactButtonPadding}"
                 VerticalContentAlignment="Center">
                 <controls:IconLabel Icon="{StaticResource IconColor}"
                   Text="挑選自訂顏色" />
                 <Button.Flyout>
-                  <Flyout x:Name="AccentColorFlyout">
+                  <Flyout x:Name="AccentColorFlyout"
+                    Opening="OnAccentColorFlyoutOpening">
                     <StackPanel Spacing="12"
                       Width="260">
                       <ColorPicker x:Name="AccentPicker"
@@ -207,17 +206,16 @@
                         IsColorSpectrumVisible="True"
                         IsColorPreviewVisible="True"
                         IsHexInputVisible="True"
-                        IsAlphaEnabled="False" />
+                        IsAlphaEnabled="False"
+                        AutomationProperties.Name="自訂強調色" />
                       <StackPanel Orientation="Horizontal"
                         HorizontalAlignment="Right"
                         Spacing="8">
                         <Button Content="套用"
                           Style="{StaticResource PrimaryButtonStyle}"
-                          Height="32"
                           Padding="{StaticResource CompactButtonPadding}"
                           Click="OnApplyAccentColorClicked" />
                         <Button Content="取消"
-                          Height="32"
                           Padding="{StaticResource CompactButtonPadding}"
                           Click="OnCancelAccentColorClicked" />
                       </StackPanel>
@@ -227,8 +225,7 @@
               </Button>
               <Button Content="重設為系統強調色"
                 Command="{x:Bind ViewModel.ResetAccentColorCommand}"
-                IsEnabled="{x:Bind ViewModel.IsCustomAccentColor, Mode=OneWay}"
-                Height="32"
+                Style="{StaticResource DangerButtonStyle}"
                 Padding="{StaticResource CompactButtonPadding}"
                 VerticalContentAlignment="Center" />
             </controls:WrapPanel>
@@ -250,8 +247,7 @@
           HorizontalAlignment="Left"
           Value="{x:Bind ViewModel.BackupRetentionCount, Mode=TwoWay}" />
         <TextBlock Text="超過份數時自動刪除最舊的備份；需先為伺服器設定備份資料夾，自動備份才會執行。"
-          FontSize="{StaticResource CaptionTextBlockFontSize}"
-          Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+          Style="{StaticResource SecondaryCaptionTextStyle}"
           TextWrapping="Wrap"
           Margin="0,8,0,16" />
 
@@ -260,10 +256,9 @@
           Margin="0,0,0,20" />
         <Button Content="還原預設"
           Command="{x:Bind ViewModel.ResetAllSettingsCommand}"
-          Style="{ThemeResource DangerButtonStyle}"
+          Style="{StaticResource DangerButtonStyle}"
           HorizontalAlignment="Left"
           MinWidth="100"
-          Height="32"
           VerticalContentAlignment="Center" />
       </StackPanel>
     </Grid>

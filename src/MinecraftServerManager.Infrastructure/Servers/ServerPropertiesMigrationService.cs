@@ -1,7 +1,7 @@
 using System.Collections.Frozen;
 using MinecraftServerManager.Core.Servers;
-using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Core.Utilities;
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
@@ -30,12 +30,14 @@ public static class ServerPropertiesMigrationService
     private static readonly FrozenDictionary<string, string>.AlternateLookup<ReadOnlySpan<char>> LevelTypeSpanLookup =
         LevelTypeNormalizedMap.GetAlternateLookup<ReadOnlySpan<char>>();
 
-    private static readonly FrozenDictionary<string, string> DeprecatedKeys = new Dictionary<string, string>
-    {
-        ["max-build-height"] = "自 1.17 起移除，世界高度由資料包與世界生成控制",
-        ["snooper-enabled"] = "自 1.18 起移除，遙測設定已廢棄",
-        ["announce-player-achievements"] = "自 1.12 起移除，已改為遊戲規則 announceAdvancements"
-    }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+    private static readonly FrozenDictionary<string, (VersionValue MinRemovedVersion, string Reason)> DeprecatedKeys =
+        new Dictionary<string, (VersionValue MinRemovedVersion, string Reason)>
+        {
+            ["max-build-height"] = (new VersionValue(1, 17, 0), "自 1.17 起移除，世界高度由資料包與世界生成控制"),
+            ["snooper-enabled"] = (new VersionValue(1, 18, 0), "自 1.18 起移除，遙測設定已廢棄"),
+            ["max-achievements"] = (new VersionValue(1, 12, 0), "自 1.12 起移除，已改為進度系統"),
+            ["announce-player-achievements"] = (new VersionValue(1, 12, 0), "自 1.12 起移除，已改為遊戲規則 announceAdvancements"),
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>分析現有屬性字典並產生遷移計畫</summary>
     public static ServerPropertiesMigrationPlan PlanMigration(
@@ -46,42 +48,28 @@ public static class ServerPropertiesMigrationService
 
         var newProps = new Dictionary<string, string>(properties, StringComparer.OrdinalIgnoreCase);
         var changes = new List<string>();
+        VersionValue? parsedVersion = !string.IsNullOrWhiteSpace(minecraftVersion) && VersionValue.TryParse(minecraftVersion, out var parsed)
+            ? parsed
+            : null;
 
-        if (newProps.Remove("texture-pack", out string? texturePackValue))
-        {
-            if (!newProps.ContainsKey("resource-pack"))
-            {
-                newProps["resource-pack"] = texturePackValue;
-                changes.Add("屬性更名：texture-pack ➔ resource-pack (1.7.2+)");
-            }
-            else
-            {
-                changes.Add("移除舊版重複屬性：texture-pack (已存在 resource-pack)");
-            }
-        }
+        RenameKeyIfPresent(newProps, "texture-pack", "resource-pack", changes, "1.7.2+");
+        RenameKeyIfPresent(newProps, "hellworld", "allow-nether", changes);
 
-        if (newProps.Remove("hellworld", out string? hellworldValue))
-        {
-            if (!newProps.ContainsKey("allow-nether"))
-            {
-                newProps["allow-nether"] = hellworldValue;
-                changes.Add("屬性更名：hellworld ➔ allow-nether");
-            }
-        }
-
-        if (newProps.TryGetValue("gamemode", out string? rawGm) && TryMapLegacyIndex(rawGm, GamemodeNames, out string? mappedGm))
+        // 1.12 以下僅接受數字形式，不轉換為名稱
+        bool acceptsNamedModes = parsedVersion is null || parsedVersion >= Min113Version;
+        if (acceptsNamedModes && newProps.TryGetValue("gamemode", out string? rawGm) && TryMapLegacyIndex(rawGm, GamemodeNames, out string? mappedGm))
         {
             newProps["gamemode"] = mappedGm;
-            changes.Add($"遊戲模式轉換：gamemode={rawGm} ➔ {mappedGm} (1.14+)");
+            changes.Add($"遊戲模式轉換：gamemode={rawGm} ➔ {mappedGm} (1.13+)");
         }
 
-        if (newProps.TryGetValue("difficulty", out string? rawDiff) && TryMapLegacyIndex(rawDiff, DifficultyNames, out string? mappedDiff))
+        if (acceptsNamedModes && newProps.TryGetValue("difficulty", out string? rawDiff) && TryMapLegacyIndex(rawDiff, DifficultyNames, out string? mappedDiff))
         {
             newProps["difficulty"] = mappedDiff;
-            changes.Add($"遊戲難度轉換：difficulty={rawDiff} ➔ {mappedDiff} (1.14+)");
+            changes.Add($"遊戲難度轉換：difficulty={rawDiff} ➔ {mappedDiff} (1.13+)");
         }
 
-        if (IsVersionAtLeast119(minecraftVersion) && newProps.TryGetValue("level-type", out string? rawLt))
+        if (parsedVersion is not null && parsedVersion >= Min119Version && newProps.TryGetValue("level-type", out string? rawLt))
         {
             if (LevelTypeSpanLookup.TryGetValue(rawLt.AsSpan().Trim(), out string? mappedLt) && !string.Equals(rawLt, mappedLt, StringComparison.Ordinal))
             {
@@ -90,9 +78,9 @@ public static class ServerPropertiesMigrationService
             }
         }
 
-        foreach (var (depKey, reason) in DeprecatedKeys)
+        foreach (var (depKey, (minRemovedVersion, reason)) in DeprecatedKeys)
         {
-            if (newProps.Remove(depKey))
+            if ((parsedVersion is null || parsedVersion >= minRemovedVersion) && newProps.Remove(depKey))
             {
                 changes.Add($"移除廢棄屬性：{depKey} ({reason})");
             }
@@ -102,6 +90,29 @@ public static class ServerPropertiesMigrationService
             NeedsMigration: changes.Count > 0,
             Changes: changes,
             MigratedProperties: newProps);
+    }
+
+    private static void RenameKeyIfPresent(
+        Dictionary<string, string> properties,
+        string oldKey,
+        string newKey,
+        List<string> changes,
+        string? versionNote = null)
+    {
+        if (!properties.Remove(oldKey, out string? oldValue))
+        {
+            return;
+        }
+
+        if (properties.TryAdd(newKey, oldValue))
+        {
+            string suffix = string.IsNullOrEmpty(versionNote) ? string.Empty : $" ({versionNote})";
+            changes.Add($"屬性更名：{oldKey} ➔ {newKey}{suffix}");
+        }
+        else
+        {
+            changes.Add($"移除舊版重複屬性：{oldKey} (已存在 {newKey})");
+        }
     }
 
     /// <summary>將遷移計畫套用並寫入指定伺服器目錄下的 server.properties</summary>
@@ -131,7 +142,7 @@ public static class ServerPropertiesMigrationService
                 SafeFileSystem.CopyFile(propsPath, backupPath, overwrite: true);
                 Logger.Information("已建立 server.properties 備份: {BackupPath}", backupPath);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 Logger.Warning(ex, "建立 server.properties.backup 失敗");
             }
@@ -161,19 +172,5 @@ public static class ServerPropertiesMigrationService
     }
 
     private static readonly VersionValue Min119Version = new(1, 19, 0);
-
-    private static bool IsVersionAtLeast119(string? version)
-    {
-        if (string.IsNullOrWhiteSpace(version))
-        {
-            return false;
-        }
-
-        if (VersionValue.TryParse(version, out var parsed))
-        {
-            return parsed >= Min119Version;
-        }
-
-        return false;
-    }
+    private static readonly VersionValue Min113Version = new(1, 13, 0);
 }

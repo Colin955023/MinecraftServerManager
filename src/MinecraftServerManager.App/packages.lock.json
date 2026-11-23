@@ -20,15 +20,6 @@
         "resolved": "2.3.1",
         "contentHash": "ojoYrj8m8mAx6LVxofQXgfvsReDTv2LQFeDgXt5Lw99r5fv7dCR19ybd1JN0OueaWvL+BNqv0E7zZCgqptP9zA=="
       },
-      "Microsoft.WindowsAppSDK.DWrite": {
-        "type": "Direct",
-        "requested": "[2.7.0, )",
-        "resolved": "2.7.0",
-        "contentHash": "8p7Dq+KjbXBh29s/zbDmCauylblws9aF2px5T4q0wNDwiUaF5hKCyrPs3VU3ampO3kkZPSfn+FX0O0DAhLgnsg==",
-        "dependencies": {
-          "Microsoft.WindowsAppSDK.Base": "2.7.0"
-        }
-      },
       "Microsoft.WindowsAppSDK.Runtime": {
         "type": "Direct",
         "requested": "[2.7.0, )",

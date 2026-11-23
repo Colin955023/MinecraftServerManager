@@ -16,7 +16,7 @@ public sealed class SafeScriptValidatorFuzzingTests
     ];
 
     [Fact]
-    public void FuzzChcpValidVariations_AllAccepted()
+    public void ValidateScriptContent_FuzzedChcpVariations_Accepts()
     {
         using var dirTemp = new TempDirectory("msm-fuzz-script-");
         string dir = dirTemp.FullName;
@@ -47,7 +47,7 @@ public sealed class SafeScriptValidatorFuzzingTests
     }
 
     [Fact]
-    public void FuzzChcpMaliciousInjections_AllRejected()
+    public void ValidateScriptContent_FuzzedChcpInjections_Rejects()
     {
         using var dirTemp = new TempDirectory("msm-fuzz-script-");
         string dir = dirTemp.FullName;
@@ -111,7 +111,7 @@ public sealed class SafeScriptValidatorFuzzingTests
         Assert.False(SafeScriptValidator.IsSafeJavaExecutable(sample));
 
     [Fact]
-    public void FuzzJavaExecutableValidation_NeverThrowsUnhandledException()
+    public void IsSafeJavaExecutable_FuzzedInput_NeverThrows()
     {
         Assert.False(SafeScriptValidator.IsSafeJavaExecutable(new string('a', 500)));
 

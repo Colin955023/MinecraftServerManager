@@ -6,16 +6,16 @@ namespace MinecraftServerManager.UnitTests.FileSystem;
 public sealed class SafeZipArchiveTests
 {
     [Fact]
-    public void ExtractPreservesFilesAndReportsProgress()
+    public void Extract_ValidArchive_PreservesFilesAndReportsProgress()
     {
         using var rootTemp = new TempDirectory("msm-zip-");
         string root = rootTemp.FullName;
         string archivePath = Path.Combine(root, "sample.zip");
         string destination = Path.Combine(root, "extract");
-        CreateArchive(archivePath, ("nested/file.txt", "內容"));
+        TestZip.Create(archivePath, ("nested/file.txt", "內容"));
         var progress = new List<(long Current, long Total)>();
 
-        SafeZipArchive.Extract(archivePath, destination, (current, total) => progress.Add((current, total)));
+        SafeZipArchive.Extract(archivePath, destination, (current, total) => progress.Add((current, total)), TestContext.Current.CancellationToken);
 
         Assert.Equal("內容", File.ReadAllText(Path.Combine(destination, "nested", "file.txt")));
         Assert.NotEmpty(progress);
@@ -23,34 +23,30 @@ public sealed class SafeZipArchiveTests
     }
 
     [Fact]
-    public void ExtractRejectsTraversalMember()
+    public void Extract_TraversalMember_Rejects()
     {
         using var rootTemp = new TempDirectory("msm-zip-");
         string root = rootTemp.FullName;
         string archivePath = Path.Combine(root, "unsafe.zip");
-        using (var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
-        {
-            using var writer = new StreamWriter(archive.CreateEntry("../outside.txt").Open());
-            writer.Write("不應輸出");
-        }
+        TestZip.Create(archivePath, ("../outside.txt", "不應輸出"));
 
-        Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(archivePath, Path.Combine(root, "extract")));
+        Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(archivePath, Path.Combine(root, "extract"), cancellationToken: TestContext.Current.CancellationToken));
         Assert.False(File.Exists(Path.Combine(root, "outside.txt")));
     }
 
     [Fact]
-    public void OpenReadRejectsMemberLimit()
+    public void OpenRead_ExceedsMemberLimit_Rejects()
     {
         using var rootTemp = new TempDirectory("msm-zip-");
         string root = rootTemp.FullName;
         string archivePath = Path.Combine(root, "many.zip");
-        CreateArchive(archivePath, ("one.txt", "1"), ("two.txt", "2"));
+        TestZip.Create(archivePath, ("one.txt", "1"), ("two.txt", "2"));
 
         Assert.Throws<SafeArchiveException>(() => SafeZipArchive.OpenRead(archivePath, maxMembers: 1));
     }
 
     [Fact]
-    public void WriteArchivePublishesBoundedOutputAtomically()
+    public void WriteArchive_ValidEntries_PublishesAtomically()
     {
         using var rootTemp = new TempDirectory("msm-zip-");
         string root = rootTemp.FullName;
@@ -74,7 +70,7 @@ public sealed class SafeZipArchiveTests
     }
 
     [Fact]
-    public void WriteArchiveRejectsMemberLimit()
+    public void WriteArchive_ExceedsMemberLimit_Rejects()
     {
         using var rootTemp = new TempDirectory("msm-zip-");
         string root = rootTemp.FullName;
@@ -94,7 +90,7 @@ public sealed class SafeZipArchiveTests
     }
 
     [Fact]
-    public void WrittenArchiveWithHighlyCompressibleMemberCanBeExtracted()
+    public void WriteArchive_HighlyCompressibleMember_CanBeExtracted()
     {
         using var rootTemp = new TempDirectory("msm-zip-");
         string root = rootTemp.FullName;
@@ -104,13 +100,13 @@ public sealed class SafeZipArchiveTests
         File.WriteAllBytes(sourcePath, new byte[4 * 1024 * 1024]);
 
         SafeZipArchive.WriteArchive(archivePath, writer => writer.WriteFile("world/region/r.0.0.mca", sourcePath));
-        SafeZipArchive.Extract(archivePath, Path.Combine(root, "extract"));
+        SafeZipArchive.Extract(archivePath, Path.Combine(root, "extract"), cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(4 * 1024 * 1024, new FileInfo(Path.Combine(root, "extract", "world", "region", "r.0.0.mca")).Length);
     }
 
     [Fact]
-    public void ExtractAcceptsSmallHighlyCompressibleMemberFromOtherTools()
+    public void Extract_SmallHighRatioMember_Accepts()
     {
         using var rootTemp = new TempDirectory("msm-zip-");
         string root = rootTemp.FullName;
@@ -122,13 +118,13 @@ public sealed class SafeZipArchiveTests
             stream.Write(new byte[8192]);
         }
 
-        SafeZipArchive.Extract(archivePath, Path.Combine(root, "extract"));
+        SafeZipArchive.Extract(archivePath, Path.Combine(root, "extract"), cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(8192, new FileInfo(Path.Combine(root, "extract", "world", "poi", "r.0.0.mca")).Length);
     }
 
     [Fact]
-    public void OpenReadRejectsLargeMemberWithExcessiveCompressionRatio()
+    public void OpenRead_LargeHighRatioMember_Rejects()
     {
         using var rootTemp = new TempDirectory("msm-zip-");
         string root = rootTemp.FullName;
@@ -147,12 +143,12 @@ public sealed class SafeZipArchiveTests
     }
 
     [Fact]
-    public void ExtractHonorsCancellationToken()
+    public void Extract_Cancelled_Throws()
     {
         using var rootTemp = new TempDirectory("msm-zip-");
         string root = rootTemp.FullName;
         string archivePath = Path.Combine(root, "sample.zip");
-        CreateArchive(archivePath, ("file.txt", "內容"));
+        TestZip.Create(archivePath, ("file.txt", "內容"));
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
@@ -160,14 +156,68 @@ public sealed class SafeZipArchiveTests
             SafeZipArchive.Extract(archivePath, Path.Combine(root, "extract"), cancellationToken: cts.Token));
     }
 
-    private static void CreateArchive(string path, params (string Name, string Content)[] entries)
+    [Fact]
+    public void ReadEntryTextBounded_Utf8Content_HonorsByteLimit()
     {
-        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
-        foreach (var (name, content) in entries)
+        using var temp = new TempDirectory("msm-zip-bounded-");
+        string archivePath = temp.Combine("a.zip");
+        TestZip.Create(archivePath, ("a.txt", "內容"), ("empty.txt", ""));
+        using var archive = ZipFile.OpenRead(archivePath);
+
+        // 「內容」UTF-8 為 6 位元組：上限以位元組而非字元計算
+        Assert.Equal("內容", SafeZipArchive.ReadEntryTextBounded(archive.GetEntry("a.txt")!, 6));
+        Assert.Null(SafeZipArchive.ReadEntryTextBounded(archive.GetEntry("a.txt")!, 5));
+        Assert.Equal(string.Empty, SafeZipArchive.ReadEntryTextBounded(archive.GetEntry("empty.txt")!, 0));
+    }
+
+    [Fact]
+    public void ReadEntryBytesBounded_OverLimit_ReturnsNull()
+    {
+        using var temp = new TempDirectory("msm-zip-bounded-");
+        string archivePath = temp.Combine("a.zip");
+        TestZip.Create(archivePath, ("a.txt", "0123456789"));
+        using var archive = ZipFile.OpenRead(archivePath);
+        var entry = archive.GetEntry("a.txt")!;
+
+        Assert.Null(SafeZipArchive.ReadEntryBytesBounded(entry, 9));
+        Assert.Equal(10, SafeZipArchive.ReadEntryBytesBounded(entry, 10)!.Length);
+    }
+
+    [Fact]
+    public void Extract_BackslashDirectoryEntry_RecognizesAsDirectory()
+    {
+        using var rootTemp = new TempDirectory("msm-zip-");
+        string archivePath = rootTemp.Combine("backslash-dir.zip");
+        string destination = rootTemp.Combine("extract");
+
+        using (var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
         {
-            using var writer = new StreamWriter(archive.CreateEntry(name).Open());
-            writer.Write(content);
+            archive.CreateEntry(@"dir\");
+            using var writer = new StreamWriter(archive.CreateEntry(@"dir\nested.txt").Open());
+            writer.Write("OK");
         }
+
+        SafeZipArchive.Extract(archivePath, destination, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(Directory.Exists(Path.Combine(destination, "dir")));
+        Assert.Equal("OK", File.ReadAllText(Path.Combine(destination, "dir", "nested.txt")));
+    }
+
+    [Fact]
+    public void OpenRead_UnixSymlinkExternalAttributes_Rejects()
+    {
+        using var rootTemp = new TempDirectory("msm-zip-");
+        string archivePath = rootTemp.Combine("symlink.zip");
+
+        using (var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
+        {
+            var entry = archive.CreateEntry("link.txt");
+            entry.ExternalAttributes = 0xA000 << 16;
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write("target");
+        }
+
+        Assert.Throws<SafeArchiveException>(() => SafeZipArchive.OpenRead(archivePath));
     }
 
     private static string ReadEntry(ZipArchive archive, string name)

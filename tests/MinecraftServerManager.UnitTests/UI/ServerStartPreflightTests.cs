@@ -1,6 +1,5 @@
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Domain.Servers;
-using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.Servers;
 using MinecraftServerManager.Infrastructure.Settings;
 
@@ -21,7 +20,7 @@ public sealed class ServerStartPreflightTests : IAsyncDisposable
         _preflight = new ServerStartPreflight(
             _ui,
             _settings,
-            new ServerBackupService(_rootTemp.FullName, static () => 10),
+            new ServerBackupService(_rootTemp.FullName, static () => 10, TimeProvider.System),
             new ServerPropertiesStore(_rootTemp.FullName),
             _host);
     }
@@ -43,72 +42,72 @@ public sealed class ServerStartPreflightTests : IAsyncDisposable
             File.WriteAllText(Path.Combine(dir, "server.properties"), $"server-port={port}\n");
         }
 
-        return new ServerConfig(ServerName.Parse(name), MinecraftVersion.Parse("1.21.4"), LoaderKind.Vanilla, string.Empty, 1024, null, path: dir, backupPath: backupPath);
+        return TestServerConfigs.Create(name, memoryMaxMb: 1024, path: dir, backupPath: backupPath);
     }
 
     [Fact]
-    public async Task SamePortAsRunningServer_IsBlocked()
+    public async Task CheckAsync_SamePortAsRunningServer_Blocks()
     {
         CreateServer("A", "25570");
         _host.GetFake("A").IsRunning = true;
 
-        bool ok = await _preflight.RunAsync(CreateServer("B", "25570"));
+        bool ok = await _preflight.RunAsync(CreateServer("B", "25570"), TestContext.Current.CancellationToken);
 
         Assert.False(ok);
         Assert.Contains(_ui.Notifications, static n => n.Type == NotificationType.Warning && n.Message.Contains("25570", StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task DifferentPort_Passes()
+    public async Task CheckAsync_DifferentPort_Passes()
     {
         CreateServer("A", "25570");
         _host.GetFake("A").IsRunning = true;
 
-        Assert.True(await _preflight.RunAsync(CreateServer("B", "25571")));
+        Assert.True(await _preflight.RunAsync(CreateServer("B", "25571"), TestContext.Current.CancellationToken));
         Assert.Empty(_ui.Notifications);
     }
 
     [Fact]
-    public async Task UnsetPorts_AreTreatedAsDefaultAndConflict()
+    public async Task CheckAsync_UnsetPorts_ConflictAsDefault()
     {
         CreateServer("A");
         _host.GetFake("A").IsRunning = true;
 
-        bool ok = await _preflight.RunAsync(CreateServer("B"));
+        bool ok = await _preflight.RunAsync(CreateServer("B"), TestContext.Current.CancellationToken);
 
         Assert.False(ok);
         Assert.Contains(_ui.Notifications, static n => n.Message.Contains("25565", StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task AutoBackupDisabled_DoesNotBackup()
+    public async Task CheckAsync_AutoBackupDisabled_DoesNotBackup()
     {
         var server = CreateServer("A", backupPath: _backupTemp.FullName);
 
-        Assert.True(await _preflight.RunAsync(server));
+        Assert.True(await _preflight.RunAsync(server, TestContext.Current.CancellationToken));
         Assert.Empty(Directory.EnumerateFiles(_backupTemp.FullName));
     }
 
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task AutoBackupWithoutBackupFolder_ReturnsUserDecision(bool continueStart)
+    public async Task CheckAsync_AutoBackupWithoutFolder_ReturnsUserDecision(bool continueStart)
     {
-        _settings.SetAutoBackupBeforeStartEnabled(true);
+        _settings.UpdatePreferences(p => p with { AutoBackupBeforeStart = true });
         _ui.ConfirmResult = continueStart;
 
-        bool ok = await _preflight.RunAsync(CreateServer("A"));
+        bool ok = await _preflight.RunAsync(CreateServer("A"), TestContext.Current.CancellationToken);
 
         Assert.Equal(continueStart, ok);
         Assert.Single(_ui.ConfirmMessages);
     }
 
     [Fact]
-    public async Task AutoBackupEnabled_CreatesZipAndAllowsStart()
+    public async Task CheckAsync_AutoBackupEnabled_CreatesZipAndAllowsStart()
     {
-        _settings.SetAutoBackupBeforeStartEnabled(true);
+        _settings.UpdatePreferences(p => p with { AutoBackupBeforeStart = true });
 
-        bool ok = await _preflight.RunAsync(CreateServer("A", backupPath: _backupTemp.FullName));
+        bool ok = await _preflight.RunAsync(CreateServer("A", backupPath: _backupTemp.FullName), TestContext.Current.CancellationToken);
 
         Assert.True(ok);
         Assert.Single(Directory.EnumerateFiles(_backupTemp.FullName, "backup-A-*.zip"));
@@ -118,14 +117,14 @@ public sealed class ServerStartPreflightTests : IAsyncDisposable
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task AutoBackupFailure_ReturnsUserDecision(bool continueStart)
+    public async Task CheckAsync_AutoBackupFails_ReturnsUserDecision(bool continueStart)
     {
-        _settings.SetAutoBackupBeforeStartEnabled(true);
+        _settings.UpdatePreferences(p => p with { AutoBackupBeforeStart = true });
         _ui.ConfirmResult = continueStart;
         var server = CreateServer("A", backupPath: _backupTemp.FullName);
         Directory.Delete(server.Path, recursive: true);
 
-        bool ok = await _preflight.RunAsync(server);
+        bool ok = await _preflight.RunAsync(server, TestContext.Current.CancellationToken);
 
         Assert.Equal(continueStart, ok);
         Assert.Single(_ui.ConfirmMessages);

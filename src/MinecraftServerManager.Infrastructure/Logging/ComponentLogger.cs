@@ -4,9 +4,15 @@ using Microsoft.Extensions.Logging;
 namespace MinecraftServerManager.Infrastructure.Logging;
 
 /// <summary>以元件名稱為類別的記錄器，只有 Information／Warning／Error</summary>
-public sealed class ComponentLogger(ILogger logger)
+public sealed class ComponentLogger
 {
-    private readonly ILogger _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger _logger;
+
+    public ComponentLogger(ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        _logger = logger;
+    }
 
     public void Information(string message, params object?[] args) => Log(LogLevel.Information, null, message, args);
 
@@ -20,6 +26,11 @@ public sealed class ComponentLogger(ILogger logger)
 
     [SuppressMessage("Performance", "CA1848", Justification = "元件化記錄器需保留呼叫端的動態記錄層級與訊息範本")]
     [SuppressMessage("Usage", "CA2254", Justification = "元件化記錄器的訊息範本由各工作流程提供")]
-    private void Log(LogLevel level, Exception? exception, string message, object?[] args) =>
-        _logger.Log(level, exception, message, args);
+    private void Log(LogLevel level, Exception? exception, string message, object?[] args)
+    {
+        if (_logger.IsEnabled(level))
+        {
+            _logger.Log(level, exception, message, args);
+        }
+    }
 }

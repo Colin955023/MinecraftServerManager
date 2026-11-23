@@ -39,4 +39,8 @@ public sealed partial class LabeledValue : UserControl
         get => (FontWeight)GetValue(ValueWeightProperty);
         set => SetValue(ValueWeightProperty, value);
     }
+
+    /// <summary>截斷時懸停檢視全文；值為空白時不顯示</summary>
+    public static string? ToToolTip(string? label, string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : label + value;
 }

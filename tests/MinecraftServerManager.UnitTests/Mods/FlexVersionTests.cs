@@ -33,7 +33,7 @@ public sealed class FlexVersionTests
     }
 
     [Fact]
-    public void ComparesNullAndEmptySafely()
+    public void Compare_NullOrEmpty_HandlesSafely()
     {
         Assert.Equal(0, FlexVersion.Compare(null, null));
         Assert.Equal(0, FlexVersion.Compare(string.Empty, null));
@@ -42,7 +42,7 @@ public sealed class FlexVersionTests
     }
 
     [Fact]
-    public void FindsMaximumCompatibleVersionFromList()
+    public void Compare_VersionList_FindsMaximum()
     {
         string[] versions = ["1.0.0", "1.2.0-beta", "1.1.5", "1.2.0", "1.0.9"];
         string? max = null;

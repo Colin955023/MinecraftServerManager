@@ -4,16 +4,15 @@ namespace MinecraftServerManager.Core.Errors;
 public sealed class JavaInstallException : Exception
 {
     public JavaInstallException()
-        : base()
     {
     }
 
-    public JavaInstallException(string message)
+    public JavaInstallException(string? message)
         : base(message)
     {
     }
 
-    public JavaInstallException(string message, Exception innerException)
+    public JavaInstallException(string? message, Exception? innerException)
         : base(message, innerException)
     {
     }

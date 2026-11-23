@@ -18,8 +18,9 @@
     <!-- 左側導覽：匯入與開啟資料夾為動作項目，不改變選取 -->
     <NavigationView x:Name="NavView"
       Grid.Row="1"
-      PaneDisplayMode="Left"
       OpenPaneLength="240"
+      PaneDisplayMode="Left"
+      ExpandedModeThresholdWidth="0"
       IsBackButtonVisible="Collapsed"
       IsPaneToggleButtonVisible="False"
       IsSettingsVisible="False"
@@ -29,19 +30,25 @@
         <NavigationViewItem Content="建立伺服器"
           Tag="create">
           <NavigationViewItem.Icon>
-            <FontIcon Glyph="{StaticResource IconCreateServer}" />
+            <FontIcon Glyph="{StaticResource IconCreateServer}"
+              FontFamily="{StaticResource SymbolThemeFontFamily}"
+              AutomationProperties.AccessibilityView="Raw" />
           </NavigationViewItem.Icon>
         </NavigationViewItem>
         <NavigationViewItem Content="管理伺服器"
           Tag="manage">
           <NavigationViewItem.Icon>
-            <FontIcon Glyph="{StaticResource IconManageServer}" />
+            <FontIcon Glyph="{StaticResource IconManageServer}"
+              FontFamily="{StaticResource SymbolThemeFontFamily}"
+              AutomationProperties.AccessibilityView="Raw" />
           </NavigationViewItem.Icon>
         </NavigationViewItem>
         <NavigationViewItem Content="模組管理"
           Tag="mods">
           <NavigationViewItem.Icon>
-            <FontIcon Glyph="{StaticResource IconMods}" />
+            <FontIcon Glyph="{StaticResource IconMods}"
+              FontFamily="{StaticResource SymbolThemeFontFamily}"
+              AutomationProperties.AccessibilityView="Raw" />
           </NavigationViewItem.Icon>
         </NavigationViewItem>
         <NavigationViewItemSeparator />
@@ -49,14 +56,18 @@
           Tag="import"
           SelectsOnInvoked="False">
           <NavigationViewItem.Icon>
-            <FontIcon Glyph="{StaticResource IconImport}" />
+            <FontIcon Glyph="{StaticResource IconImport}"
+              FontFamily="{StaticResource SymbolThemeFontFamily}"
+              AutomationProperties.AccessibilityView="Raw" />
           </NavigationViewItem.Icon>
         </NavigationViewItem>
         <NavigationViewItem Content="開啟資料夾"
           Tag="open_folder"
           SelectsOnInvoked="False">
           <NavigationViewItem.Icon>
-            <FontIcon Glyph="{StaticResource IconFolder}" />
+            <FontIcon Glyph="{StaticResource IconFolder}"
+              FontFamily="{StaticResource SymbolThemeFontFamily}"
+              AutomationProperties.AccessibilityView="Raw" />
           </NavigationViewItem.Icon>
         </NavigationViewItem>
       </NavigationView.MenuItems>
@@ -64,7 +75,9 @@
         <NavigationViewItem Content="關於與設定"
           Tag="about_preferences">
           <NavigationViewItem.Icon>
-            <FontIcon Glyph="{StaticResource IconAbout}" />
+            <FontIcon Glyph="{StaticResource IconAbout}"
+              FontFamily="{StaticResource SymbolThemeFontFamily}"
+              AutomationProperties.AccessibilityView="Raw" />
           </NavigationViewItem.Icon>
         </NavigationViewItem>
       </NavigationView.FooterMenuItems>
@@ -80,9 +93,9 @@
           </ContentPresenter.ContentTransitions>
         </ContentPresenter>
         <StackPanel x:Name="NotificationContainer"
-          VerticalAlignment="Top"
-          HorizontalAlignment="Right"
           Margin="0,8,24,0"
+          HorizontalAlignment="Right"
+          VerticalAlignment="Top"
           Spacing="8"
           Canvas.ZIndex="1000">
           <StackPanel.ChildrenTransitions>

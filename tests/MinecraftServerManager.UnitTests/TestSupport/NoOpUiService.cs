@@ -1,7 +1,7 @@
-using System.Collections.ObjectModel;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Mods;
 
 namespace MinecraftServerManager.UnitTests.TestSupport;
@@ -38,6 +38,8 @@ internal class NoOpUiService : IUiService
     public void ShutdownApplication(int exitCode = 0) { }
 
     public virtual void RestartApplication() { }
+
+    public virtual void LaunchReplacementInstance(Action launch) => launch();
 
     public virtual void PostToUi(Action action, bool afterLayout = false) { }
 
@@ -78,25 +80,25 @@ internal class NoOpUiService : IUiService
     public virtual Task<bool?> ShowModVersionPickerAsync(ModVersionPickerViewModel viewModel) =>
         Task.FromResult<bool?>(null);
 
-    public virtual Task<bool?> ShowModInstallQueueAsync(ObservableCollection<ModInstallQueueItem> queue) =>
+    public virtual Task<bool?> ShowModInstallQueueAsync(ModInstallQueueReviewViewModel viewModel) =>
         Task.FromResult<bool?>(null);
 
-    public virtual Task<IReadOnlyList<ModUpdateCandidateItem>?> ShowModUpdatesAsync(IEnumerable<ModUpdateCandidateItem> items) =>
+    public virtual Task<IReadOnlyList<ModUpdateCandidateItem>?> ShowModUpdatesAsync(ModUpdateSelectionViewModel viewModel) =>
         Task.FromResult<IReadOnlyList<ModUpdateCandidateItem>?>(null);
 
     /// <summary>無介面時維持原本流程：不阻擋刪除，僅刪除伺服器本體</summary>
     public virtual Task<ServerDeleteDecision> ShowServerDeleteConfirmationAsync(string serverName, int backupCount) =>
         Task.FromResult(ServerDeleteDecision.DeleteServerOnly);
 
-    public virtual Task ShowExportModListAsync(string serverName, IReadOnlyList<ModListExportRow> rows, IModListExporter exporter, IExternalLauncher launcher) =>
-        Task.CompletedTask;
+    public virtual Task<ModListExportFormat?> ShowExportModListAsync() =>
+        Task.FromResult<ModListExportFormat?>(null);
 
     public virtual Task<bool> ShowServerInitializationAsync(ServerInitializationViewModel viewModel) =>
         Task.FromResult(true);
 
     public virtual IMonitorWindow OpenServerMonitor(ServerMonitorViewModel viewModel) => new NoOpMonitorWindow();
 
-    public virtual IProgressSession<ServerBackupProgressReport> ShowServerBackupProgress(string serverName, string actionTitle = "備份") =>
+    public virtual IProgressSession<ServerBackupProgressReport> ShowServerBackupProgress(string serverName, bool isRestore = false) =>
         new NoOpProgressSession<ServerBackupProgressReport>();
 
     public virtual IProgressSession<ServerImportProgressReport> ShowServerImportProgress(string serverName) =>
@@ -105,17 +107,17 @@ internal class NoOpUiService : IUiService
     public virtual IProgressSession<ServerCreationProgressReport> ShowServerCreationProgress(string serverName) =>
         new NoOpProgressSession<ServerCreationProgressReport>();
 
-    public virtual IOperationProgress ShowModOperationProgress(string title, string initialMessage) =>
-        new NoOpModOperationProgress();
+    public virtual IOperationProgress ShowOperationProgress(string title, string initialMessage) =>
+        new NoOpOperationProgress();
 
     private sealed class NoOpProgressSession<TReport> : IProgressSession<TReport>
     {
-        public IProgress<TReport> Progress { get; } = new Progress<TReport>();
+        public IProgress<TReport> Progress { get; } = new SynchronousProgress<TReport>(static _ => { });
 
         public void Dispose() { }
     }
 
-    private sealed class NoOpModOperationProgress : IOperationProgress
+    private sealed class NoOpOperationProgress : IOperationProgress
     {
         public void UpdateProgress(int current, int total, string message) { }
 
@@ -127,6 +129,8 @@ internal class NoOpUiService : IUiService
         public void StartTimer() { }
 
         public void StopTimer() { }
+
+        public void Dispose() { }
     }
 
     private sealed class NoOpMonitorWindow : IMonitorWindow

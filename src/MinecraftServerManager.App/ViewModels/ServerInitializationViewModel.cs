@@ -1,5 +1,5 @@
-using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Ports;
@@ -18,18 +18,18 @@ public enum InitializationCountdownState
 }
 
 /// <summary>伺服器初次啟動初始化視窗 ViewModel</summary>
-public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisposable
+public sealed partial class ServerInitializationViewModel : DialogViewModelBase
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerInitializationViewModel));
+    /// <summary>主控台行數上限</summary>
+    public const int MaxConsoleLines = 5000;
 
-    /// <summary>主控台文字長度上限</summary>
-    public const int MaxConsoleChars = 50000;
-
-    /// <summary>主控台修剪後保留字元數</summary>
-    public const int TrimmedConsoleChars = 40000;
+    /// <summary>主控台修剪後保留行數</summary>
+    public const int TrimmedConsoleLines = 4000;
 
     private const int MaxPendingLines = 5000;
     private const int MaxLinesPerFlush = 500;
+
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerInitializationViewModel));
 
     private readonly IUiService _ui;
     private readonly IServerRuntime _serverRuntime;
@@ -44,13 +44,31 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
     private bool _isStopping;
     private bool _subscribed;
 
+    public ServerInitializationViewModel(
+        IServerRuntime serverRuntime,
+        ServerInitializationWorkflow workflow,
+        ServerConfig config,
+        string javaExecutablePath,
+        IUiService uiService)
+    {
+        ArgumentNullException.ThrowIfNull(serverRuntime);
+        ArgumentNullException.ThrowIfNull(workflow);
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentException.ThrowIfNullOrWhiteSpace(javaExecutablePath);
+        ArgumentNullException.ThrowIfNull(uiService);
+
+        _ui = uiService;
+        _serverRuntime = serverRuntime;
+        _config = config;
+        _javaExecutablePath = javaExecutablePath;
+        _workflow = workflow;
+        TitleText = $"正在初始化伺服器「{config.Name.Value}」";
+    }
+
     public string TitleText { get; }
 
     [ObservableProperty]
     public partial string StatusText { get; set; } = "狀態：正在準備啟動伺服器執行初次世界生成與設定...";
-
-    [ObservableProperty]
-    public partial string ConsoleText { get; set; } = string.Empty;
 
     [ObservableProperty]
     public partial bool IsProgressVisible { get; set; } = true;
@@ -70,28 +88,10 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
     [ObservableProperty]
     public partial bool IsCompleteEnabled { get; set; }
 
+    /// <summary>主控台輸出行（虛擬化清單來源）</summary>
+    public BulkObservableCollection<string> ConsoleLines { get; } = [];
+
     public bool IsSuccess { get; private set; }
-
-    public event Action? CloseRequested;
-
-    public ServerInitializationViewModel(
-        IServerRuntime serverRuntime,
-        ServerInitializationWorkflow workflow,
-        ServerConfig config,
-        string javaExecutablePath,
-        IUiService uiService)
-    {
-        ArgumentNullException.ThrowIfNull(serverRuntime);
-        ArgumentNullException.ThrowIfNull(workflow);
-        ArgumentNullException.ThrowIfNull(config);
-
-        _ui = uiService;
-        _serverRuntime = serverRuntime;
-        _config = config;
-        _javaExecutablePath = javaExecutablePath;
-        _workflow = workflow;
-        TitleText = $"正在初始化伺服器「{config.Name.Value}」";
-    }
 
     /// <summary>訂閱伺服器輸出並啟動初始化流程（視窗載入後呼叫）</summary>
     public async Task StartAsync()
@@ -106,14 +106,14 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
             _flushTimer = _ui.CreateUiTimer(TimeSpan.FromMilliseconds(150), FlushPendingLines);
             _flushTimer.StartTimer();
 
-            AppendLog($"[系統] 準備啟動伺服器「{_config.Name.Value}」執行初次世界與設定初始化...\n");
+            AppendLog($"[系統] 準備啟動伺服器「{_config.Name.Value}」執行初次世界與設定初始化...");
 
-            string executableName = await Task.Run(() => ServerInitializationWorkflow.ResolveExecutableName(_config.Path)).ConfigureAwait(true);
-            AppendLog(executableName.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)
-                ? $"[系統] 偵測到啟動腳本 {executableName}，即將執行...\n"
-                : $"[系統] 啟動伺服器核心 {executableName}...\n");
+            string executableName = await _workflow.ResolveExecutableNameAsync(_config.Path, _config.LoaderType);
+            AppendLog(executableName.EndsWith(ServerDefaults.BatchScriptExtension, StringComparison.OrdinalIgnoreCase)
+                ? $"[系統] 偵測到啟動腳本 {executableName}，即將執行..."
+                : $"[系統] 啟動伺服器核心 {executableName}...");
 
-            await _workflow.StartAsync(_javaExecutablePath, _config, executableName).ConfigureAwait(true);
+            await _workflow.StartAsync(_javaExecutablePath, _config, executableName);
         }
         catch (OperationCanceledException)
         {
@@ -125,7 +125,7 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
         catch (Exception ex)
         {
             Logger.Error(ex, "初次啟動伺服器失敗");
-            AppendLog($"[錯誤] 伺服器啟動失敗: {ex.Message}\n");
+            AppendLog($"[錯誤] 伺服器啟動失敗：{ex.Message}");
             StatusText = "狀態：啟動伺服器時發生例外錯誤，請檢查輸出";
             EnableClose();
             IsSuccess = false;
@@ -133,17 +133,19 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
         }
     }
 
+    [RelayCommand]
     public void Cancel()
     {
         IsSuccess = false;
-        CloseRequested?.Invoke();
+        Close(IsSuccess);
     }
 
     /// <summary>使用者確認完成初始化</summary>
+    [RelayCommand]
     public void Complete()
     {
         IsSuccess = true;
-        CloseRequested?.Invoke();
+        Close(IsSuccess);
     }
 
     /// <summary>視窗關閉前呼叫；伺服器仍在執行時回傳 true 攔截關閉，停止後再關閉</summary>
@@ -168,7 +170,7 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
         _isStopping = true;
         try
         {
-            await _workflow.StopAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(true);
+            await _workflow.StopAsync(TimeSpan.FromSeconds(5));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -180,23 +182,41 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
         }
 
         _isClosingExpected = true;
-        CloseRequested?.Invoke();
+        Close(IsSuccess);
     }
 
-    private void OnOutputLineReceived(string line) => _pendingLines.Post(line);
+    private void OnOutputLineReceived(string line)
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        _pendingLines.Post(line);
+    }
 
     private void OnServerReady() => _ui.PostToUi(() =>
     {
+        if (IsDisposed)
+        {
+            return;
+        }
+
         FlushPendingLines();
         StatusText = "狀態：伺服器已就緒！正在平順關閉以完成初始化...";
-        AppendLog("\n[系統] 伺服器準備完畢，所有模組載入完成，正在傳送 stop 指令正常關閉...\n");
+        AppendLog("[系統] 伺服器準備完畢，所有模組載入完成，正在傳送 stop 指令正常關閉...");
     });
 
     private void OnServerExited(int exitCode) => _ui.PostToUi(() => HandleServerExited(exitCode));
 
-    /// <summary>依是否已偵測到就緒訊號更新結束狀態並啟動倒數</summary>
+    /// <summary>依是否已偵測到就緒訊號更新結束狀態並啟動倒數（釋放後忽略）</summary>
     public void HandleServerExited(int exitCode)
     {
+        if (IsDisposed)
+        {
+            return;
+        }
+
         FlushPendingLines();
         IsProgressVisible = false;
         EnableClose();
@@ -204,7 +224,7 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
         {
             IsSuccess = true;
             StatusText = "狀態：伺服器初次啟動初始化完成！";
-            AppendLog($"\n[系統] 伺服器行程已安全結束（結束代碼：{exitCode}），初次初始化完成！\n");
+            AppendLog($"[系統] 伺服器行程已安全結束（結束代碼：{exitCode}），初次初始化完成！");
             CompleteButtonText = "完成初始化";
             StartCountdown(2, isSuccess: true);
         }
@@ -212,7 +232,7 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
         {
             IsSuccess = false;
             StatusText = $"狀態：伺服器未完成初始化即結束（代碼：{exitCode}）";
-            AppendLog($"\n[警告] 伺服器行程已結束（結束代碼：{exitCode}），未收到就緒標記。\n");
+            AppendLog($"[警告] 伺服器行程已結束（結束代碼：{exitCode}），未收到就緒標記。");
             StartCountdown(60, isSuccess: false);
         }
     }
@@ -225,7 +245,7 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
 
     private void StartCountdown(int seconds, bool isSuccess)
     {
-        _countdownTimer?.StopTimer();
+        _countdownTimer?.Dispose();
         CountdownSeconds = seconds;
         CountdownState = isSuccess ? InitializationCountdownState.Success : InitializationCountdownState.Warning;
         UpdateCountdownText();
@@ -236,13 +256,18 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
 
     private void OnCountdownTick()
     {
+        if (IsDisposed)
+        {
+            return;
+        }
+
         CountdownSeconds--;
         UpdateCountdownText();
         if (CountdownSeconds <= 0)
         {
             _countdownTimer?.StopTimer();
             _isClosingExpected = true;
-            CloseRequested?.Invoke();
+            Close(IsSuccess);
         }
     }
 
@@ -251,40 +276,30 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
             ? $"初始化完成！倒數 {CountdownSeconds} 秒後自動進入管理頁面..."
             : $"初始化未完成，倒數 {CountdownSeconds} 秒後自動關閉...";
 
-    private void AppendLog(string text) => ConsoleText = AppendWithLimit(ConsoleText, text);
+    private void AppendLog(string line) => ConsoleLines.AppendAndTrim((string[])[line], MaxConsoleLines, TrimmedConsoleLines);
 
-    /// <summary>附加主控台文字，超過上限時只保留尾端</summary>
-    public static string AppendWithLimit(string current, string text)
-    {
-        ArgumentNullException.ThrowIfNull(current);
-        ArgumentNullException.ThrowIfNull(text);
-        if (current.Length + text.Length > MaxConsoleChars)
-        {
-            current = current[^Math.Min(current.Length, TrimmedConsoleChars)..];
-        }
-
-        return current + text;
-    }
-
-    /// <summary>排出待處理輸出（每次最多 500 行）並依關鍵字更新狀態文字</summary>
+    /// <summary>排出待處理輸出（每次最多 500 行）並依關鍵字更新狀態文字（釋放後忽略）</summary>
     public void FlushPendingLines()
     {
+        if (IsDisposed)
+        {
+            return;
+        }
+
         _flushBatch.Clear();
         if (_pendingLines.DrainTo(_flushBatch, MaxLinesPerFlush) == 0)
         {
             return;
         }
 
-        var batch = new StringBuilder();
         string? statusText = null;
         foreach (string line in _flushBatch)
         {
-            batch.AppendLine(line);
             statusText = DetectStatus(line) ?? statusText;
         }
 
+        ConsoleLines.AppendAndTrim(_flushBatch, MaxConsoleLines, TrimmedConsoleLines);
         _flushBatch.Clear();
-        AppendLog(batch.ToString());
         if (statusText is not null)
         {
             StatusText = statusText;
@@ -319,9 +334,11 @@ public sealed partial class ServerInitializationViewModel : ViewModelBase, IDisp
         }
     }
 
-    public void Dispose()
+    protected override void OnDispose()
     {
         StopTimersAndUnsubscribe();
+        _countdownTimer?.Dispose();
+        _flushTimer?.Dispose();
         _workflow.Dispose();
     }
 }

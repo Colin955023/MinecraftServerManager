@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Settings;
@@ -56,19 +57,32 @@ public sealed partial class ServerRowItem : ObservableObject
 
     [ObservableProperty]
     public partial long RawLastModifiedTicks { get; set; } = -1;
+
+    /// <summary>行程執行中（含停止中）</summary>
+    [ObservableProperty]
+    public partial bool IsRunning { get; set; }
+
+    /// <summary>正在執行平順停止流程</summary>
+    [ObservableProperty]
+    public partial bool IsStopping { get; set; }
+
+    /// <summary>狀態探測序號，用於過濾慢速過期探測結果</summary>
+    public long StatusProbeSequence { get; set; }
 }
 
 /// <summary>伺服器管理頁：伺服器清單、選取狀態、執行狀態偵測與目錄大小背景計算</summary>
 public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
 {
+    private const string StoppingStatusText = "停止中";
+    private const string RunningStatusText = "執行中";
+    private const int MaxConcurrentServerSnapshots = 4;
+
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerListViewModel));
 
     private readonly IUiService _ui;
-    private readonly SettingsManager _settingsManager;
+    private readonly ISettingsManager _settingsManager;
     private readonly IServerManager _serverManager;
     private readonly IServerBackupService _backupService;
-    private const string StoppingStatusText = "停止中";
-
     private readonly IServerRuntimeHost _runtimeHost;
     private readonly ServerStopCoordinator _stopCoordinator;
     private readonly IServerIntegrityService _integrityService;
@@ -76,6 +90,49 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
     private readonly ILocalFileSystem _fileSystem;
     private readonly Action<string> _navigateCallback;
     private readonly SerialCancellation _sizeCalculation = new();
+    private readonly SerialCancellation _refresh = new();
+    private readonly List<IRelayCommand> _dependentCommands = [];
+    private long _statusProbeSequence;
+
+    public ServerListViewModel(
+        ISettingsManager settingsManager,
+        IServerManager serverManager,
+        IServerBackupService backupService,
+        IServerRuntimeHost runtimeHost,
+        ServerStopCoordinator stopCoordinator,
+        IServerIntegrityService integrityService,
+        IServerDirectorySizeService directorySizeService,
+        ILocalFileSystem fileSystem,
+        IUiService uiService,
+        Action<string> navigateCallback)
+    {
+        ArgumentNullException.ThrowIfNull(navigateCallback);
+        ArgumentNullException.ThrowIfNull(settingsManager);
+        ArgumentNullException.ThrowIfNull(serverManager);
+        ArgumentNullException.ThrowIfNull(backupService);
+        ArgumentNullException.ThrowIfNull(runtimeHost);
+        ArgumentNullException.ThrowIfNull(stopCoordinator);
+        ArgumentNullException.ThrowIfNull(integrityService);
+        ArgumentNullException.ThrowIfNull(directorySizeService);
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(uiService);
+
+        _ui = uiService;
+        _settingsManager = settingsManager;
+        _serverManager = serverManager;
+        _backupService = backupService;
+        _runtimeHost = runtimeHost;
+        _stopCoordinator = stopCoordinator;
+        _integrityService = integrityService;
+        _directorySizeService = directorySizeService;
+        _fileSystem = fileSystem;
+        _navigateCallback = navigateCallback;
+        // 建構時僅取記憶體設定值，已驗證路徑由首次重新整理於背景執行緒解析
+        DetectPath = _settingsManager.GetServersRoot();
+
+        _runtimeHost.ServerStateChanged += OnServerStateChanged;
+        _stopCoordinator.StoppingStateChanged += OnServerStateChanged;
+    }
 
     [ObservableProperty]
     public partial string DetectPath { get; set; } = string.Empty;
@@ -107,59 +164,21 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
     /// <summary>選取伺服器是否為目前執行中的伺服器</summary>
     public bool IsSelectedServerActive =>
         SelectedServer is not null &&
-        (_runtimeHost.IsRunning(SelectedServer.Name) ||
-         string.Equals(SelectedServer.Status, "執行中", StringComparison.OrdinalIgnoreCase) ||
-         string.Equals(SelectedServer.Status, StoppingStatusText, StringComparison.OrdinalIgnoreCase));
-
-    private readonly List<IRelayCommand> _dependentCommands = [];
-
-    public ServerListViewModel(
-        SettingsManager settingsManager,
-        IServerManager serverManager,
-        IServerBackupService backupService,
-        IServerRuntimeHost runtimeHost,
-        ServerStopCoordinator stopCoordinator,
-        IServerIntegrityService integrityService,
-        IServerDirectorySizeService directorySizeService,
-        ILocalFileSystem fileSystem,
-        IUiService uiService,
-        Action<string> navigateCallback)
-    {
-        ArgumentNullException.ThrowIfNull(navigateCallback);
-        ArgumentNullException.ThrowIfNull(settingsManager);
-        ArgumentNullException.ThrowIfNull(serverManager);
-        ArgumentNullException.ThrowIfNull(backupService);
-        ArgumentNullException.ThrowIfNull(runtimeHost);
-        ArgumentNullException.ThrowIfNull(stopCoordinator);
-        ArgumentNullException.ThrowIfNull(integrityService);
-        ArgumentNullException.ThrowIfNull(directorySizeService);
-        ArgumentNullException.ThrowIfNull(fileSystem);
-
-        _ui = uiService;
-        _settingsManager = settingsManager;
-        _serverManager = serverManager;
-        _backupService = backupService;
-        _runtimeHost = runtimeHost;
-        _stopCoordinator = stopCoordinator;
-        _integrityService = integrityService;
-        _directorySizeService = directorySizeService;
-        _fileSystem = fileSystem;
-        _navigateCallback = navigateCallback;
-        DetectPath = ResolveServersDirectory();
-
-        _runtimeHost.ServerStateChanged += OnServerStateChanged;
-        _stopCoordinator.StoppingStateChanged += OnServerStateChanged;
-    }
+        (SelectedServer.IsRunning || SelectedServer.IsStopping || _runtimeHost.IsRunning(SelectedServer.Name));
 
     public void Dispose()
     {
         _runtimeHost.ServerStateChanged -= OnServerStateChanged;
         _stopCoordinator.StoppingStateChanged -= OnServerStateChanged;
         _sizeCalculation.Dispose();
+        _refresh.Dispose();
     }
 
-    /// <summary>取得已驗證之伺服器存放根目錄，驗證失敗時改用設定值</summary>
-    public string ResolveServersDirectory()
+    /// <summary>於背景執行緒取得已驗證之伺服器存放根目錄，驗證失敗時改用設定值</summary>
+    public Task<string> ResolveServersDirectoryAsync(CancellationToken cancellationToken = default) =>
+        Task.Run(ResolveServersDirectory, cancellationToken);
+
+    private string ResolveServersDirectory()
     {
         try
         {
@@ -184,7 +203,7 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
                 ? value.BackupPath
                 : "未設定外部備份資料夾";
 
-            string memoryDisplay = FormatMemoryDisplay(value.MemoryMinMb, value.MemoryMaxMb);
+            string memoryDisplay = ServerStatusFormatter.FormatMemoryDisplay(value.MemoryMinMb, value.MemoryMaxMb);
             SelectedServerMemory = memoryDisplay;
             SelectedServerBackupPath = backupInfo;
         }
@@ -207,15 +226,15 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
     public void RegisterDependentCommands(params IRelayCommand[] commands) => _dependentCommands.AddRange(commands);
 
     [RelayCommand]
-    public void AddServer() => _navigateCallback("create");
+    public void AddServer() => _navigateCallback(PageKeys.Create);
 
     [RelayCommand]
-    public async Task DetectServers()
+    public async Task DetectServersAsync()
     {
         try
         {
             var report = await _serverManager.ScanAndRegisterAsync();
-            await RefreshServers();
+            await RefreshServersAsync();
             _ui.Notify(
                 $"偵測完成：已管理 {report.AlreadyManaged} 個，新增 {report.NewlyAdded} 個，跳過 {report.Skipped} 個",
                 NotificationType.Success);
@@ -228,37 +247,57 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
-    public async Task RefreshServers()
+    public Task RefreshServersAsync() => RefreshCoreAsync(preferredSelection: null);
+
+    /// <summary>重新整理伺服器清單並選取指定名稱之伺服器</summary>
+    public Task RefreshAndSelectServerAsync(string serverName) => RefreshCoreAsync(serverName);
+
+    /// <summary>重新載入清單；較新的重新整理會取消較舊者，避免舊結果覆寫新結果</summary>
+    private async Task RefreshCoreAsync(string? preferredSelection)
     {
+        CancellationToken token = _refresh.Next();
         IsBusy = true;
         BusyStatusText = "正在載入伺服器清單...";
         try
         {
-            DetectPath = ResolveServersDirectory();
-            string? prevSelectedName = SelectedServer?.Name;
-            var serverEntries = await _serverManager.GetAllServersAsync();
+            DetectPath = await ResolveServersDirectoryAsync(token);
+            var serverEntries = await _serverManager.GetAllServersAsync(token);
             var running = new HashSet<string>(_runtimeHost.GetRunningServerNames(), StringComparer.OrdinalIgnoreCase);
 
-            IReadOnlyList<ServerRowSnapshot> snapshots = await Task.Run(() =>
-                serverEntries.Select(s => BuildServerSnapshot(s, running.Contains(s.Name.Value))).ToList())
-                .ConfigureAwait(true);
+            var snapshots = new ServerRowSnapshot[serverEntries.Count];
+            await Parallel.ForEachAsync(
+                Enumerable.Range(0, serverEntries.Count),
+                new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentServerSnapshots, CancellationToken = token },
+                async (index, cancellationToken) =>
+                {
+                    ServerConfig server = serverEntries[index];
+                    snapshots[index] = await BuildServerSnapshotAsync(
+                        server,
+                        running.Contains(server.Name.Value),
+                        cancellationToken).ConfigureAwait(false);
+                }).ConfigureAwait(true);
+            token.ThrowIfCancellationRequested();
 
+            string? selectName = preferredSelection ?? SelectedServer?.Name;
             ReconcileRows(snapshots);
 
-            if (!string.IsNullOrEmpty(prevSelectedName))
+            var target = (selectName is null ? null : FindServer(selectName)) ?? Servers.FirstOrDefault();
+            if (ReferenceEquals(SelectedServer, target))
             {
-                SelectedServer = FindServer(prevSelectedName) ?? Servers.FirstOrDefault();
+                // 同一物件不會觸發變更通知，手動同步詳細資訊
+                UpdateSelectedServerDetails(target);
             }
-            else if (SelectedServer is null || FindServer(SelectedServer.Name) is null)
+            else
             {
-                SelectedServer = Servers.FirstOrDefault();
+                SelectedServer = target;
             }
 
-            // 確保選取項目之詳細資訊與記憶體顯示即時同步
-            UpdateSelectedServerDetails(SelectedServer);
             TriggerBackgroundSizeBackfill();
-
-            Logger.Information("成功重新整理伺服器清單，共 {Count} 個伺服器，路徑: {Path}", Servers.Count, DetectPath);
+            Logger.Information("成功重新整理伺服器清單，共 {Count} 個伺服器，路徑：{Path}", Servers.Count, DetectPath);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            Logger.Information("伺服器清單重新整理已被較新的要求取代");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -267,27 +306,11 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
         }
         finally
         {
-            IsBusy = false;
-            BusyStatusText = string.Empty;
-        }
-    }
-
-    /// <summary>重新整理伺服器清單並選取指定名稱之伺服器</summary>
-    public async Task RefreshAndSelectServerAsync(string serverName)
-    {
-        try
-        {
-            await RefreshServers();
-            if (FindServer(serverName) is { } target)
+            if (!token.IsCancellationRequested)
             {
-                SelectedServer = target;
+                IsBusy = false;
+                BusyStatusText = string.Empty;
             }
-
-            UpdateSelectedServerDetails(SelectedServer);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning(ex, "重新整理並選取伺服器「{Name}」失敗", serverName);
         }
     }
 
@@ -301,26 +324,37 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>更新各伺服器的執行與檔案狀態，不重新計算目錄大小</summary>
-    public async Task UpdateServerStatusInPlaceAsync()
+    /// <summary>更新伺服器的執行與檔案狀態（<paramref name="serverName"/> 為 null 時更新全部），不重新計算目錄大小</summary>
+    public async Task UpdateServerStatusInPlaceAsync(string? serverName = null)
     {
+        long probeSequence = Interlocked.Increment(ref _statusProbeSequence);
         try
         {
             var running = new HashSet<string>(_runtimeHost.GetRunningServerNames(), StringComparer.OrdinalIgnoreCase);
-            var targets = Servers.Select(s => (Row: s, s.Path, s.Loader, s.Name)).ToList();
+            var targets = Servers
+                .Where(s => serverName is null || string.Equals(s.Name, serverName, StringComparison.OrdinalIgnoreCase))
+                .Select(s => (Row: s, s.Path, s.Loader, s.Name))
+                .ToList();
 
-            var probes = await Task.Run(() => targets
-                .Select(t => ProbeServerStatus(
+            var probes = await Task.WhenAll(targets
+                .Select(t => ProbeServerStatusAsync(
                     t.Path,
                     LoaderKinds.ParseOrDefault(t.Loader),
                     running.Contains(t.Name),
-                    _stopCoordinator.IsStopping(t.Name)))
-                .ToList()).ConfigureAwait(true);
+                    _stopCoordinator.IsStopping(t.Name))));
 
             for (int i = 0; i < targets.Count; i++)
             {
                 ServerRowItem row = targets[i].Row;
+                if (probeSequence < row.StatusProbeSequence)
+                {
+                    continue;
+                }
+
+                row.StatusProbeSequence = probeSequence;
                 row.Status = probes[i].Status;
+                row.IsRunning = probes[i].IsRunning;
+                row.IsStopping = probes[i].IsStopping;
                 row.HasMissingFiles = probes[i].HasMissingFiles;
                 if (probes[i].LastModified is { } lastModified)
                 {
@@ -340,10 +374,79 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>於 UI 執行緒排入伺服器狀態更新（不阻塞呼叫端）</summary>
-    public void RequestStatusRefresh() => _ui.PostToUi(() => { _ = RunSafeAsync(UpdateServerStatusInPlaceAsync, "更新伺服器就緒狀態", Logger); });
+    /// <summary>若有選取伺服器則執行指定非同步動作，並自動攔截例外通知使用者</summary>
+    public async Task RunForSelectedServerAsync(
+        Func<ServerRowItem, Task> action,
+        string? failureTitle = null,
+        ComponentLogger? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        if (SelectedServer is not { } selected)
+        {
+            return;
+        }
 
-    private void OnServerStateChanged(string serverName) => RequestStatusRefresh();
+        try
+        {
+            await action(selected);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger?.Error(ex, failureTitle ?? "執行伺服器操作失敗");
+            _ui.Notify($"{(failureTitle is null ? "操作失敗" : failureTitle)}：{ex.Message}", NotificationType.Error);
+        }
+    }
+
+    /// <summary>更新已選取伺服器的設定檔，更新成功後自動重新整理並選取</summary>
+    public async Task<bool> UpdateSelectedServerConfigAsync(
+        Func<ServerConfig, ServerConfig> mutator,
+        string? successMessage = null,
+        string failureTitle = "更新伺服器設定失敗",
+        ComponentLogger? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(mutator);
+        if (SelectedServer is not { } selected)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (await _ui.GetServerOrWarnAsync(_serverManager, selected.Name) is not { } config)
+            {
+                return false;
+            }
+
+            var updated = mutator(config);
+            var result = await _serverManager.UpdateServerAsync(updated);
+            if (result.Success)
+            {
+                if (!string.IsNullOrWhiteSpace(successMessage))
+                {
+                    _ui.Notify(successMessage, NotificationType.Success);
+                }
+
+                await RefreshAndSelectServerAsync(updated.Name.Value);
+                return true;
+            }
+
+            logger?.Warning("{Title}：{Message}", failureTitle, result.Message);
+            _ui.Notify($"{failureTitle}：{result.Message}", NotificationType.Error);
+            return false;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger?.Error(ex, failureTitle);
+            _ui.Notify($"{failureTitle}：{ex.Message}", NotificationType.Error);
+            return false;
+        }
+    }
+
+    /// <summary>於 UI 執行緒排入伺服器狀態更新（不阻塞呼叫端）；指定名稱時僅更新該列</summary>
+    public void RequestStatusRefresh(string? serverName = null) =>
+        _ui.PostToUi(() => { _ = RunSafeAsync(() => UpdateServerStatusInPlaceAsync(serverName), "更新伺服器就緒狀態", Logger); });
+
+    private void OnServerStateChanged(string serverName) => RequestStatusRefresh(serverName);
 
     private ServerRowItem? FindServer(string name) =>
         Servers.FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
@@ -380,25 +483,6 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private static void ApplySnapshot(ServerRowItem row, ServerRowSnapshot snapshot, string? baseDirectory)
-    {
-        ServerConfig s = snapshot.Config;
-        row.Version = s.MinecraftVersion.Value;
-        row.Loader = s.LoaderType.ToString();
-        row.Status = snapshot.Status;
-        row.BackupStatus = snapshot.BackupStatus;
-        row.LastModified = snapshot.LastModified;
-        row.RawLastModifiedTicks = snapshot.RawLastModifiedTicks;
-        row.Path = s.Path;
-        row.RelativePath = !string.IsNullOrWhiteSpace(baseDirectory) && !string.IsNullOrWhiteSpace(s.Path)
-            ? Path.GetRelativePath(baseDirectory, s.Path)
-            : s.Path;
-        row.MemoryMaxMb = s.MemoryMaxMb;
-        row.MemoryMinMb = s.MemoryMinMb;
-        row.BackupPath = s.BackupPath;
-        row.HasMissingFiles = snapshot.HasMissingFiles;
-    }
-
     private void TriggerBackgroundSizeBackfill()
     {
         var token = _sizeCalculation.Next();
@@ -415,7 +499,7 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
                     try
                     {
                         long bytes = await _directorySizeService.CalculateServerSizeAsync(target.Path, ct).ConfigureAwait(false);
-                        string formatted = _directorySizeService.FormatServerSize(bytes);
+                        string formatted = bytes <= 0 ? "-" : UnitFormatter.FormatBytes(bytes);
 
                         _ui.PostToUi(() =>
                         {
@@ -424,17 +508,14 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
                                 return;
                             }
 
+                            // 大小只顯示於清單列，不需重算選取詳情
                             target.Row.RawSizeBytes = bytes;
                             target.Row.Size = formatted;
-                            if (ReferenceEquals(SelectedServer, target.Row))
-                            {
-                                UpdateSelectedServerDetails(SelectedServer);
-                            }
                         });
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
-                        Logger.Warning(ex, "非同步計算伺服器目錄大小失敗 ({Path})", target.Path);
+                        Logger.Warning(ex, "非同步計算伺服器目錄大小失敗（{Path}）", target.Path);
                     }
                 }).ConfigureAwait(false);
             }
@@ -444,91 +525,4 @@ public sealed partial class ServerListViewModel : ViewModelBase, IDisposable
             }
         }, token), "伺服器目錄大小背景計算", Logger);
     }
-
-    private sealed record ServerRowSnapshot(
-        ServerConfig Config,
-        string BackupStatus,
-        string Status,
-        string LastModified,
-        long RawLastModifiedTicks,
-        bool HasMissingFiles);
-
-    private sealed record ServerStatusProbe(string Status, bool HasMissingFiles, DateTime? LastModified);
-
-    private ServerRowSnapshot BuildServerSnapshot(ServerConfig s, bool isThisServerRunning)
-    {
-        ServerStatusProbe probe = ProbeServerStatus(s.Path, s.LoaderType, isThisServerRunning, _stopCoordinator.IsStopping(s.Name.Value));
-        return new ServerRowSnapshot(
-            Config: s,
-            BackupStatus: FormatBackupStatus(_backupService.GetBackupSummary(s.Name.Value, s.BackupPath)),
-            Status: probe.Status,
-            LastModified: probe.LastModified?.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture) ?? "-",
-            RawLastModifiedTicks: probe.LastModified?.Ticks ?? -1,
-            HasMissingFiles: probe.HasMissingFiles);
-    }
-
-    private ServerStatusProbe ProbeServerStatus(string path, LoaderKind loader, bool isRunning, bool stopping = false)
-    {
-        if (isRunning)
-        {
-            return new ServerStatusProbe(stopping ? StoppingStatusText : "執行中", false, GetLastModifiedTime(path));
-        }
-
-        var result = _integrityService.CheckImportantFiles(path, loader);
-        string status = result.HasMissing ? $"缺少重要檔案：{string.Join("、", result.MissingFiles)}" : "已停止";
-        return new ServerStatusProbe(status, result.HasMissing, GetLastModifiedTime(path));
-    }
-
-    private DateTime? GetLastModifiedTime(string path)
-    {
-        try
-        {
-            return _fileSystem.GetDirectoryLastWriteTime(path);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning(ex, "取得目錄最後修改時間失敗: {Path}", path);
-            return null;
-        }
-    }
-
-    /// <summary>將備份摘要格式化為清單顯示文字</summary>
-    public static string FormatBackupStatus(ServerBackupSummary summary)
-    {
-        ArgumentNullException.ThrowIfNull(summary);
-        return summary.Status switch
-        {
-            ServerBackupSummaryStatus.NotConfigured => "未設定外部備份",
-            ServerBackupSummaryStatus.DirectoryMissing => "備份資料夾不存在",
-            ServerBackupSummaryStatus.NoBackups => "尚無備份",
-            ServerBackupSummaryStatus.HasBackups when summary.LatestWriteTime is { } latest =>
-                $"{summary.Count} 個備份（{FormatRelativeTime(latest)}）",
-            ServerBackupSummaryStatus.HasBackups => $"{summary.Count} 個備份",
-            _ => "讀取備份失敗",
-        };
-    }
-
-    /// <summary>將時間格式化為相對時間描述</summary>
-    public static string FormatRelativeTime(DateTime timestamp)
-    {
-        var span = DateTime.Now - timestamp;
-        if (span < TimeSpan.Zero)
-        {
-            span = TimeSpan.Zero;
-        }
-
-        return span.TotalMinutes switch
-        {
-            < 1 => "剛剛",
-            < 60 => $"{(int)span.TotalMinutes} 分鐘前",
-            _ => span.TotalHours < 24
-                ? $"{(int)span.TotalHours} 小時前"
-                : $"{(int)span.TotalDays} 天前"
-        };
-    }
-
-    private static string FormatMemoryDisplay(int? minMb, int maxMb) =>
-        minMb is { } min && min > 0
-            ? $"{min} MB ~ {maxMb} MB"
-            : $"{maxMb} MB";
 }

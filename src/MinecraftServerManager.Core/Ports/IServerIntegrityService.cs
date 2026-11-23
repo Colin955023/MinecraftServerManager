@@ -9,5 +9,5 @@ public sealed record ServerIntegrityResult(bool HasMissing, IReadOnlyList<string
 public interface IServerIntegrityService
 {
     /// <summary>伺服器核心關鍵啟動檔案是否存在</summary>
-    public ServerIntegrityResult CheckImportantFiles(string serverPath, LoaderKind loader);
+    public Task<ServerIntegrityResult> CheckImportantFilesAsync(string serverPath, LoaderKind loader, CancellationToken cancellationToken = default);
 }

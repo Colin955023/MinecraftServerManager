@@ -4,6 +4,7 @@
     "ms-dotnettools.csharp",
     "redhat.vscode-xml",
     "redhat.vscode-yaml",
-    "ms-vscode.powershell"
+    "ms-vscode.powershell",
+    "editorconfig.editorconfig"
   ]
 }

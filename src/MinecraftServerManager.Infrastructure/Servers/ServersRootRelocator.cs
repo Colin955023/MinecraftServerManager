@@ -1,9 +1,9 @@
 using MinecraftServerManager.Core.Servers;
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Settings;
 using MinecraftServerManager.Infrastructure.Utilities;
-using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
@@ -59,7 +59,7 @@ public static class ServersRootRelocator
 
         try
         {
-            var entries = SafeFileSystem.ListBoundedDirectory(normalized, maxEntries: 100);
+            var entries = SafeFileSystem.ListBoundedDirectory(normalized);
             if (entries.Count == 0)
             {
                 return false;
@@ -91,8 +91,7 @@ public static class ServersRootRelocator
             return true;
         }
 
-        var entries = SafeFileSystem.ListBoundedDirectory(normalized, maxEntries: 10);
-        return entries.Count == 0;
+        return SafeFileSystem.IsDirectoryEmpty(normalized);
     }
 
     /// <summary>遷移全部內容並更新 servers.json；失敗時復原。回傳已複製到新位置但原位置刪不掉的項目路徑</summary>
@@ -113,20 +112,23 @@ public static class ServersRootRelocator
             throw new InvalidOperationException("目標資料夾不是空的，無法遷移資料。");
         }
 
-        SafeFileSystem.ResolveStableDirectory(dstRoot, create: true);
+        bool createdTargetRoot = !SafeFileSystem.DirectoryExists(dstRoot);
         if (!SafeFileSystem.DirectoryExists(srcRoot))
         {
+            SafeFileSystem.ResolveStableDirectory(dstRoot, create: true);
             return [];
         }
 
         var entries = SafeFileSystem.ListBoundedDirectory(srcRoot);
+        EnsureCrossVolumeFreeSpace(srcRoot, dstRoot);
+        SafeFileSystem.ResolveStableDirectory(dstRoot, create: true);
         if (entries.Count == 0)
         {
             return [];
         }
 
         var movedItems = new List<(string DestPath, string SourcePath, bool IsDirectory)>(entries.Count);
-        var leftovers = new List<string>();
+        var leftovers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
@@ -137,8 +139,8 @@ public static class ServersRootRelocator
                 string name = Path.GetFileName(entry.FullPath);
                 string destPath = Path.Combine(dstRoot, name);
 
-                int pct = (int)(i * 90.0 / entries.Count);
-                progress?.Report((Math.Clamp(pct, 5, 90), $"正在搬移：{name}..."));
+                int pct = ProgressMapping.Map(i, entries.Count, 5, 90);
+                progress?.Report((pct, $"正在搬移：{name}..."));
 
                 if (!MoveEntryWithCrossVolumeSupport(entry.FullPath, destPath, entry.IsDirectory, cancellationToken))
                 {
@@ -154,7 +156,7 @@ public static class ServersRootRelocator
 
             Logger.Information("已將伺服器根目錄全部內容從 {OldRoot} 遷移至 {NewRoot}（共 {Count} 項，原位置殘留 {Leftover} 項）", srcRoot, dstRoot, movedItems.Count, leftovers.Count);
             TryDeleteEmptySourceRoot(srcRoot);
-            return leftovers;
+            return [.. leftovers];
         }
         catch (Exception ex)
         {
@@ -183,7 +185,39 @@ public static class ServersRootRelocator
                 }
             }
 
+            if (createdTargetRoot)
+            {
+                TryDeleteEmptyDirectory(dstRoot, "遷移失敗後新建的目標資料夾");
+            }
+
             throw;
+        }
+    }
+
+    /// <summary>跨磁碟遷移前確認目標磁碟可容納來源全部內容；無法估算時記錄警告並交由實際複製判定</summary>
+    private static void EnsureCrossVolumeFreeSpace(string srcRoot, string dstRoot)
+    {
+        if (string.Equals(Path.GetPathRoot(srcRoot), Path.GetPathRoot(dstRoot), StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        long requiredBytes;
+        try
+        {
+            requiredBytes = SafeFileSystem.EnumerateBoundedTree(srcRoot, rejectReparse: false)
+                .Where(static e => !e.IsDirectory)
+                .Sum(static e => e.Length);
+        }
+        catch (SafeFileSystemException ex) when (ex.IsLimitExceeded)
+        {
+            Logger.Warning(ex, "原伺服器根目錄超出估算上限，略過遷移前空間檢查: {Path}", srcRoot);
+            return;
+        }
+
+        if (ServerSetupHelpers.CheckFreeSpace(dstRoot, requiredBytes) is { } error)
+        {
+            throw new IOException(error);
         }
     }
 
@@ -214,19 +248,29 @@ public static class ServersRootRelocator
     /// <summary>原根目錄已空則刪除</summary>
     private static void TryDeleteEmptySourceRoot(string srcRoot)
     {
+        if (TryDeleteEmptyDirectory(srcRoot, "已清空的原伺服器根目錄"))
+        {
+            Logger.Information("原伺服器根目錄已清空並刪除: {OldRoot}", srcRoot);
+        }
+    }
+
+    /// <summary>目錄存在且為空則刪除；失敗記錄警告</summary>
+    private static bool TryDeleteEmptyDirectory(string directory, string purpose)
+    {
         try
         {
-            if (!SafeFileSystem.DirectoryExists(srcRoot) || SafeFileSystem.ListBoundedDirectory(srcRoot, maxEntries: 1).Count > 0)
+            if (!SafeFileSystem.DirectoryExists(directory) || !SafeFileSystem.IsDirectoryEmpty(directory))
             {
-                return;
+                return false;
             }
 
-            SafeFileSystem.DeleteDirectory(srcRoot);
-            Logger.Information("原伺服器根目錄已清空並刪除: {OldRoot}", srcRoot);
+            SafeFileSystem.DeleteDirectory(directory);
+            return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning(ex, "刪除已清空的原伺服器根目錄失敗，予以保留: {Path}", srcRoot);
+            Logger.Warning(ex, "刪除空資料夾失敗，予以保留（{Purpose}）: {Path}", purpose, directory);
+            return false;
         }
     }
 
@@ -250,7 +294,7 @@ public static class ServersRootRelocator
                 SafeFileSystem.MovePath(sourcePath, destinationPath, overwrite: false);
                 return true;
             }
-            catch (IOException ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 Logger.Warning(ex, "同磁碟目錄直接移動失敗，改用複製後刪除 ({SourcePath})", sourcePath);
             }
@@ -299,8 +343,10 @@ public static class ServersRootRelocator
 
         try
         {
-            var loaded = JsonCodec.ReadFile<Dictionary<string, ServerConfigPayload>>(registryPath);
-            if (loaded is null || loaded.Count == 0)
+            // 無法解析時擲錯觸發回滾，避免新根目錄留下仍指向舊位置的清單
+            var loaded = JsonCodec.ReadFile<Dictionary<string, ServerConfigPayload>>(registryPath)
+                ?? throw new InvalidDataException($"無法解析伺服器清單檔：{registryPath}");
+            if (loaded.Count == 0)
             {
                 return;
             }

@@ -182,4 +182,62 @@ public class DialogStackCoordinatorTests
         Assert.Equal(2, outerShowCount);
         await AssertStackEmptyAsync(coordinator);
     }
+
+    [Fact]
+    public async Task ShowDialogAsync_MiddleDialogExitsWhileCovered_OuterStillResumes()
+    {
+        var coordinator = new DialogStackCoordinator();
+        var outerShown = new TaskCompletionSource();
+        var outerHidden = new TaskCompletionSource();
+        var outerFinish = new TaskCompletionSource();
+        var middleShown = new TaskCompletionSource();
+        var middleHidden = new TaskCompletionSource();
+        var topFinish = new TaskCompletionSource();
+        int outerShowCount = 0;
+
+        var outerTask = coordinator.ShowDialogAsync(
+            async () =>
+            {
+                if (++outerShowCount == 1)
+                {
+                    outerShown.TrySetResult();
+                    await outerHidden.Task;
+                    return "hidden";
+                }
+
+                await outerFinish.Task;
+                return "outer";
+            },
+            () => outerHidden.TrySetResult());
+        await outerShown.Task;
+
+        // 中間層被上層覆蓋而隱藏時直接失敗結束（例如對話框已被釋放）
+        var middleTask = coordinator.ShowDialogAsync<string>(
+            async () =>
+            {
+                middleShown.TrySetResult();
+                await middleHidden.Task;
+                throw new InvalidOperationException("middle failure");
+            },
+            () => middleHidden.TrySetResult());
+        await middleShown.Task;
+
+        var topTask = coordinator.ShowDialogAsync(
+            async () =>
+            {
+                await topFinish.Task;
+                return "top";
+            },
+            () => { });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => middleTask);
+        topFinish.TrySetResult();
+        Assert.Equal("top", await topTask);
+
+        // 中間層節點已移除，上層結束後應喚醒最外層而非已結束的中間層
+        outerFinish.TrySetResult();
+        Assert.Equal("outer", await outerTask.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+        Assert.Equal(2, outerShowCount);
+        await AssertStackEmptyAsync(coordinator);
+    }
 }

@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.IO.Compression;
 using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 
@@ -165,17 +164,16 @@ public sealed class InputFuzzingAndBoundarySecurityTests
     public void SafeFileSystem_PathContainment_RejectsAllTraversalPayloads()
     {
         using var baseDirTemp = new TempDirectory("mc_det_fuzz_base_");
-        string baseDir = Path.Combine(baseDirTemp.FullName, "root");
-        Directory.CreateDirectory(baseDir);
+        string baseDir = baseDirTemp.CreateSubdirectory("root");
 
         foreach (string payload in MaliciousPathTraversalPayloads)
         {
             string targetPath = Path.Combine(baseDir, payload);
             bool isWithin = SafeFileSystem.IsPathWithin(baseDir, targetPath);
 
-            string normalizedTarget = Path.GetFullPath(targetPath);
-            string normalizedBase = Path.GetFullPath(baseDir);
-            bool actuallyWithin = normalizedTarget.StartsWith(normalizedBase, StringComparison.OrdinalIgnoreCase);
+            // 以相對路徑判定實際位置，避免 root 與 root2 之類的兄弟目錄前綴誤判
+            string relative = Path.GetRelativePath(baseDir, Path.GetFullPath(targetPath));
+            bool actuallyWithin = !Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
 
             if (!actuallyWithin)
             {
@@ -184,12 +182,23 @@ public sealed class InputFuzzingAndBoundarySecurityTests
         }
     }
 
+    [Theory]
+    [InlineData("root2")]
+    [InlineData("root.bak")]
+    [InlineData("root ")]
+    public void SafeFileSystem_PathContainment_RejectsSiblingWithSharedPrefix(string sibling)
+    {
+        using var temp = new TempDirectory("mc_det_sibling_");
+        string baseDir = Path.Combine(temp.FullName, "root");
+
+        Assert.False(SafeFileSystem.IsPathWithin(baseDir, Path.Combine(temp.FullName, sibling, "file.txt")));
+    }
+
     [Fact]
     public void SafeZipArchive_WithZipSlipEntries_RejectsExtractionBeforeWriting()
     {
         using var tempDirTemp = new TempDirectory("mc_det_zip_");
-        string tempDir = Path.Combine(tempDirTemp.FullName, "root");
-        Directory.CreateDirectory(tempDir);
+        string tempDir = tempDirTemp.CreateSubdirectory("root");
 
         for (int i = 0; i < ZipSlipPayloads.Length; i++)
         {
@@ -198,28 +207,26 @@ public sealed class InputFuzzingAndBoundarySecurityTests
             string extractDest = Path.Combine(tempDir, $"dest_{i}");
             Directory.CreateDirectory(extractDest);
 
-            using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
-            {
-                var entry = archive.CreateEntry(traversalName);
-                using var writer = new StreamWriter(entry.Open());
-                writer.Write("pwned");
-            }
+            TestZip.Create(zipPath, (traversalName, "pwned"));
+            HashSet<string> before = SnapshotTree(tempDirTemp.FullName);
 
             // 驗證明確擲出 SafeArchiveException
-            Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(zipPath, extractDest));
+            Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(zipPath, extractDest, cancellationToken: TestContext.Current.CancellationToken));
 
-            // 驗證預定目錄外絕無任何外洩寫入檔案
-            string outsideFile = Path.Combine(tempDir, "secret.txt");
-            Assert.False(File.Exists(outsideFile), $"檔案不應被寫入目標目錄之外：{outsideFile}");
+            // 驗證擷取前後整個暫存樹（含目標目錄之外）未新增任何項目
+            Assert.Empty(SnapshotTree(tempDirTemp.FullName).Except(before));
         }
     }
+
+    /// <summary>列舉目錄樹下所有項目的完整路徑</summary>
+    private static HashSet<string> SnapshotTree(string root) =>
+        [.. Directory.EnumerateFileSystemEntries(root, "*", SearchOption.AllDirectories)];
 
     [Fact]
     public void SafeZipArchive_CorruptedAndTruncatedArchive_RejectsWithSafeArchiveException()
     {
         using var tempDirTemp = new TempDirectory("mc_corrupt_det_zip_");
-        string tempDir = Path.Combine(tempDirTemp.FullName, "root");
-        Directory.CreateDirectory(tempDir);
+        string tempDir = tempDirTemp.CreateSubdirectory("root");
 
         var deterministicRng = new Random(1337);
 
@@ -242,7 +249,7 @@ public sealed class InputFuzzingAndBoundarySecurityTests
             File.WriteAllBytes(corruptPath, garbage);
 
             // 明確要求擲出 SafeArchiveException，拒絕使用過於寬鬆的 ThrowsAny
-            Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(corruptPath, destDir));
+            Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(corruptPath, destDir, cancellationToken: TestContext.Current.CancellationToken));
         }
     }
 
@@ -250,30 +257,21 @@ public sealed class InputFuzzingAndBoundarySecurityTests
     public void SafeZipArchive_DuplicatePathCollision_RejectsExtraction()
     {
         using var tempDirTemp = new TempDirectory("mc_dup_zip_");
-        string tempDir = Path.Combine(tempDirTemp.FullName, "root");
-        Directory.CreateDirectory(tempDir);
+        string tempDir = tempDirTemp.CreateSubdirectory("root");
 
         string zipPath = Path.Combine(tempDir, "collision.zip");
         string extractDest = Path.Combine(tempDir, "extract");
 
-        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
-        {
-            var entry1 = archive.CreateEntry("data.txt");
-            using (var writer = new StreamWriter(entry1.Open())) { writer.Write("first"); }
+        TestZip.Create(zipPath, ("data.txt", "first"), ("data.txt", "second"));
 
-            var entry2 = archive.CreateEntry("data.txt");
-            using (var writer = new StreamWriter(entry2.Open())) { writer.Write("second"); }
-        }
-
-        Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(zipPath, extractDest));
+        Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(zipPath, extractDest, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public void SafeZipArchive_ExtractionFailure_PreservesExistingDestinationFiles()
     {
         using var tempDirTemp = new TempDirectory("mc_safe_extract_");
-        string tempDir = Path.Combine(tempDirTemp.FullName, "root");
-        Directory.CreateDirectory(tempDir);
+        string tempDir = tempDirTemp.CreateSubdirectory("root");
 
         string extractDest = Path.Combine(tempDir, "target");
         Directory.CreateDirectory(extractDest);
@@ -282,14 +280,9 @@ public sealed class InputFuzzingAndBoundarySecurityTests
 
         // 建立一個惡意 zip（嘗試 Zip Slip）
         string maliciousZip = Path.Combine(tempDir, "malicious.zip");
-        using (var archive = ZipFile.Open(maliciousZip, ZipArchiveMode.Create))
-        {
-            var entry = archive.CreateEntry("../escape.txt");
-            using var writer = new StreamWriter(entry.Open());
-            writer.Write("bad");
-        }
+        TestZip.Create(maliciousZip, ("../escape.txt", "bad"));
 
-        Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(maliciousZip, extractDest));
+        Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(maliciousZip, extractDest, cancellationToken: TestContext.Current.CancellationToken));
 
         // 驗證原始既有檔案未遭損毀或移除
         Assert.True(File.Exists(existingFile), "解壓縮失敗不應影響目標目錄既有檔案");

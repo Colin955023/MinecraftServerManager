@@ -2,12 +2,14 @@ using MinecraftServerManager.Core.Servers;
 
 namespace MinecraftServerManager.Core.Ports;
 
-/// <summary>單一伺服器的行程與生命週期控制</summary>
+/// <summary>單一伺服器的行程與生命週期控制；事件可能於背景執行緒引發，訂閱端須自行切換至 UI 執行緒</summary>
 public interface IServerRuntime : IAsyncDisposable
 {
     public int Pid { get; }
     public bool IsRunning { get; }
     public bool IsReady { get; }
+    /// <summary>目前行程啟動時的 <see cref="System.Diagnostics.Stopwatch.GetTimestamp"/>；未執行為 null</summary>
+    public long? StartedTimestamp { get; }
     /// <summary>最近一次行程結束代碼；尚未結束過或重新啟動後為 null</summary>
     public int? ExitCode { get; }
 
@@ -15,7 +17,8 @@ public interface IServerRuntime : IAsyncDisposable
     public long? GetWorkingSet64();
 
     public event Action<string>? OutputLineReceived;
-    public event Action? ServerStarted;
+    /// <summary>行程啟動後觸發，參數為 PID</summary>
+    public event Action<int>? ServerStarted;
     public event Action<int>? ServerExited;
     public event Action? ServerReady;
 

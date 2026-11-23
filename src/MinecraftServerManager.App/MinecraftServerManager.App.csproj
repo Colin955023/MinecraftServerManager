@@ -31,27 +31,34 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" />
-    <PackageReference Include="Microsoft.WindowsAppSDK.DWrite" />
     <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" />
     <PackageReference Include="Microsoft.Windows.CsWinRT" />
     <PackageReference Include="CommunityToolkit.Mvvm" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="MinecraftServerManager.UnitTests" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\MinecraftServerManager.Core\MinecraftServerManager.Core.csproj" />
     <ProjectReference
       Include="..\MinecraftServerManager.Infrastructure\MinecraftServerManager.Infrastructure.csproj" />
   </ItemGroup>
-  <!-- XAML 編譯器重複加入 .g.cs，去重以免 MSBuildWorkspace 警告 -->
+  <!-- XAML 編譯器重複加入 .g.cs，僅對其去重以免 MSBuildWorkspace 警告並保留其他項目中繼資料 -->
   <Target Name="DeduplicateXamlGeneratedCompileItems"
     BeforeTargets="CoreCompile"
     DependsOnTargets="DesignTimeMarkupCompilation;IncludeGeneratedXamlCompileItemsForDesignTime">
-    <RemoveDuplicates Inputs="@(Compile->'%(FullPath)')">
-      <Output TaskParameter="Filtered" ItemName="_FilteredCompile" />
+    <ItemGroup>
+      <_XamlGeneratedCompile Include="@(Compile)"
+        Condition="$([System.String]::Copy('%(Identity)').EndsWith('.g.cs', StringComparison.OrdinalIgnoreCase)) or $([System.String]::Copy('%(Identity)').EndsWith('.g.i.cs', StringComparison.OrdinalIgnoreCase))" />
+    </ItemGroup>
+    <RemoveDuplicates Inputs="@(_XamlGeneratedCompile->'%(FullPath)')">
+      <Output TaskParameter="Filtered" ItemName="_UniqueXamlGeneratedCompile" />
     </RemoveDuplicates>
     <ItemGroup>
-      <Compile Remove="@(Compile)" />
-      <Compile Include="@(_FilteredCompile)" />
-      <_FilteredCompile Remove="@(_FilteredCompile)" />
+      <Compile Remove="@(_XamlGeneratedCompile)" />
+      <Compile Include="@(_UniqueXamlGeneratedCompile)" />
+      <_XamlGeneratedCompile Remove="@(_XamlGeneratedCompile)" />
+      <_UniqueXamlGeneratedCompile Remove="@(_UniqueXamlGeneratedCompile)" />
     </ItemGroup>
   </Target>
   <!-- 單檔打包前移除實測從未載入的檔案 -->
@@ -70,7 +77,6 @@
         ;app.manifest
         ;Microsoft.UI.Xaml.Phone.dll.mui
         ;Microsoft.UI.Designer.dll
-        ;DWriteCore.dll
         ;DwmSceneI.dll
         ;Microsoft.Graphics.Display.dll
         ;
@@ -80,13 +86,13 @@
     </PropertyGroup>
     <ItemGroup>
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
-        Condition="$(_UnusedPayload.Contains(';%(Filename)%(Extension);'))" />
+        Condition="$(_UnusedPayload.Contains(';%(Filename)%(Extension);', StringComparison.OrdinalIgnoreCase))" />
       <!-- 型別中繼資料已編入組件、XAML 已編為 .pri 內的 XBF -->
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
-        Condition="'%(Extension)' == '.winmd' or '%(Extension)' == '.xaml'" />
+        Condition="$([System.String]::Copy('%(Extension)').Equals('.winmd', StringComparison.OrdinalIgnoreCase)) or $([System.String]::Copy('%(Extension)').Equals('.xaml', StringComparison.OrdinalIgnoreCase))" />
       <!-- 只留 zh-TW 語系資源 -->
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
-        Condition="'%(Extension)' == '.mui' and !$([System.String]::Copy('%(RelativePath)').StartsWith('zh-TW'))" />
+        Condition="$([System.String]::Copy('%(Extension)').Equals('.mui', StringComparison.OrdinalIgnoreCase)) and !$([System.String]::Copy('%(RelativePath)').Replace('/', '\').StartsWith('zh-TW\', StringComparison.OrdinalIgnoreCase))" />
     </ItemGroup>
   </Target>
 </Project>

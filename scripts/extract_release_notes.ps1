@@ -30,19 +30,22 @@ if (-not (Test-Path -LiteralPath $resolvedChangelog))
 }
 
 $changelog = Get-Content -LiteralPath $resolvedChangelog -Raw -Encoding UTF8
-$escaped = [regex]::Escape($version)
-# 版本號後須為非版本字元，避免 2.2.1 誤配 2.2.10 或 2.3.0 誤配 2.3.0-beta
-$pattern = "(?ms)^##\s+\[?v?$escaped(?![\w.\-])\]?[^\r\n]*\r?\n(.*?)(?=^##\s+|\Z)"
-if ($changelog -notmatch $pattern)
+$notes = Get-ChangelogSection -Changelog $changelog -Version $version
+if ($null -eq $notes)
 {
-    throw "CHANGELOG.md 中找不到版本 $version 對應之章節"
+    throw "CHANGELOG.md 中找不到版本 $version 對應之章節或內容空白"
 }
 
-Set-Content -LiteralPath $resolvedOutput -Value $matches[1].Trim() -Encoding UTF8
+$lfNotes = ($notes.Trim() -replace "\r\n", "`n") + "`n"
+[System.IO.File]::WriteAllText($resolvedOutput, $lfNotes, $Utf8NoBom)
 Write-Host "成功提取發行說明至：$resolvedOutput"
 
 if ($env:GITHUB_OUTPUT)
 {
+    if ($version -match '[\r\n]')
+    {
+        throw "版本字串含換行字元，拒絕寫入 GITHUB_OUTPUT"
+    }
     "tag_name=$tag" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
     "version=$version" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 }

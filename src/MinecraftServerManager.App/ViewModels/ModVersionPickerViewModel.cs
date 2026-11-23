@@ -1,11 +1,11 @@
-using MinecraftServerManager.Infrastructure.Logging;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
-using MinecraftServerManager.Domain.Mods;
+using MinecraftServerManager.Domain.Servers;
+using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
 
@@ -34,27 +34,23 @@ public sealed class ModVersionDisplayItem
 }
 
 /// <summary>線上模組版本選擇對話方塊 ViewModel</summary>
-public sealed partial class ModVersionPickerViewModel : ViewModelBase
+public sealed partial class ModVersionPickerViewModel : DialogViewModelBase
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModVersionPickerViewModel));
     private readonly IModrinthClient _modrinthClient;
     private readonly string _projectId;
-    private readonly string? _loader;
+    private readonly LoaderKind? _loader;
     private readonly string? _minecraftVersion;
-
-    [ObservableProperty]
-    public partial ModVersionDisplayItem? SelectedVersion { get; set; }
-
-    [ObservableProperty]
-    public partial string StatusMessage { get; set; } = "正在讀取版本清單...";
 
     public ModVersionPickerViewModel(
         IModrinthClient modrinthClient,
         string projectId,
         string projectTitle,
-        string? loader = null,
+        LoaderKind? loader = null,
         string? minecraftVersion = null)
     {
+        ArgumentNullException.ThrowIfNull(modrinthClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
         _modrinthClient = modrinthClient;
         _projectId = projectId;
         _loader = loader;
@@ -66,6 +62,13 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
         _ = RunSafeAsync(LoadVersionsAsync, "載入模組版本清單", Logger);
     }
 
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(InstallCommand), nameof(QueueCommand))]
+    public partial ModVersionDisplayItem? SelectedVersion { get; set; }
+
+    [ObservableProperty]
+    public partial string StatusMessage { get; set; } = "正在讀取版本清單...";
+
     public string ProjectTitle { get; }
 
     public BulkObservableCollection<ModVersionDisplayItem> Versions { get; }
@@ -76,15 +79,20 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
     /// <summary>使用者是否選擇立即安裝（false 代表僅加入安裝清單）</summary>
     public bool InstallImmediately { get; private set; }
 
-    public event Action<bool>? RequestClose;
+    private bool CanCommit => SelectedVersion is { DownloadUrl.Length: > 0 };
 
     public async Task LoadVersionsAsync()
     {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        CancellationToken token = LifetimeToken;
         try
         {
             var list = await _modrinthClient
-                .GetProjectVersionsAsync(_projectId, loader: _loader, minecraftVersion: _minecraftVersion)
-                .ConfigureAwait(true);
+                .GetProjectVersionsAsync(_projectId, loader: _loader, minecraftVersion: _minecraftVersion, cancellationToken: token);
 
             var versionItems = list.Select(version =>
             {
@@ -96,15 +104,11 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
                     GameVersions = string.Join(", ", version.GameVersions),
                     Loaders = string.Join(", ", version.Loaders),
                     DatePublished = FormatPublishedDate(version.DatePublished),
-                    FileName = file?.Filename ?? "-",
+                    FileName = file?.FileName ?? "-",
                     DownloadUrl = file?.Url ?? string.Empty,
                     ExpectedHash = ModHelpers.ResolveHash(file, out string algorithm),
                     HashAlgorithm = algorithm,
-                    // 僅必要相依才需要補齊；選用、內嵌與不相容項目不可當成必要相依
-                    Dependencies = (string[])[.. version.Dependencies
-                        .Where(static d => d.DependencyType == ModDependencyType.Required)
-                        .Select(static d => d.ProjectId ?? string.Empty)
-                        .Where(static id => id.Length > 0)]
+                    Dependencies = ModBatchOperations.GetRequiredDependencyIds(version)
                 };
             });
 
@@ -120,14 +124,18 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
                 StatusMessage = "此模組在目前伺服器的 Minecraft 版本與載入器下無相容版本";
             }
         }
-        catch (Exception exception)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            Logger.Information("模組版本選擇視窗已關閉，取消讀取版本清單");
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
             Logger.Warning(exception, "讀取模組版本清單失敗");
             StatusMessage = $"讀取版本清單失敗：{exception.Message}";
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanCommit))]
     public void Install()
     {
         if (!TryCommit())
@@ -136,10 +144,10 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
         }
 
         InstallImmediately = true;
-        RequestClose?.Invoke(true);
+        Close(true);
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanCommit))]
     public void Queue()
     {
         if (!TryCommit())
@@ -148,11 +156,11 @@ public sealed partial class ModVersionPickerViewModel : ViewModelBase
         }
 
         InstallImmediately = false;
-        RequestClose?.Invoke(true);
+        Close(true);
     }
 
     [RelayCommand]
-    public void Cancel() => RequestClose?.Invoke(false);
+    public void Cancel() => Close(false);
 
     private bool TryCommit()
     {

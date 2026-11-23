@@ -13,14 +13,14 @@ public sealed class DomainModelTests
     [InlineData("servers.json")]
     [InlineData("servers_config.json")]
     [InlineData(".msm-delete-test")]
-    public void ServerNameRejectsWindowsReservedNames(string invalidName) =>
+    public void ServerNameParse_WindowsReservedName_Throws(string invalidName) =>
         Assert.Throws<ArgumentException>(() => ServerName.Parse(invalidName));
 
     [Theory]
     [InlineData("paper", LoaderKind.Paper)]
     [InlineData(" NeoForge ", LoaderKind.NeoForge)]
     [InlineData("VANILLA", LoaderKind.Vanilla)]
-    public void LoaderKindsParsesDefinedNames(string value, LoaderKind expected)
+    public void LoaderKindsTryParse_DefinedName_ReturnsKind(string value, LoaderKind expected)
     {
         Assert.True(LoaderKinds.TryParse(value, out var kind));
         Assert.Equal(expected, kind);
@@ -30,17 +30,39 @@ public sealed class DomainModelTests
     [InlineData("2")]
     [InlineData("-1")]
     [InlineData("spigot")]
+    [InlineData("Forge,Fabric")]
     [InlineData("")]
     [InlineData(null)]
-    public void LoaderKindsRejectsNumericAndUnknownValues(string? value)
+    public void LoaderKindsTryParse_NumericOrUnknown_ReturnsUnknown(string? value)
     {
         Assert.False(LoaderKinds.TryParse(value, out var kind));
         Assert.Equal(LoaderKind.Unknown, kind);
         Assert.Equal(LoaderKind.Vanilla, LoaderKinds.ParseOrDefault(value, LoaderKind.Vanilla));
     }
 
+    [Theory]
+    [InlineData(LoaderKind.Paper, "paper")]
+    [InlineData(LoaderKind.NeoForge, "neoforge")]
+    [InlineData(LoaderKind.Quilt, "quilt")]
+    public void LoaderKindsModrinthId_KnownKinds_RoundTrips(LoaderKind kind, string id)
+    {
+        Assert.Equal(id, LoaderKinds.ToModrinthId(kind));
+        Assert.True(LoaderKinds.TryParseModrinthId(id.ToUpperInvariant(), out var parsed));
+        Assert.Equal(kind, parsed);
+    }
+
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("datapack")]
+    [InlineData("")]
+    public void LoaderKindsTryParseModrinthId_NoMapping_ReturnsFalse(string id)
+    {
+        Assert.False(LoaderKinds.TryParseModrinthId(id, out var kind));
+        Assert.Equal(LoaderKind.Unknown, kind);
+    }
+
     [Fact]
-    public void OnlineModVersionSelectsPrimaryJarBeforeFallback()
+    public void OnlineModVersionPrimaryFile_MultipleFiles_PrefersPrimaryJar()
     {
         var version = new OnlineModVersion(
             "id",
@@ -52,11 +74,11 @@ public sealed class DomainModelTests
                 new ModFile("fallback.jar"),
             ]);
 
-        Assert.Equal("primary.jar", version.PrimaryFile?.Filename);
+        Assert.Equal("primary.jar", version.PrimaryFile?.FileName);
     }
 
     [Fact]
-    public void ServerConfigCopiesJvmArguments()
+    public void ServerConfig_SourceListMutated_KeepsCopiedJvmArgs()
     {
         var arguments = new List<string> { "-Xmx2G" };
         var config = new ServerConfig(
@@ -73,7 +95,7 @@ public sealed class DomainModelTests
     }
 
     [Fact]
-    public void ServerCreationPlanBuildsConfig()
+    public void ServerCreationPlanCreate_ValidInput_BuildsConfig()
     {
         var plan = ServerCreationPlan.Create(
             name: ServerName.Parse("測試計畫伺服器"),
@@ -95,7 +117,7 @@ public sealed class DomainModelTests
     [InlineData(2048, 2048, true)]
     [InlineData(4096, 2048, true)]
     [InlineData(1024, 2048, false)]
-    public void ServerCreationPlanValidatesMemoryInvariants(int maxMb, int minMb, bool shouldSucceed)
+    public void ServerCreationPlanCreate_InvalidMemory_Throws(int maxMb, int minMb, bool shouldSucceed)
     {
         void act() => _ = ServerCreationPlan.Create(
             ServerName.Parse("MemTest"),
@@ -115,15 +137,17 @@ public sealed class DomainModelTests
     }
 
     [Fact]
-    public void OnlineModCompatibilityReportDeterminesCompatibility()
+    public void OnlineModCompatibilityReport_Errors_DeterminesCompatibility()
     {
-        var compatibleReport = new OnlineModCompatibilityReport([], [], []);
+        var compatibleReport = new OnlineModCompatibilityReport([], [], [], []);
         Assert.Empty(compatibleReport.HardErrors);
         Assert.False(compatibleReport.HasEnvironmentErrors);
 
-        var incompatibleReport = new OnlineModCompatibilityReport(["遊戲版本不相容", "缺少必要相依"], ["fabric-api"], []);
+        var incompatibleReport = new OnlineModCompatibilityReport(["遊戲版本不相容", "缺少必要相依"], ["fabric-api"], [], ["遊戲版本不相容"]);
         Assert.NotEmpty(incompatibleReport.HardErrors);
         Assert.True(incompatibleReport.HasEnvironmentErrors);
+
+        var missingOnlyReport = new OnlineModCompatibilityReport(["缺少必要相依"], ["fabric-api"], [], []);
+        Assert.False(missingOnlyReport.HasEnvironmentErrors);
     }
 }
-

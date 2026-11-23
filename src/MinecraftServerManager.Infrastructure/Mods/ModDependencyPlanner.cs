@@ -2,11 +2,13 @@ using System.Collections.Frozen;
 using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
+/// <summary>模組相容性評估與必要相依遞迴解析</summary>
 public sealed class ModDependencyPlanner : IModDependencyPlanner
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModDependencyPlanner));
@@ -29,26 +31,29 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         ["8BmcYKbN"] = "geckolib"
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>外掛類型伺服器載入器集合（不支援一般 Forge/Fabric Mod）</summary>
-    private static readonly FrozenSet<string> PluginServerLoaders = new[]
+    private readonly IModrinthClient _modrinthClient;
+
+    public ModDependencyPlanner(IModrinthClient modrinthClient)
     {
-        "paper", "spigot", "purpur", "bukkit", "velocity", "bungeecord", "waterfall"
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+        ArgumentNullException.ThrowIfNull(modrinthClient);
+        _modrinthClient = modrinthClient;
+    }
 
     public OnlineModCompatibilityReport EvaluateCompatibility(
         OnlineModVersion targetVersion,
         string serverMinecraftVersion,
-        string serverLoader,
+        LoaderKind serverLoader,
         IReadOnlyList<LocalModInfo> installedMods,
         string? serverSide = null)
     {
         ArgumentNullException.ThrowIfNull(targetVersion);
 
         var hardErrors = new List<string>();
+        var environmentErrors = new List<string>();
         var missingRequired = new List<string>();
         var incompatible = new List<string>();
 
-        string normalizedServerLoader = ModHelpers.NormalizeIdentifier(serverLoader);
+        string serverLoaderId = LoaderKinds.ToModrinthId(serverLoader);
         string normalizedServerMcVer = MinecraftVersion.TryParse(serverMinecraftVersion, out var parsedServerMc)
             ? parsedServerMc.Value
             : string.Empty;
@@ -56,15 +61,15 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         // 0. 伺服器端環境相容性檢查 (純用戶端模組不可在伺服器運作)
         if (!string.IsNullOrWhiteSpace(serverSide) && string.Equals(serverSide.Trim(), "unsupported", StringComparison.OrdinalIgnoreCase))
         {
-            hardErrors.Add("此模組僅支援用戶端，不相容伺服器環境 (server_side: unsupported)");
+            environmentErrors.Add("此模組僅支援用戶端，不相容伺服器環境 (server_side: unsupported)");
         }
 
         // 1. Loader 相容性檢查
-        if (!string.IsNullOrEmpty(normalizedServerLoader) && normalizedServerLoader != "vanilla")
+        if (serverLoader != LoaderKind.Vanilla)
         {
-            if (targetVersion.Loaders.Count > 0 && !IsLoaderCompatible(normalizedServerLoader, targetVersion.Loaders, normalizedServerMcVer))
+            if (targetVersion.Loaders.Count > 0 && !LoaderCompatibility.IsCompatible(serverLoader, targetVersion.Loaders, normalizedServerMcVer))
             {
-                hardErrors.Add($"此版本不支援目前的伺服器載入器 {serverLoader}（僅支援: {string.Join(", ", targetVersion.Loaders)}）");
+                environmentErrors.Add($"此版本不支援目前的伺服器載入器 {serverLoaderId}（僅支援: {string.Join(", ", targetVersion.Loaders)}）");
             }
         }
 
@@ -73,12 +78,12 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         {
             if (targetVersion.GameVersions.Count > 0 && !IsMinecraftVersionCompatible(normalizedServerMcVer, targetVersion.GameVersions))
             {
-                hardErrors.Add($"此版本不支援目前的 Minecraft 版本 {serverMinecraftVersion}");
+                environmentErrors.Add($"此版本不支援目前的 Minecraft 版本 {serverMinecraftVersion}");
             }
         }
 
-        // 3. 本地模組識別字集合建立 (包含 ID, Name, PlatformId, PlatformSlug 與別名)
-        var installedIdentifiers = BuildInstalledIdentifiers(installedMods);
+        // 3. 本地模組識別索引建立 (包含 ID, Name, PlatformId, PlatformSlug 與別名；停用模組不計入)
+        var installedIndex = InstalledModIndex.Create(installedMods);
 
         // 4. 相依性檢查
         if (targetVersion.Dependencies is not null)
@@ -87,7 +92,7 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
             {
                 string depName = dep.ProjectId ?? dep.VersionId ?? dep.FileName ?? "未知相依項";
                 string? idToMatch = dep.ProjectId ?? dep.VersionId;
-                bool isInstalled = IsModMatched(idToMatch, dep.FileName, installedIdentifiers);
+                bool isInstalled = installedIndex.Contains(idToMatch, dep.FileName);
 
                 switch (dep.DependencyType)
                 {
@@ -110,32 +115,40 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
             }
         }
 
+        hardErrors.InsertRange(0, environmentErrors);
+
         if (missingRequired.Count > 0)
         {
             hardErrors.Add($"缺少必要相依模組：{string.Join(", ", missingRequired)}");
         }
 
-        return new OnlineModCompatibilityReport(hardErrors, missingRequired, incompatible);
+        return new OnlineModCompatibilityReport(hardErrors, missingRequired, incompatible, environmentErrors);
     }
 
     public async Task<IReadOnlyList<ModDependencyPlanItem>> ResolveDependenciesRecursivelyAsync(
-        IModrinthClient modrinthClient,
         IReadOnlyList<OnlineModDependency> initialDependencies,
         string serverMinecraftVersion,
-        string serverLoader,
+        LoaderKind serverLoader,
         IReadOnlyList<LocalModInfo> installedMods,
+        string? rootProjectId = null,
         int maxDepth = 5,
         int maxItems = 20,
         bool upgradeInstalled = true,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(modrinthClient);
         if (initialDependencies is null || initialDependencies.Count == 0 || maxDepth <= 0 || maxItems <= 0)
         {
             return [];
         }
 
+        // 停用的模組不載入，不能滿足相依
+        var installedIndex = InstalledModIndex.Create(installedMods);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(rootProjectId))
+        {
+            visited.Add(ModHelpers.NormalizeIdentifier(rootProjectId));
+        }
+
         var resolvedPlans = new List<ModDependencyPlanItem>();
         var queue = new Queue<(OnlineModDependency dep, int depth)>();
 
@@ -146,8 +159,6 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
                 queue.Enqueue((dep, 1));
             }
         }
-
-        string normalizedLoader = serverLoader?.ToLowerInvariant() ?? string.Empty;
 
         while (queue.Count > 0 && resolvedPlans.Count < maxItems)
         {
@@ -172,7 +183,8 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
             }
 
             visited.Add(normalizedKey);
-            if (!upgradeInstalled && FindMatchingInstalledMod(targetKey, currentDep.FileName, installedMods) is not null)
+            var localMod = installedIndex.TryFind(targetKey, currentDep.FileName);
+            if (!upgradeInstalled && localMod is not null)
             {
                 // 已安裝即視為滿足，不查詢也不升級（僅補齊缺少的必要相依）
                 continue;
@@ -185,28 +197,40 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
 
             try
             {
-                var versions = await modrinthClient.GetProjectVersionsAsync(
-                    targetKey,
-                    loader: normalizedLoader,
-                    minecraftVersion: serverMinecraftVersion,
-                    cancellationToken: cancellationToken).ConfigureAwait(false);
-
-                if (versions.Count == 0 && string.Equals(normalizedLoader, "quilt", StringComparison.OrdinalIgnoreCase))
+                IReadOnlyList<OnlineModVersion> versions;
+                if (currentDep.ProjectId is null && !string.IsNullOrWhiteSpace(currentDep.VersionId))
                 {
-                    versions = await modrinthClient.GetProjectVersionsAsync(
+                    // 僅指定版本 ID 的相依直接查詢該版本
+                    var pinned = await _modrinthClient.GetVersionAsync(currentDep.VersionId, cancellationToken).ConfigureAwait(false);
+                    versions = pinned is null ? [] : [pinned];
+                }
+                else
+                {
+                    versions = await _modrinthClient.GetProjectVersionsAsync(
                         targetKey,
-                        loader: "fabric",
+                        loader: serverLoader,
+                        minecraftVersion: serverMinecraftVersion,
+                        cancellationToken: cancellationToken).ConfigureAwait(false);
+                }
+
+                LoaderKind? fallbackLoader = currentDep.ProjectId is null ? null : LoaderCompatibility.GetFallbackLoader(serverLoader, serverMinecraftVersion);
+                if (versions.Count == 0 && fallbackLoader is { } fallback)
+                {
+                    // Quilt 可載入 Fabric 模組；NeoForge 1.20.1 可載入 Forge 模組
+                    versions = await _modrinthClient.GetProjectVersionsAsync(
+                        targetKey,
+                        loader: fallback,
                         minecraftVersion: serverMinecraftVersion,
                         cancellationToken: cancellationToken).ConfigureAwait(false);
                 }
 
                 if (versions.Count == 0)
                 {
-                    Logger.Warning("相依模組「{Name}」在 MC {MC} / {Loader} 下無相容版本", targetKey, serverMinecraftVersion, normalizedLoader);
+                    Logger.Warning("相依模組「{Name}」在 MC {MC} / {Loader} 下無相容版本", targetKey, serverMinecraftVersion, LoaderKinds.ToModrinthId(serverLoader));
                     continue;
                 }
 
-                var matchedVersion = SelectBestCompatibleVersion(versions, serverMinecraftVersion, normalizedLoader);
+                var matchedVersion = SelectBestCompatibleVersion(versions, serverMinecraftVersion, serverLoader);
                 if (matchedVersion is null)
                 {
                     Logger.Warning("相依模組「{Name}」找不到具備有效 JAR 檔案的相容版本", targetKey);
@@ -218,22 +242,18 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
                     visited.Add(ModHelpers.NormalizeIdentifier(matchedVersion.VersionId));
                 }
 
-                var localMod = FindMatchingInstalledMod(targetKey, currentDep.FileName, installedMods);
                 if (localMod is not null)
                 {
-                    bool isSameVersion = !string.IsNullOrWhiteSpace(localMod.Version) &&
-                        string.Equals(localMod.Version.Trim(), matchedVersion.VersionNumber.Trim(), StringComparison.OrdinalIgnoreCase);
-
-                    if (isSameVersion)
+                    // 雜湊相同或本機版本不舊於候選版時不降級，但仍展開其子相依
+                    if (!ModHelpers.HashMatches(matchedVersion.PrimaryFile, localMod.CurrentHash)
+                        && FlexVersion.Compare(matchedVersion.VersionNumber, localMod.Version) > 0)
                     {
-                        continue;
-                    }
-
-                    resolvedPlans.Add(new ModDependencyPlanItem(
+                        resolvedPlans.Add(new ModDependencyPlanItem(
                         matchedVersion,
                         ModInstallAction.Update,
                         localMod,
                         $"升級相依模組 ({localMod.Version} ➔ {matchedVersion.VersionNumber})"));
+                    }
                 }
                 else
                 {
@@ -272,166 +292,90 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         return resolvedPlans;
     }
 
-    private static HashSet<string> BuildInstalledIdentifiers(IReadOnlyList<LocalModInfo>? installedMods)
+    private sealed class InstalledModIndex
     {
-        var installedIdentifiers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var mod in installedMods ?? [])
+        private readonly Dictionary<string, LocalModInfo> _index = new(StringComparer.OrdinalIgnoreCase);
+
+        public static InstalledModIndex Create(IReadOnlyList<LocalModInfo>? installedMods)
         {
-            if (!string.IsNullOrWhiteSpace(mod.Id))
+            var result = new InstalledModIndex();
+            if (installedMods is null)
             {
-                string norm = ModHelpers.NormalizeIdentifier(mod.Id);
-                installedIdentifiers.Add(norm);
-                if (KnownModProjectAliases.TryGetValue(mod.Id, out string? a1))
+                return result;
+            }
+
+            foreach (var mod in installedMods)
+            {
+                if (mod.Status != ModStatus.Enabled)
                 {
-                    installedIdentifiers.Add(ModHelpers.NormalizeIdentifier(a1));
+                    continue;
+                }
+
+                void Register(string? raw)
+                {
+                    if (string.IsNullOrWhiteSpace(raw))
+                    {
+                        return;
+                    }
+
+                    string norm = ModHelpers.NormalizeIdentifier(raw);
+                    if (norm.Length > 0)
+                    {
+                        result._index.TryAdd(norm, mod);
+                    }
+                }
+
+                Register(mod.Id);
+                if (!string.IsNullOrWhiteSpace(mod.Id) && KnownModProjectAliases.TryGetValue(mod.Id, out string? a1))
+                {
+                    Register(a1);
+                }
+
+                Register(mod.Name);
+                Register(mod.PlatformId);
+                Register(mod.PlatformSlug);
+                if (!string.IsNullOrWhiteSpace(mod.FileName))
+                {
+                    Register(ModHelpers.ModFilenameStem(mod.FileName));
                 }
             }
 
-            if (!string.IsNullOrWhiteSpace(mod.Name))
-            {
-                installedIdentifiers.Add(ModHelpers.NormalizeIdentifier(mod.Name));
-            }
-
-            if (!string.IsNullOrWhiteSpace(mod.PlatformId))
-            {
-                installedIdentifiers.Add(ModHelpers.NormalizeIdentifier(mod.PlatformId));
-            }
-
-            if (!string.IsNullOrWhiteSpace(mod.PlatformSlug))
-            {
-                installedIdentifiers.Add(ModHelpers.NormalizeIdentifier(mod.PlatformSlug));
-            }
-
-            if (!string.IsNullOrWhiteSpace(mod.Filename))
-            {
-                installedIdentifiers.Add(ModHelpers.NormalizeIdentifier(ModHelpers.ModFilenameStem(mod.Filename)));
-            }
+            return result;
         }
 
-        return installedIdentifiers;
-    }
+        public bool Contains(string? idToMatch, string? fileName) => TryFind(idToMatch, fileName) is not null;
 
-    private readonly record struct ModMatchKey(string? NormalizedId, string? NormalizedAlias, string? FileStem)
-    {
-        public static ModMatchKey Create(string? idToMatch, string? fileName)
+        public LocalModInfo? TryFind(string? idToMatch, string? fileName)
         {
-            string? normalizedAlias = !string.IsNullOrEmpty(idToMatch) && KnownModProjectAliases.TryGetValue(idToMatch, out string? alias)
-                ? ModHelpers.NormalizeIdentifier(alias)
-                : null;
-            return new ModMatchKey(
-                !string.IsNullOrEmpty(idToMatch) ? ModHelpers.NormalizeIdentifier(idToMatch) : null,
-                normalizedAlias,
-                !string.IsNullOrEmpty(fileName) ? ModHelpers.NormalizeIdentifier(ModHelpers.ModFilenameStem(fileName)) : null);
-        }
-    }
+            if (!string.IsNullOrWhiteSpace(idToMatch))
+            {
+                string normId = ModHelpers.NormalizeIdentifier(idToMatch);
+                if (_index.TryGetValue(normId, out var mod))
+                {
+                    return mod;
+                }
 
-    private static bool IsModMatched(string? idToMatch, string? fileName, HashSet<string> installedIdentifiers)
-    {
-        var key = ModMatchKey.Create(idToMatch, fileName);
-        return (key.NormalizedId is not null && installedIdentifiers.Contains(key.NormalizedId)) ||
-            (key.NormalizedAlias is not null && installedIdentifiers.Contains(key.NormalizedAlias)) ||
-            (key.FileStem is not null && installedIdentifiers.Contains(key.FileStem));
-    }
+                if (KnownModProjectAliases.TryGetValue(idToMatch, out string? alias))
+                {
+                    string normAlias = ModHelpers.NormalizeIdentifier(alias);
+                    if (_index.TryGetValue(normAlias, out var aliasMod))
+                    {
+                        return aliasMod;
+                    }
+                }
+            }
 
-    /// <summary>比對識別碼（不分大小寫）</summary>
-    private static bool IdMatches(string? candidate, string normalized) =>
-        !string.IsNullOrWhiteSpace(candidate) && candidate.AsSpan().Trim().Equals(normalized, StringComparison.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(fileName))
+            {
+                string normStem = ModHelpers.NormalizeIdentifier(ModHelpers.ModFilenameStem(fileName));
+                if (_index.TryGetValue(normStem, out var fileMod))
+                {
+                    return fileMod;
+                }
+            }
 
-    private static LocalModInfo? FindMatchingInstalledMod(string? idToMatch, string? fileName, IReadOnlyList<LocalModInfo> installedMods)
-    {
-        if (installedMods is null || installedMods.Count == 0)
-        {
             return null;
         }
-
-        (string? normId, string? aliasNorm, string? fileStem) = ModMatchKey.Create(idToMatch, fileName);
-
-        foreach (var mod in installedMods)
-        {
-            if (normId is not null)
-            {
-                if (IdMatches(mod.Id, normId) || IdMatches(mod.Name, normId) ||
-                    IdMatches(mod.PlatformId, normId) || IdMatches(mod.PlatformSlug, normId))
-                {
-                    return mod;
-                }
-
-                if (aliasNorm is not null && (IdMatches(mod.Id, aliasNorm) || IdMatches(mod.Name, aliasNorm)))
-                {
-                    return mod;
-                }
-            }
-
-            if (fileStem is not null && !string.IsNullOrWhiteSpace(mod.Filename))
-            {
-                if (IdMatches(ModHelpers.ModFilenameStem(mod.Filename), fileStem))
-                {
-                    return mod;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private static bool IsLoaderCompatible(string serverLoader, IReadOnlyList<string> targetLoaders, string minecraftVersion)
-    {
-        if (targetLoaders.Count == 0)
-        {
-            return true;
-        }
-
-        bool hasFabric = false;
-        bool hasForge = false;
-        bool hasDatapack = false;
-        for (int i = 0; i < targetLoaders.Count; i++)
-        {
-            string l = targetLoaders[i];
-            if (string.Equals(l, serverLoader, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            if (string.Equals(l, "fabric", StringComparison.OrdinalIgnoreCase))
-            {
-                hasFabric = true;
-            }
-            else if (string.Equals(l, "forge", StringComparison.OrdinalIgnoreCase))
-            {
-                hasForge = true;
-            }
-            else if (string.Equals(l, "datapack", StringComparison.OrdinalIgnoreCase))
-            {
-                hasDatapack = true;
-            }
-        }
-
-        if (PluginServerLoaders.Contains(serverLoader))
-        {
-            return false;
-        }
-
-        // Quilt 伺服器向下相容 Fabric 模組
-        if (string.Equals(serverLoader, "quilt", StringComparison.OrdinalIgnoreCase) && hasFabric)
-        {
-            return true;
-        }
-
-        // NeoForge 伺服器在 1.20.1 早期可向下相容 Forge 模組
-        if (string.Equals(serverLoader, "neoforge", StringComparison.OrdinalIgnoreCase) &&
-            hasForge &&
-            minecraftVersion.StartsWith("1.20.1", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        // 資料包模組相容
-        if (hasDatapack)
-        {
-            return true;
-        }
-
-        return false;
     }
 
     private static bool IsMinecraftVersionCompatible(string serverMcVer, IReadOnlyList<string> targetMcVersions)
@@ -470,18 +414,16 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
     private static OnlineModVersion? SelectBestCompatibleVersion(
         IReadOnlyList<OnlineModVersion> versions,
         string serverMinecraftVersion,
-        string serverLoader)
+        LoaderKind serverLoader)
     {
         if (versions.Count == 0)
         {
             return null;
         }
 
-        string normLoader = ModHelpers.NormalizeIdentifier(serverLoader);
         string normMc = ModHelpers.NormalizeIdentifier(serverMinecraftVersion);
 
         OnlineModVersion? anyCompatible = null;
-        OnlineModVersion? fallbackWithFile = null;
 
         for (int i = 0; i < versions.Count; i++)
         {
@@ -491,9 +433,7 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
                 continue;
             }
 
-            fallbackWithFile ??= v;
-
-            if (IsVersionMatchingEnvironment(v, normMc, normLoader))
+            if (IsVersionMatchingEnvironment(v, normMc, serverLoader))
             {
                 if (string.Equals(v.VersionType, "release", StringComparison.OrdinalIgnoreCase))
                 {
@@ -504,15 +444,15 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
             }
         }
 
-        return anyCompatible ?? fallbackWithFile;
+        // 無相容版本時回傳 null，不可安裝環境不符的版本
+        return anyCompatible;
     }
 
-    private static bool IsVersionMatchingEnvironment(OnlineModVersion v, string normMc, string normLoader)
+    private static bool IsVersionMatchingEnvironment(OnlineModVersion v, string normMc, LoaderKind serverLoader)
     {
-        bool loaderOk = string.IsNullOrEmpty(normLoader) ||
-                        normLoader == "vanilla" ||
+        bool loaderOk = serverLoader == LoaderKind.Vanilla ||
                         v.Loaders.Count == 0 ||
-                        IsLoaderCompatible(normLoader, v.Loaders, normMc);
+                        LoaderCompatibility.IsCompatible(serverLoader, v.Loaders, normMc);
 
         bool mcOk = string.IsNullOrEmpty(normMc) ||
                     !MinecraftVersion.TryParse(normMc, out var validMc) ||

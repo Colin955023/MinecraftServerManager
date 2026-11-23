@@ -7,8 +7,27 @@ charset = utf-8
 trim_trailing_whitespace = true
 insert_final_newline = true
 
-[*.{csproj,props,targets,xaml,xml,config,yml,yaml,json,html,css,js}]
+[*.{csproj,props,targets,slnx,xaml,xml,config,manifest,yml,yaml,json,html,css,js,svg}]
 indent_size = 2
+
+# 換行字元與 .gitattributes 一致
+[*.{cs,csproj,props,targets,slnx,xaml,manifest,ps1}]
+end_of_line = crlf
+
+[*.{toml,json,yml,yaml,xml,config,html,css,js,svg,md,txt}]
+end_of_line = lf
+
+[{.editorconfig,.gitattributes,.gitignore,LICENSE,CODEOWNERS}]
+end_of_line = lf
+
+# NuGet 產生的鎖定檔不含檔尾換行且於 Windows 輸出 CRLF，維持工具輸出避免來回變動
+[packages.lock.json]
+end_of_line = crlf
+insert_final_newline = false
+
+# GitHub Pages 空標記檔維持 0 位元組
+[.nojekyll]
+insert_final_newline = false
 
 [*.ps1]
 charset = utf-8-bom
@@ -17,12 +36,12 @@ indent_size = 4
 [*.cs]
 # 基本排版格式
 indent_size = 4
-end_of_line = crlf
 
 # C# 風格
 csharp_style_var_for_built_in_types = false:warning
 csharp_style_var_when_type_is_apparent = true:warning
 csharp_using_directive_placement = outside_namespace:warning
+dotnet_sort_system_directives_first = true
 csharp_style_namespace_declarations = file_scoped:warning
 csharp_prefer_braces = true:warning
 csharp_style_prefer_simple_using_statement = true:warning
@@ -99,20 +118,23 @@ csharp_style_prefer_utf8_string_literals = true:warning
 dotnet_analyzer_diagnostic.category-Security.severity = error
 
 # 專案類型例外（UI 專案與測試專案）
-# WinUI 3 UI 需要 SynchronizationContext，且 XAML 標記事件處理器無法由 C# 靜態語法樹探知，排除 IDE0051/IDE0052/IDE0060 避免 dotnet format 誤刪事件處理常式與未使用引數。
+# WinUI 3 UI 需要 SynchronizationContext，不強制 ConfigureAwait
 [src/MinecraftServerManager.App/**.cs]
 dotnet_diagnostic.CA2007.severity = none
+
+# XAML 標記事件處理常式無法由 C# 語法樹探知，code-behind 排除 IDE0051/IDE0052/IDE0060 避免誤刪
+[src/MinecraftServerManager.App/**.xaml.cs]
 dotnet_diagnostic.IDE0051.severity = none
 dotnet_diagnostic.IDE0052.severity = none
 dotnet_diagnostic.IDE0060.severity = none
 
 # Tests 測試專案排除非必要約束
 [tests/**.cs]
-dotnet_diagnostic.IDE0005.severity = none
+dotnet_diagnostic.IDE0005.severity = warning
 dotnet_diagnostic.CA1707.severity = none
 dotnet_diagnostic.CA1849.severity = none
 dotnet_diagnostic.CA1859.severity = none
 dotnet_diagnostic.CA1861.severity = none
 dotnet_diagnostic.CA2000.severity = none
 dotnet_diagnostic.CA2007.severity = none
-dotnet_diagnostic.xUnit1051.severity = none
+dotnet_diagnostic.xUnit1051.severity = error

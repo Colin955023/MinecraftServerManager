@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.Core.Utilities;
+using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.App.ViewModels;
 
@@ -21,22 +22,13 @@ public sealed partial class JvmArgsViewModel : ObservableObject
 {
     private readonly int? _javaMajor;
     private readonly int _memoryMaxMb;
-    private readonly string _loaderType;
+    private readonly LoaderKind _loaderType;
     private readonly HashSet<string> _recommendedSet = new(StringComparer.OrdinalIgnoreCase);
-
-    public string DescriptionText { get; }
-
-    [ObservableProperty]
-    public partial bool HasCustomArgs { get; set; }
-
-    [ObservableProperty]
-    public partial string CustomArgsText { get; set; } = string.Empty;
-    public ObservableCollection<JvmArgOptionItem> RecommendedArgs { get; } = [];
 
     public JvmArgsViewModel(
         int? javaMajor,
         int memoryMaxMb,
-        string loaderType = "",
+        LoaderKind loaderType = LoaderKind.Unknown,
         IEnumerable<string>? existingArgs = null)
     {
         _javaMajor = javaMajor;
@@ -47,6 +39,19 @@ public sealed partial class JvmArgsViewModel : ObservableObject
         LoadArgs(existingArgs);
     }
 
+    public string DescriptionText { get; }
+
+    [ObservableProperty]
+    public partial bool HasCustomArgs { get; set; }
+
+    [ObservableProperty]
+    public partial string CustomArgsText { get; set; } = string.Empty;
+
+    public ObservableCollection<JvmArgOptionItem> RecommendedArgs { get; } = [];
+
+    /// <summary>上次 <see cref="GetFinalJvmArgs"/> 排除的自訂參數</summary>
+    public IReadOnlyList<string> RejectedArgs { get; private set; } = [];
+
     private static string CreateDescriptionText(int? javaMajor)
     {
         if (javaMajor.HasValue && javaMajor.Value >= 21)
@@ -56,7 +61,7 @@ public sealed partial class JvmArgsViewModel : ObservableObject
 
         if (javaMajor.HasValue)
         {
-            return $"目前偵測為 Java {javaMajor.Value}，已自動套用 G1GC (Aikar's Flags) 最佳化設定。滑鼠游標移至項目可檢視說明。";
+            return $"目前偵測為 Java {javaMajor.Value}，已自動套用 G1GC（Aikar's Flags）最佳化設定。滑鼠游標移至項目可檢視說明。";
         }
 
         return "Java 21+ 建議使用 ZGC；Java 8/16/17 建議使用 G1GC。滑鼠游標移至項目可檢視說明。";
@@ -104,9 +109,6 @@ public sealed partial class JvmArgsViewModel : ObservableObject
         CustomArgsText = string.Empty;
     }
 
-    /// <summary>上次 <see cref="GetFinalJvmArgs"/> 排除的自訂參數</summary>
-    public IReadOnlyList<string> RejectedArgs { get; private set; } = [];
-
     /// <summary>取得使用者勾選與自訂的最終 JVM 參數清單（排除可執行外部命令的選項）</summary>
     public IReadOnlyList<string> GetFinalJvmArgs()
     {
@@ -125,7 +127,7 @@ public sealed partial class JvmArgsViewModel : ObservableObject
             var customTokens = JvmOptionPolicy.NormalizeJvmArgs(CustomArgsText);
             foreach (string token in customTokens)
             {
-                if (JvmOptionPolicy.IsCommandExecutionOption(token))
+                if (JvmOptionPolicy.IsRejectedCustomArgument(token))
                 {
                     rejected.Add(token);
                 }

@@ -7,7 +7,7 @@ public sealed class JvmArgsViewModelTests
     [Theory]
     [InlineData(21, "ZGC")]
     [InlineData(17, "G1GC")]
-    public void Constructor_SetsExpectedGcDescription(int javaMajor, string expectedGc)
+    public void Constructor_JavaMajor_SetsGcDescription(int javaMajor, string expectedGc)
     {
         var vm = new JvmArgsViewModel(javaMajor: javaMajor, memoryMaxMb: 4096);
 
@@ -29,7 +29,7 @@ public sealed class JvmArgsViewModelTests
     }
 
     [Fact]
-    public void GetFinalJvmArgs_ExcludesOptionsThatExecuteExternalCommands()
+    public void GetFinalJvmArgs_CommandExecutionOptions_ExcludesThem()
     {
         var vm = new JvmArgsViewModel(javaMajor: 21, memoryMaxMb: 4096)
         {
@@ -40,13 +40,13 @@ public sealed class JvmArgsViewModelTests
         var finalArgs = vm.GetFinalJvmArgs();
 
         Assert.Contains("-Dfoo=bar", finalArgs);
-        Assert.Contains("-javaagent:authlib.jar", finalArgs);
+        Assert.DoesNotContain("-javaagent:authlib.jar", finalArgs);
         Assert.DoesNotContain("-XX:OnError=calc.exe", finalArgs);
-        Assert.Equal("-XX:OnError=calc.exe", Assert.Single(vm.RejectedArgs));
+        Assert.Equal(["-XX:OnError=calc.exe", "-javaagent:authlib.jar"], vm.RejectedArgs);
     }
 
     [Fact]
-    public void ResetToDefault_RestoresDefaultState()
+    public void ResetToDefault_CustomState_RestoresDefaults()
     {
         var existing = new List<string> { "-Dcustom.flag=true" };
         var vm = new JvmArgsViewModel(javaMajor: 21, memoryMaxMb: 4096, existingArgs: existing);

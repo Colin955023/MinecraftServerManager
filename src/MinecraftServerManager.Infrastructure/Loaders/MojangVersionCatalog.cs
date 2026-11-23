@@ -1,7 +1,11 @@
+using System.Collections.Frozen;
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Text.Json;
 using MinecraftServerManager.Core.Loaders;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Utilities;
+using MinecraftServerManager.Infrastructure.Http;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
 
@@ -21,10 +25,21 @@ internal static class MojangVersionCatalog
     public const int MinimumJavaMajor = 8;
 
     private static readonly string[] ManifestUrls = [ManifestV2Url, ManifestFallbackUrl];
-    private static readonly Lock CacheLock = new();
+    private static readonly FrozenSet<string> OfficialPackageHosts =
+        TrustedHostPolicy.Hosts("piston-meta.mojang.com", "launchermeta.mojang.com");
 
-    private static Uri PaperVersionUri(string minecraftVersion) =>
-        new($"{PaperProjectUrl}/versions/{Uri.EscapeDataString(minecraftVersion.Trim())}");
+    // 依快取路徑分條上鎖，不同快取檔互不阻塞
+    private static readonly Lock[] CacheLocks = [new(), new(), new(), new(), new(), new(), new(), new()];
+
+    private static Lock GetCacheLock(string cachePath)
+    {
+        int hash = StringComparer.OrdinalIgnoreCase.GetHashCode(Path.GetFullPath(cachePath));
+        return CacheLocks[(int)((uint)hash % (uint)CacheLocks.Length)];
+    }
+
+    /// <summary>版本 package JSON 須為 Mojang 官方 HTTPS 位址（預設埠、無使用者資訊）</summary>
+    public static bool IsOfficialPackageUrl([NotNullWhen(true)] string? url) =>
+        TrustedHostPolicy.IsTrusted(url, OfficialPackageHosts);
 
     public static Uri PaperBuildsUri(string minecraftVersion) =>
         new($"{PaperProjectUrl}/versions/{Uri.EscapeDataString(minecraftVersion.Trim())}/builds");
@@ -71,25 +86,18 @@ internal static class MojangVersionCatalog
     /// <summary>讀取版本快取；檔案不存在或格式錯誤時回傳空清單</summary>
     public static List<LoaderVersion> LoadCachedVersions(string cachePath)
     {
-        lock (CacheLock)
+        lock (GetCacheLock(cachePath))
         {
-            return JsonCodec.TryReadFile<List<LoaderVersion>>(cachePath) ?? [];
+            return LoadCachedCore(cachePath);
         }
     }
 
     /// <summary>以原子寫入方式儲存版本快取</summary>
     public static void SaveCachedVersions(string cachePath, IReadOnlyList<LoaderVersion> versions)
     {
-        lock (CacheLock)
+        lock (GetCacheLock(cachePath))
         {
-            try
-            {
-                AtomicFileWriter.WriteJson(cachePath, versions, indented: true);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Logger.Warning(ex, "寫入版本快取失敗: {Path}", cachePath);
-            }
+            SaveCachedCore(cachePath, versions);
         }
     }
 
@@ -99,16 +107,31 @@ internal static class MojangVersionCatalog
         Func<List<LoaderVersion>, IReadOnlyList<LoaderVersion>?> update)
     {
         ArgumentNullException.ThrowIfNull(update);
-        lock (CacheLock)
+        lock (GetCacheLock(cachePath))
         {
-            var current = LoadCachedVersions(cachePath);
+            var current = LoadCachedCore(cachePath);
             if (update(current) is not { } updated)
             {
                 return current;
             }
 
-            SaveCachedVersions(cachePath, updated);
+            SaveCachedCore(cachePath, updated);
             return updated;
+        }
+    }
+
+    private static List<LoaderVersion> LoadCachedCore(string cachePath) =>
+        JsonCodec.TryReadFile<List<LoaderVersion>>(cachePath) ?? [];
+
+    private static void SaveCachedCore(string cachePath, IReadOnlyList<LoaderVersion> versions)
+    {
+        try
+        {
+            AtomicFileWriter.WriteJson(cachePath, versions, indented: true);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Warning(ex, "寫入版本快取失敗: {Path}", cachePath);
         }
     }
 
@@ -166,42 +189,54 @@ internal static class MojangVersionCatalog
         return null;
     }
 
-    /// <summary>解析官方 Manifest；有官方 server.jar 的正式版標記為穩定</summary>
+    /// <summary>解析官方 Manifest；有官方 server.jar 的正式版標記為穩定，依 <c>releaseTime</c> 由新到舊排序</summary>
     internal static List<LoaderVersion> ParseManifest(JsonDocument doc)
     {
-        if (doc.RootElement.ValueKind != JsonValueKind.Object
-            || !doc.RootElement.TryGetProperty("versions", out var versionsElem)
-            || versionsElem.ValueKind != JsonValueKind.Array)
+        if (!doc.RootElement.TryGetProperty("versions", JsonValueKind.Array, out var versionsElem))
         {
             return [];
         }
 
-        var list = new List<LoaderVersion>();
+        var list = new List<(LoaderVersion Version, DateTimeOffset ReleaseTime)>();
         foreach (var elem in versionsElem.EnumerateArray())
         {
-            string? id = elem.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+            string? id = elem.GetStringOrNull("id");
             if (string.IsNullOrEmpty(id))
             {
                 continue;
             }
 
-            string? type = elem.TryGetProperty("type", out var typeProp) ? typeProp.GetString() : null;
-            string? url = elem.TryGetProperty("url", out var urlProp) ? urlProp.GetString() : null;
+            string? type = elem.GetStringOrNull("type");
+            string? url = elem.GetStringOrNull("url");
+            if (!IsOfficialPackageUrl(url))
+            {
+                url = null;
+            }
 
-            if (string.Equals(type, "release", StringComparison.OrdinalIgnoreCase))
+            bool isRelease = string.Equals(type, "release", StringComparison.OrdinalIgnoreCase);
+            if (isRelease && !HasOfficialServerJar(id))
             {
-                if (HasOfficialServerJar(id))
-                {
-                    list.Add(new LoaderVersion(id, Url: url, Stable: true));
-                }
+                continue;
             }
-            else
-            {
-                list.Add(new LoaderVersion(id, Url: url, Stable: false));
-            }
+
+            // 週快照版號無法以數字比較，缺 releaseTime 時排最後
+            DateTimeOffset releaseTime = DateTimeOffset.TryParse(
+                elem.GetStringOrNull("releaseTime"),
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal,
+                out var parsed)
+                ? parsed
+                : DateTimeOffset.MinValue;
+            list.Add((new LoaderVersion(id, Url: url, Stable: isRelease), releaseTime));
         }
 
-        return [.. list.OrderByDescending(static v => VersionValue.ParseOrZero(v.Version))];
+        return
+        [
+            .. list
+                .OrderByDescending(static item => item.ReleaseTime)
+                .ThenByDescending(static item => VersionValue.ParseOrZero(item.Version.Version))
+                .Select(static item => item.Version),
+        ];
     }
 
     /// <summary>官方 server.jar 自 1.2.5 起提供下載</summary>
@@ -217,6 +252,12 @@ internal static class MojangVersionCatalog
 
     public static async Task<int?> FetchOfficialJavaMajorAsync(IHttpPort httpPort, string packageUrl, CancellationToken cancellationToken)
     {
+        if (!IsOfficialPackageUrl(packageUrl))
+        {
+            Logger.Warning("略過非 Mojang 官方版本 package 位址: {Url}", packageUrl);
+            return null;
+        }
+
         try
         {
             var response = await httpPort.GetJsonDocumentAsync(new Uri(packageUrl), cancellationToken).ConfigureAwait(false);
@@ -237,35 +278,6 @@ internal static class MojangVersionCatalog
         }
     }
 
-    /// <summary>取得 Paper 指定版本的最低 Java major（下限 8）</summary>
-    public static async Task<int?> FetchPaperJavaMajorAsync(IHttpPort httpPort, string minecraftVersion, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var response = await httpPort.GetJsonDocumentAsync(PaperVersionUri(minecraftVersion), cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccess || response.Payload is null)
-            {
-                return null;
-            }
-
-            using var doc = response.Payload;
-            if (doc.RootElement.TryGetProperty("version", out var vProp) &&
-                vProp.TryGetProperty("java", out var jProp) &&
-                jProp.TryGetProperty("version", out var jvProp) &&
-                jvProp.TryGetProperty("minimum", out var minProp) &&
-                minProp.TryGetInt32(out int minimum))
-            {
-                return Math.Max(MinimumJavaMajor, minimum);
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning(ex, "從 Paper API 取得 Java 最低版本失敗");
-        }
-
-        return null;
-    }
-
     /// <summary>解析 javaVersion.majorVersion 或 java_version.major</summary>
     internal static int? ParseJavaMajorFromVersionJson(JsonElement root)
     {
@@ -275,15 +287,15 @@ internal static class MojangVersionCatalog
         }
 
         // 1. 標準 Mojang 結構: { "javaVersion": { "component": "...", "majorVersion": 21 } }
-        if (root.TryGetProperty("javaVersion", out var jvElem) && jvElem.ValueKind == JsonValueKind.Object
-            && jvElem.TryGetProperty("majorVersion", out var mvElem) && mvElem.TryGetInt32(out int mv) && mv > 0)
+        if (root.TryGetProperty("javaVersion", JsonValueKind.Object, out var jvElem)
+            && jvElem.GetInt32OrNull("majorVersion") is > 0 and int mv)
         {
             return mv;
         }
 
         // 2. 替代結構: { "java_version": { "major": 17 } }
-        if (root.TryGetProperty("java_version", out var jvElem2) && jvElem2.ValueKind == JsonValueKind.Object
-            && jvElem2.TryGetProperty("major", out var mvElem2) && mvElem2.TryGetInt32(out int mv2) && mv2 > 0)
+        if (root.TryGetProperty("java_version", JsonValueKind.Object, out var jvElem2)
+            && jvElem2.GetInt32OrNull("major") is > 0 and int mv2)
         {
             return mv2;
         }

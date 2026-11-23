@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
@@ -76,6 +75,9 @@ public interface IUiService
 
     public void RestartApplication();
 
+    /// <summary>釋放單一實體鎖後啟動取代本程式的新行程；啟動失敗時取回鎖並重新擲回例外，可於任何執行緒呼叫</summary>
+    public void LaunchReplacementInstance(Action launch);
+
     /// <summary>以非阻塞方式於 UI 執行緒執行動作；非 UI 環境時不執行</summary>
     public void PostToUi(Action action, bool afterLayout = false);
 
@@ -107,25 +109,26 @@ public interface IUiService
 
     public Task<bool?> ShowModVersionPickerAsync(ModVersionPickerViewModel viewModel);
 
-    public Task<bool?> ShowModInstallQueueAsync(ObservableCollection<ModInstallQueueItem> queue);
+    public Task<bool?> ShowModInstallQueueAsync(ModInstallQueueReviewViewModel viewModel);
 
     /// <summary>顯示模組更新清單；使用者確認時回傳所選項目，取消時回傳 null</summary>
-    public Task<IReadOnlyList<ModUpdateCandidateItem>?> ShowModUpdatesAsync(IEnumerable<ModUpdateCandidateItem> items);
+    public Task<IReadOnlyList<ModUpdateCandidateItem>?> ShowModUpdatesAsync(ModUpdateSelectionViewModel viewModel);
 
     public Task<ServerDeleteDecision> ShowServerDeleteConfirmationAsync(string serverName, int backupCount);
 
-    public Task ShowExportModListAsync(string serverName, IReadOnlyList<ModListExportRow> rows, IModListExporter exporter, IExternalLauncher launcher);
+    /// <summary>顯示匯出模組清單格式選擇對話方塊；使用者取消時回傳 null</summary>
+    public Task<ModListExportFormat?> ShowExportModListAsync();
 
     /// <summary>顯示初次啟動初始化對話方塊，回傳是否成功完成初始化</summary>
     public Task<bool> ShowServerInitializationAsync(ServerInitializationViewModel viewModel);
 
     public IMonitorWindow OpenServerMonitor(ServerMonitorViewModel viewModel);
 
-    public IProgressSession<ServerBackupProgressReport> ShowServerBackupProgress(string serverName, string actionTitle = "備份");
+    public IProgressSession<ServerBackupProgressReport> ShowServerBackupProgress(string serverName, bool isRestore = false);
 
     public IProgressSession<ServerImportProgressReport> ShowServerImportProgress(string serverName);
 
     public IProgressSession<ServerCreationProgressReport> ShowServerCreationProgress(string serverName);
 
-    public IOperationProgress ShowModOperationProgress(string title, string initialMessage);
+    public IOperationProgress ShowOperationProgress(string title, string initialMessage);
 }

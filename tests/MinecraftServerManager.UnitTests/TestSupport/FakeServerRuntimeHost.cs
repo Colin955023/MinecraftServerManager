@@ -33,7 +33,8 @@ internal sealed class FakeServerRuntimeHost : IServerRuntimeHost
 
     public IReadOnlyList<string> GetRunningServerNames() => [.. _runtimes.Where(static p => p.Value.IsRunning).Select(static p => p.Key)];
 
-    public void RaiseStateChanged(string name) => ServerStateChanged?.Invoke(name);
+    public ValueTask<bool> ReleaseIdleRuntimeAsync(string serverName) =>
+        ValueTask.FromResult(!IsRunning(serverName) && _runtimes.Remove(serverName));
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
