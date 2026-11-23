@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Markup;
 
 namespace MinecraftServerManager.App.Controls;
@@ -139,12 +140,30 @@ public sealed partial class TableFrame : UserControl
             }
         }
 
+        _listView?.ContainerContentChanging -= OnContainerContentChanging;
         _listView = Body as ListViewBase ?? Body.FindDescendant<ListViewBase>();
-        _listView?.ContainerContentChanging += OnContainerContentChanging;
+        if (_listView is null)
+        {
+            return;
+        }
+
+        _listView.ContainerContentChanging += OnContainerContentChanging;
+
+        // 補同步掛鉤解除期間已產生的列
+        for (int i = 0; i < _listView.Items.Count; i++)
+        {
+            SyncRow(_listView.ContainerFromIndex(i) as SelectorItem);
+        }
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        // WinUI 可能於新的 Loaded 之後才送達舊的 Unloaded，仍在樹上時略過以免掛鉤永久失效
+        if (IsLoaded)
+        {
+            return;
+        }
+
         SortTarget?.Detach();
         _listView?.ContainerContentChanging -= OnContainerContentChanging;
         _listView = null;
@@ -152,16 +171,14 @@ public sealed partial class TableFrame : UserControl
         _rowGrids.Clear();
     }
 
-    private void OnContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+    private void OnContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args) => SyncRow(args.ItemContainer);
+
+    private void SyncRow(SelectorItem? container)
     {
-        if (args.ItemContainer is not null)
+        if (container is not null && (container.ContentTemplateRoot as Grid ?? container.FindDescendant<Grid>()) is { } rowGrid)
         {
-            var rowGrid = args.ItemContainer.ContentTemplateRoot as Grid ?? args.ItemContainer.FindDescendant<Grid>();
-            if (rowGrid is not null)
-            {
-                SyncRowGridDefinitions(rowGrid);
-                RegisterRowGrid(rowGrid);
-            }
+            SyncRowGridDefinitions(rowGrid);
+            RegisterRowGrid(rowGrid);
         }
     }
 

@@ -89,8 +89,7 @@
         CanDragTabs="False"
         CanReorderTabs="False"
         IsAddTabButtonVisible="False"
-        TabWidthMode="SizeToContent"
-        SelectionChanged="OnTabSelectionChanged">
+        TabWidthMode="SizeToContent">
         <TabView.TabItems>
           <!-- 分頁 1：管理員名單 (ops.json) -->
           <TabViewItem Header="管理員名單 (ops.json)"
@@ -175,7 +174,7 @@
                         <Border Grid.Column="2"
                           Style="{StaticResource TableCellBorderStyle}"
                           Padding="6,2">
-                          <ComboBox HorizontalAlignment="Stretch"
+                          <controls:WheelPassthroughComboBox HorizontalAlignment="Stretch"
                             VerticalAlignment="Center"
                             ItemsSource="{x:Bind AvailableLevels}"
                             SelectedItem="{x:Bind Level, Mode=TwoWay}"
@@ -209,9 +208,7 @@
             <TabViewItem.IconSource>
               <FontIconSource Glyph="{StaticResource IconList}" />
             </TabViewItem.IconSource>
-            <Grid x:Name="WhitelistTabContent"
-              x:Load="False"
-              Margin="12"
+            <Grid Margin="12"
               RowSpacing="10">
               <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -231,7 +228,7 @@
                 LineSpacing="8">
                 <TextBlock VerticalAlignment="Center"
                   Text="選擇玩家：" />
-                <ComboBox Width="160"
+                <controls:WheelPassthroughComboBox Width="160"
                   VerticalAlignment="Center"
                   ItemsSource="{x:Bind ViewModel.AvailableCandidates}"
                   SelectedItem="{x:Bind ViewModel.SelectedWhitelistCandidate, Mode=TwoWay}"
@@ -298,9 +295,7 @@
             <TabViewItem.IconSource>
               <FontIconSource Glyph="{StaticResource IconBlocked}" />
             </TabViewItem.IconSource>
-            <Grid x:Name="BannedPlayersTabContent"
-              x:Load="False"
-              Margin="12"
+            <Grid Margin="12"
               RowSpacing="10">
               <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -320,7 +315,7 @@
                 LineSpacing="8">
                 <TextBlock VerticalAlignment="Center"
                   Text="玩家：" />
-                <ComboBox Width="140"
+                <controls:WheelPassthroughComboBox Width="140"
                   VerticalAlignment="Center"
                   ItemsSource="{x:Bind ViewModel.AvailableCandidates}"
                   SelectedItem="{x:Bind ViewModel.SelectedBanCandidate, Mode=TwoWay}"
@@ -406,9 +401,7 @@
             <TabViewItem.IconSource>
               <FontIconSource Glyph="{StaticResource IconGlobe}" />
             </TabViewItem.IconSource>
-            <Grid x:Name="BannedIpsTabContent"
-              x:Load="False"
-              Margin="12"
+            <Grid Margin="12"
               RowSpacing="10">
               <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />

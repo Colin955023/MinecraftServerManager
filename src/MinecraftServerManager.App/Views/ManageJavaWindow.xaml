@@ -76,17 +76,17 @@
           VerticalAlignment="Center"
           Text="線上安裝 Java (winget)："
           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-        <ComboBox Grid.Column="1"
+        <controls:WheelPassthroughComboBox Grid.Column="1"
           HorizontalAlignment="Stretch"
           ItemsSource="{x:Bind ViewModel.AvailableInstallOptions}"
           SelectedItem="{x:Bind ViewModel.SelectedInstallMajorOption, Mode=TwoWay}"
           AutomationProperties.Name="線上安裝 Java 版本">
-          <ComboBox.ItemTemplate>
+          <controls:WheelPassthroughComboBox.ItemTemplate>
             <DataTemplate x:DataType="vm:JavaMajorOption">
               <TextBlock Text="{x:Bind DisplayName}" />
             </DataTemplate>
-          </ComboBox.ItemTemplate>
-        </ComboBox>
+          </controls:WheelPassthroughComboBox.ItemTemplate>
+        </controls:WheelPassthroughComboBox>
         <Button Grid.Column="2"
           Style="{StaticResource PrimaryButtonStyle}"
           Command="{x:Bind ViewModel.InstallWithWingetCommand}">

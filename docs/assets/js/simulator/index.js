@@ -1442,7 +1442,7 @@ export function initWinUiSimulator() {
               <button type="button" class="winui-btn winui-btn-success" id="mon-start-btn">啟動</button>
               <button type="button" class="winui-btn winui-btn-danger" id="mon-stop-btn">停止</button>
               <button type="button" class="winui-btn" id="mon-clear-btn">清除紀錄</button>
-              <button type="button" class="winui-btn" id="mon-refresh-btn">重新整理</button>
+              <button type="button" class="winui-btn" id="mon-refresh-btn" data-sim-f5>重新整理</button>
             </div>
           </div>
           <div class="winui-monitor-grid u-my0">
@@ -2781,11 +2781,25 @@ export function initWinUiSimulator() {
     });
   });
 
-  // 右鍵選單開啟時的 Esc 由 popover 原生處理，其餘才關閉模擬視窗
+  // 右鍵選單開啟時的 Esc 由 popover 原生處理，其餘才關閉模擬視窗；F5 重新整理、Ctrl+F 移至搜尋框，限目前視窗內可見元素
   app.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && state.activeModal && !state.activeModal.locked && !contextMenu.matches(":popover-open")) {
       e.preventDefault();
       closeModal();
+      return;
+    }
+    const isF5 = e.key === "F5";
+    const isCtrlF = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f";
+    if (!isF5 && !isCtrlF) return;
+    const scope = state.activeModal ? modalDialog : app;
+    const target = [...scope.querySelectorAll(isF5 ? "[data-sim-f5]:not([disabled])" : 'input[type="search"]:not([disabled])')]
+      .find((el) => el.offsetParent !== null);
+    if (!target) return;
+    e.preventDefault();
+    if (isF5) target.click();
+    else {
+      target.focus();
+      target.select();
     }
   });
 

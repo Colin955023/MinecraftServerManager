@@ -58,24 +58,15 @@ public static class ThemeBrush
             return;
         }
 
+        // 快取頁面離開視覺樹期間切換主題時，重新掛回不保證觸發 ActualThemeChanged，故每次載入都重套
         element.ActualThemeChanged += OnActualThemeChanged;
-        if (!element.IsLoaded)
-        {
-            // 載入前 ActualTheme 尚未確定，載入後補套一次
-            element.Loaded += OnElementLoaded;
-        }
-
+        element.Loaded += OnElementLoaded;
         Apply(element);
     }
 
     private static void OnActualThemeChanged(FrameworkElement sender, object args) => Apply(sender);
 
-    private static void OnElementLoaded(object sender, RoutedEventArgs e)
-    {
-        var element = (FrameworkElement)sender;
-        element.Loaded -= OnElementLoaded;
-        Apply(element);
-    }
+    private static void OnElementLoaded(object sender, RoutedEventArgs e) => Apply((FrameworkElement)sender);
 
     private static DependencyProperty? GetForegroundProperty(FrameworkElement element) => element switch
     {

@@ -86,7 +86,15 @@ public static class ListViewBehaviors
 
     private static void OnListViewLoaded(object sender, RoutedEventArgs e) => AttachOutsidePress((ListView)sender);
 
-    private static void OnListViewUnloaded(object sender, RoutedEventArgs e) => DetachOutsidePress((ListView)sender);
+    /// <summary>晚到的 Unloaded（元素仍在樹上）不解除，避免掛鉤永久失效</summary>
+    private static void OnListViewUnloaded(object sender, RoutedEventArgs e)
+    {
+        var listView = (ListView)sender;
+        if (!listView.IsLoaded)
+        {
+            DetachOutsidePress(listView);
+        }
+    }
 
     private static void AttachOutsidePress(ListView listView)
     {

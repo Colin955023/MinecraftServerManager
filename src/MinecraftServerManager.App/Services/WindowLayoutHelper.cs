@@ -71,8 +71,20 @@ public static partial class WindowLayoutHelper
     }
 
     /// <summary>取得全部螢幕的外框、工作區與 DPI 縮放比例</summary>
-    public static List<DisplayMetrics> GetDisplays() =>
-        DisplayArea.FindAll().Select(static area => new DisplayMetrics(area.OuterBounds, area.WorkArea, GetScale(area))).ToList();
+    public static List<DisplayMetrics> GetDisplays()
+    {
+        // 裁剪發布下 IVectorView<DisplayArea> 的列舉介面無法建立（InvalidCastException），只能以索引存取
+        var areas = DisplayArea.FindAll();
+        int count = areas.Count;
+        var displays = new List<DisplayMetrics>(count);
+        for (int i = 0; i < count; i++)
+        {
+            var area = areas[i];
+            displays.Add(new DisplayMetrics(area.OuterBounds, area.WorkArea, GetScale(area)));
+        }
+
+        return displays;
+    }
 
     /// <summary>判斷視窗標題列是否有足夠範圍位於工作區內</summary>
     public static bool IsTitleBarVisible(RectInt32 window, RectInt32 workArea, double scale)

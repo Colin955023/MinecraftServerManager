@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
@@ -14,9 +15,18 @@ public sealed partial class MainWindow
         int widthDip = saved.Width > 0 ? saved.Width : DefaultWidthDip;
         int heightDip = saved.Height > 0 ? saved.Height : DefaultHeightDip;
 
-        var target = saved.X is int x && saved.Y is int y
-            ? WindowLayoutHelper.ResolveRestoreBounds(WindowLayoutHelper.GetDisplays(), x, y, widthDip, heightDip)
-            : null;
+        (RectInt32 Bounds, double Scale)? target = null;
+        if (saved.X is int x && saved.Y is int y)
+        {
+            try
+            {
+                target = WindowLayoutHelper.ResolveRestoreBounds(WindowLayoutHelper.GetDisplays(), x, y, widthDip, heightDip);
+            }
+            catch (Exception ex) when (ex is InvalidCastException or COMException)
+            {
+                Logger.Warning(ex, "列舉螢幕失敗，視窗改置中於主螢幕");
+            }
+        }
 
         if (target is { } restore)
         {

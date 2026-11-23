@@ -25,6 +25,7 @@ public sealed partial class MainWindow
             IsClosable = true,
             IsOpen = true,
         };
+        Controls.InfoBarThemeRefresh.SetIsEnabled(infoBar, true);
 
         // InfoBar 預設背景為半透明，外層以不透明底色（ThemeResource，隨主題切換）承載確保浮於頁面內容上仍清晰可讀
         var host = new Border

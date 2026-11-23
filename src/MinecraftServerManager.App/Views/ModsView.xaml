@@ -47,7 +47,7 @@
           Text="伺服器："
           IconSize="16"
           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-        <ComboBox Grid.Column="1"
+        <controls:WheelPassthroughComboBox Grid.Column="1"
           Margin="0,0,12,0"
           HorizontalAlignment="Stretch"
           ItemsSource="{x:Bind ViewModel.Servers}"
@@ -150,7 +150,7 @@
                 PlaceholderText="搜尋本地模組..."
                 controls:TextBoxShortcuts.FocusOnCtrlF="True"
                 AutomationProperties.Name="搜尋本地模組" />
-              <ComboBox Width="100"
+              <controls:WheelPassthroughComboBox Width="100"
                 Height="32"
                 ItemsSource="{x:Bind ViewModel.Local.LocalFilterOptions}"
                 SelectedItem="{x:Bind ViewModel.Local.SelectedLocalFilter, Mode=TwoWay}"
@@ -344,7 +344,7 @@
             VerticalAlignment="Center"
             Text="平台："
             Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-          <ComboBox Grid.Column="2"
+          <controls:WheelPassthroughComboBox Grid.Column="2"
             Width="120"
             Height="32"
             Margin="0,0,10,0"
@@ -356,7 +356,7 @@
             VerticalAlignment="Center"
             Text="排序："
             Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-          <ComboBox Grid.Column="4"
+          <controls:WheelPassthroughComboBox Grid.Column="4"
             Width="110"
             Height="32"
             Margin="0,0,10,0"

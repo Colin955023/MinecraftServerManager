@@ -262,12 +262,14 @@ public static partial class SafeFileSystem
         }
     }
 
+    /// <summary>於背景執行緒原子寫入；失敗時擲出 <see cref="IOException"/></summary>
     public static async Task WriteAllBytesAsync(
         string filePath,
         ReadOnlyMemory<byte> content,
         CancellationToken cancellationToken = default)
     {
-        if (!await AtomicFileWriter.WriteBytesAsync(filePath, content, cancellationToken: cancellationToken).ConfigureAwait(false))
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!await Task.Run(() => AtomicFileWriter.WriteBytes(filePath, content.Span), cancellationToken).ConfigureAwait(false))
         {
             throw new IOException($"無法安全寫入檔案：{filePath}");
         }

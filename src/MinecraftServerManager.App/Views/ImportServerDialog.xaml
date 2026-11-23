@@ -72,6 +72,7 @@
 
     <!-- 錯誤狀態提示 -->
     <InfoBar Severity="Error"
+      controls:InfoBarThemeRefresh.IsEnabled="True"
       IsClosable="False"
       IsOpen="{x:Bind controls:UiBindHelpers.HasText(ViewModel.StatusMessage), Mode=OneWay}"
       Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}" />

@@ -63,22 +63,4 @@ public sealed partial class PlayerManagementWindow : Window
         }
     }
 
-    private void OnTabSelectionChanged(object sender, Microsoft.UI.Xaml.Controls.SelectionChangedEventArgs e)
-    {
-        if (sender is Microsoft.UI.Xaml.Controls.TabView tabView && Content is FrameworkElement root)
-        {
-            switch (tabView.SelectedIndex)
-            {
-                case 1:
-                    root.FindName("WhitelistTabContent");
-                    break;
-                case 2:
-                    root.FindName("BannedPlayersTabContent");
-                    break;
-                case 3:
-                    root.FindName("BannedIpsTabContent");
-                    break;
-            }
-        }
-    }
 }

@@ -24,7 +24,7 @@
       </DataTemplate>
       <DataTemplate x:Key="PropertyOptionsEditorTemplate"
         x:DataType="vm:PropertyEditItem">
-        <ComboBox HorizontalAlignment="Stretch"
+        <controls:WheelPassthroughComboBox HorizontalAlignment="Stretch"
           VerticalAlignment="Center"
           ItemsSource="{x:Bind Options}"
           SelectedItem="{x:Bind Value, Mode=TwoWay}"
@@ -65,7 +65,7 @@
         AutomationProperties.Name="搜尋屬性" />
 
       <!-- 分類下拉選單 -->
-      <ComboBox Grid.Column="1"
+      <controls:WheelPassthroughComboBox Grid.Column="1"
         HorizontalAlignment="Stretch"
         ItemsSource="{x:Bind ViewModel.Categories}"
         SelectedItem="{x:Bind ViewModel.SelectedCategory, Mode=TwoWay}"
@@ -142,6 +142,7 @@
 
     <!-- 狀態訊息 -->
     <InfoBar Grid.Row="3"
+      controls:InfoBarThemeRefresh.IsEnabled="True"
       IsClosable="False"
       Severity="{x:Bind controls:UiBindHelpers.ErrorSeverity(ViewModel.IsStatusError), Mode=OneWay}"
       IsOpen="{x:Bind controls:UiBindHelpers.HasText(ViewModel.StatusMessage), Mode=OneWay}"

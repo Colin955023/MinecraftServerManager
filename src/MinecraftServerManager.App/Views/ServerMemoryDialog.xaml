@@ -49,6 +49,7 @@
 
     <!-- 錯誤與警示訊息 -->
     <InfoBar Severity="Error"
+      controls:InfoBarThemeRefresh.IsEnabled="True"
       IsClosable="False"
       IsOpen="{x:Bind controls:UiBindHelpers.HasText(ViewModel.ErrorMessage), Mode=OneWay}"
       Message="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}" />

@@ -3,7 +3,6 @@
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:controls="using:Microsoft.UI.Xaml.Controls"
-  xmlns:customControls="using:MinecraftServerManager.App.Controls"
   xmlns:resources="using:MinecraftServerManager.App.Resources">
   <Application.Resources>
     <ResourceDictionary>
@@ -217,13 +216,6 @@
           Value="{ThemeResource DangerBrush}" />
         <Setter Property="BorderBrush"
           Value="{ThemeResource DangerBrush}" />
-      </Style>
-
-      <!-- 全域 ComboBox 預設啟用滾輪選項切換 -->
-      <Style TargetType="ComboBox">
-        <Setter
-          Property="customControls:ComboBoxScrollHelper.EnableWheelScroll"
-          Value="True" />
       </Style>
 
       <!-- 共用卡片外框：卡片底色、邊框色、1px 邊框、圓角與標題內距 -->

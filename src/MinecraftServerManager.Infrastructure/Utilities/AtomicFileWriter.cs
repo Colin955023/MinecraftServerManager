@@ -71,56 +71,6 @@ public static class AtomicFileWriter
         }
     }
 
-    public static async Task<bool> WriteBytesAsync(
-        string filePath,
-        ReadOnlyMemory<byte> content,
-        bool skipIfUnchanged = false,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (TryResolveTarget(filePath) is not { } target)
-        {
-            return false;
-        }
-
-        var gate = GetGateForPath(target);
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        string? temporary = null;
-        bool committed = false;
-        try
-        {
-            if (skipIfUnchanged && IsUnchanged(target, content.Span))
-            {
-                return true;
-            }
-
-            temporary = CreateTempSiblingPath(target);
-            using (SafeFileHandle handle = File.OpenHandle(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, FileOptions.Asynchronous, content.Length))
-            {
-                await RandomAccess.WriteAsync(handle, content, fileOffset: 0, cancellationToken).ConfigureAwait(false);
-                RandomAccess.FlushToDisk(handle);
-            }
-
-            CommitReplace(temporary, target);
-            committed = true;
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Logger.Warning(ex, "原子寫入失敗: {Path}", target);
-            return false;
-        }
-        finally
-        {
-            if (!committed)
-            {
-                SafeFileSystem.TryDeleteFile(temporary);
-            }
-
-            gate.Release();
-        }
-    }
-
     public static bool WriteText(string filePath, string content, bool skipIfUnchanged = false) => WriteBytes(filePath, System.Text.Encoding.UTF8.GetBytes(content), skipIfUnchanged);
 
     public static bool WriteJson<T>(string filePath, T? value, bool indented = true, bool skipIfUnchanged = false)
