@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Collections.Frozen;
 using System.Text;
 using MinecraftServerManager.Core.Utilities;
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 
@@ -14,16 +15,32 @@ public static class SafeScriptValidator
 
     private static readonly SearchValues<char> StrictForbiddenBatchChars = SearchValues.Create("&|<>^\0");
 
-    private static readonly FrozenSet<string> ValidJavaExecutables = new[]
-    {
-        "java",
+    // cmd.exe 解析命令名稱時的分隔符；未加引號的執行檔路徑出現非空白分隔符時解析結果與本檢驗不一致
+    private static readonly SearchValues<char> CmdSeparators = SearchValues.Create(" \t,;=");
+
+    private const string ScriptDirectoryToken = "%~dp0";
+    private const long MaxArgumentFileBytes = 1024 * 1024;
+
+    private static readonly FrozenSet<string> ValidJavaExecutables = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        ServerDefaults.DefaultJavaCommand,
         "java.exe",
         "javaw",
-        "javaw.exe"
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+        "javaw.exe");
 
     /// <summary>純檔名是否為允許的 Java 執行檔名稱（java／javaw，含 .exe）</summary>
     internal static bool IsJavaExecutableName(string fileName) => ValidJavaExecutables.Contains(fileName);
+
+    /// <summary>Java 路徑須為實體 java 執行檔；純檔名只接受 java 系列名稱，不符合時拋出 <see cref="InvalidOperationException"/></summary>
+    internal static void ValidateJavaPath(string javaPath)
+    {
+        string trimmedJava = javaPath.Trim();
+        bool isBareName = Path.GetFileName(trimmedJava) == trimmedJava;
+        if (isBareName ? !IsJavaExecutableName(trimmedJava) : !IsSafeJavaExecutable(trimmedJava))
+        {
+            throw new InvalidOperationException($"指定的 Java 執行檔未通過安全性檢驗：{javaPath}");
+        }
+    }
 
     internal static bool IsSafeJavaExecutable(string javaPath)
     {
@@ -41,14 +58,13 @@ public static class SafeScriptValidator
                 return false;
             }
 
-            if (SafeFileSystem.IsReparsePoint(fullPath))
+            if (HasReparsePointAlongPath(fullPath))
             {
                 Logger.Warning("拒絕使用符號連結或 Reparse Point 之 Java 執行檔: {Path}", fullPath);
                 return false;
             }
 
-            string fileName = Path.GetFileName(fullPath);
-            return ValidJavaExecutables.Contains(fileName);
+            return IsJavaExecutableName(Path.GetFileName(fullPath));
         }
         catch (Exception ex)
         {
@@ -64,19 +80,26 @@ public static class SafeScriptValidator
         ArgumentNullException.ThrowIfNull(arguments);
 
         string stableServerDir = SafeFileSystem.ResolveStableDirectory(serverDirectory);
+        return ValidateLaunchReferences(stableServerDir, arguments, requireExists: true);
+    }
 
+    /// <summary>檢查 <c>-jar</c> 與 <c>@argfile</c> 引用位於伺服器目錄內，並掃描引數檔內容；<paramref name="requireExists"/> 為 false 時允許引用檔尚不存在</summary>
+    private static bool ValidateLaunchReferences(string stableServerDir, IReadOnlyList<string> arguments, bool requireExists)
+    {
         for (int i = 0; i < arguments.Count; i++)
         {
             string arg = arguments[i];
             string? targetRelativePath = null;
+            bool isArgumentFile = false;
 
             if (arg.StartsWith('@') && arg.Length > 1)
             {
                 targetRelativePath = arg[1..].Trim('"');
+                isArgumentFile = true;
             }
             else if (string.Equals(arg, "-jar", StringComparison.OrdinalIgnoreCase) && i + 1 < arguments.Count)
             {
-                targetRelativePath = arguments[i + 1].Trim('"');
+                targetRelativePath = arguments[++i].Trim('"');
             }
 
             if (string.IsNullOrWhiteSpace(targetRelativePath))
@@ -84,8 +107,22 @@ public static class SafeScriptValidator
                 continue;
             }
 
-            // 若為絕對路徑或包含相對路徑，確認其位於伺服器目錄內
-            string targetFullPath = Path.GetFullPath(targetRelativePath, stableServerDir);
+            // %~dp0 展開為腳本所在目錄（含結尾反斜線），即伺服器目錄
+            if (targetRelativePath.StartsWith(ScriptDirectoryToken, StringComparison.OrdinalIgnoreCase))
+            {
+                targetRelativePath = targetRelativePath[ScriptDirectoryToken.Length..];
+            }
+
+            string targetFullPath;
+            try
+            {
+                targetFullPath = Path.GetFullPath(targetRelativePath, stableServerDir);
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                Logger.Warning(ex, "啟動參數引用之檔案路徑無效: {Target}", targetRelativePath);
+                return false;
+            }
 
             if (!SafeFileSystem.IsPathWithin(stableServerDir, targetFullPath, strict: false))
             {
@@ -101,12 +138,54 @@ public static class SafeScriptValidator
 
             if (!SafeFileSystem.FileExists(targetFullPath))
             {
-                Logger.Warning("啟動參數引用之檔案不存在: {Target}", targetFullPath);
+                if (requireExists)
+                {
+                    Logger.Warning("啟動參數引用之檔案不存在: {Target}", targetFullPath);
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (isArgumentFile && !IsArgumentFileSafe(targetFullPath))
+            {
                 return false;
             }
         }
 
         return true;
+    }
+
+    /// <summary>java 會展開引數檔內容為參數，須同樣排除可執行外部命令的選項</summary>
+    private static bool IsArgumentFileSafe(string argumentFilePath)
+    {
+        try
+        {
+            foreach (string rawLine in SafeFileSystem.ReadAllLines(argumentFilePath, Encoding.UTF8, MaxArgumentFileBytes))
+            {
+                ReadOnlySpan<char> line = rawLine.AsSpan().Trim();
+                if (line.IsEmpty || line[0] == '#')
+                {
+                    continue;
+                }
+
+                foreach (string token in JvmOptionPolicy.NormalizeJvmArgs(line.ToString()))
+                {
+                    if (JvmOptionPolicy.IsCommandExecutionOption(token))
+                    {
+                        Logger.Warning("引數檔包含不允許的 JVM 選項: {Path}: {Option}", argumentFilePath, token);
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or NotSupportedException)
+        {
+            Logger.Warning(ex, "讀取引數檔失敗: {Path}", argumentFilePath);
+            return false;
+        }
     }
 
     /// <summary>批次腳本內容是否安全合規（防範批次注入、路徑超出邊界、任意命令執行）</summary>
@@ -116,7 +195,16 @@ public static class SafeScriptValidator
         ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
 
         string stableServerDir = SafeFileSystem.ResolveStableDirectory(serverDirectory);
-        string fullScriptPath = Path.GetFullPath(scriptPath);
+        string fullScriptPath;
+        try
+        {
+            fullScriptPath = Path.GetFullPath(scriptPath, stableServerDir);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            Logger.Warning(ex, "啟動腳本路徑無效: {ScriptPath}", scriptPath);
+            return false;
+        }
 
         if (!SafeFileSystem.IsPathWithin(stableServerDir, fullScriptPath, strict: false))
         {
@@ -132,7 +220,7 @@ public static class SafeScriptValidator
 
         try
         {
-            string[] lines = SafeFileSystem.ReadAllLines(fullScriptPath, Encoding.UTF8);
+            string[] lines = SafeFileSystem.ReadAllLines(fullScriptPath, Encoding.UTF8, maxBytes: MaxArgumentFileBytes);
             foreach (string rawLine in lines)
             {
                 string line = rawLine.Trim();
@@ -176,7 +264,7 @@ public static class SafeScriptValidator
                 }
 
                 // 5. 結構化指令格式白名單檢驗
-                if (!IsAllowedScriptCommand(lineToCheck))
+                if (!IsAllowedScriptCommand(lineToCheck, stableServerDir))
                 {
                     Logger.Warning("啟動腳本包含未受信任之指令: {Line}", line);
                     return false;
@@ -185,9 +273,9 @@ public static class SafeScriptValidator
 
             return true;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or NotSupportedException)
         {
-            Logger.Warning(ex, "讀取啟動腳本失敗");
+            Logger.Warning(ex, "讀取啟動腳本失敗: {ScriptPath}", fullScriptPath);
             return false;
         }
     }
@@ -195,7 +283,7 @@ public static class SafeScriptValidator
     private static bool IsCommandWord(string line, string word) =>
         line.StartsWith(word, StringComparison.OrdinalIgnoreCase) && (line.Length == word.Length || char.IsWhiteSpace(line[word.Length]));
 
-    private static bool IsAllowedScriptCommand(string line)
+    private static bool IsAllowedScriptCommand(string line, string stableServerDir)
     {
         // 註解行
         if (line.StartsWith("::", StringComparison.Ordinal) ||
@@ -248,37 +336,52 @@ public static class SafeScriptValidator
         }
 
         // Java 啟動指令只接受絕對路徑
-        if (TryExtractLaunchExecutable(line, out string exePath))
+        if (TryExtractLaunchExecutable(line, out string exePath, out string arguments)
+            && Path.IsPathFullyQualified(exePath))
         {
-            if (Path.IsPathFullyQualified(exePath))
+            try
             {
-                try
-                {
-                    if (SafeFileSystem.FileExists(exePath) && SafeFileSystem.IsReparsePoint(exePath))
-                    {
-                        return false;
-                    }
-
-                    string fileName = Path.GetFileName(exePath);
-                    if (ValidJavaExecutables.Contains(fileName))
-                    {
-                        // 仍須排除可執行外部命令的 JVM 選項
-                        return !JvmOptionPolicy.ContainsCommandExecutionOption(line);
-                    }
-                }
-                catch (ArgumentException)
+                // FileExists 會拒絕 reparse point，故直接檢查屬性；不存在的路徑回傳 false
+                if (HasReparsePointAlongPath(exePath) || !ValidJavaExecutables.Contains(Path.GetFileName(exePath)))
                 {
                     return false;
                 }
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+
+            // 排除可執行外部命令的 JVM 選項（剝除引號後比對），並驗證 -jar／@argfile 位於伺服器目錄內
+            return !JvmOptionPolicy.ContainsCommandExecutionOption(arguments)
+                && ValidateLaunchReferences(stableServerDir, JvmOptionPolicy.NormalizeJvmArgs(arguments), requireExists: false);
+        }
+
+        return false;
+    }
+
+    private static bool HasReparsePointAlongPath(string path)
+    {
+        if (SafeFileSystem.IsReparsePoint(path))
+        {
+            return true;
+        }
+
+        for (string? parent = Path.GetDirectoryName(path); !string.IsNullOrEmpty(parent); parent = Path.GetDirectoryName(parent))
+        {
+            if (SafeFileSystem.IsReparsePoint(parent))
+            {
+                return true;
             }
         }
 
         return false;
     }
 
-    private static bool TryExtractLaunchExecutable(string line, out string exePath)
+    private static bool TryExtractLaunchExecutable(string line, out string exePath, out string arguments)
     {
         exePath = string.Empty;
+        arguments = string.Empty;
         ReadOnlySpan<char> span = line.AsSpan().Trim();
         if (span.IsEmpty)
         {
@@ -310,12 +413,20 @@ public static class SafeScriptValidator
             }
 
             exePath = span[1..endQuotePos].Trim().ToString();
+            arguments = span[(endQuotePos + 1)..].Trim().ToString();
             return !string.IsNullOrWhiteSpace(exePath);
         }
 
-        int spaceIndex = span.IndexOf(' ');
-        ReadOnlySpan<char> rawTarget = spaceIndex >= 0 ? span[..spaceIndex] : span;
+        int separatorIndex = span.IndexOfAny(CmdSeparators);
+        if (separatorIndex >= 0 && span[separatorIndex] is not (' ' or '\t'))
+        {
+            // 未加引號之 , ; = 會被 cmd.exe 視為命令名稱結尾
+            return false;
+        }
+
+        ReadOnlySpan<char> rawTarget = separatorIndex >= 0 ? span[..separatorIndex] : span;
         exePath = rawTarget.Trim().ToString();
+        arguments = separatorIndex >= 0 ? span[separatorIndex..].Trim().ToString() : string.Empty;
         return !string.IsNullOrWhiteSpace(exePath);
     }
 

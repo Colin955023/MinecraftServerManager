@@ -48,25 +48,19 @@ public sealed partial class ServerBackupViewModel : ViewModelBase
     private bool HasSelectedServer() => _list.HasSelectedServer;
 
     [RelayCommand(CanExecute = nameof(HasSelectedServer))]
-    public async Task BackupServer()
+    public Task BackupServerAsync() => _list.RunForSelectedServerAsync(async selected =>
     {
-        if (_list.SelectedServer is not { } selected)
-        {
-            return;
-        }
-
         string serverName = selected.Name;
 
-        if (_runtimeHost.IsRunning(serverName))
+        if (!_ui.EnsureServerStopped(_runtimeHost, serverName, "備份", "無法備份"))
         {
-            _ui.ShowNotification("伺服器正在執行中，請先停止伺服器後再備份。", "無法備份", NotificationType.Warning);
             return;
         }
 
         if (string.IsNullOrWhiteSpace(selected.BackupPath))
         {
             _ui.ShowNotification("伺服器尚未設定外部備份資料夾，請先設定儲存位置", "請設定備份路徑", NotificationType.Warning);
-            await EditBackupPath();
+            await EditBackupPathAsync();
             selected = _list.SelectedServer ?? selected;
             if (string.IsNullOrWhiteSpace(selected.BackupPath))
             {
@@ -75,12 +69,12 @@ public sealed partial class ServerBackupViewModel : ViewModelBase
         }
 
         string destinationDir = selected.BackupPath;
-        if (_backupService.ValidateBackupDestination(destinationDir) is { } boundaryViolation)
+        if (await _backupService.ValidateBackupDestinationAsync(destinationDir) is { } boundaryViolation)
         {
             _ui.ShowNotification(boundaryViolation, "備份路徑無效，請重新設定", NotificationType.Warning);
-            await EditBackupPath();
+            await EditBackupPathAsync();
             selected = _list.SelectedServer ?? selected;
-            if (string.IsNullOrWhiteSpace(selected.BackupPath) || _backupService.ValidateBackupDestination(selected.BackupPath) is not null)
+            if (string.IsNullOrWhiteSpace(selected.BackupPath) || await _backupService.ValidateBackupDestinationAsync(selected.BackupPath) is not null)
             {
                 return;
             }
@@ -91,7 +85,7 @@ public sealed partial class ServerBackupViewModel : ViewModelBase
         string destinationPath;
         try
         {
-            destinationPath = _backupService.PrepareBackupFilePath(serverName, destinationDir);
+            destinationPath = await _backupService.PrepareBackupFilePathAsync(serverName, destinationDir);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -108,33 +102,23 @@ public sealed partial class ServerBackupViewModel : ViewModelBase
                 backup = await _backupService.CreateBackupAsync(
                     serverName,
                     destinationPath: destinationPath,
-                    progress: progressDialog.Progress).ConfigureAwait(true);
+                    progress: progressDialog.Progress);
             }
 
-            Logger.Information("伺服器「{Name}」備份建立成功: {File}", serverName, backup.FullPath);
+            Logger.Information("伺服器「{Name}」備份建立成功：{File}", serverName, backup.FullPath);
             _ui.Notify($"已成功建立伺服器「{serverName}」備份：{backup.FileName}", NotificationType.Success);
-            await _list.RefreshServers();
+            await _list.RefreshServersAsync();
         }
         catch (OperationCanceledException)
         {
             Logger.Information("使用者取消了伺服器「{Name}」的備份操作", serverName);
             _ui.Notify($"已取消備份「{serverName}」", NotificationType.Info);
         }
-        catch (Exception ex)
-        {
-            Logger.Error(ex, "備份伺服器失敗");
-            _ui.Notify($"備份伺服器失敗：{ex.Message}", NotificationType.Error);
-        }
-    }
+    }, "備份伺服器失敗", Logger);
 
     [RelayCommand(CanExecute = nameof(HasSelectedServer))]
-    public async Task RestoreBackup()
+    public Task RestoreBackupAsync() => _list.RunForSelectedServerAsync(async selected =>
     {
-        if (_list.SelectedServer is not { } selected)
-        {
-            return;
-        }
-
         string serverName = selected.Name;
 
         var vm = new RestoreBackupViewModel(
@@ -147,80 +131,66 @@ public sealed partial class ServerBackupViewModel : ViewModelBase
         if (await _ui.ShowRestoreBackupAsync(vm) == true)
         {
             Logger.Information("伺服器「{Name}」備份已成功還原", serverName);
-            await _list.RefreshAndSelectServerAsync(serverName).ConfigureAwait(true);
+            await _list.RefreshAndSelectServerAsync(serverName);
         }
-    }
+    }, "還原備份失敗", Logger);
 
     [RelayCommand(CanExecute = nameof(HasSelectedServer))]
-    public async Task OpenBackupFolder()
+    public Task OpenBackupFolderAsync() => _list.RunForSelectedServerAsync(async selected =>
     {
-        if (_list.SelectedServer is not { } selected)
-        {
-            return;
-        }
-
         string? backupFolder = selected.BackupPath;
-        if (string.IsNullOrWhiteSpace(backupFolder) || !_fileSystem.DirectoryExists(backupFolder))
+        if (string.IsNullOrWhiteSpace(backupFolder) || !await _fileSystem.DirectoryExistsAsync(backupFolder))
         {
-            if (await _ui.ConfirmAsync(
-                $"伺服器「{selected.Name}」尚未設定自訂備份路徑。\n\n是否要立即設定外部備份資料夾？",
-                "尚未設定備份資料夾"))
+            bool isConfigured = !string.IsNullOrWhiteSpace(backupFolder);
+            string message = isConfigured
+                ? $"伺服器「{selected.Name}」的備份資料夾不存在：\n{backupFolder}\n\n是否要重新設定外部備份資料夾？"
+                : $"伺服器「{selected.Name}」尚未設定自訂備份路徑。\n\n是否要立即設定外部備份資料夾？";
+            if (await _ui.ConfirmAsync(message, isConfigured ? "備份資料夾不存在" : "尚未設定備份資料夾"))
             {
-                await EditBackupPath();
+                await EditBackupPathAsync();
             }
 
             return;
         }
 
-        if (!_launcher.OpenFolder(backupFolder))
-        {
-            _ui.Notify($"無法開啟備份資料夾：{backupFolder}", NotificationType.Warning);
-        }
-    }
+        _ui.OpenFolderOrWarn(_launcher, backupFolder);
+    }, "開啟備份資料夾失敗", Logger);
 
     [RelayCommand(CanExecute = nameof(HasSelectedServer))]
-    public async Task EditBackupPath()
-    {
-        if (_list.SelectedServer is not { } selected)
-        {
-            return;
-        }
+    public Task EditBackupPathAsync() => _list.RunForSelectedServerAsync(
+        selected => EditBackupPathCoreAsync(selected.Name),
+        "更新備份資料夾路徑失敗",
+        Logger);
 
-        var config = await _serverManager.GetServerAsync(selected.Name);
-        if (config is null)
+    private async Task EditBackupPathCoreAsync(string serverName)
+    {
+        if (await _ui.GetServerOrWarnAsync(_serverManager, serverName) is not { } config)
         {
             return;
         }
 
         while (true)
         {
-            string? initialFolder = _fileSystem.DirectoryExists(config.BackupPath) ? config.BackupPath : null;
-            string? folder = await _ui.PickFolderAsync($"選擇伺服器「{selected.Name}」的外部備份資料夾", initialFolder);
+            string? initialFolder = await _fileSystem.DirectoryExistsAsync(config.BackupPath) ? config.BackupPath : null;
+            string? folder = await _ui.PickFolderAsync($"選擇伺服器「{serverName}」的外部備份資料夾", initialFolder);
             if (string.IsNullOrWhiteSpace(folder))
             {
                 return;
             }
 
             string chosen = folder.Trim();
-            if (_backupService.ValidateBackupDestination(chosen) is { } invalidReason)
+            if (await _backupService.ValidateBackupDestinationAsync(chosen) is { } invalidReason)
             {
                 _ui.ShowNotification(invalidReason, "備份路徑無效，請重新選擇", NotificationType.Warning);
                 continue;
             }
 
             var updated = config.WithBackupPath(chosen);
-
-            var res = await _serverManager.UpdateServerAsync(updated);
-            if (res.Success)
-            {
-                _ui.Notify($"已更新「{config.Name.Value}」備份資料夾路徑為：{chosen}", NotificationType.Success);
-                await _list.RefreshAndSelectServerAsync(config.Name.Value);
-            }
-            else
-            {
-                _ui.Notify($"更新備份資料夾路徑失敗：{res.Message}", NotificationType.Error);
-            }
-
+            await _list.UpdateSelectedServerConfigAsync(
+                _ => updated,
+                $"已更新「{config.Name.Value}」備份資料夾路徑為：{chosen}",
+                "更新備份資料夾路徑失敗",
+                Logger);
             return;
         }
     }

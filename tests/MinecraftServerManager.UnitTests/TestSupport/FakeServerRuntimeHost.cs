@@ -2,7 +2,6 @@ using MinecraftServerManager.Core.Ports;
 
 namespace MinecraftServerManager.UnitTests.TestSupport;
 
-/// <summary>測試用多伺服器執行階段管理</summary>
 internal sealed class FakeServerRuntimeHost : IServerRuntimeHost
 {
     private readonly Dictionary<string, IServerRuntime> _runtimes = new(StringComparer.OrdinalIgnoreCase);
@@ -34,7 +33,8 @@ internal sealed class FakeServerRuntimeHost : IServerRuntimeHost
 
     public IReadOnlyList<string> GetRunningServerNames() => [.. _runtimes.Where(static p => p.Value.IsRunning).Select(static p => p.Key)];
 
-    public void RaiseStateChanged(string name) => ServerStateChanged?.Invoke(name);
+    public ValueTask<bool> ReleaseIdleRuntimeAsync(string serverName) =>
+        ValueTask.FromResult(!IsRunning(serverName) && _runtimes.Remove(serverName));
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

@@ -1,28 +1,60 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text;
 using Microsoft.Extensions.Logging;
-using MinecraftServerManager.Infrastructure.FileSystem;
-
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Logging;
 
 /// <summary>依設定的單檔上限輪替、保留有限份數的檔案記錄器提供者</summary>
+/// <remarks>
+/// 檔案操作直接使用 BCL（A1 白名單），不經 <c>SafeFileSystem</c>，避免記錄器在輪替中再度記錄而遞迴。
+/// Warning 以上立即排清，其餘每秒批次排清。
+/// </remarks>
 public sealed class RotatingFileLoggerProvider : ILoggerProvider
 {
-    private readonly RotatingFileLoggerOptions _options;
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+    private static readonly TimeSpan FlushInterval = TimeSpan.FromSeconds(1);
+    private static readonly int NewLineByteCount = Utf8NoBom.GetByteCount(Environment.NewLine);
+    private static readonly EnumerationOptions LogEnumeration = new()
+    {
+        AttributesToSkip = FileAttributes.ReparsePoint,
+        IgnoreInaccessible = true,
+    };
+
+    private readonly string _logDirectory;
+    private readonly long _maxFileBytes;
+    private readonly int _maxArchiveFiles;
+    private readonly LogLevel _minimumLevel;
+    private readonly int _processId;
     private readonly Lock _syncRoot = new();
     private readonly ConcurrentDictionary<string, RotatingFileLogger> _loggers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Timer _flushTimer;
     private StreamWriter? _writer;
     private string _currentFilePath = string.Empty;
     private long _currentFileBytes;
-    private bool _isDisposed;
+    private long _nextRolloverThresholdBytes;
+    private const long RolloverRetryBackoffBytes = 512L * 1024;
+    private bool _pendingFlush;
+    private bool _isWriting;
+    private volatile bool _isDisposed;
 
     public RotatingFileLoggerProvider(RotatingFileLoggerOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        _options = options;
+        ArgumentException.ThrowIfNullOrWhiteSpace(options.LogDirectory);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.MaxFileBytes);
+        ArgumentOutOfRangeException.ThrowIfLessThan(options.MaxArchiveFiles, 1);
+
+        _logDirectory = options.LogDirectory;
+        _maxFileBytes = options.MaxFileBytes;
+        _nextRolloverThresholdBytes = options.MaxFileBytes;
+        _maxArchiveFiles = options.MaxArchiveFiles;
+        _minimumLevel = options.MinimumLevel;
+        _processId = options.ProcessId;
+
         InitializeWriter();
+        _flushTimer = new Timer(static state => ((RotatingFileLoggerProvider)state!).FlushPending(), this, FlushInterval, FlushInterval);
     }
 
     /// <summary>目前寫入中的記錄檔完整路徑；初始化失敗時為空字串</summary>
@@ -53,23 +85,13 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider
             }
 
             _isDisposed = true;
-            try
-            {
-                _writer?.Flush();
-                _writer?.Dispose();
-            }
-            catch (Exception)
-            {
-                // 日誌器無法記錄自身的關閉失敗
-            }
-            finally
-            {
-                _writer = null;
-            }
+            CloseWriter();
         }
+
+        _flushTimer.Dispose();
     }
 
-    internal bool IsEnabled(LogLevel logLevel) => !_isDisposed && logLevel != LogLevel.None && logLevel >= _options.MinimumLevel;
+    internal bool IsEnabled(LogLevel logLevel) => !_isDisposed && logLevel != LogLevel.None && logLevel >= _minimumLevel;
 
     internal void WriteLog(string categoryName, LogLevel logLevel, string message, Exception? exception)
     {
@@ -79,18 +101,16 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider
         }
 
         string component = string.IsNullOrWhiteSpace(categoryName) ? "Global" : categoryName;
-        string timestamp = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
-        string levelString = FormatLogLevel(logLevel);
-        string maskedMessage = LogDataMasker.Mask(message);
+        string timestamp = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
         var sb = new StringBuilder(128);
         sb.Append(timestamp)
           .Append(" | ")
-          .Append(levelString)
+          .Append(FormatLogLevel(logLevel))
           .Append(" | ")
           .Append(component)
           .Append(" | ")
-          .Append(maskedMessage);
+          .Append(LogDataMasker.Mask(message));
 
         if (exception is not null)
         {
@@ -102,11 +122,13 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider
 
         lock (_syncRoot)
         {
-            if (_isDisposed)
+            // 重入防護：輪替或寫入過程中的同執行緒記錄直接捨棄，避免遞迴
+            if (_isDisposed || _isWriting)
             {
                 return;
             }
 
+            _isWriting = true;
             try
             {
                 EnsureWriter();
@@ -116,9 +138,19 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider
                 }
 
                 _writer.WriteLine(logLine);
-                _currentFileBytes = _writer.BaseStream.Position;
+                _currentFileBytes += Utf8NoBom.GetByteCount(logLine) + NewLineByteCount;
 
-                if (_currentFileBytes >= _options.MaxFileBytes)
+                if (logLevel >= LogLevel.Warning)
+                {
+                    _writer.Flush();
+                    _pendingFlush = false;
+                }
+                else
+                {
+                    _pendingFlush = true;
+                }
+
+                if (_currentFileBytes >= _nextRolloverThresholdBytes)
                 {
                     DoRollover();
                 }
@@ -127,6 +159,38 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider
             {
                 // 日誌器無法記錄自身的寫入失敗
             }
+            finally
+            {
+                _isWriting = false;
+            }
+        }
+    }
+
+    /// <summary>刪除最舊的記錄檔，只保留最新 <paramref name="keep"/> 份</summary>
+    internal static void PruneLogs(string logDir, int keep)
+    {
+        try
+        {
+            var directory = new DirectoryInfo(logDir);
+            if (!directory.Exists)
+            {
+                return;
+            }
+
+            var files = directory.EnumerateFiles("*", LogEnumeration)
+                .Where(static file => IsLogFileName(file.Name))
+                .OrderBy(static file => file.LastWriteTimeUtc)
+                .ToList();
+
+            int removeCount = files.Count - Math.Max(0, keep);
+            for (int i = 0; i < removeCount; i++)
+            {
+                TryDelete(files[i].FullName);
+            }
+        }
+        catch (Exception)
+        {
+            // 日誌器無法記錄自身的清理失敗；保留舊檔不影響後續寫入
         }
     }
 
@@ -136,25 +200,12 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider
         {
             try
             {
-                string logDir;
-                try
-                {
-                    logDir = SafeFileSystem.ResolveStableDirectory(_options.LogDirectory, create: true);
-                }
-                catch (Exception)
-                {
-                    string fallbackDir = Path.Combine(RuntimePaths.GetTempDir(), "MinecraftServerManager", "Logs");
-                    SafeFileSystem.CreateDirectory(fallbackDir);
-                    logDir = fallbackDir;
-                }
+                string logDir = ResolveLogDirectory();
+                PruneLogs(logDir, _maxArchiveFiles - 1);
 
-                PruneLogs(logDir, Math.Max(0, _options.MaxArchiveFiles - 1));
-
-                string timestamp = DateTime.Now.ToString("yyyy-MM-dd-HH-mm-ss", System.Globalization.CultureInfo.InvariantCulture);
-                string fileName = $"{timestamp}-p{_options.ProcessId}.log";
-                _currentFilePath = Path.Combine(logDir, fileName);
-
-                OpenWriter();
+                string timestamp = DateTime.Now.ToString("yyyy-MM-dd-HH-mm-ss", CultureInfo.InvariantCulture);
+                _currentFilePath = Path.Combine(logDir, $"{timestamp}-p{_processId}.log");
+                OpenWriter(truncate: false);
             }
             catch (Exception)
             {
@@ -164,101 +215,173 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider
         }
     }
 
-    private void OpenWriter()
+    private string ResolveLogDirectory()
+    {
+        try
+        {
+            return EnsureDirectory(_logDirectory);
+        }
+        catch (Exception)
+        {
+            return EnsureDirectory(Path.Combine(RuntimePaths.GetTempDir(), "MinecraftServerManager", "Logs"));
+        }
+    }
+
+    private static string EnsureDirectory(string path)
+    {
+        var directory = Directory.CreateDirectory(Path.GetFullPath(path));
+        if (directory.Attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            throw new IOException($"記錄目錄不可為重新分析點：{directory.FullName}");
+        }
+
+        return directory.FullName;
+    }
+
+    private void OpenWriter(bool truncate)
     {
         if (string.IsNullOrEmpty(_currentFilePath))
         {
             return;
         }
 
-        _writer?.Dispose();
-        var fileStream = new FileStream(_currentFilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-        _writer = new StreamWriter(fileStream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))
+        CloseWriter();
+        FileStream? fileStream = null;
+        try
         {
-            AutoFlush = true,
-        };
-        _currentFileBytes = SafeFileSystem.GetFileLength(_currentFilePath);
+            fileStream = new FileStream(_currentFilePath, truncate ? FileMode.Create : FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            _currentFileBytes = fileStream.Length;
+            _writer = new StreamWriter(fileStream, Utf8NoBom);
+            fileStream = null;
+        }
+        finally
+        {
+            fileStream?.Dispose();
+        }
+    }
+
+    private void CloseWriter()
+    {
+        try
+        {
+            _writer?.Flush();
+            _writer?.Dispose();
+        }
+        catch (Exception)
+        {
+            // 日誌器無法記錄自身的關閉失敗
+        }
+        finally
+        {
+            _writer = null;
+            _pendingFlush = false;
+        }
     }
 
     private void EnsureWriter()
     {
         if (_writer is null && !string.IsNullOrEmpty(_currentFilePath))
         {
-            OpenWriter();
+            OpenWriter(truncate: false);
+        }
+    }
+
+    private void FlushPending()
+    {
+        lock (_syncRoot)
+        {
+            if (_isDisposed || !_pendingFlush || _writer is null)
+            {
+                return;
+            }
+
+            try
+            {
+                _writer.Flush();
+            }
+            catch (Exception)
+            {
+                // 日誌器無法記錄自身的排清失敗
+            }
+
+            _pendingFlush = false;
         }
     }
 
     private void DoRollover()
     {
+        int maxBackup = _maxArchiveFiles - 1;
         try
         {
-            _writer?.Flush();
-            _writer?.Dispose();
-            _writer = null;
-
-            string logDir = Path.GetDirectoryName(_currentFilePath) ?? _options.LogDirectory;
-            int maxBackup = Math.Max(0, _options.MaxArchiveFiles - 1);
-
-            if (maxBackup > 0)
+            CloseWriter();
+            if (maxBackup == 0)
             {
-                for (int i = maxBackup - 1; i >= 1; i--)
-                {
-                    string source = $"{_currentFilePath}.{i}";
-                    string target = $"{_currentFilePath}.{i + 1}";
-                    if (SafeFileSystem.FileExists(source))
-                    {
-                        SafeFileSystem.MoveWithin(logDir, source, target);
-                    }
-                }
-
-                string rolloverTarget = $"{_currentFilePath}.1";
-                if (SafeFileSystem.FileExists(_currentFilePath))
-                {
-                    SafeFileSystem.MoveWithin(logDir, _currentFilePath, rolloverTarget);
-                }
+                // 只保留 1 份：截斷目前檔案重新寫入
+                OpenWriter(truncate: true);
+                _nextRolloverThresholdBytes = _maxFileBytes;
+                return;
             }
 
-            PruneLogs(logDir, _options.MaxArchiveFiles);
-            OpenWriter();
+            for (int i = maxBackup - 1; i >= 1; i--)
+            {
+                TryMove($"{_currentFilePath}.{i}", $"{_currentFilePath}.{i + 1}");
+            }
+
+            TryMove(_currentFilePath, $"{_currentFilePath}.1");
+            PruneLogs(Path.GetDirectoryName(_currentFilePath)!, maxBackup);
+            OpenWriter(truncate: false);
+            _nextRolloverThresholdBytes = _maxFileBytes;
         }
         catch (Exception)
         {
-            // 輪替失敗時仍嘗試重新開啟寫入器，確保後續記錄不中斷
-            OpenWriter();
+            // 輪替失敗時仍嘗試重新開啟寫入器，確保後續記錄不中斷；推進門檻避免每筆重試風暴
+            try
+            {
+                OpenWriter(truncate: false);
+            }
+            catch (Exception)
+            {
+                _writer = null;
+            }
+
+            _nextRolloverThresholdBytes = _currentFileBytes + RolloverRetryBackoffBytes;
+        }
+    }
+
+    private static void TryMove(string source, string target)
+    {
+        try
+        {
+            if (File.Exists(source))
+            {
+                File.Move(source, target, overwrite: true);
+            }
+        }
+        catch (Exception)
+        {
+            // 單一檔案搬移失敗不影響其餘輪替
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception)
+        {
+            // 單一檔案刪除失敗不影響其餘清理
         }
     }
 
     private static bool IsLogFileName(string fileName) =>
         fileName.EndsWith(".log", StringComparison.OrdinalIgnoreCase) || fileName.Contains(".log.", StringComparison.OrdinalIgnoreCase);
 
-    internal static void PruneLogs(string logDir, int keep)
-    {
-        if (!SafeFileSystem.DirectoryExists(logDir))
-        {
-            return;
-        }
-
-        try
-        {
-            var files = SafeFileSystem.ListBoundedDirectory(logDir)
-                .Where(static entry => !entry.IsDirectory && IsLogFileName(Path.GetFileName(entry.FullPath)))
-                .OrderBy(static entry => entry.LastWriteTimeUtc)
-                .ToList();
-
-            int removeCount = Math.Max(0, files.Count - Math.Max(0, keep));
-            for (int i = 0; i < removeCount; i++)
-            {
-                SafeFileSystem.DeleteWithin(logDir, files[i].FullPath);
-            }
-        }
-        catch (Exception)
-        {
-            // 日誌器無法記錄自身的清理失敗；保留舊檔不影響後續寫入
-        }
-    }
-
     private static string FormatLogLevel(LogLevel level) => level switch
     {
+        LogLevel.Trace => "TRACE   ",
+        LogLevel.Debug => "DEBUG   ",
         LogLevel.Information => "INFO    ",
         LogLevel.Warning => "WARNING ",
         LogLevel.Error => "ERROR   ",
@@ -284,8 +407,7 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider
                 return;
             }
 
-            string message = formatter(state, exception);
-            provider.WriteLog(categoryName, logLevel, message, exception);
+            provider.WriteLog(categoryName, logLevel, formatter(state, exception), exception);
         }
     }
 }

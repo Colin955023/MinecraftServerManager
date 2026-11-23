@@ -1,12 +1,17 @@
+using MinecraftServerManager.Infrastructure.Logging;
+
 namespace MinecraftServerManager.App.Services;
 
 /// <summary>對話框堆疊協調器：同一執行緒同時只能開一個 ContentDialog，巢狀時先隱藏上層、關閉後重現</summary>
 public sealed class DialogStackCoordinator
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(DialogStackCoordinator));
+
     /// <summary>等待前一個對話框隱藏的逾時上限；對話框拒絕隱藏時避免永久卡住</summary>
     private static readonly TimeSpan PreviousHideTimeout = TimeSpan.FromSeconds(3);
 
-    private readonly Stack<DialogEntry> _stack = new();
+    // 以串列保存堆疊：任一層（含中間層）結束時都能移除自身節點，不會殘留而攔截恢復訊號
+    private readonly LinkedList<DialogEntry> _stack = new();
     private readonly Lock _lock = new();
 
     /// <summary>排隊顯示對話框；已有顯示中的對話框時先暫時隱藏，本對話框關閉後恢復</summary>
@@ -22,16 +27,17 @@ public sealed class DialogStackCoordinator
         ArgumentNullException.ThrowIfNull(hideAction);
 
         DialogEntry currentEntry = new(hideAction);
-
         DialogEntry? previousActive = null;
+        LinkedListNode<DialogEntry> node;
         lock (_lock)
         {
-            if (_stack.Count > 0)
+            if (_stack.Last is { } last)
             {
-                previousActive = _stack.Peek();
+                previousActive = last.Value;
                 previousActive.MarkInterrupted();
             }
-            _stack.Push(currentEntry);
+
+            node = _stack.AddLast(currentEntry);
         }
 
         try
@@ -39,13 +45,13 @@ public sealed class DialogStackCoordinator
             if (previousActive is not null)
             {
                 // 等前一個對話框真正關閉後才顯示（同時只能開一個 ContentDialog）
-                previousActive.RequestHide();
-                await Task.WhenAny(previousActive.HiddenTask, Task.Delay(PreviousHideTimeout)).ConfigureAwait(true);
+                await HidePreviousAsync(previousActive);
             }
 
             while (true)
             {
-                // 尚未顯示或顯示期間被更上層對話框中斷時，等待更上層對話框關閉後再（重新）顯示
+                // 尚未顯示或顯示期間被更上層對話框中斷時，等待更上層對話框關閉後再（重新）顯示；
+                // 檢查中斷與標記顯示需在同一鎖內，避免與新對話框的中斷判斷交錯而同時顯示兩個 ContentDialog
                 Task? resumeTask = null;
                 lock (_lock)
                 {
@@ -54,19 +60,22 @@ public sealed class DialogStackCoordinator
                         resumeTask = currentEntry.ResumeTask;
                         currentEntry.ResetInterrupted();
                     }
+                    else
+                    {
+                        currentEntry.MarkShowing();
+                    }
                 }
 
                 if (resumeTask is not null)
                 {
-                    await resumeTask.ConfigureAwait(true);
+                    await resumeTask;
                     continue;
                 }
 
                 TResult result;
-                currentEntry.MarkShowing();
                 try
                 {
-                    result = await showAsync().ConfigureAwait(true);
+                    result = await showAsync();
                 }
                 finally
                 {
@@ -87,24 +96,44 @@ public sealed class DialogStackCoordinator
             DialogEntry? toResume = null;
             lock (_lock)
             {
-                if (_stack.Count > 0 && ReferenceEquals(_stack.Peek(), currentEntry))
+                // 只有最上層結束時才喚醒下一層；中間層結束只移除自身
+                bool wasTop = ReferenceEquals(_stack.Last, node);
+                _stack.Remove(node);
+                if (wasTop && _stack.Last is { } last)
                 {
-                    _stack.Pop();
-                }
-                if (_stack.Count > 0)
-                {
-                    toResume = _stack.Peek();
+                    toResume = last.Value;
                 }
             }
 
-            // 喚醒前一層對話框重新顯示
             toResume?.SignalResume();
+        }
+    }
+
+    private static async Task HidePreviousAsync(DialogEntry previous)
+    {
+        try
+        {
+            previous.RequestHide();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "要求前一個對話框隱藏失敗");
+        }
+
+        using var timeoutCts = new CancellationTokenSource();
+        Task completed = await Task.WhenAny(previous.HiddenTask, Task.Delay(PreviousHideTimeout, timeoutCts.Token));
+        if (completed == previous.HiddenTask)
+        {
+            await timeoutCts.CancelAsync();
+        }
+        else
+        {
+            Logger.Warning("等待前一個對話框隱藏逾時（{Timeout} 秒），繼續顯示新對話框", PreviousHideTimeout.TotalSeconds);
         }
     }
 
     private sealed class DialogEntry(Action hideAction)
     {
-        private readonly Action _hideAction = hideAction;
         private TaskCompletionSource _resumeTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private TaskCompletionSource _hiddenTcs = CreateCompleted();
 
@@ -126,7 +155,7 @@ public sealed class DialogStackCoordinator
 
         public void MarkHidden() => _hiddenTcs.TrySetResult();
 
-        public void RequestHide() => _hideAction();
+        public void RequestHide() => hideAction();
 
         public void ResetInterrupted() => IsInterrupted = false;
 

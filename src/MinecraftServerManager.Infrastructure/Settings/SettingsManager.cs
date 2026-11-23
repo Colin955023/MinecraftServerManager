@@ -7,11 +7,11 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Settings;
 
-public sealed class SettingsManager
+public sealed class SettingsManager : ISettingsManager
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(SettingsManager));
 
-    private static readonly FrozenSet<string> ValidThemeModes = FrozenSet.ToFrozenSet(["system", "light", "dark"], StringComparer.Ordinal);
+    private static readonly FrozenSet<string> ValidThemeModes = FrozenSet.Create(StringComparer.Ordinal, "system", "light", "dark");
     private readonly Lock _syncRoot = new();
     private readonly string _settingsPath;
     private UserSettings _settings;
@@ -76,23 +76,25 @@ public sealed class SettingsManager
         }
     }
 
-    public void SetServersRoot(string? path)
-    {
-        string normalized = NormalizeServersRootPath(path);
-        if (!string.IsNullOrEmpty(normalized))
-        {
-            SafeFileSystem.ResolveStableDirectory(normalized, create: true);
-        }
-        Update(settings => settings with { ServersRoot = normalized });
-    }
+    public void SetServersRoot(string? path) => ApplyServersRoot(path, NormalizeServersRootPath(path));
 
-    public void SetExactServersRoot(string? path)
+    public void SetExactServersRoot(string? path) => ApplyServersRoot(path, NormalizeExactServersRootPath(path));
+
+    /// <summary>非空輸入卻無法正規化時拒絕，避免無效路徑被靜默清空；有效路徑先確認可建立再寫入</summary>
+    private void ApplyServersRoot(string? input, string normalized)
     {
-        string normalized = NormalizeExactServersRootPath(path);
-        if (!string.IsNullOrEmpty(normalized))
+        if (string.IsNullOrEmpty(normalized))
+        {
+            if (!string.IsNullOrWhiteSpace(input))
+            {
+                throw new ArgumentException($"伺服器資料夾路徑無效： {input}", nameof(input));
+            }
+        }
+        else
         {
             SafeFileSystem.ResolveStableDirectory(normalized, create: true);
         }
+
         Update(settings => settings with { ServersRoot = normalized });
     }
 
@@ -141,8 +143,6 @@ public sealed class SettingsManager
         }
     }
 
-    public void SetAutoUpdateEnabled(bool enabled) => Update(settings => settings with { AutoUpdateEnabled = enabled });
-
     public bool IsAutoBackupBeforeStartEnabled()
     {
         lock (_syncRoot)
@@ -151,8 +151,6 @@ public sealed class SettingsManager
         }
     }
 
-    public void SetAutoBackupBeforeStartEnabled(bool enabled) => Update(settings => settings with { AutoBackupBeforeStart = enabled });
-
     public int GetBackupRetentionCount()
     {
         lock (_syncRoot)
@@ -160,8 +158,6 @@ public sealed class SettingsManager
             return _settings.BackupRetentionCount;
         }
     }
-
-    public void SetBackupRetentionCount(int count) => Update(settings => settings with { BackupRetentionCount = count });
 
     private WindowPreferences GetWindowPreferences()
     {
@@ -183,11 +179,23 @@ public sealed class SettingsManager
 
     public string GetThemeMode() => GetWindowPreferences().ThemeMode;
 
-    public void SetThemeMode(string? mode) => UpdateWindowPreferences(preferences => preferences with { ThemeMode = NormalizeThemeMode(mode) });
-
     public string? GetCustomAccentColor() => GetWindowPreferences().CustomAccentColor;
 
-    public void SetCustomAccentColor(string? hex) => UpdateWindowPreferences(preferences => preferences with { CustomAccentColor = string.IsNullOrWhiteSpace(hex) ? null : hex.Trim() });
+    public void SetPreferences(UserPreferences preferences)
+    {
+        ArgumentNullException.ThrowIfNull(preferences);
+        Update(settings => settings with
+        {
+            AutoUpdateEnabled = preferences.AutoUpdateEnabled,
+            AutoBackupBeforeStart = preferences.AutoBackupBeforeStart,
+            BackupRetentionCount = preferences.BackupRetentionCount,
+            WindowPreferences = NormalizeWindowPreferences(settings.WindowPreferences) with
+            {
+                ThemeMode = NormalizeThemeMode(preferences.ThemeMode),
+                CustomAccentColor = NormalizeAccentColor(preferences.CustomAccentColor),
+            },
+        });
+    }
 
     private static WindowPreferences NormalizeWindowPreferences(WindowPreferences? preferences)
     {
@@ -197,78 +205,98 @@ public sealed class SettingsManager
         {
             ThemeMode = NormalizeThemeMode(preferences.ThemeMode),
             MainWindow = mainWindow,
-            CustomAccentColor = string.IsNullOrWhiteSpace(preferences.CustomAccentColor) ? null : preferences.CustomAccentColor.Trim(),
+            CustomAccentColor = NormalizeAccentColor(preferences.CustomAccentColor),
         };
+    }
+
+    /// <summary>只接受 6 位十六進位色碼並統一為 #RRGGBB；其他值視為未自訂</summary>
+    private static string? NormalizeAccentColor(string? hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex))
+        {
+            return null;
+        }
+
+        ReadOnlySpan<char> digits = hex.AsSpan().Trim();
+        if (digits.StartsWith('#'))
+        {
+            digits = digits[1..];
+        }
+
+        return HashCalculator.IsHexDigest(digits, 6)
+            ? string.Concat("#", digits.ToString().ToUpperInvariant())
+            : null;
     }
 
     private UserSettings LoadSettings()
     {
-        byte[]? bytes = null;
+        byte[]? bytes;
         try
         {
             bytes = SafeFileSystem.ReadRegularFile(_settingsPath, JsonCodec.DefaultMaxBytes);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Logger.Warning(ex, "讀取設定檔失敗: {Path}", _settingsPath);
+            // 暫時性讀取失敗（鎖定、權限、過大）：不覆寫原檔，本次以記憶體預設值執行
+            Logger.Warning(ex, "讀取設定檔失敗，本次改用預設值且不覆寫原檔: {Path}", _settingsPath);
+            return new UserSettings();
         }
 
         UserSettings? loaded = bytes is null ? null : JsonCodec.Deserialize<UserSettings>(bytes);
         if (loaded is null)
         {
-            // 檔案存在卻讀不到（損毀、過大或被鎖定）：先保留原檔，避免預設值覆蓋使用者設定
-            PreserveUnreadableSettings();
+            // 檔案不存在直接寫入預設值；內容損毀須先成功備份為 .bad 才可覆寫
             var defaults = new UserSettings();
-            TrySaveDefaults(defaults);
+            if (bytes is null || PreserveUnreadableSettings())
+            {
+                TrySave(defaults, "無法寫入預設設定檔: {Path}");
+            }
+
             return defaults;
         }
 
         var normalized = NormalizeSettings(loaded);
         if (loaded != normalized)
         {
-            Save(normalized);
+            TrySave(normalized, "無法回寫正規化後的設定檔: {Path}");
         }
+
         return normalized;
     }
 
-    private void PreserveUnreadableSettings()
+    /// <summary>將損毀的設定檔備份為 .bad；失敗回傳 false，呼叫端不得覆寫原檔</summary>
+    private bool PreserveUnreadableSettings()
     {
-        if (!SafeFileSystem.FileExists(_settingsPath))
+        if (!SafeFileSystem.TryPreserveCorruptFile(_settingsPath, Logger))
         {
-            return;
+            return false;
         }
 
-        try
-        {
-            SafeFileSystem.CopyFile(_settingsPath, _settingsPath + ".bad", overwrite: true);
-            Logger.Warning("設定檔無法讀取，已備份為 {Path}.bad 並改用預設值", _settingsPath);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning(ex, "無法備份損毀的設定檔: {Path}", _settingsPath);
-        }
+        Logger.Warning("設定檔無法解析，已備份為 {Path}.bad 並改用預設值", _settingsPath);
+        return true;
     }
 
-    private void TrySaveDefaults(UserSettings defaults)
+    /// <summary>啟動期間寫入失敗不應使啟動失敗；記錄後以記憶體中的值繼續</summary>
+    private void TrySave(UserSettings settings, string failureMessage)
     {
         try
         {
-            Save(defaults);
+            Save(settings);
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // 寫入失敗不應使啟動失敗；使用記憶體中的預設值繼續
-            Logger.Warning(ex, "無法寫入預設設定檔: {Path}", _settingsPath);
+            Logger.Warning(ex, failureMessage, _settingsPath);
         }
     }
 
+    /// <summary>先寫入成功才更新記憶體，避免寫檔失敗時記憶體與磁碟不一致</summary>
     private void Update(Func<UserSettings, UserSettings> update)
     {
         lock (_syncRoot)
         {
             var updated = NormalizeSettings(update(_settings));
-            _settings = updated;
             Save(updated);
+            _settings = updated;
         }
     }
 

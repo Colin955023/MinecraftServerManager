@@ -1,17 +1,18 @@
 namespace MinecraftServerManager.Domain.Mods;
 
+/// <summary>線上模組的單一發布版本與相依資訊</summary>
 public sealed record OnlineModVersion
 {
-    public string VersionId { get; }
-    public string VersionNumber { get; }
-    public string DisplayName { get; }
-    public string ProjectId { get; }
-    public IReadOnlyList<string> GameVersions { get; }
-    public IReadOnlyList<string> Loaders { get; }
-    public string VersionType { get; }
-    public string DatePublished { get; }
-    public IReadOnlyList<ModFile> Files { get; }
-    public IReadOnlyList<OnlineModDependency> Dependencies { get; }
+    public string VersionId { get; init => field = value ?? string.Empty; } = string.Empty;
+    public string VersionNumber { get; init => field = value ?? string.Empty; } = string.Empty;
+    public string DisplayName { get; init => field = value ?? string.Empty; } = string.Empty;
+    public string ProjectId { get; init => field = value ?? string.Empty; } = string.Empty;
+    public IReadOnlyList<string> GameVersions { get; init => field = value ?? []; } = [];
+    public IReadOnlyList<string> Loaders { get; init => field = value ?? []; } = [];
+    public string VersionType { get; init => field = value ?? string.Empty; } = string.Empty;
+    public string DatePublished { get; init => field = value ?? string.Empty; } = string.Empty;
+    public IReadOnlyList<ModFile> Files { get; init => field = value ?? []; } = [];
+    public IReadOnlyList<OnlineModDependency> Dependencies { get; init => field = value ?? []; } = [];
 
     public OnlineModVersion(
         string versionId,
@@ -25,39 +26,38 @@ public sealed record OnlineModVersion
         IEnumerable<OnlineModDependency>? dependencies = null,
         string projectId = "")
     {
-        VersionId = versionId ?? string.Empty;
-        VersionNumber = versionNumber ?? string.Empty;
-        DisplayName = displayName ?? string.Empty;
-        ProjectId = projectId ?? string.Empty;
+        VersionId = versionId;
+        VersionNumber = versionNumber;
+        DisplayName = displayName;
+        ProjectId = projectId;
         GameVersions = [.. gameVersions ?? []];
         Loaders = [.. loaders ?? []];
-        VersionType = versionType ?? string.Empty;
-        DatePublished = datePublished ?? string.Empty;
-        Files = [.. files ?? []];
+        VersionType = versionType;
+        DatePublished = datePublished;
+        Files = files is null ? [] : [.. files.Where(static file => file is not null)];
+        PrimaryFile = SelectPrimaryFile(Files);
         Dependencies = [.. dependencies ?? []];
     }
 
-    public ModFile? PrimaryFile
+    /// <summary>主要檔案：標記 primary 者優先，其次第一個 .jar，再其次第一個檔案</summary>
+    public ModFile? PrimaryFile { get; init; }
+
+    private static ModFile? SelectPrimaryFile(IReadOnlyList<ModFile> files)
     {
-        get
+        ModFile? firstJar = null;
+        foreach (var file in files)
         {
-            for (int index = 0; index < Files.Count; index++)
+            if (file.IsPrimary)
             {
-                if (Files[index].IsPrimary)
-                {
-                    return Files[index];
-                }
+                return file;
             }
 
-            for (int index = 0; index < Files.Count; index++)
+            if (firstJar is null && file.FileName.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
             {
-                if (Files[index].Filename.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
-                {
-                    return Files[index];
-                }
+                firstJar = file;
             }
-
-            return Files.Count > 0 ? Files[0] : null;
         }
+
+        return firstJar ?? (files.Count > 0 ? files[0] : null);
     }
 }

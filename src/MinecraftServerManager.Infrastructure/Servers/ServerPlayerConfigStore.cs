@@ -1,12 +1,11 @@
-using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-/// <summary>伺服器名單檔案存取</summary>
 public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerPlayerConfigStore));
@@ -16,7 +15,6 @@ public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
     private const string BannedIpsFileName = ServerDefaults.BannedIpsFileName;
     private const string UserCacheFileName = ServerDefaults.UserCacheFileName;
 
-    /// <summary>讀取伺服器的名單設定（管理員、白名單、封鎖玩家與封鎖 IP 等）</summary>
     public async Task<ServerPlayerConfigBundle> LoadBundleAsync(string serverPath, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverPath);
@@ -39,7 +37,6 @@ public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>將名單設定寫回伺服器資料夾</summary>
     public async Task SaveBundleAsync(string serverPath, ServerPlayerConfigBundle bundle, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverPath);
@@ -71,7 +68,15 @@ public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
                 return null;
             }
 
-            return JsonCodec.Deserialize<List<T>>(bytes);
+            var items = JsonCodec.Deserialize<List<T>>(bytes);
+            if (items is null)
+            {
+                // 損毀內容另存 .bad，避免下次儲存以空清單覆蓋後無從復原
+                Logger.Warning("伺服器玩家設定檔內容無法解析，已另存為 .bad: {FileName}", fileName);
+                SafeFileSystem.TryPreserveCorruptFile(targetPath, Logger);
+            }
+
+            return items;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -84,10 +89,6 @@ public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
     {
         string targetPath = Path.Combine(serverPath, fileName);
         var list = items is List<T> concreteList ? concreteList : [.. items];
-        byte[]? bytes = JsonCodec.SerializeToUtf8Bytes(list, indented: true);
-        if (bytes is null || !AtomicFileWriter.WriteBytes(targetPath, bytes))
-        {
-            throw new IOException($"無法以不可分割方式寫入伺服器玩家設定檔：{fileName}");
-        }
+        AtomicFileWriter.WriteJsonOrThrow(targetPath, list, indented: true);
     }
 }

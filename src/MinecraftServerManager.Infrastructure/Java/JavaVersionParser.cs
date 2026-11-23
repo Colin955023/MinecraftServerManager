@@ -13,6 +13,31 @@ public static partial class JavaVersionParser
     private static readonly SearchValues<string> Bit32Markers = SearchValues.Create(["32-Bit", "x86_32"], StringComparison.OrdinalIgnoreCase);
     private static readonly SearchValues<string> Bit64Markers = SearchValues.Create(["64-Bit", "x86_64", "amd64", "aarch64"], StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>廠牌關鍵字對照；依序比對，較明確的發行版需排在通用字樣（Oracle、OpenJDK）之前</summary>
+    private static readonly (string Keyword, string Vendor)[] VendorMarkers =
+    [
+        ("Microsoft", "Microsoft"),
+        ("Temurin", "Eclipse Adoptium"),
+        ("Adoptium", "Eclipse Adoptium"),
+        ("AdoptOpenJDK", "Eclipse Adoptium"),
+        ("Zulu", "Azul Zulu"),
+        ("Azul", "Azul Zulu"),
+        ("Corretto", "Amazon Corretto"),
+        ("Liberica", "BellSoft Liberica"),
+        ("BellSoft", "BellSoft Liberica"),
+        ("Semeru", "IBM Semeru"),
+        ("IBM", "IBM Semeru"),
+        ("GraalVM", "GraalVM"),
+        ("JetBrains", "JetBrains Runtime"),
+        ("SapMachine", "SAP SapMachine"),
+        ("Dragonwell", "Alibaba Dragonwell"),
+        ("Red_Hat", "Red Hat"),
+        ("Red Hat", "Red Hat"),
+        ("Java(TM)", "Oracle"),
+        ("Oracle", "Oracle"),
+        ("OpenJDK", "OpenJDK"),
+    ];
+
     public static JavaVersionDetails? ParseDetails(string output)
     {
         ArgumentNullException.ThrowIfNull(output);
@@ -36,56 +61,17 @@ public static partial class JavaVersionParser
         ReadOnlySpan<char> span = output.AsSpan();
         bool is64Bit = !span.ContainsAny(Bit32Markers) && span.ContainsAny(Bit64Markers);
 
-        string? vendor = DetectVendor(output);
-
-        return new JavaVersionDetails(effectiveMajor, is64Bit, vendor);
+        return new JavaVersionDetails(effectiveMajor, is64Bit, DetectVendor(span));
     }
 
-    private static string? DetectVendor(string output)
+    private static string? DetectVendor(ReadOnlySpan<char> output)
     {
-        if (output.Contains("Microsoft", StringComparison.OrdinalIgnoreCase))
+        foreach (var (keyword, vendor) in VendorMarkers)
         {
-            return "Microsoft";
-        }
-
-        if (output.Contains("Adoptium", StringComparison.OrdinalIgnoreCase) ||
-            output.Contains("Temurin", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Eclipse Adoptium";
-        }
-
-        if (output.Contains("Zulu", StringComparison.OrdinalIgnoreCase) ||
-            output.Contains("Azul", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Azul Zulu";
-        }
-
-        if (output.Contains("Corretto", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Amazon Corretto";
-        }
-
-        if (output.Contains("Liberica", StringComparison.OrdinalIgnoreCase) ||
-            output.Contains("BellSoft", StringComparison.OrdinalIgnoreCase))
-        {
-            return "BellSoft Liberica";
-        }
-
-        if (output.Contains("Semeru", StringComparison.OrdinalIgnoreCase) ||
-            output.Contains("IBM", StringComparison.OrdinalIgnoreCase))
-        {
-            return "IBM Semeru";
-        }
-
-        if (output.Contains("Java(TM)", StringComparison.OrdinalIgnoreCase) ||
-            output.Contains("Oracle", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Oracle";
-        }
-
-        if (output.Contains("OpenJDK", StringComparison.OrdinalIgnoreCase))
-        {
-            return "OpenJDK";
+            if (output.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+            {
+                return vendor;
+            }
         }
 
         return null;

@@ -1,21 +1,20 @@
-using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Domain.Servers;
-using MinecraftServerManager.Domain.ValueObjects;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
 public sealed class ServerMemoryViewModelTests
 {
     private static ServerConfig CreateSampleConfig(int maxMb = 2048, int? minMb = 1024) =>
-        new(
-            ServerName.Parse("TestServer"),
-            MinecraftVersion.Parse("1.20.4"),
-            LoaderKind.Vanilla,
-            "",
-            maxMb,
-            minMb,
-            "C:\\Servers\\TestServer");
+        TestServerConfigs.Create("TestServer", minecraftVersion: "1.20.4", memoryMaxMb: maxMb, memoryMinMb: minMb, path: "C:\\Servers\\TestServer");
+
+    [Fact]
+    public void SystemMemoryText_FractionalGigabytes_Rounds()
+    {
+        var vm = new ServerMemoryViewModel(CreateSampleConfig(), static (_, _) => Task.FromResult(true), NoOpUiService.Instance, systemMemoryMb: 16303);
+
+        Assert.Contains("（16 GB）", vm.SystemMemoryText, StringComparison.Ordinal);
+    }
 
     [Theory]
     [InlineData("-100", "1024", "大於 0 的整數")]
@@ -38,7 +37,7 @@ public sealed class ServerMemoryViewModelTests
             MinMemoryMb = minMb
         };
 
-        await vm.SaveAsync();
+        Assert.False(await vm.SaveAsync());
 
         Assert.False(callbackInvoked);
         Assert.Contains(expectedError, vm.ErrorMessage);
@@ -49,7 +48,6 @@ public sealed class ServerMemoryViewModelTests
     {
         int savedMax = 0;
         int? savedMin = null;
-        bool closed = false;
 
         var config = CreateSampleConfig();
         var vm = new ServerMemoryViewModel(
@@ -67,13 +65,27 @@ public sealed class ServerMemoryViewModelTests
             MinMemoryMb = "2048"
         };
 
-        vm.RequestClose += success => closed = success;
-
-        await vm.SaveAsync();
+        bool closed = await vm.SaveAsync();
 
         Assert.Equal(4096, savedMax);
         Assert.Equal(2048, savedMin);
         Assert.True(closed);
         Assert.Empty(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SaveAsync_WhenCallbackFails_KeepsDialogOpenWithErrorMessage()
+    {
+        var vm = new ServerMemoryViewModel(
+            CreateSampleConfig(),
+            static (_, _) => Task.FromResult(false),
+            systemMemoryMb: 16384,
+            uiService: NoOpUiService.Instance)
+        {
+            MaxMemoryMb = "4096",
+        };
+
+        Assert.False(await vm.SaveAsync());
+        Assert.Contains("儲存記憶體設定失敗", vm.ErrorMessage);
     }
 }

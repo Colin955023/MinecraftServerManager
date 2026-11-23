@@ -1,10 +1,12 @@
-﻿[CmdletBinding()]
+﻿#Requires -Version 7.1
+[CmdletBinding()]
 param(
     [string]$ChangelogPath = "CHANGELOG.md",
     [string]$OutputPath = "release_notes.md"
 )
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
 
-$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $commonScript = Join-Path $PSScriptRoot "lib\Common.ps1"
 if (-not (Test-Path -LiteralPath $commonScript))
 {
@@ -13,6 +15,7 @@ if (-not (Test-Path -LiteralPath $commonScript))
 . $commonScript
 Initialize-ScriptEnvironment
 
+$repoRoot = Get-RepoRoot
 $version = Get-ProjectVersion -RepoRoot $repoRoot
 
 $tag = "v$version"
@@ -26,20 +29,23 @@ if (-not (Test-Path -LiteralPath $resolvedChangelog))
     throw "找不到 CHANGELOG 檔案：$resolvedChangelog"
 }
 
-$changelog = Get-Content -Raw -Encoding UTF8 $resolvedChangelog
-$escaped = [regex]::Escape($version)
-# 版本號後須為非版本字元，避免 2.2.1 誤配 2.2.10 或 2.3.0 誤配 2.3.0-beta
-$pattern = "(?ms)^##\s+\[?v?$escaped(?![\w.\-])\]?[^\r\n]*\r?\n(.*?)(?=^##\s+|\Z)"
-if ($changelog -notmatch $pattern)
+$changelog = Get-Content -LiteralPath $resolvedChangelog -Raw -Encoding UTF8
+$notes = Get-ChangelogSection -Changelog $changelog -Version $version
+if ($null -eq $notes)
 {
-    throw "CHANGELOG.md 中找不到版本 $version 對應之章節"
+    throw "CHANGELOG.md 中找不到版本 $version 對應之章節或內容空白"
 }
 
-Set-Content -LiteralPath $resolvedOutput -Value $matches[1].Trim() -Encoding UTF8
+$lfNotes = ($notes.Trim() -replace "\r\n", "`n") + "`n"
+[System.IO.File]::WriteAllText($resolvedOutput, $lfNotes, $Utf8NoBom)
 Write-Host "成功提取發行說明至：$resolvedOutput"
 
 if ($env:GITHUB_OUTPUT)
 {
-    "tag_name=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-    "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+    if ($version -match '[\r\n]')
+    {
+        throw "版本字串含換行字元，拒絕寫入 GITHUB_OUTPUT"
+    }
+    "tag_name=$tag" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+    "version=$version" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 }

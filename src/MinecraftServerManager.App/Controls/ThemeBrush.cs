@@ -21,7 +21,7 @@ public static class ThemeBrush
         obj.SetValue(ForegroundKeyProperty, value);
 
     /// <summary>依實際主題自應用程式主題字典解析筆刷；找不到時退回一般資源</summary>
-    public static Brush? ResolveBrush(string key, ElementTheme theme)
+    private static Brush? ResolveBrush(string key, ElementTheme theme)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         var resources = Application.Current?.Resources;
@@ -50,31 +50,49 @@ public static class ThemeBrush
         }
 
         element.ActualThemeChanged -= OnActualThemeChanged;
-        if (e.NewValue is string { Length: > 0 })
+        element.Loaded -= OnElementLoaded;
+        if (e.NewValue is not string { Length: > 0 })
         {
-            element.ActualThemeChanged += OnActualThemeChanged;
+            // 鍵值清空時還原為樣式或繼承的前景
+            ClearForeground(element);
+            return;
         }
 
+        // 快取頁面離開視覺樹期間切換主題時，重新掛回不保證觸發 ActualThemeChanged，故每次載入都重套
+        element.ActualThemeChanged += OnActualThemeChanged;
+        element.Loaded += OnElementLoaded;
         Apply(element);
     }
 
     private static void OnActualThemeChanged(FrameworkElement sender, object args) => Apply(sender);
 
+    private static void OnElementLoaded(object sender, RoutedEventArgs e) => Apply((FrameworkElement)sender);
+
+    private static DependencyProperty? GetForegroundProperty(FrameworkElement element) => element switch
+    {
+        TextBlock => TextBlock.ForegroundProperty,
+        Control => Control.ForegroundProperty,
+        IconElement => IconElement.ForegroundProperty,
+        _ => null,
+    };
+
     private static void Apply(FrameworkElement element)
     {
-        if (GetForegroundKey(element) is not { Length: > 0 } key || ResolveBrush(key, element.ActualTheme) is not { } brush)
+        if (GetForegroundProperty(element) is not { } property ||
+            GetForegroundKey(element) is not { Length: > 0 } key ||
+            ResolveBrush(key, element.ActualTheme) is not { } brush)
         {
             return;
         }
 
-        switch (element)
+        element.SetValue(property, brush);
+    }
+
+    private static void ClearForeground(FrameworkElement element)
+    {
+        if (GetForegroundProperty(element) is { } property)
         {
-            case TextBlock textBlock:
-                textBlock.Foreground = brush;
-                break;
-            case Control control:
-                control.Foreground = brush;
-                break;
+            element.ClearValue(property);
         }
     }
 }

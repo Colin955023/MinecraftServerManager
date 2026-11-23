@@ -5,7 +5,7 @@ namespace MinecraftServerManager.UnitTests.FileSystem;
 public sealed class ServerTombstoneManagerTests
 {
     [Fact]
-    public void MoveWithinStrictEnforcesDirectSubdirectoryAndRejectsExistingDestination()
+    public void MoveWithinStrict_NonDirectChildOrExistingDestination_Rejects()
     {
         using var tempDir = new TempDirectory("msm-strict-move-");
         string source = Path.Combine(tempDir.FullName, "server1");
@@ -25,11 +25,10 @@ public sealed class ServerTombstoneManagerTests
     }
 
     [Fact]
-    public void PrepareDeleteTombstoneCreatesMarkerAndJournal()
+    public void PrepareDeleteTombstone_ServerDirectory_CreatesMarkerAndJournal()
     {
         using var tempDir = new TempDirectory("msm-tombstone-prep-");
-        string serverPath = Path.Combine(tempDir.FullName, "Survival");
-        Directory.CreateDirectory(serverPath);
+        string serverPath = tempDir.CreateSubdirectory("Survival");
         File.WriteAllText(Path.Combine(serverPath, "world.txt"), "data");
 
         var (tombstonePath, journalPath) = ServerTombstoneManager.PrepareDeleteTombstone(
@@ -42,11 +41,10 @@ public sealed class ServerTombstoneManagerTests
     }
 
     [Fact]
-    public void RecoverDeleteTombstonesRestoresUncommittedServer()
+    public void RecoverDeleteTombstones_Uncommitted_RestoresServer()
     {
         using var tempDir = new TempDirectory("msm-tombstone-recover-");
-        string originalPath = Path.Combine(tempDir.FullName, "UncommittedServer");
-        Directory.CreateDirectory(originalPath);
+        string originalPath = tempDir.CreateSubdirectory("UncommittedServer");
         File.WriteAllText(Path.Combine(originalPath, "config.txt"), "hello");
 
         var (tombstonePath, journalPath) = ServerTombstoneManager.PrepareDeleteTombstone(
@@ -64,11 +62,10 @@ public sealed class ServerTombstoneManagerTests
     }
 
     [Fact]
-    public void RecoverDeleteTombstonesCleansCommittedDeletedServer()
+    public void RecoverDeleteTombstones_Committed_CleansServer()
     {
         using var tempDir = new TempDirectory("msm-tombstone-clean-");
-        string originalPath = Path.Combine(tempDir.FullName, "CommittedServer");
-        Directory.CreateDirectory(originalPath);
+        string originalPath = tempDir.CreateSubdirectory("CommittedServer");
 
         var (tombstonePath, journalPath) = ServerTombstoneManager.PrepareDeleteTombstone(
             tempDir.FullName, "CommittedServer", originalPath);

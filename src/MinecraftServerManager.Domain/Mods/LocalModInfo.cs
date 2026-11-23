@@ -1,30 +1,34 @@
 namespace MinecraftServerManager.Domain.Mods;
 
+/// <summary>本機已安裝模組的中繼資料與雜湊資訊</summary>
 public sealed record LocalModInfo
 {
-    public string Id { get; }
-    public string Name { get; }
-    public string Filename { get; }
-    public string Version { get; }
-    public string MinecraftVersion { get; }
-    public string LoaderType { get; }
-    public string Description { get; }
-    public string Author { get; }
-    public ModPlatform Platform { get; }
-    public string PlatformId { get; }
-    public string PlatformSlug { get; }
-    public ModStatus Status { get; }
-    public string FilePath { get; }
-    public long FileSize { get; }
-    public double FileMtime { get; }
-    public string CurrentHash { get; }
-    public string HashAlgorithm { get; }
-    public IReadOnlyList<string> Dependencies { get; }
+    public string Id { get; init => field = value ?? string.Empty; } = string.Empty;
+    public string Name { get; init => field = value ?? string.Empty; } = string.Empty;
+    public string FileName { get; init => field = value ?? string.Empty; } = string.Empty;
+    public string Version { get; init => field = value ?? string.Empty; } = string.Empty;
+    public string MinecraftVersion { get; init => field = value ?? string.Empty; } = string.Empty;
+    public string LoaderType { get; init => field = value ?? string.Empty; } = string.Empty;
+    public string Description { get; init => field = value ?? string.Empty; } = string.Empty;
+    public string Author { get; init => field = value ?? string.Empty; } = string.Empty;
+    public ModPlatform Platform { get; init; } = ModPlatform.Local;
+    public string PlatformId { get; init => field = value ?? string.Empty; } = string.Empty;
+    public string PlatformSlug { get; init => field = value ?? string.Empty; } = string.Empty;
+    public ModStatus Status { get; init; } = ModStatus.Enabled;
+    public long FileSize { get; init; }
+    public double FileMtime { get; init; }
+    public string CurrentHash { get; init => field = value ?? string.Empty; } = string.Empty;
+    public string HashAlgorithm { get; init => field = value ?? string.Empty; } = string.Empty;
+    public IReadOnlyList<string> Dependencies { get; init => field = value ?? []; } = [];
+
+    public LocalModInfo()
+    {
+    }
 
     public LocalModInfo(
         string id,
         string name,
-        string filename,
+        string fileName,
         string version,
         string minecraftVersion,
         string loaderType,
@@ -34,34 +38,31 @@ public sealed record LocalModInfo
         string platformId = "",
         string platformSlug = "",
         ModStatus status = ModStatus.Enabled,
-        string filePath = "",
         long fileSize = 0,
         double fileMtime = 0.0,
         string currentHash = "",
         string hashAlgorithm = "",
         IEnumerable<string>? dependencies = null)
     {
-        Id = id ?? string.Empty;
-        Name = name ?? string.Empty;
-        Filename = filename ?? string.Empty;
-        Version = version ?? string.Empty;
-        MinecraftVersion = minecraftVersion ?? string.Empty;
-        LoaderType = loaderType ?? string.Empty;
-        Description = description ?? string.Empty;
-        Author = author ?? string.Empty;
+        Id = id;
+        Name = name;
+        FileName = fileName;
+        Version = version;
+        MinecraftVersion = minecraftVersion;
+        LoaderType = loaderType;
+        Description = description;
+        Author = author;
         Platform = platform;
-        PlatformId = platformId ?? string.Empty;
-        PlatformSlug = platformSlug ?? string.Empty;
+        PlatformId = platformId;
+        PlatformSlug = platformSlug;
         Status = status;
-        FilePath = filePath ?? string.Empty;
         FileSize = fileSize;
         FileMtime = fileMtime;
-        CurrentHash = currentHash ?? string.Empty;
-        HashAlgorithm = hashAlgorithm ?? string.Empty;
+        CurrentHash = currentHash;
+        HashAlgorithm = hashAlgorithm;
         Dependencies = [.. dependencies ?? []];
     }
 
     /// <summary>回傳補上平台專案識別碼的副本（供以官方專案識別碼比對相依使用）</summary>
-    public LocalModInfo WithPlatformId(string platformId) =>
-        new(Id, Name, Filename, Version, MinecraftVersion, LoaderType, Description, Author, Platform, platformId, PlatformSlug, Status, FilePath, FileSize, FileMtime, CurrentHash, HashAlgorithm, Dependencies);
+    public LocalModInfo WithPlatformId(string platformId) => this with { PlatformId = platformId };
 }

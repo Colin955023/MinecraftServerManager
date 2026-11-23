@@ -3,7 +3,6 @@ using MinecraftServerManager.Infrastructure.Servers;
 
 namespace MinecraftServerManager.UnitTests.Servers;
 
-/// <summary>latest.log 尾端讀取測試</summary>
 public sealed class ServerLogReaderTests : IDisposable
 {
     private static readonly UTF8Encoding Utf8NoBom = new(false);
@@ -21,21 +20,21 @@ public sealed class ServerLogReaderTests : IDisposable
     public void Dispose() => _serverDirTemp.Dispose();
 
     [Fact]
-    public async Task MissingLogFile_ReturnsEmpty()
+    public async Task ReadLatestLogTailAsync_MissingLogFile_ReturnsEmpty()
     {
         var reader = new ServerLogReader();
 
-        var lines = await reader.ReadLatestLogTailAsync(_serverDir);
+        var lines = await reader.ReadLatestLogTailAsync(_serverDir, TestContext.Current.CancellationToken);
 
         Assert.Empty(lines);
     }
 
     [Fact]
-    public async Task EmptyServerPath_ReturnsEmpty()
+    public async Task ReadLatestLogTailAsync_EmptyServerPath_ReturnsEmpty()
     {
         var reader = new ServerLogReader();
 
-        var lines = await reader.ReadLatestLogTailAsync(string.Empty);
+        var lines = await reader.ReadLatestLogTailAsync(string.Empty, TestContext.Current.CancellationToken);
 
         Assert.Empty(lines);
     }
@@ -43,46 +42,56 @@ public sealed class ServerLogReaderTests : IDisposable
     [Fact]
     public async Task ReadsAllLines_WhenWithinLimits_AndStripsColorCodes()
     {
-        await File.WriteAllTextAsync(_logFile, "\u001b[32mLine 1\u001b[0m\n§aLine 2\nLine 3\n", Utf8NoBom);
+        await File.WriteAllTextAsync(_logFile, "\u001b[32mLine 1\u001b[0m\n§aLine 2\nLine 3\n", Utf8NoBom, TestContext.Current.CancellationToken);
         var reader = new ServerLogReader();
 
-        var lines = await reader.ReadLatestLogTailAsync(_serverDir);
+        var lines = await reader.ReadLatestLogTailAsync(_serverDir, TestContext.Current.CancellationToken);
 
         Assert.Equal(["Line 1", "Line 2", "Line 3"], lines);
     }
 
     [Fact]
-    public async Task KeepsOnlyLastLines_WhenExceedingLineLimit()
+    public async Task ReadLatestLogTailAsync_ExceedsLineLimit_KeepsLastLines()
     {
-        await File.WriteAllLinesAsync(_logFile, Enumerable.Range(1, 10).Select(static i => $"L{i}"), Utf8NoBom);
+        await File.WriteAllLinesAsync(_logFile, Enumerable.Range(1, 10).Select(static i => $"L{i}"), Utf8NoBom, TestContext.Current.CancellationToken);
         var reader = new ServerLogReader(maxLines: 3);
 
-        var lines = await reader.ReadLatestLogTailAsync(_serverDir);
+        var lines = await reader.ReadLatestLogTailAsync(_serverDir, TestContext.Current.CancellationToken);
 
         Assert.Equal(["L8", "L9", "L10"], lines);
     }
 
     [Fact]
-    public async Task DropsPartialFirstLine_WhenTruncatedByByteLimit()
+    public async Task ReadLatestLogTailAsync_TruncatedByByteLimit_DropsPartialFirstLine()
     {
-        await File.WriteAllTextAsync(_logFile, "AAAAAAAAAA\nBBBB\nCCCC\n", Utf8NoBom);
+        await File.WriteAllTextAsync(_logFile, "AAAAAAAAAA\nBBBB\nCCCC\n", Utf8NoBom, TestContext.Current.CancellationToken);
         var reader = new ServerLogReader(maxBytesToRead: 12);
 
-        var lines = await reader.ReadLatestLogTailAsync(_serverDir);
+        var lines = await reader.ReadLatestLogTailAsync(_serverDir, TestContext.Current.CancellationToken);
 
         // 尾端 12 位元組為 "A\nBBBB\nCCCC\n"，第一行不完整須捨棄
         Assert.Equal(["BBBB", "CCCC"], lines);
     }
 
     [Fact]
-    public async Task ReadsWhileFileIsOpenedForWriting()
+    public async Task ReadLatestLogTailAsync_FileOpenForWriting_ReadsContent()
     {
-        await File.WriteAllTextAsync(_logFile, "Running\n", Utf8NoBom);
+        await File.WriteAllTextAsync(_logFile, "Running\n", Utf8NoBom, TestContext.Current.CancellationToken);
         using var writer = new FileStream(_logFile, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
         var reader = new ServerLogReader();
 
-        var lines = await reader.ReadLatestLogTailAsync(_serverDir);
+        var lines = await reader.ReadLatestLogTailAsync(_serverDir, TestContext.Current.CancellationToken);
 
         Assert.Equal(["Running"], lines);
+    }
+
+    [Fact]
+    public async Task ReadLatestLogTailAsync_FileWithBom_StripsOnlyFirstLine()
+    {
+        await File.WriteAllTextAsync(_logFile, "\uFEFFFirst\n\uFEFFSecond\n", Utf8NoBom, TestContext.Current.CancellationToken);
+
+        var lines = await new ServerLogReader().ReadLatestLogTailAsync(_serverDir, TestContext.Current.CancellationToken);
+
+        Assert.Equal(["First", "\uFEFFSecond"], lines);
     }
 }

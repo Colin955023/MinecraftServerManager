@@ -11,24 +11,35 @@ using MinecraftServerManager.Infrastructure.Logging;
 namespace MinecraftServerManager.App.ViewModels;
 
 /// <summary>伺服器名單管理對話方塊 ViewModel</summary>
-public sealed partial class PlayerManagementViewModel(
-    string serverName,
-    string serverPath,
-    IServerPlayerConfigStore configStore,
-    IUiService ui) : ViewModelBase
+public sealed partial class PlayerManagementViewModel : DialogViewModelBase, IUnsavedChangesPrompt
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(PlayerManagementViewModel));
-    private readonly IServerPlayerConfigStore _configStore = configStore;
-    private readonly IUiService _ui = ui;
+    private readonly IServerPlayerConfigStore _configStore;
+    private readonly IUiService _ui;
     private readonly List<ServerUserCacheEntry> _allUserCache = [];
 
-    public string ServerName { get; } = serverName;
-    public string ServerPath { get; } = serverPath;
+    public PlayerManagementViewModel(
+        string serverName,
+        string serverPath,
+        IServerPlayerConfigStore configStore,
+        IUiService ui)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverPath);
+        ArgumentNullException.ThrowIfNull(configStore);
+        ArgumentNullException.ThrowIfNull(ui);
+
+        ServerName = serverName;
+        ServerPath = serverPath;
+        _configStore = configStore;
+        _ui = ui;
+    }
+
+    public string ServerName { get; }
+    public string ServerPath { get; }
 
     [ObservableProperty]
     public partial string PlayerSearchText { get; set; } = string.Empty;
-
-    partial void OnPlayerSearchTextChanged(string value) => ApplyUserCacheFilter();
 
     [ObservableProperty]
     public partial ServerUserCacheEntry? SelectedUserCacheEntry { get; set; }
@@ -38,6 +49,15 @@ public sealed partial class PlayerManagementViewModel(
 
     [ObservableProperty]
     public partial bool HasUnsavedChanges { get; set; }
+
+    /// <summary>名單已成功讀取；讀取失敗時禁止儲存以免以空名單覆寫檔案</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SaveCommand))]
+    public partial bool IsLoaded { get; private set; }
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SaveCommand))]
+    public partial bool IsSaving { get; private set; }
 
     // --- 各標籤頁新增表單屬性 ---
     [ObservableProperty]
@@ -63,15 +83,18 @@ public sealed partial class PlayerManagementViewModel(
     public BulkObservableCollection<ServerBannedPlayerEntry> BannedPlayers { get; } = [];
     public BulkObservableCollection<ServerBannedIpEntry> BannedIps { get; } = [];
 
-    public event Action<bool>? RequestClose;
+    private bool CanSave => IsLoaded && !IsSaving;
+
+    partial void OnPlayerSearchTextChanged(string value) => ApplyUserCacheFilter();
 
     public async Task InitializeAsync()
     {
         StatusMessage = "正在讀取伺服器名單設定檔案...";
+        IsLoaded = false;
 
         try
         {
-            var bundle = await _configStore.LoadBundleAsync(ServerPath).ConfigureAwait(true);
+            var bundle = await _configStore.LoadBundleAsync(ServerPath);
 
             _allUserCache.Clear();
             _allUserCache.AddRange(bundle.UserCache);
@@ -119,9 +142,10 @@ public sealed partial class PlayerManagementViewModel(
             ApplyUserCacheFilter();
 
             HasUnsavedChanges = false;
+            IsLoaded = true;
             StatusMessage = $"讀取完成，共有 {_allUserCache.Count} 位曾連線玩家紀錄，{OperatorRows.Count} 位名冊玩家";
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.Error(ex, "讀取伺服器名單設定失敗");
             StatusMessage = $"讀取失敗：{ex.Message}";
@@ -153,7 +177,7 @@ public sealed partial class PlayerManagementViewModel(
             return;
         }
 
-        if (Whitelist.Any(w => string.Equals(w.Uuid, SelectedWhitelistCandidate.Uuid, StringComparison.OrdinalIgnoreCase)))
+        if (Whitelist.Any(w => IsSamePlayer(w.Uuid, w.Name, SelectedWhitelistCandidate)))
         {
             StatusMessage = $"玩家「{SelectedWhitelistCandidate.Name}」已在白名單中";
             return;
@@ -186,7 +210,7 @@ public sealed partial class PlayerManagementViewModel(
             return;
         }
 
-        if (BannedPlayers.Any(b => string.Equals(b.Uuid, SelectedBanCandidate.Uuid, StringComparison.OrdinalIgnoreCase)))
+        if (BannedPlayers.Any(b => IsSamePlayer(b.Uuid, b.Name, SelectedBanCandidate)))
         {
             StatusMessage = $"玩家「{SelectedBanCandidate.Name}」已在封鎖名單中";
             return;
@@ -233,19 +257,19 @@ public sealed partial class PlayerManagementViewModel(
 
         if (System.Net.IPAddress.Any.Equals(parsedIp) || System.Net.IPAddress.IPv6Any.Equals(parsedIp))
         {
-            StatusMessage = "禁止封鎖萬用全域 IP (0.0.0.0 或 ::)，否則將導致伺服器無法接受任何連線！";
+            StatusMessage = "禁止封鎖萬用全域 IP（0.0.0.0 或 ::），否則將導致伺服器無法接受任何連線！";
             return;
         }
 
         if (System.Net.IPAddress.Loopback.Equals(parsedIp) || System.Net.IPAddress.IPv6Loopback.Equals(parsedIp))
         {
-            StatusMessage = "禁止封鎖本機迴路 IP (127.0.0.1 或 ::1)！";
+            StatusMessage = "禁止封鎖本機迴路 IP（127.0.0.1 或 ::1）！";
             return;
         }
 
         if (System.Net.IPAddress.Broadcast.Equals(parsedIp))
         {
-            StatusMessage = "禁止封鎖廣播 IP (255.255.255.255)！";
+            StatusMessage = "禁止封鎖廣播 IP（255.255.255.255）！";
             return;
         }
 
@@ -279,9 +303,15 @@ public sealed partial class PlayerManagementViewModel(
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanSave))]
     public async Task SaveAsync()
     {
+        if (!CanSave)
+        {
+            return;
+        }
+
+        IsSaving = true;
         StatusMessage = "正在儲存伺服器名單設定...";
 
         try
@@ -302,14 +332,18 @@ public sealed partial class PlayerManagementViewModel(
                 BannedPlayers: (ServerBannedPlayerEntry[])[.. BannedPlayers],
                 BannedIps: (ServerBannedIpEntry[])[.. BannedIps]);
 
-            await _configStore.SaveBundleAsync(ServerPath, bundle).ConfigureAwait(true);
+            await _configStore.SaveBundleAsync(ServerPath, bundle);
             HasUnsavedChanges = false;
-            RequestClose?.Invoke(true);
+            Close(true);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.Error(ex, "儲存伺服器名單設定失敗");
             StatusMessage = $"儲存失敗：{ex.Message}";
+        }
+        finally
+        {
+            IsSaving = false;
         }
     }
 
@@ -318,7 +352,7 @@ public sealed partial class PlayerManagementViewModel(
     {
         if (await ConfirmDiscardAsync())
         {
-            RequestClose?.Invoke(false);
+            Close(false);
         }
     }
 
@@ -326,32 +360,53 @@ public sealed partial class PlayerManagementViewModel(
     public Task<bool> ConfirmDiscardAsync() =>
         ConfirmDiscardChangesAsync(_ui, HasUnsavedChanges, "有尚未儲存的名單設定變更，確定要捨棄變更並關閉嗎？");
 
+    /// <summary>兩端皆有 UUID 時比對 UUID，否則改比對名稱（離線模式 UUID 可能為空）</summary>
+    private static bool IsSamePlayer(string uuid, string name, ServerUserCacheEntry candidate) =>
+        !string.IsNullOrWhiteSpace(uuid) && !string.IsNullOrWhiteSpace(candidate.Uuid)
+            ? string.Equals(uuid, candidate.Uuid, StringComparison.OrdinalIgnoreCase)
+            : string.Equals(name, candidate.Name, StringComparison.OrdinalIgnoreCase);
+
     private static string FormatMinecraftTimestamp(DateTimeOffset dto) =>
-        dto.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " " + dto.ToString("zzz", CultureInfo.InvariantCulture).Replace(":", "", StringComparison.Ordinal);
+        dto.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " " + dto.ToString("zzz", CultureInfo.InvariantCulture).Replace(":", string.Empty, StringComparison.Ordinal);
 }
 
 /// <summary>管理員名單資料列項目模型</summary>
-public sealed partial class OperatorRowItem(string name, string uuid, bool isOp, int level, bool bypassesPlayerLimit, Action onChanged) : ObservableObject
+public sealed partial class OperatorRowItem : ObservableObject
 {
-    private readonly Action _onChanged = onChanged;
+    private static readonly int[] LevelsCache = [1, 2, 3, 4];
 
-    public string Name { get; init; } = name;
-    public string Uuid { get; init; } = uuid;
+    private readonly Action _onChanged;
+
+    public OperatorRowItem(string name, string uuid, bool isOp, int level, bool bypassesPlayerLimit, Action onChanged)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(uuid);
+        ArgumentNullException.ThrowIfNull(onChanged);
+
+        Name = name;
+        Uuid = uuid;
+        _onChanged = onChanged;
+        IsOp = isOp;
+        Level = level is >= 1 and <= 4 ? level : 4;
+        BypassesPlayerLimit = bypassesPlayerLimit;
+    }
+
+    public string Name { get; init; }
+    public string Uuid { get; init; }
 
     [ObservableProperty]
-    public partial bool IsOp { get; set; } = isOp;
+    public partial bool IsOp { get; set; }
 
     [ObservableProperty]
-    public partial int Level { get; set; } = level is >= 1 and <= 4 ? level : 4;
+    public partial int Level { get; set; }
 
     [ObservableProperty]
-    public partial bool BypassesPlayerLimit { get; set; } = bypassesPlayerLimit;
+    public partial bool BypassesPlayerLimit { get; set; }
+
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "x:Bind 靜態路徑在 Level 之後才更新，ItemsSource 為空時 SelectedItem 回寫 null 會擲出例外")]
+    public IReadOnlyList<int> AvailableLevels => LevelsCache;
 
     partial void OnIsOpChanged(bool value) => _onChanged();
     partial void OnLevelChanged(int value) => _onChanged();
     partial void OnBypassesPlayerLimitChanged(bool value) => _onChanged();
-
-    private static readonly int[] LevelsCache = [1, 2, 3, 4];
-    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "WinUI 3 x:Bind requires instance member for DataTemplate bindings")]
-    public IReadOnlyList<int> AvailableLevels => LevelsCache;
 }

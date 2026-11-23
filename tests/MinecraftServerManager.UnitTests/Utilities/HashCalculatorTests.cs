@@ -12,7 +12,7 @@ public sealed class HashCalculatorTests
     [InlineData("hello world")]
     [InlineData("1234567890!@#$%^&*()_+")]
     [InlineData("繁體中文與台灣用詞測試內容一二三四五六七八九十")]
-    public void DigestBytes_ProducesExactMatchWithStandardCrypto(string input)
+    public void DigestBytes_Sha256_MatchesStandardCrypto(string input)
     {
         string actual = HashCalculator.DigestBytes(Encoding.UTF8.GetBytes(input));
         byte[] expectedBytes = SHA256.HashData(Encoding.UTF8.GetBytes(input ?? string.Empty));

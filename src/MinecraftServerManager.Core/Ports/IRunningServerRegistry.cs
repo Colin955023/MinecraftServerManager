@@ -17,4 +17,7 @@ public interface IRunningServerRegistry
 
     /// <summary>強制終止遺留行程（含子行程）並移除登記；行程已不存在或終止成功回傳 true</summary>
     public Task<bool> TerminateAsync(TrackedServerProcess process, CancellationToken cancellationToken = default);
+
+    /// <summary>等待已排入的登記檔寫入完成</summary>
+    public Task FlushAsync();
 }

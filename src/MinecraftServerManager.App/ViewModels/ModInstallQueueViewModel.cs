@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -45,25 +44,42 @@ public sealed class ModInstallQueueItem
         : VersionNumber;
 
     public string Reason { get; set; } = "全新安裝";
+
+    public bool PreserveDisabledState { get; set; }
 }
 
 /// <summary>模組頁：版本挑選、安裝佇列、相依解析與批次安裝</summary>
-public sealed partial class ModInstallQueueViewModel(
-    ModsContext context,
-    IModDependencyPlanner dependencyPlanner,
-    IModFileService modFileService,
-    IUiService uiService,
-    IModManager modManager,
-    IModrinthClient modrinthClient)
-    : ModQueueWorkflowViewModelBase(context, dependencyPlanner, modFileService, uiService, modManager, modrinthClient)
+public sealed partial class ModInstallQueueViewModel : ModQueueWorkflowViewModelBase, IDisposable
 {
+    private const string EmptyQueueHint = "安裝清單為空";
+
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModInstallQueueViewModel));
+    private bool _disposed;
+
+    public ModInstallQueueViewModel(
+        ModsContext context,
+        IModDependencyPlanner dependencyPlanner,
+        IModFileService modFileService,
+        IUiService uiService,
+        IModManager modManager,
+        IModrinthClient modrinthClient,
+        IServerRuntimeHost runtimeHost)
+        : base(context, dependencyPlanner, modFileService, uiService, modManager, modrinthClient, runtimeHost)
+    {
+        _context.ServerChanged += OnServerChanged;
+    }
 
     [ObservableProperty]
-    public partial string InstallQueueHint { get; set; } = "安裝清單：0 個項目";
+    public partial string InstallQueueHint { get; set; } = EmptyQueueHint;
 
-    /// <summary>待安裝模組佇列</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(InstallQueuedModsCommand), nameof(ClearInstallQueueCommand))]
+    public partial bool IsInstalling { get; private set; }
+
+    /// <summary>待安裝模組佇列（切換伺服器時清空）</summary>
     public BulkObservableCollection<ModInstallQueueItem> InstallQueue { get; } = [];
+
+    private bool CanModifyQueue => !IsInstalling;
 
     /// <summary>彈出版本選擇對話方塊，將選定版本與必要相依模組加入安裝清單</summary>
     public async Task PickVersionAndQueueAsync(OnlineModRowItem? mod)
@@ -76,22 +92,22 @@ public sealed partial class ModInstallQueueViewModel(
         // 偵測伺服器端環境相容性，防範純用戶端模組造成伺服器當機
         if (string.Equals(mod.ServerSide, "unsupported", StringComparison.OrdinalIgnoreCase)
             && !await _ui.ConfirmAsync(
-                $"模組「{mod.Title}」在 Modrinth 標記為純用戶端模組 (server_side: unsupported)，在伺服器端執行可能引發當機！\n\n是否仍要強行挑選版本並加入安裝清單？",
+                $"模組「{mod.Title}」在 Modrinth 標記為純用戶端模組（server_side: unsupported），在伺服器端執行可能引發當機！\n\n是否仍要強行挑選版本並加入安裝清單？",
                 "伺服器端環境不相容警告",
-                UiMessageLevel.Warning).ConfigureAwait(true))
+                UiMessageLevel.Warning))
         {
             return;
         }
 
         ServerConfig? server = _context.Server;
-        var pickerVm = new ModVersionPickerViewModel(
+        using var pickerVm = new ModVersionPickerViewModel(
             _modrinthClient,
             mod.Id,
             mod.Title,
-            _context.LoaderId,
+            _context.LoaderType,
             _context.MinecraftVersion);
 
-        if (await _ui.ShowModVersionPickerAsync(pickerVm).ConfigureAwait(true) != true || pickerVm.QueuedVersion is not { } chosen)
+        if (await _ui.ShowModVersionPickerAsync(pickerVm) != true || pickerVm.QueuedVersion is not { } chosen)
         {
             return;
         }
@@ -113,38 +129,38 @@ public sealed partial class ModInstallQueueViewModel(
 
         if (server is not null && chosen.Dependencies.Count > 0)
         {
-            await QueueMissingDependenciesAsync(mod.Title, chosen.Dependencies, server).ConfigureAwait(true);
+            await QueueMissingDependenciesAsync(mod.Title, mod.Id, chosen.Dependencies, server);
         }
 
         UpdateInstallQueueHint();
 
         if (pickerVm.InstallImmediately)
         {
-            await InstallQueuedModsAsync().ConfigureAwait(true);
+            await InstallQueuedModsAsync();
         }
     }
 
     private bool ContainsFile(string? fileName) =>
         InstallQueue.Any(q => string.Equals(q.FileName, fileName, StringComparison.OrdinalIgnoreCase));
 
-    private async Task QueueMissingDependenciesAsync(string modTitle, IReadOnlyList<string> dependencyIds, ServerConfig server)
+    private async Task QueueMissingDependenciesAsync(string modTitle, string rootProjectId, IReadOnlyList<string> dependencyIds, ServerConfig server)
     {
         try
         {
-            var installed = await _modManager.GetModsAsync(server.Path).ConfigureAwait(true);
+            var installed = await _modManager.GetModsAsync(server.Path);
             var rawDeps = dependencyIds
                 .Select(static d => new OnlineModDependency(d, ModDependencyType.Required))
                 .ToList();
 
             var plans = await _dependencyPlanner.ResolveDependenciesRecursivelyAsync(
-                _modrinthClient,
                 rawDeps,
                 server.MinecraftVersion.Value,
-                server.LoaderType.ToString(),
-                installed).ConfigureAwait(true);
+                server.LoaderType,
+                installed,
+                rootProjectId);
 
             var toAdd = plans
-                .Where(plan => plan.TargetVersion.PrimaryFile is { } pf && !ContainsFile(pf.Filename))
+                .Where(plan => plan.TargetVersion.PrimaryFile is { } pf && !ContainsFile(pf.FileName))
                 .ToList();
 
             if (toAdd.Count == 0)
@@ -152,8 +168,14 @@ public sealed partial class ModInstallQueueViewModel(
                 return;
             }
 
-            if (!await _ui.ConfirmAsync(BuildDependencyPrompt(modTitle, toAdd), "發現必要相依模組").ConfigureAwait(true))
+            if (!await _ui.ConfirmAsync(BuildDependencyPrompt(modTitle, toAdd), "發現必要相依模組"))
             {
+                return;
+            }
+
+            if (!string.Equals(_context.Server?.Name.Value, server.Name.Value, StringComparison.OrdinalIgnoreCase))
+            {
+                Logger.Information("伺服器已切換，放棄將「{Mod}」的相依模組加入清單", modTitle);
                 return;
             }
 
@@ -167,17 +189,15 @@ public sealed partial class ModInstallQueueViewModel(
                     Title = depVer.DisplayName,
                     VersionNumber = depVer.VersionNumber,
                     CurrentVersion = plan.ExistingLocalMod?.Version,
-                    FileName = pf.Filename,
-                    OldFileName = plan.ExistingLocalMod?.Filename,
+                    FileName = pf.FileName,
+                    OldFileName = plan.ExistingLocalMod?.FileName,
                     DownloadUrl = pf.Url,
                     ExpectedHash = ModHelpers.ResolveHash(pf, out string algo),
                     HashAlgorithm = algo,
-                    Dependencies = (string[])[.. depVer.Dependencies
-                        .Where(static d => d.DependencyType == ModDependencyType.Required)
-                        .Select(static d => d.ProjectId ?? string.Empty)
-                        .Where(static id => id.Length > 0)],
+                    Dependencies = ModBatchOperations.GetRequiredDependencyIds(depVer),
                     Action = plan.Action,
-                    Reason = plan.Reason
+                    Reason = plan.Reason,
+                    PreserveDisabledState = plan.ExistingLocalMod is { Status: ModStatus.Disabled }
                 });
             }
 
@@ -197,7 +217,7 @@ public sealed partial class ModInstallQueueViewModel(
         sb.AppendLine(CultureInfo.InvariantCulture, $"模組「{modTitle}」偵測到 {plans.Count} 個必要相依模組規劃：");
 
         AppendPlanSection(sb, "【全新安裝】", plans.Where(static p => p.Action == ModInstallAction.Install),
-            static p => $"• {p.TargetVersion.DisplayName} ({p.TargetVersion.PrimaryFile?.Filename})");
+            static p => $"• {p.TargetVersion.DisplayName} ({p.TargetVersion.PrimaryFile?.FileName})");
         AppendPlanSection(sb, "【更新升級】", plans.Where(static p => p.Action == ModInstallAction.Update),
             static p => $"• {p.TargetVersion.DisplayName} ({p.ExistingLocalMod?.Version} ➔ {p.TargetVersion.VersionNumber})");
 
@@ -224,126 +244,91 @@ public sealed partial class ModInstallQueueViewModel(
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanModifyQueue))]
     public async Task InstallQueuedModsAsync(CancellationToken cancellationToken = default)
     {
+        if (IsInstalling)
+        {
+            return;
+        }
+
         if (InstallQueue.Count == 0)
         {
             _ui.Notify("安裝清單目前沒有項目", NotificationType.Warning);
             return;
         }
 
-        if (_context.Server is not { } server)
-        {
-            _ui.Notify("請先選擇伺服器", NotificationType.Warning);
-            return;
-        }
-
-        var pending = InstallQueue.ToList();
-        if (!await ModBatchOperations.ConfirmUnofficialSourcesAsync(_ui, _modFileService, pending, static u => u.Title, static u => u.DownloadUrl, "待安裝模組", "安裝"))
+        if (!_context.TryRequireServer(_ui, out var server))
         {
             return;
         }
 
-        using IOperationProgress installProgressDialog = _ui.ShowModOperationProgress("正在安裝模組", "準備下載模組檔案...");
+        if (!EnsureServerStopped(server, "安裝"))
+        {
+            return;
+        }
+
+        var pending = ModBatchOperations.ExcludeUnofficialSources(_ui, _modFileService, InstallQueue, static u => u.Title, static u => u.DownloadUrl, "待安裝模組");
+        if (pending.Count == 0)
+        {
+            return;
+        }
+
+        IsInstalling = true;
         try
         {
-            var succeededItems = await InstallItemsAsync(server.Path, pending, installProgressDialog, cancellationToken).ConfigureAwait(true);
-            foreach (var item in succeededItems)
-            {
-                InstallQueue.Remove(item);
-            }
+            var (succeededItems, failures) = await ExecuteStagedDownloadsAsync(
+                server.Path,
+                pending,
+                static item => new ModDownloadTask
+                {
+                    DisplayName = item.Title,
+                    DownloadUrl = item.DownloadUrl,
+                    FileName = item.FileName,
+                    ExpectedHash = item.ExpectedHash,
+                    HashAlgorithm = item.HashAlgorithm,
+                    OldFileName = item.Action == ModInstallAction.Update ? item.OldFileName : null,
+                    PreserveDisabledState = item.PreserveDisabledState || (item.OldFileName is { } oldFileName && ModHelpers.IsDisabledModFileName(oldFileName))
+                },
+                "正在安裝模組",
+                "安裝",
+                Logger,
+                cancellationToken);
 
-            int success = succeededItems.Count;
-            Logger.Information("批次安裝完成，成功 {Success} / {Total}", success, pending.Count);
-            await _context.NotifyModsChangedAsync().ConfigureAwait(true);
+            InstallQueue.RemoveRange(succeededItems);
 
-            int failed = pending.Count - success;
-            string summaryMsg = $"已成功安裝 {success} 個模組！" + (failed > 0 ? $"\n其中 {failed} 個模組安裝失敗，請檢查網路連線或記錄檔。" : string.Empty);
-            _ui.Notify(summaryMsg, failed > 0 ? NotificationType.Warning : NotificationType.Success);
+            Logger.Information("批次安裝完成，成功 {Success} / {Total}", succeededItems.Count, pending.Count);
+            await _context.NotifyModsChangedAsync();
+            ModBatchOperations.NotifySummary(_ui, "安裝", succeededItems.Count, failures);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Error(ex, "批次安裝模組發生例外");
+            _ui.Notify($"安裝模組失敗：{ex.Message}", NotificationType.Error);
         }
         finally
         {
+            IsInstalling = false;
             UpdateInstallQueueHint();
-            _modFileService.CleanupStagingDirectory(server.Path);
         }
-    }
-
-    private async Task<List<ModInstallQueueItem>> InstallItemsAsync(
-        string serverPath,
-        List<ModInstallQueueItem> pending,
-        IOperationProgress progressDialog,
-        CancellationToken cancellationToken)
-    {
-        IModManager modManager = _modManager;
-        progressDialog.UpdateProgress(0, pending.Count, "已排入模組並行下載佇列...");
-
-        var pendingTargetFileNames = pending
-            .Select(static item => Path.GetFileName(item.FileName))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var succeededItems = new ConcurrentBag<ModInstallQueueItem>();
-
-        await ModBatchOperations.RunWithProgressAsync(pending, 3, progressDialog, "安裝模組", static item => item.Title, async (item, token) =>
-        {
-            try
-            {
-                var result = await modManager.InstallOnlineModAsync(
-                    serverPath,
-                    item.DownloadUrl,
-                    item.FileName,
-                    expectedHash: item.ExpectedHash,
-                    hashAlgorithm: item.HashAlgorithm,
-                    cancellationToken: token).ConfigureAwait(false);
-
-                if (result?.Completed != true)
-                {
-                    string message = result?.Message ?? (token.IsCancellationRequested ? "已取消安裝" : "下載工作未回傳結果");
-                    Logger.Warning("模組「{Title}」安裝失敗: {Message}", item.Title, message);
-                    _ui.Notify($"模組「{item.Title}」安裝失敗：{message}", NotificationType.Error);
-                    return;
-                }
-
-                if (item.Action == ModInstallAction.Update && !string.IsNullOrWhiteSpace(item.OldFileName) &&
-                    !string.Equals(item.OldFileName, item.FileName, StringComparison.OrdinalIgnoreCase) &&
-                    !pendingTargetFileNames.Contains(Path.GetFileName(item.OldFileName)))
-                {
-                    try
-                    {
-                        _modFileService.DeleteModFileVariants(serverPath, item.OldFileName);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        Logger.Warning(ex, "刪除舊版本模組檔案「{Old}」失敗", item.OldFileName);
-                    }
-                }
-
-                succeededItems.Add(item);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Logger.Error(ex, "安裝模組「{Title}」失敗", item.Title);
-                _ui.Notify($"安裝「{item.Title}」失敗：{ex.Message}", NotificationType.Error);
-            }
-        }, cancellationToken).ConfigureAwait(true);
-
-        return [.. succeededItems];
     }
 
     /// <summary>檢視待安裝佇列清單視窗</summary>
     [RelayCommand]
     public async Task ViewInstallQueueAsync()
     {
-        bool? confirmed = await _ui.ShowModInstallQueueAsync(InstallQueue);
+        using var reviewVm = new ModInstallQueueReviewViewModel(InstallQueue);
+        bool? confirmed = await _ui.ShowModInstallQueueAsync(reviewVm);
         UpdateInstallQueueHint();
 
-        if (confirmed == true && InstallQueue.Count > 0)
+        if (confirmed == true && InstallQueue.Count > 0 && !IsInstalling)
         {
             _ = RunSafeAsync(() => InstallQueuedModsAsync(), "安裝佇列模組", Logger);
         }
     }
 
     /// <summary>清空安裝清單</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanModifyQueue))]
     public void ClearInstallQueue()
     {
         InstallQueue.Clear();
@@ -355,7 +340,7 @@ public sealed partial class ModInstallQueueViewModel(
     {
         if (InstallQueue.Count == 0)
         {
-            InstallQueueHint = "安裝佇列為空";
+            InstallQueueHint = EmptyQueueHint;
             return;
         }
 
@@ -365,5 +350,26 @@ public sealed partial class ModInstallQueueViewModel(
         InstallQueueHint = updates > 0
             ? $"安裝清單：{installs} 個新增，{updates} 個更新"
             : $"安裝清單：{installs} 個項目待安裝";
+    }
+
+    private void OnServerChanged()
+    {
+        if (IsInstalling)
+        {
+            return;
+        }
+
+        ClearInstallQueue();
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _context.ServerChanged -= OnServerChanged;
     }
 }

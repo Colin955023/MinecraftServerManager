@@ -21,7 +21,7 @@ public sealed class ServerBackupServiceTests : IDisposable
         File.WriteAllText(Path.Combine(_serverDir, "server.properties"), "motd=Initial Server");
         File.WriteAllText(Path.Combine(_serverDir, "world.txt"), "world-data");
 
-        _backupService = new ServerBackupService(_testRoot, static () => 10);
+        _backupService = new ServerBackupService(_testRoot, static () => 10, TimeProvider.System);
     }
 
     public void Dispose()
@@ -31,39 +31,47 @@ public sealed class ServerBackupServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task RejectsCreateBackupWithoutDestinationPath()
+    public async Task CreateBackupAsync_NoDestinationPath_Rejects()
     {
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            _backupService.CreateBackupAsync("TestServer", destinationPath: null));
+            _backupService.CreateBackupAsync("TestServer", destinationPath: null, cancellationToken: TestContext.Current.CancellationToken));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            _backupService.CreateBackupAsync("TestServer", destinationPath: "   "));
+            _backupService.CreateBackupAsync("TestServer", destinationPath: "   ", cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task CreatesAndListsBackupsSuccessfully()
+    public async Task CreateBackupAsync_ValidServer_IsListed()
     {
-        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir, comment: "Test Backup 1");
+        var backup = await _backupService.CreateBackupAsync(
+            "TestServer",
+            destinationPath: _externalBackupsDir,
+            comment: "Test Backup 1",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(backup);
         Assert.True(File.Exists(backup.FullPath));
         Assert.True(backup.SizeBytes > 0);
 
-        var list = await _backupService.ListBackupsAsync("TestServer", _externalBackupsDir);
+        var list = await _backupService.ListBackupsAsync("TestServer", _externalBackupsDir, TestContext.Current.CancellationToken);
         var item = Assert.Single(list);
         Assert.Equal(backup.FileName, item.FileName);
     }
 
     [Fact]
-    public async Task RestoresBackupOverExistingFiles()
+    public async Task RestoreBackupAsync_ExistingFiles_Overwrites()
     {
-        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir);
+        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir, cancellationToken: TestContext.Current.CancellationToken);
 
         // 修改原始檔案
         File.WriteAllText(Path.Combine(_serverDir, "server.properties"), "motd=Modified Content");
         File.Delete(Path.Combine(_serverDir, "world.txt"));
 
-        bool restored = await _backupService.RestoreBackupAsync("TestServer", backup.FileName, _externalBackupsDir);
+        bool restored = await _backupService.RestoreBackupAsync(
+            "TestServer",
+            backup.FileName,
+            _externalBackupsDir,
+            cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(restored);
 
         Assert.True(File.Exists(Path.Combine(_serverDir, "world.txt")));
@@ -71,54 +79,76 @@ public sealed class ServerBackupServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task DeletesBackupSuccessfully()
+    public async Task RestoreBackupAsync_ForeignOrPathQualifiedName_Rejects()
     {
-        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir);
+        string foreignFileName = "backup-OtherServer-20260101-120000.zip";
+        string foreignPath = Path.Combine(_externalBackupsDir, foreignFileName);
+        TestZip.Create(foreignPath, ("server.properties", "motd=Foreign Server"));
+        string originalProperties = File.ReadAllText(Path.Combine(_serverDir, "server.properties"));
+
+        Assert.False(await _backupService.RestoreBackupAsync(
+            "TestServer",
+            foreignFileName,
+            _externalBackupsDir,
+            cancellationToken: TestContext.Current.CancellationToken));
+        Assert.False(await _backupService.RestoreBackupAsync(
+            "TestServer",
+            Path.Combine(_externalBackupsDir, foreignFileName),
+            _externalBackupsDir,
+            cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(originalProperties, File.ReadAllText(Path.Combine(_serverDir, "server.properties")));
+    }
+
+    [Fact]
+    public async Task DeleteBackupAsync_ExistingBackup_Removes()
+    {
+        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(File.Exists(backup.FullPath));
 
-        bool deleted = await _backupService.DeleteBackupAsync("TestServer", backup.FileName, _externalBackupsDir);
+        bool deleted = await _backupService.DeleteBackupAsync("TestServer", backup.FileName, _externalBackupsDir, TestContext.Current.CancellationToken);
         Assert.True(deleted);
         Assert.False(File.Exists(backup.FullPath));
 
-        var list = await _backupService.ListBackupsAsync("TestServer", _externalBackupsDir);
+        var list = await _backupService.ListBackupsAsync("TestServer", _externalBackupsDir, TestContext.Current.CancellationToken);
         Assert.Empty(list);
     }
 
     [Fact]
-    public async Task SupportsExternalBackupDirectoryForListRestoreAndDelete()
+    public async Task BackupOperations_ExternalDirectory_ListRestoreAndDelete()
     {
         using var extra = new TempDirectory("msm-extra-backups-");
         string extraDir = Path.Combine(extra.FullName, "backups");
-        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: extraDir);
+        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: extraDir, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(File.Exists(backup.FullPath));
         Assert.StartsWith(Path.GetFullPath(extraDir), backup.FullPath, StringComparison.OrdinalIgnoreCase);
 
-        var listed = await _backupService.ListBackupsAsync("TestServer", extraDir);
+        var listed = await _backupService.ListBackupsAsync("TestServer", extraDir, TestContext.Current.CancellationToken);
         var item = Assert.Single(listed);
         Assert.Equal(backup.FileName, item.FileName);
 
         File.WriteAllText(Path.Combine(_serverDir, "server.properties"), "motd=Modified Content");
-        bool restored = await _backupService.RestoreBackupAsync("TestServer", backup.FileName, extraDir);
+        bool restored = await _backupService.RestoreBackupAsync("TestServer", backup.FileName, extraDir, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(restored);
         Assert.Equal("motd=Initial Server", File.ReadAllText(Path.Combine(_serverDir, "server.properties")));
 
-        bool deleted = await _backupService.DeleteBackupAsync("TestServer", backup.FileName, extraDir);
+        bool deleted = await _backupService.DeleteBackupAsync("TestServer", backup.FileName, extraDir, TestContext.Current.CancellationToken);
         Assert.True(deleted);
         Assert.False(File.Exists(backup.FullPath));
     }
 
     [Fact]
-    public async Task RejectsBackupDirectoryInsideServersRoot()
+    public async Task CreateBackupAsync_DirectoryInsideServersRoot_Rejects()
     {
         string invalidDir = Path.Combine(_testRoot, "InvalidInsideBackupDir");
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            _backupService.CreateBackupAsync("TestServer", destinationPath: invalidDir));
+            _backupService.CreateBackupAsync("TestServer", destinationPath: invalidDir, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task RestoresBackup_PreservesLiveDiagnosticsAndCrashReports()
+    public async Task RestoreBackupAsync_LiveDiagnostics_Preserves()
     {
-        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir);
+        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir, cancellationToken: TestContext.Current.CancellationToken);
 
         // 模擬伺服器運作後產生了當機報告與現場最新記錄檔
         string logsDir = Path.Combine(_serverDir, "logs");
@@ -129,7 +159,11 @@ public sealed class ServerBackupServiceTests : IDisposable
         File.WriteAllText(Path.Combine(logsDir, "latest.log"), "Live latest log before disaster");
         File.WriteAllText(Path.Combine(crashDir, "crash-2026-09-24.txt"), "Live crash traceback");
 
-        bool restored = await _backupService.RestoreBackupAsync("TestServer", backup.FileName, _externalBackupsDir);
+        bool restored = await _backupService.RestoreBackupAsync(
+            "TestServer",
+            backup.FileName,
+            _externalBackupsDir,
+            cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(restored);
 
         // 驗證當機報告被妥善保留移回
@@ -145,7 +179,7 @@ public sealed class ServerBackupServiceTests : IDisposable
     [Fact]
     public async Task RestoresBackup_WhenBackupContainsLatestLog_KeepsBothAsPreRestore()
     {
-        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir);
+        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir, cancellationToken: TestContext.Current.CancellationToken);
 
         // 備份本身預設不含 logs；手動加入 logs/latest.log 模擬舊版備份，使其與現場記錄檔衝突
         string backupPath = Path.Combine(_externalBackupsDir, backup.FileName);
@@ -160,7 +194,7 @@ public sealed class ServerBackupServiceTests : IDisposable
         Directory.CreateDirectory(logsDir);
         File.WriteAllText(Path.Combine(logsDir, "latest.log"), "Live latest log before disaster");
 
-        Assert.True(await _backupService.RestoreBackupAsync("TestServer", backup.FileName, _externalBackupsDir));
+        Assert.True(await _backupService.RestoreBackupAsync("TestServer", backup.FileName, _externalBackupsDir, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal("Log inside backup", File.ReadAllText(Path.Combine(logsDir, "latest.log")));
         Assert.Equal("Live latest log before disaster", File.ReadAllText(Path.Combine(logsDir, "latest.log.pre-restore")));
@@ -169,13 +203,17 @@ public sealed class ServerBackupServiceTests : IDisposable
     [Fact]
     public async Task RestoresBackup_ClearsReadOnlyAttribute_SuccessfullyRestores()
     {
-        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir);
+        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir, cancellationToken: TestContext.Current.CancellationToken);
 
         // 將既有檔案設為 ReadOnly 唯讀屬性，模擬鎖定情況
         string propsPath = Path.Combine(_serverDir, "server.properties");
         File.SetAttributes(propsPath, FileAttributes.ReadOnly);
 
-        bool restored = await _backupService.RestoreBackupAsync("TestServer", backup.FileName, _externalBackupsDir);
+        bool restored = await _backupService.RestoreBackupAsync(
+            "TestServer",
+            backup.FileName,
+            _externalBackupsDir,
+            cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(restored);
 
         // 還原後唯讀屬性應被清除且內容成功復原
@@ -189,22 +227,17 @@ public sealed class ServerBackupServiceTests : IDisposable
     {
         // 備份內含 backups 資料夾，與伺服器保留的 backups 衝突，使搬入階段在 a-new.txt 之後失敗
         string zipPath = Path.Combine(_externalBackupsDir, "broken.zip");
-        using (var zip = System.IO.Compression.ZipFile.Open(zipPath, System.IO.Compression.ZipArchiveMode.Create))
-        {
-            using (var writer = new StreamWriter(zip.CreateEntry("a-new.txt").Open()))
-            {
-                writer.Write("new-data");
-            }
-
-            using var nested = new StreamWriter(zip.CreateEntry("backups/new.txt").Open());
-            nested.Write("new-nested");
-        }
+        TestZip.Create(zipPath, ("a-new.txt", "new-data"), ("backups/new.txt", "new-nested"));
 
         string keptDir = Path.Combine(_serverDir, "backups");
         Directory.CreateDirectory(keptDir);
         File.WriteAllText(Path.Combine(keptDir, "old.txt"), "old-backup");
 
-        bool restored = await _backupService.RestoreBackupAsync("TestServer", "broken.zip", _externalBackupsDir);
+        bool restored = await _backupService.RestoreBackupAsync(
+            "TestServer",
+            "broken.zip",
+            _externalBackupsDir,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(restored);
         Assert.Equal("motd=Initial Server", File.ReadAllText(Path.Combine(_serverDir, "server.properties")));
@@ -216,7 +249,7 @@ public sealed class ServerBackupServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateBackupAsync_PrunesAndExcludesDiagnosticDirectories()
+    public async Task CreateBackupAsync_DiagnosticDirectories_Excludes()
     {
         // 建立伺服器診斷與記錄資料夾
         string logsDir = Path.Combine(_serverDir, "logs");
@@ -230,7 +263,7 @@ public sealed class ServerBackupServiceTests : IDisposable
         File.WriteAllText(Path.Combine(crashDir, "crash.txt"), "crash report");
         File.WriteAllText(Path.Combine(legacyBackupsDir, "old-backup.zip"), "old zip");
 
-        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir);
+        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir, cancellationToken: TestContext.Current.CancellationToken);
         string backupFile = Path.Combine(_externalBackupsDir, backup.FileName);
 
         Assert.True(File.Exists(backupFile));
@@ -249,7 +282,7 @@ public sealed class ServerBackupServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateBackupAsync_KeepsNestedFoldersNamedLikeExcludedDirectories()
+    public async Task CreateBackupAsync_NestedFoldersNamedLikeExcluded_Keeps()
     {
         string pluginBackups = Path.Combine(_serverDir, "plugins", "CoreProtect", "backups");
         string configLogs = Path.Combine(_serverDir, "config", "mod", "logs");
@@ -258,7 +291,7 @@ public sealed class ServerBackupServiceTests : IDisposable
         File.WriteAllText(Path.Combine(pluginBackups, "data.db"), "plugin data");
         File.WriteAllText(Path.Combine(configLogs, "settings.json"), "{}");
 
-        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir);
+        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir, cancellationToken: TestContext.Current.CancellationToken);
 
         using var archive = Infrastructure.FileSystem.SafeZipArchive.OpenRead(Path.Combine(_externalBackupsDir, backup.FileName));
         var entryNames = archive.Entries.Select(static e => e.FullName.Replace('\\', '/')).ToList();
@@ -276,24 +309,79 @@ public sealed class ServerBackupServiceTests : IDisposable
     [InlineData("a", "backup-a-b-20260101-120000.zip", false)]
     [InlineData("a", "a-b-20260101-120000.zip", false)]
     [InlineData("a", "backup-ab.zip", false)]
-    public void IsBackupFileFor_MatchesOnlyTimestampedOwnBackups(string serverName, string fileName, bool expected) => Assert.Equal(expected, ServerBackupService.IsBackupFileFor(serverName, fileName));
+    [InlineData("a", "backup-a-20260101-120000.txt", false)]
+    [InlineData("a", "backup-a-20260101-120000", false)]
+    public void IsBackupFileFor_VariousNames_MatchesOnlyOwnTimestamped(string serverName, string fileName, bool expected) => Assert.Equal(expected, ServerBackupService.IsBackupFileFor(serverName, fileName));
 
     [Fact]
-    public async Task RetentionCountIsReadDynamicallyFromProvider()
+    public async Task RestoreBackupAsync_NestedDiagnostics_MergesAndStampsSnapshot()
+    {
+        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir, cancellationToken: TestContext.Current.CancellationToken);
+        string backupPath = Path.Combine(_externalBackupsDir, backup.FileName);
+        using (var zipStream = new FileStream(backupPath, FileMode.Open, FileAccess.ReadWrite))
+        using (var archive = new System.IO.Compression.ZipArchive(zipStream, System.IO.Compression.ZipArchiveMode.Update))
+        {
+            using (var writer = new StreamWriter(archive.CreateEntry("logs/latest.log").Open()))
+            {
+                writer.Write("Log inside backup");
+            }
+
+            using var preRestore = new StreamWriter(archive.CreateEntry("logs/latest.log.pre-restore").Open());
+            preRestore.Write("Old pre-restore");
+        }
+
+        string logsDir = Path.Combine(_serverDir, "logs");
+        string nestedCrash = Path.Combine(_serverDir, "crash-reports", "mods");
+        Directory.CreateDirectory(logsDir);
+        Directory.CreateDirectory(nestedCrash);
+        File.WriteAllText(Path.Combine(logsDir, "latest.log"), "Live log");
+        File.WriteAllText(Path.Combine(nestedCrash, "nested.txt"), "Nested crash");
+
+        Assert.True(await _backupService.RestoreBackupAsync("TestServer", backup.FileName, _externalBackupsDir, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal("Nested crash", File.ReadAllText(Path.Combine(nestedCrash, "nested.txt")));
+        Assert.Equal("Old pre-restore", File.ReadAllText(Path.Combine(logsDir, "latest.log.pre-restore")));
+        string stamped = Assert.Single(Directory.GetFiles(logsDir, "latest.log.pre-restore-*"));
+        Assert.Equal("Live log", File.ReadAllText(stamped));
+    }
+
+    [Fact]
+    public async Task DeleteBackupAsync_ForeignOrPathQualifiedName_Rejects()
+    {
+        var backup = await _backupService.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir, cancellationToken: TestContext.Current.CancellationToken);
+        string foreign = Path.Combine(_externalBackupsDir, "backup-Other-20260101-120000.zip");
+        File.WriteAllText(foreign, "other");
+
+        Assert.False(await _backupService.DeleteBackupAsync("TestServer", "backup-Other-20260101-120000.zip", _externalBackupsDir, TestContext.Current.CancellationToken));
+        Assert.False(await _backupService.DeleteBackupAsync("TestServer", $"..\\{backup.FileName}", _externalBackupsDir, TestContext.Current.CancellationToken));
+        Assert.True(File.Exists(foreign));
+        Assert.True(File.Exists(backup.FullPath));
+    }
+
+    [Theory]
+    [InlineData("..")]
+    [InlineData("TestServer\\..\\..")]
+    [InlineData("a/b")]
+    public async Task CreateBackupAsync_ServerOutsideRoot_Rejects(string serverName) =>
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _backupService.CreateBackupAsync(serverName, destinationPath: _externalBackupsDir, cancellationToken: TestContext.Current.CancellationToken));
+
+    [Fact]
+    public async Task CreateBackupAsync_RetentionChanged_ReadsCurrentValue()
     {
         int retention = 3;
-        var service = new ServerBackupService(_testRoot, () => retention);
+        var service = new ServerBackupService(_testRoot, () => retention, TimeProvider.System);
 
         for (int i = 0; i < 4; i++)
         {
-            await service.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir);
+            await service.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir, cancellationToken: TestContext.Current.CancellationToken);
         }
 
-        Assert.Equal(3, (await service.ListBackupsAsync("TestServer", _externalBackupsDir)).Count);
+        Assert.Equal(3, (await service.ListBackupsAsync("TestServer", _externalBackupsDir, TestContext.Current.CancellationToken)).Count);
 
         retention = 1;
-        await service.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir);
+        await service.CreateBackupAsync("TestServer", destinationPath: _externalBackupsDir, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Single(await service.ListBackupsAsync("TestServer", _externalBackupsDir));
+        Assert.Single(await service.ListBackupsAsync("TestServer", _externalBackupsDir, TestContext.Current.CancellationToken));
     }
 }

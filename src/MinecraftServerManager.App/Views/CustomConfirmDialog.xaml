@@ -1,30 +1,17 @@
 <ContentDialog x:Class="MinecraftServerManager.App.Views.CustomConfirmDialog"
-    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    mc:Ignorable="d"
-    Title="{x:Bind DialogTitle, Mode=OneTime}"
-    PrimaryButtonText="確定"
-    CloseButtonText="取消"
-    DefaultButton="Primary">
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:controls="using:MinecraftServerManager.App.Controls"
+  mc:Ignorable="d"
+  Title="{x:Bind DialogTitle}"
+  PrimaryButtonText="確定"
+  CloseButtonText="取消"
+  DefaultButton="Primary">
 
-    <Grid Margin="0,12,0,0">
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
-
-        <TextBlock Text="{x:Bind IconGlyph, Mode=OneTime}"
-            FontSize="26"
-            VerticalAlignment="Top"
-            Margin="0,0,14,0" />
-
-        <TextBlock Grid.Column="1"
-            Text="{x:Bind Message, Mode=OneTime}"
-            TextWrapping="Wrap"
-            FontSize="14"
-            VerticalAlignment="Center"
-            Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-    </Grid>
+  <controls:IconMessageContent Margin="0,12,0,0"
+    Glyph="{x:Bind IconGlyph}"
+    IconBrushKey="{x:Bind IconBrushKey}"
+    Message="{x:Bind Message}" />
 </ContentDialog>

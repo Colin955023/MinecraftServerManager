@@ -6,7 +6,6 @@ using MinecraftServerManager.Infrastructure.Servers;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-/// <summary>監控視窗 ViewModel 測試</summary>
 public sealed class ServerMonitorViewModelTests : IDisposable
 {
     private readonly TempDirectory _tempRootTemp = new("msm-monitor-test-");
@@ -33,32 +32,23 @@ public sealed class ServerMonitorViewModelTests : IDisposable
     public void Dispose() => _tempRootTemp.Dispose();
 
     [Theory]
-    [InlineData("[12:00:00] [Server thread/INFO]: Steve joined the game")]
-    [InlineData("[12:00:00] [Server thread/INFO] [minecraft/MinecraftServer]: Steve joined the game")]
-    public void PlayerJoin_RealLogFormats_AreRecognized(string line)
+    [InlineData("[12:00:00] [Server thread/INFO]: Steve joined the game", "Steve")]
+    [InlineData("[12:00:00] [Server thread/INFO] [minecraft/MinecraftServer]: Steve joined the game", "Steve")]
+    [InlineData("[12:00:00] [Server thread/INFO]: .Steve joined the game", ".Steve")]
+    public void PlayerJoin_RealLogFormats_AreRecognized(string line, string expectedPlayer)
     {
         using var vm = CreateMonitor();
 
         _runtime.RaiseOutputLine(line);
 
-        Assert.Equal(["Steve"], vm.OnlinePlayers.ToArray());
-    }
-
-    [Fact]
-    public void PlayerJoin_BedrockStyleNameWithDot_IsRecognized()
-    {
-        using var vm = CreateMonitor();
-
-        _runtime.RaiseOutputLine("[12:00:00] [Server thread/INFO]: .Steve joined the game");
-
-        Assert.Equal([".Steve"], vm.OnlinePlayers.ToArray());
+        Assert.Equal([expectedPlayer], vm.OnlinePlayers.ToArray());
     }
 
     [Theory]
     [InlineData("[12:00:00] [Server thread/INFO]: <Alice> hi: Bob joined the game")]
     [InlineData("[12:00:00] [Server thread/INFO]: <Alice> ]: Bob joined the game")]
     [InlineData("[12:00:00] [Server thread/INFO]: <Alice> ]: Bob left the game")]
-    public void ChatSpoofing_DoesNotChangeOnlinePlayers(string line)
+    public void OutputLine_SpoofedJoinChat_KeepsOnlinePlayers(string line)
     {
         using var vm = CreateMonitor();
 
@@ -68,7 +58,7 @@ public sealed class ServerMonitorViewModelTests : IDisposable
     }
 
     [Fact]
-    public void ChatSpoofedPlayerCountLine_DoesNotChangeCount()
+    public void OutputLine_SpoofedPlayerCount_KeepsCount()
     {
         using var vm = CreateMonitor();
         _runtime.RaiseOutputLine("[12:00:00] [Server thread/INFO]: There are 1 of a max of 20 players online: Steve");
@@ -80,11 +70,54 @@ public sealed class ServerMonitorViewModelTests : IDisposable
         Assert.Equal(["Steve"], vm.OnlinePlayers.ToArray());
     }
 
+    [Theory]
+    [InlineData(0, 0, 5, "00:00:05")]
+    [InlineData(25, 3, 9, "25:03:09")]
+    [InlineData(100, 59, 59, "100:59:59")]
+    public void FormatUptime_Over24Hours_DoesNotWrap(int hours, int minutes, int seconds, string expected) =>
+        Assert.Equal(expected, ServerMonitorViewModel.FormatUptime(new TimeSpan(hours, minutes, seconds)));
+
+    [Fact]
+    public void PlayerJoinLeave_CaseInsensitive_UpdatesCountWithMaxPlayers()
+    {
+        using var vm = CreateMonitor();
+        _runtime.RaiseOutputLine("[12:00:00] [Server thread/INFO]: There are 0 of a max of 50 players online:");
+
+        _runtime.RaiseOutputLine("[12:00:01] [Server thread/INFO]: Steve joined the game");
+        _runtime.RaiseOutputLine("[12:00:02] [Server thread/INFO]: steve joined the game");
+        Assert.Equal("1 / 50", vm.OnlinePlayersText);
+
+        _runtime.RaiseOutputLine("[12:00:03] [Server thread/INFO]: STEVE left the game");
+        Assert.Empty(vm.OnlinePlayers);
+        Assert.Equal("0 / 50", vm.OnlinePlayersText);
+    }
+
+    [Fact]
+    public void Commands_ServerStopped_AreDisabled()
+    {
+        _runtime.IsRunning = false;
+        using var vm = CreateMonitor();
+
+        Assert.False(vm.SendCommandCommand.CanExecute(null));
+        Assert.False(vm.ForceKillCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void OutputLine_AfterDispose_IsIgnored()
+    {
+        var vm = CreateMonitor();
+        vm.Dispose();
+
+        _runtime.RaiseOutputLine("[12:00:00] [Server thread/INFO]: Steve joined the game");
+
+        Assert.Empty(vm.OnlinePlayers);
+    }
+
     private ServerMonitorViewModel CreateMonitor() =>
         new(_runtime, _logReader, _propertiesStore, "TestServer", NoOpUiService.Instance, _tempServerDir, string.Empty, StopCoordinator, static () => Task.CompletedTask);
 
     [Fact]
-    public async Task StopServerCommand_UsesCoordinatorAndDoesNotForceKill()
+    public async Task StopServerCommand_Running_StopsGracefullyViaCoordinator()
     {
         _runtime.IsRunning = true;
         _runtime.WaitResults.Enqueue(new ProcessExitResult(0, false));
@@ -108,7 +141,7 @@ public sealed class ServerMonitorViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task NavigateHistory_BrowsesSentCommandsAndRestoresDraft()
+    public async Task NavigateHistory_SentCommands_BrowsesAndRestoresDraft()
     {
         _runtime.IsRunning = true;
         using var vm = new ServerMonitorViewModel(_runtime, _logReader, _propertiesStore, "TestServer", NoOpUiService.Instance, _tempServerDir, string.Empty, StopCoordinator, static () => Task.CompletedTask);
@@ -170,7 +203,7 @@ public sealed class ServerMonitorViewModelTests : IDisposable
     }
 
     [Fact]
-    public void HandlesPlayerJoinAndLeave_UpdatesOnlinePlayersCorrectly()
+    public void OutputLine_PlayerJoinAndLeave_UpdatesOnlinePlayers()
     {
         using var vm = new ServerMonitorViewModel(_runtime, _logReader, _propertiesStore, "TestServer", NoOpUiService.Instance, _tempServerDir, string.Empty, StopCoordinator, static () => Task.CompletedTask);
 
@@ -189,7 +222,7 @@ public sealed class ServerMonitorViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task InitialLoad_ReadsLatestLogHistoryFromDisk()
+    public async Task Constructor_ExistingLog_LoadsHistory()
     {
         string logsDir = Path.Combine(_tempServerDir, "logs");
         Directory.CreateDirectory(logsDir);
@@ -200,12 +233,8 @@ public sealed class ServerMonitorViewModelTests : IDisposable
 
         using var vm = new ServerMonitorViewModel(_runtime, _logReader, _propertiesStore, "TestServer", NoOpUiService.Instance, _tempServerDir, string.Empty, StopCoordinator, static () => Task.CompletedTask);
 
-        // 歷史紀錄於背景載入，輪詢直到 Logs 出現內容
-        var deadline = DateTime.UtcNow.AddSeconds(10);
-        while (vm.Logs.Count < 5 && DateTime.UtcNow < deadline)
-        {
-            await Task.Delay(20);
-        }
+        // 歷史紀錄於背景載入
+        await TestWait.UntilAsync(() => vm.Logs.Count >= 5, "歷史日誌載入");
 
         Assert.Equal(5, vm.Logs.Count);
         Assert.Equal("Line 1", vm.Logs[0]);
@@ -237,10 +266,7 @@ public sealed class ServerMonitorViewModelTests : IDisposable
 
         _runtime.RaiseReady();
 
-        for (int i = 0; i < 50 && mockUi.LastNotification is null; i++)
-        {
-            await Task.Delay(20);
-        }
+        await TestWait.UntilAsync(() => mockUi.LastNotification is not null, "就緒通知");
 
         Assert.NotNull(mockUi.LastNotification);
         Assert.Contains("25577", mockUi.LastNotification.Value.Message);
@@ -248,7 +274,7 @@ public sealed class ServerMonitorViewModelTests : IDisposable
     }
 
     [Fact]
-    public void LogBurst_UsesBoundedBufferAndTrimsDisplayedLogsAtLowWatermark()
+    public void OutputLine_Burst_TrimsDisplayedLogsToLowWatermark()
     {
         var mockUi = new ManualUiService();
         _runtime.IsRunning = true;

@@ -14,7 +14,7 @@ public sealed class ModHelpersTests
     [InlineData("\\u001b[31mRed\\u001b[0m", "Red")]
     [InlineData("", "")]
     [InlineData(null, "")]
-    public void StripColorAndFormattingCodesShouldCleanCorrectly(string? input, string expected)
+    public void StripColorAndFormattingCodes_FormattedText_RemovesCodes(string? input, string expected)
     {
         string actual = ModHelpers.StripColorAndFormattingCodes(input);
         Assert.Equal(expected, actual);
@@ -26,7 +26,7 @@ public sealed class ModHelpersTests
     [InlineData("Jade-1.20.1-Forge-11.8.0.jar", "Jade")]
     [InlineData("fabric-api-0.92.0+1.20.1.jar", "api")]
     [InlineData("appleskin-fabric-mc1.20.1-2.5.1.jar", "appleskin")]
-    public void NormalizeModSearchQueryShouldProduceCleanKeywords(string input, string expected)
+    public void NormalizeModSearchQuery_RawQuery_ProducesCleanKeywords(string input, string expected)
     {
         string actual = ModHelpers.NormalizeModSearchQuery(input);
         Assert.Equal(expected, actual);

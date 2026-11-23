@@ -5,7 +5,6 @@ using MinecraftServerManager.Infrastructure.Servers;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-/// <summary>初始化視窗 ViewModel 測試</summary>
 public sealed class ServerInitializationViewModelTests : IDisposable
 {
     private readonly TempDirectory _serverDirTemp = new("msm-init-vm-");
@@ -22,15 +21,15 @@ public sealed class ServerInitializationViewModelTests : IDisposable
 
     private ServerInitializationViewModel CreateViewModel() => new(
         _runtime,
-        new ServerLaunchPlanner(),
+        new ServerInitializationWorkflow(_runtime, new ServerLaunchPlanner()),
         new ServerConfig(ServerName.Parse("InitServer"), MinecraftVersion.Parse("1.21.4"), LoaderKind.Vanilla, string.Empty, 2048, path: _serverDir),
         "java",
         _ui);
 
     [Fact]
-    public async Task StartAsync_UsesStartScriptWhenPresent()
+    public async Task StartAsync_StartScriptPresent_UsesScript()
     {
-        await File.WriteAllTextAsync(Path.Combine(_serverDir, ServerDefaults.StartServerBatFileName), "@echo off");
+        await File.WriteAllTextAsync(Path.Combine(_serverDir, ServerDefaults.StartServerBatFileName), "@echo off", TestContext.Current.CancellationToken);
         using var vm = CreateViewModel();
 
         await vm.StartAsync();
@@ -38,14 +37,14 @@ public sealed class ServerInitializationViewModelTests : IDisposable
         Assert.NotNull(_runtime.LastPlan);
         Assert.True(_runtime.LastPlan.IsScript);
         Assert.EndsWith(ServerDefaults.StartServerBatFileName, _runtime.LastPlan.JavaExecutable, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("偵測到啟動腳本", vm.ConsoleText, StringComparison.Ordinal);
+        Assert.Contains("偵測到啟動腳本", string.Join('\n', vm.ConsoleLines), StringComparison.Ordinal);
         Assert.Equal("正在初始化伺服器「InitServer」", vm.TitleText);
     }
 
     [Fact]
-    public async Task StartAsync_FallsBackToServerJar()
+    public async Task StartAsync_NoStartScript_UsesServerJar()
     {
-        await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy jar");
+        await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy jar", TestContext.Current.CancellationToken);
         using var vm = CreateViewModel();
 
         await vm.StartAsync();
@@ -56,7 +55,7 @@ public sealed class ServerInitializationViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task OutputLines_FlushIntoConsoleAndUpdateStatus()
+    public async Task OutputLines_Received_FlushesConsoleAndUpdatesStatus()
     {
         using var vm = CreateViewModel();
         await vm.StartAsync();
@@ -64,16 +63,16 @@ public sealed class ServerInitializationViewModelTests : IDisposable
         _runtime.RaiseOutputLine("[Server] Preparing level \"world\"");
         _ui.TickRunningTimers();
 
-        Assert.Contains("Preparing level", vm.ConsoleText, StringComparison.Ordinal);
+        Assert.Contains("Preparing level", string.Join('\n', vm.ConsoleLines), StringComparison.Ordinal);
         Assert.Equal("狀態：載入世界中...", vm.StatusText);
     }
 
     [Fact]
-    public async Task ExitAfterReady_MarksSuccessAndClosesAfterCountdown()
+    public async Task ServerExit_AfterReady_MarksSuccessAndCloses()
     {
         using var vm = CreateViewModel();
         int closeRequests = 0;
-        vm.CloseRequested += () => closeRequests++;
+        vm.RequestClose += _ => closeRequests++;
         await vm.StartAsync();
 
         _runtime.RaiseReady();
@@ -94,7 +93,7 @@ public sealed class ServerInitializationViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task ExitWithoutReady_ShowsWarningCountdownAndCloseButton()
+    public async Task ServerExit_BeforeReady_ShowsWarningAndCloseButton()
     {
         using var vm = CreateViewModel();
         await vm.StartAsync();
@@ -105,7 +104,7 @@ public sealed class ServerInitializationViewModelTests : IDisposable
         Assert.Equal("關閉", vm.CompleteButtonText);
         Assert.Equal(InitializationCountdownState.Warning, vm.CountdownState);
         Assert.Equal(60, vm.CountdownSeconds);
-        Assert.Contains("未收到就緒標記", vm.ConsoleText, StringComparison.Ordinal);
+        Assert.Contains("未收到就緒標記", string.Join('\n', vm.ConsoleLines), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -113,12 +112,12 @@ public sealed class ServerInitializationViewModelTests : IDisposable
     {
         using var vm = CreateViewModel();
         var closed = new TaskCompletionSource();
-        vm.CloseRequested += () => closed.TrySetResult();
+        vm.RequestClose += _ => closed.TrySetResult();
         await vm.StartAsync();
         _runtime.IsRunning = true;
 
         Assert.True(vm.HandleClosing());
-        await closed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await closed.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         Assert.True(_runtime.StopCount >= 1);
         Assert.False(vm.HandleClosing());
@@ -127,11 +126,11 @@ public sealed class ServerInitializationViewModelTests : IDisposable
     }
 
     [Fact]
-    public void CancelAndComplete_SetResultAndRequestClose()
+    public void CancelAndComplete_Invoked_SetResultAndRequestClose()
     {
         using var vm = CreateViewModel();
         int closeRequests = 0;
-        vm.CloseRequested += () => closeRequests++;
+        vm.RequestClose += _ => closeRequests++;
 
         vm.Complete();
         Assert.True(vm.IsSuccess);
@@ -141,7 +140,7 @@ public sealed class ServerInitializationViewModelTests : IDisposable
     }
 
     [Fact]
-    public void Dispose_RemovesAllRuntimeSubscriptions()
+    public void Dispose_AfterStart_RemovesRuntimeSubscriptions()
     {
         var vm = CreateViewModel();
         vm.Dispose();
@@ -150,15 +149,41 @@ public sealed class ServerInitializationViewModelTests : IDisposable
     }
 
     [Fact]
-    public void AppendWithLimit_TrimsToTailWhenExceedingMaximum()
+    public async Task ConsoleLines_ExceedsMaximum_TrimsToTail()
     {
-        string current = new('a', ServerInitializationViewModel.MaxConsoleChars);
+        using var vm = CreateViewModel();
+        await vm.StartAsync();
 
-        string result = ServerInitializationViewModel.AppendWithLimit(current, "END");
+        for (int i = 0; i <= ServerInitializationViewModel.MaxConsoleLines; i++)
+        {
+            _runtime.RaiseOutputLine($"line {i}");
+            if (i % 400 == 0)
+            {
+                vm.FlushPendingLines();
+            }
+        }
 
-        Assert.Equal(ServerInitializationViewModel.TrimmedConsoleChars + 3, result.Length);
-        Assert.EndsWith("END", result, StringComparison.Ordinal);
-        Assert.Equal("abc", ServerInitializationViewModel.AppendWithLimit("ab", "c"));
+        vm.FlushPendingLines();
+
+        Assert.True(vm.ConsoleLines.Count <= ServerInitializationViewModel.MaxConsoleLines);
+        Assert.Equal($"line {ServerInitializationViewModel.MaxConsoleLines}", vm.ConsoleLines[^1]);
+    }
+
+    [Fact]
+    public async Task RuntimeCallbacks_AfterDispose_AreIgnored()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy jar", TestContext.Current.CancellationToken);
+        var vm = CreateViewModel();
+        await vm.StartAsync();
+        int lines = vm.ConsoleLines.Count;
+        vm.Dispose();
+
+        vm.HandleServerExited(0);
+        vm.FlushPendingLines();
+
+        Assert.Equal(lines, vm.ConsoleLines.Count);
+        Assert.True(vm.IsProgressVisible);
+        Assert.Equal(InitializationCountdownState.None, vm.CountdownState);
     }
 
     [Theory]
@@ -166,5 +191,5 @@ public sealed class ServerInitializationViewModelTests : IDisposable
     [InlineData("Preparing spawn area: 50%", "狀態：準備世界與生成區域中...")]
     [InlineData("Preparing level \"world\"", "狀態：載入世界中...")]
     [InlineData("Done (3.2s)!", null)]
-    public void DetectStatus_MapsKnownMarkers(string line, string? expected) => Assert.Equal(expected, ServerInitializationViewModel.DetectStatus(line));
+    public void DetectStatus_KnownMarker_MapsStatus(string line, string? expected) => Assert.Equal(expected, ServerInitializationViewModel.DetectStatus(line));
 }

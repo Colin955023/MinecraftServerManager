@@ -9,9 +9,63 @@ import {
   SYSTEM_MEMORY_MB,
   createInitialState
 } from "./data.js";
+import { copyPlainText } from "../util.js";
 import { escHtml, formatDuration, naturalCompare, nowDateTimeStr, nowTimeStr } from "./util.js";
 
 const INFOBAR_ICONS = { success: "✓", warn: "⚠", error: "✕", info: "ℹ" };
+const FOCUSABLE_SELECTOR = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** 清單列鍵盤操作（對應主程式 ListItemInteraction）：Space 選取、Enter 執行、Delete 刪除、Shift+F10／選單鍵開啟右鍵選單；重繪後焦點回到選取列 */
+function bindRowKeys(tr, tbody, { select, invoke = select, remove = null }) {
+  tr.tabIndex = 0;
+  tr.addEventListener("keydown", (e) => {
+    if (e.target !== tr) return;
+    let action = null;
+    if (e.key === " ") action = select;
+    else if (e.key === "Enter") action = invoke;
+    else if (e.key === "Delete") action = remove;
+    else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+      e.preventDefault();
+      const r = tr.getBoundingClientRect();
+      tr.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + 24, clientY: r.bottom }));
+      return;
+    }
+    if (!action) return;
+    e.preventDefault();
+    select();
+    tbody.querySelector('tr[aria-selected="true"]')?.focus();
+    if (action !== select) action();
+  });
+}
+
+/** 頁籤列套用 tablist／tab 語意與方向鍵切換 */
+function initTabList(tabs, onActivate) {
+  const list = tabs[0]?.parentElement;
+  if (!list) return;
+  list.setAttribute("role", "tablist");
+  tabs.forEach((tab, idx) => {
+    tab.setAttribute("role", "tab");
+    tab.removeAttribute("aria-pressed");
+    tab.addEventListener("keydown", (e) => {
+      const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      if (!step) return;
+      e.preventDefault();
+      const next = tabs[(idx + step + tabs.length) % tabs.length];
+      next.focus();
+      onActivate(next);
+    });
+  });
+}
+
+/** 同步頁籤選取狀態與可聚焦性 */
+function syncTabs(tabs, active) {
+  tabs.forEach((t) => {
+    const on = t === active;
+    t.className = `winui-btn ${on ? "winui-btn-accent" : ""}`;
+    t.setAttribute("aria-selected", String(on));
+    t.tabIndex = on ? 0 : -1;
+  });
+}
 
 export function initWinUiSimulator() {
   const app = document.getElementById("winui-app");
@@ -38,14 +92,27 @@ export function initWinUiSimulator() {
     const bar = document.createElement("div");
     bar.className = "winui-infobar";
     bar.dataset.level = level in INFOBAR_ICONS ? level : "info";
-    bar.title = "點選關閉通知";
-    bar.innerHTML = `<strong class="winui-infobar-icon">${INFOBAR_ICONS[bar.dataset.level]}</strong>
-      <div><div class="u-bold">${escHtml(title)}</div><div class="winui-sub-label u-text">${escHtml(message)}</div></div>`;
-    bar.addEventListener("click", () => bar.remove());
-    infoBarHost.appendChild(bar);
-    setTimeout(() => {
+    bar.setAttribute("role", bar.dataset.level === "error" ? "alert" : "status");
+    const el = (tag, className, text) => {
+      const node = document.createElement(tag);
+      node.className = className;
+      node.textContent = text;
+      return node;
+    };
+    const icon = el("strong", "winui-infobar-icon", INFOBAR_ICONS[bar.dataset.level]);
+    icon.setAttribute("aria-hidden", "true");
+    const body = document.createElement("div");
+    body.append(el("div", "u-bold", title), el("div", "winui-sub-label u-text", message));
+    const close = el("button", "winui-infobar-close", "✕");
+    close.type = "button";
+    close.setAttribute("aria-label", "關閉通知");
+    bar.append(icon, body, close);
+    const timerId = setTimeout(() => bar.remove(), 4200);
+    close.addEventListener("click", () => {
+      clearTimeout(timerId);
       bar.remove();
-    }, 4200);
+    });
+    infoBarHost.appendChild(bar);
   }
 
   function getSelectedServer() {
@@ -125,17 +192,44 @@ export function initWinUiSimulator() {
     modalBody.replaceChildren();
     modalFooter.replaceChildren();
     modalClose.disabled = locked;
-    const opener = state.activeModal ? state.activeModal.opener : document.activeElement;
+    const previous = state.activeModal;
+    const opener = previous ? previous.opener : document.activeElement;
+    // 直接切換至另一個對話框時，先釋放前一個的計時器並結束其等待中的 Promise
+    previous?.timers?.forEach(clearTimeout);
+    previous?.onCleanup?.();
     state.activeModal = { locked, opener };
     shell.inert = true;
     modalBackdrop.hidden = false;
     if (!modalDialog.open) modalDialog.show();
+    const focusedBeforeRender = document.activeElement;
     render({ body: modalBody, footer: modalFooter, setTitle: (t) => (modalTitle.textContent = t) });
+    // render 已自行指定焦點（如危險操作聚焦取消）時保留
+    if (document.activeElement === focusedBeforeRender || !modalDialog.contains(document.activeElement)) {
+      const firstFocusable = [...modalDialog.querySelectorAll(FOCUSABLE_SELECTOR)].find((el) => el !== modalClose) ?? modalClose;
+      firstFocusable.focus();
+    }
   }
+
+  // 非強制回應 <dialog> 不會困住焦點，自行讓 Tab 在對話框內循環
+  modalDialog.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    const focusables = [...modalDialog.querySelectorAll(FOCUSABLE_SELECTOR)].filter((el) => el.offsetParent !== null);
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
 
   function closeModal() {
     const active = state.activeModal;
     if (!active) return;
+    active.timers?.forEach(clearTimeout);
     active.onCleanup?.();
     state.activeModal = null;
     modalDialog.close();
@@ -154,11 +248,23 @@ export function initWinUiSimulator() {
     if (e.target === modalBackdrop && state.activeModal && !state.activeModal.locked) closeModal();
   });
 
+  /** 於目前對話框排程計時器，關閉對話框時自動取消 */
+  function modalTimeout(callback, ms) {
+    const active = state.activeModal;
+    const id = setTimeout(() => {
+      if (state.activeModal === active) callback();
+    }, ms);
+    if (active) (active.timers ??= []).push(id);
+    return id;
+  }
+
   function showConfirmDialog({ title, message, primaryText = "確定", primaryDanger = false, secondaryText = null, closeText = "取消" }) {
     return new Promise((resolve) => {
       openModal({
         title,
         render({ body, footer }) {
+          // ✕、Esc、遮罩或切換頁面關閉時視同取消，避免 Promise 懸掛
+          state.activeModal.onCleanup = () => resolve(null);
           const p = document.createElement("p");
           p.style.whiteSpace = "pre-line";
           p.style.fontSize = "0.9rem";
@@ -171,17 +277,15 @@ export function initWinUiSimulator() {
           const btnGroup = document.createElement("div");
           btnGroup.className = "winui-input-row";
 
-          if (closeText) {
-            const cancelBtn = document.createElement("button");
-            cancelBtn.type = "button";
-            cancelBtn.className = "winui-btn";
-            cancelBtn.textContent = closeText;
-            cancelBtn.addEventListener("click", () => {
-              closeModal();
-              resolve(null);
-            });
-            btnGroup.appendChild(cancelBtn);
-          }
+          const okBtn = document.createElement("button");
+          okBtn.type = "button";
+          okBtn.className = `winui-btn ${primaryDanger ? "winui-btn-danger" : "winui-btn-accent"}`;
+          okBtn.textContent = primaryText;
+          okBtn.addEventListener("click", () => {
+            resolve(true);
+            closeModal();
+          });
+          btnGroup.appendChild(okBtn);
 
           if (secondaryText) {
             const secBtn = document.createElement("button");
@@ -189,22 +293,23 @@ export function initWinUiSimulator() {
             secBtn.className = "winui-btn";
             secBtn.textContent = secondaryText;
             secBtn.addEventListener("click", () => {
-              closeModal();
               resolve(false);
+              closeModal();
             });
             btnGroup.appendChild(secBtn);
           }
 
-          const okBtn = document.createElement("button");
-          okBtn.type = "button";
-          okBtn.className = `winui-btn ${primaryDanger ? "winui-btn-danger" : "winui-btn-accent"}`;
-          okBtn.textContent = primaryText;
-          okBtn.addEventListener("click", () => {
-            closeModal();
-            resolve(true);
-          });
-          btnGroup.appendChild(okBtn);
+          if (closeText) {
+            const cancelBtn = document.createElement("button");
+            cancelBtn.type = "button";
+            cancelBtn.className = "winui-btn";
+            cancelBtn.textContent = closeText;
+            cancelBtn.addEventListener("click", () => closeModal());
+            btnGroup.appendChild(cancelBtn);
+          }
           footer.appendChild(btnGroup);
+          // 危險操作預設焦點落在取消，與主程式一致
+          if (primaryDanger) (btnGroup.lastElementChild ?? okBtn).focus();
         }
       });
     });
@@ -239,7 +344,7 @@ export function initWinUiSimulator() {
 
     if (createLoaderVerEl) {
       const prev = createLoaderVerEl.value;
-      createLoaderVerEl.innerHTML = "";
+      createLoaderVerEl.replaceChildren();
       versions.forEach((v) => {
         const opt = document.createElement("option");
         opt.value = v;
@@ -343,8 +448,7 @@ export function initWinUiSimulator() {
       const ok = await showConfirmDialog({
         title: "重設表單",
         message: "確定要重設建立伺服器頁面的所有欄位與 JVM 自訂參數嗎？",
-        primaryText: "確定重設",
-        primaryDanger: true
+        primaryText: "確定重設"
       });
       if (!ok) return;
       state.createNameManuallyEdited = false;
@@ -396,12 +500,12 @@ export function initWinUiSimulator() {
           track.appendChild(fill);
           body.append(p, track);
 
-          setTimeout(() => {
+          modalTimeout(() => {
             fill.style.inlineSize = "75%";
             p.textContent = "步驟 2/2：寫入統一啟動腳本 start_server.bat、同意 eula.txt 並產生 server.properties...";
           }, 420);
 
-          setTimeout(() => {
+          modalTimeout(() => {
             const newServer = {
               id: name,
               name,
@@ -467,7 +571,7 @@ export function initWinUiSimulator() {
             </div>
             <div class="winui-actions-wrap">
               <button type="button" class="winui-btn" id="dlg-java-autodetect">自動偵測配對</button>
-              <button type="button" class="winui-btn" id="dlg-java-install">⬇️ winget 安裝 Java ${reqMajor}</button>
+              <button type="button" class="winui-btn" id="dlg-java-install">winget 安裝 Java ${reqMajor}</button>
             </div>
           </div>
           <div class="winui-table-scroll">
@@ -481,7 +585,7 @@ export function initWinUiSimulator() {
 
         const tbody = body.querySelector("#dlg-java-tbody");
         function renderRows() {
-          tbody.innerHTML = "";
+          tbody.replaceChildren();
           state.installedJavas.forEach((j, idx) => {
             const compat = j.major === reqMajor ? "✓ 符合需求（建議）" : "其他版本";
             const tr = document.createElement("tr");
@@ -489,10 +593,12 @@ export function initWinUiSimulator() {
             tr.innerHTML = `<td>Java ${j.major}</td><td>${escHtml(j.vendor)}</td>
               <td class="${j.major === reqMajor ? "status-running" : ""}">${compat}</td>
               <td><code>${escHtml(j.path)}</code></td>`;
-            tr.addEventListener("click", () => {
+            const selectJava = () => {
               selectedJavaIdx = idx;
               renderRows();
-            });
+            };
+            tr.addEventListener("click", selectJava);
+            bindRowKeys(tr, tbody, { select: selectJava, invoke: () => tr.dispatchEvent(new MouseEvent("dblclick")) });
             tr.addEventListener("dblclick", () => {
               if (createJavaEl) createJavaEl.value = j.path;
               closeModal();
@@ -529,7 +635,7 @@ export function initWinUiSimulator() {
 
         const left = document.createElement("span");
         left.className = "winui-sub-label";
-        left.textContent = "點兩下列或點「套用選定 Java」將路徑填入表單";
+        left.textContent = "按兩下列或點「套用選定 Java」將路徑填入表單";
         const right = document.createElement("div");
         right.className = "winui-input-row";
         const cancelBtn = document.createElement("button");
@@ -549,7 +655,7 @@ export function initWinUiSimulator() {
           }
           closeModal();
         });
-        right.append(cancelBtn, applyBtn);
+        right.append(applyBtn, cancelBtn);
         footer.append(left, right);
       }
     });
@@ -586,7 +692,7 @@ export function initWinUiSimulator() {
         card.style.gap = "0.45rem";
 
         function renderPresetCheckboxes() {
-          card.innerHTML = "";
+          card.replaceChildren();
           presets.forEach((p) => {
             const label = document.createElement("label");
             label.className = "winui-input-row";
@@ -618,6 +724,7 @@ export function initWinUiSimulator() {
         const customInput = document.createElement("input");
         customInput.className = "winui-input";
         customInput.type = "text";
+        customInput.setAttribute("aria-label", "其他自訂 JVM 參數");
         customInput.disabled = !hasCustom;
         customInput.value = customText;
         customInput.placeholder = "例如：-Dfile.encoding=UTF-8";
@@ -676,7 +783,7 @@ export function initWinUiSimulator() {
             showInfoBar("JVM 參數已更新", `共套用 ${finalArgs.length} 項啟動參數。`, "success");
           }
         });
-        right.append(cancelBtn, applyBtn);
+        right.append(applyBtn, cancelBtn);
         footer.append(resetBtn, right);
       }
     });
@@ -725,7 +832,7 @@ export function initWinUiSimulator() {
     });
     updateSortIndicators("servers");
 
-    serverTbody.innerHTML = "";
+    serverTbody.replaceChildren();
     sorted.forEach((srv) => {
       const tr = document.createElement("tr");
       tr.setAttribute("aria-selected", srv.id === state.selectedServerId ? "true" : "false");
@@ -747,12 +854,16 @@ export function initWinUiSimulator() {
         <td>${escHtml(backupText)}</td>
         <td><code>${escHtml(srv.relPath)}</code></td>`;
 
-      tr.tabIndex = 0;
       const selectRow = () => {
         state.selectedServerId = srv.id;
         renderServerTable();
         renderServerDetails();
       };
+      bindRowKeys(tr, serverTbody, {
+        select: selectRow,
+        invoke: () => openServerMonitorWindow(srv),
+        remove: () => document.querySelector('[data-sim-action="delete-server"]')?.click()
+      });
 
       tr.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -765,18 +876,6 @@ export function initWinUiSimulator() {
         openServerMonitorWindow(srv);
       });
 
-      tr.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          selectRow();
-          serverTbody.querySelector('tr[aria-selected="true"]')?.focus();
-        } else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
-          e.preventDefault();
-          const r = tr.getBoundingClientRect();
-          tr.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + 24, clientY: r.bottom }));
-        }
-      });
-
       tr.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -784,10 +883,10 @@ export function initWinUiSimulator() {
         renderServerTable();
         renderServerDetails();
         showContextMenuAt(e.clientX, e.clientY, [
-          { label: "🧠 修改記憶體設定", onClick: () => openServerMemoryDialog(srv) },
-          { label: "🔄 重新偵測伺服器", onClick: () => showInfoBar("重新偵測完成", `已重新檢查「${srv.name}」核心檔案與版本資訊。`, "success") },
-          { label: "📂 開啟備份資料夾", onClick: () => handleOpenBackupFolder(srv) },
-          { label: "📁 修改備份路徑", onClick: () => handleEditBackupPath(srv) }
+          { label: "修改記憶體設定", onClick: () => openServerMemoryDialog(srv) },
+          { label: "重新偵測伺服器", onClick: () => showInfoBar("重新偵測完成", `已重新檢查「${srv.name}」核心檔案與版本資訊。`, "success") },
+          { label: "開啟備份資料夾", onClick: () => handleOpenBackupFolder(srv) },
+          { label: "修改備份路徑", onClick: () => handleEditBackupPath(srv) }
         ]);
       });
 
@@ -853,6 +952,12 @@ export function initWinUiSimulator() {
     if (!srv) return;
     if (startTarget) {
       if (srv.running) return;
+      const portOf = (s) => s.properties.find((p) => p.key === "server-port")?.val || "25565";
+      const conflict = state.servers.find((s) => s !== srv && s.running && portOf(s) === portOf(srv));
+      if (conflict) {
+        showInfoBar("連接埠衝突", `伺服器「${conflict.name}」正在使用連接埠 ${portOf(srv)}，無法同時啟動「${srv.name}」。請先於「屬性設定」修改其中一台的 server-port。`, "warn");
+        return;
+      }
       if (state.prefs.autoBackupBeforeStart && srv.backupPath) {
         createBackupEntry(srv);
       }
@@ -948,7 +1053,9 @@ export function initWinUiSimulator() {
             showInfoBar("路徑無效", "備份資料夾路徑不可為空。", "warn");
             return;
           }
-          if (val.toLowerCase().startsWith(state.serversRoot.toLowerCase())) {
+          const root = state.serversRoot.replace(/[\\/]+$/, "").toLowerCase();
+          const target = val.replace(/[\\/]+$/, "").toLowerCase();
+          if (target === root || target.startsWith(`${root}\\`) || target.startsWith(`${root}/`)) {
             showInfoBar("安全邊界攔截", "備份路徑不可位於伺服器存放主目錄內。", "warn");
             return;
           }
@@ -959,7 +1066,7 @@ export function initWinUiSimulator() {
           showInfoBar("已更新備份資料夾", `${srv.name} → ${val}`, "success");
         });
         footer.append(document.createElement("span"), Object.assign(document.createElement("div"), { className: "winui-input-row" }));
-        footer.lastChild.append(cancelBtn, saveBtn);
+        footer.lastChild.append(saveBtn, cancelBtn);
       }
     });
   }
@@ -1012,11 +1119,11 @@ export function initWinUiSimulator() {
         function clearDeleteConfirm() {
           pendingDeleteIdx = -1;
           confirmEl.hidden = true;
-          confirmEl.innerHTML = "";
+          confirmEl.replaceChildren();
         }
 
         function renderList() {
-          tbody.innerHTML = "";
+          tbody.replaceChildren();
           if (srv.backups.length === 0) {
             selectedIdx = -1;
             clearDeleteConfirm();
@@ -1029,11 +1136,13 @@ export function initWinUiSimulator() {
             const tr = document.createElement("tr");
             tr.setAttribute("aria-selected", idx === selectedIdx ? "true" : "false");
             tr.innerHTML = `<td>${escHtml(b.fileName)}</td><td>${escHtml(b.size)}</td><td>${escHtml(b.created)}</td>`;
-            tr.addEventListener("click", () => {
+            const selectBackup = () => {
               selectedIdx = idx;
               clearDeleteConfirm();
               renderList();
-            });
+            };
+            tr.addEventListener("click", selectBackup);
+            bindRowKeys(tr, tbody, { select: selectBackup, remove: () => delBtn.click() });
             tbody.appendChild(tr);
           });
         }
@@ -1049,7 +1158,7 @@ export function initWinUiSimulator() {
           pendingDeleteIdx = selectedIdx;
           const target = srv.backups[selectedIdx];
           confirmEl.hidden = false;
-          confirmEl.innerHTML = "";
+          confirmEl.replaceChildren();
           const msg = document.createElement("span");
           msg.textContent = `確定要永久刪除「${target.fileName}」嗎？`;
           const actions = document.createElement("div");
@@ -1074,7 +1183,7 @@ export function initWinUiSimulator() {
           noBtn.className = "winui-btn";
           noBtn.textContent = "取消";
           noBtn.addEventListener("click", clearDeleteConfirm);
-          actions.append(noBtn, yesBtn);
+          actions.append(yesBtn, noBtn);
           confirmEl.append(msg, actions);
         });
 
@@ -1102,7 +1211,7 @@ export function initWinUiSimulator() {
           closeModal();
           showInfoBar("備份還原完成", `已安全還原「${chosen.fileName}」，並已合併保存原有 logs/ 與 crash-reports/。`, "success");
         });
-        right.append(cancelBtn, restoreBtn);
+        right.append(restoreBtn, cancelBtn);
         footer.append(delBtn, right);
       }
     });
@@ -1110,12 +1219,12 @@ export function initWinUiSimulator() {
 
   function openServerMemoryDialog(srv) {
     openModal({
-      title: `🧠 修改伺服器記憶體設定 — ${srv.name}`,
+      title: `修改伺服器記憶體設定 — ${srv.name}`,
       render({ body, footer }) {
         body.innerHTML = `
           <div class="winui-sub-label">目前伺服器：${escHtml(srv.name)} (${escHtml(srv.loader)} ${escHtml(srv.version)})</div>
-          <div class="u-accent u-fs-84">系統實體記憶體：${SYSTEM_MEMORY_MB.toLocaleString()} MB</div>
-          <div class="winui-card u-flex u-dir-col u-gap-60">
+          <div class="u-accent winui-text-sm">系統實體記憶體：${SYSTEM_MEMORY_MB.toLocaleString()} MB</div>
+          <div class="winui-card u-flex u-dir-col u-gap-lg">
             <div>
               <label class="winui-label" for="dlg-srv-maxmem">最大記憶體（-Xmx，單位 MB）：</label>
               <input id="dlg-srv-maxmem" class="winui-input mt-1" type="number" value="${srv.maxMem}">
@@ -1154,14 +1263,19 @@ export function initWinUiSimulator() {
             errEl.hidden = false;
             return;
           }
-          srv.maxMem = maxVal;
-          srv.minMem = minVal;
+          const clampedMax = Math.min(maxVal, SYSTEM_MEMORY_MB);
+          const clampedMin = minVal === null ? null : Math.min(minVal, SYSTEM_MEMORY_MB);
+          if (clampedMax !== maxVal) {
+            showInfoBar("記憶體已自動調整", `設定記憶體超出系統總實體記憶體 (${SYSTEM_MEMORY_MB} MB)，已自動調整為上限值 ${SYSTEM_MEMORY_MB} MB`, "warn");
+          }
+          srv.maxMem = clampedMax;
+          srv.minMem = clampedMin;
           renderServerDetails();
           closeModal();
-          showInfoBar("已更新記憶體設定", `StartScriptWriter 已同步寫入 -Xms/-Xmx (${maxVal} MB)。`, "success");
+          showInfoBar("已更新記憶體設定", `StartScriptWriter 已同步寫入 -Xms/-Xmx (${clampedMax} MB)。`, "success");
         });
         footer.append(document.createElement("span"), Object.assign(document.createElement("div"), { className: "winui-input-row" }));
-        footer.lastChild.append(cancelBtn, saveBtn);
+        footer.lastChild.append(saveBtn, cancelBtn);
       }
     });
   }
@@ -1189,7 +1303,7 @@ export function initWinUiSimulator() {
           </div>
           <div>
             <div class="winui-label mb-1">匯入方式：</div>
-            <div class="winui-input-row u-gap-120">
+            <div class="winui-input-row u-gap-xl">
               <label class="winui-input-row"><input type="radio" name="dlg-imp-mode" value="copy" checked> 複製（保留原始來源）</label>
               <label class="winui-input-row"><input type="radio" name="dlg-imp-mode" value="move"> 遷移（匯入完成後移除原始來源）</label>
             </div>
@@ -1263,7 +1377,7 @@ export function initWinUiSimulator() {
           }
           if (mode === "move" && !moveConfirmed) {
             moveConfirmed = true;
-            moveConfirmEl.textContent = `確認遷移匯入：匯入完成後將會移除原始來源「${s}」。若確定繼續，請再次點擊「確認遷移匯入」。`;
+            moveConfirmEl.textContent = `確認遷移匯入：匯入完成後將會移除原始來源「${s}」。若確定繼續，請再次按一下「確認遷移匯入」。`;
             moveConfirmEl.hidden = false;
             submitBtn.textContent = "確認遷移匯入";
             submitBtn.className = "winui-btn winui-btn-danger";
@@ -1309,7 +1423,7 @@ export function initWinUiSimulator() {
           showInfoBar("匯入完成", `已匯入「${n}」（偵測核心：${loader} ${version}）。`, "success");
         });
         footer.append(document.createElement("span"), Object.assign(document.createElement("div"), { className: "winui-input-row" }));
-        footer.lastChild.append(cancelBtn, submitBtn);
+        footer.lastChild.append(submitBtn, cancelBtn);
       }
     });
   }
@@ -1335,31 +1449,31 @@ export function initWinUiSimulator() {
               <span class="winui-stat-pill" id="mon-uptime-pill"></span>
             </div>
             <div class="winui-actions-wrap">
-              <label class="winui-input-row u-fs-82"><input type="checkbox" id="mon-autoscroll" checked> 自動捲動</label>
-              <button type="button" class="winui-btn winui-btn-success" id="mon-start-btn">🚀 啟動</button>
-              <button type="button" class="winui-btn winui-btn-danger" id="mon-stop-btn">⏹️ 停止</button>
-              <button type="button" class="winui-btn" id="mon-clear-btn">🧹 清除紀錄</button>
-              <button type="button" class="winui-btn" id="mon-refresh-btn">🔄 重新整理</button>
+              <label class="winui-input-row winui-text-xs"><input type="checkbox" id="mon-autoscroll" checked> 自動捲動</label>
+              <button type="button" class="winui-btn winui-btn-success" id="mon-start-btn">啟動</button>
+              <button type="button" class="winui-btn winui-btn-danger" id="mon-stop-btn">停止</button>
+              <button type="button" class="winui-btn" id="mon-clear-btn">清除紀錄</button>
+              <button type="button" class="winui-btn" id="mon-refresh-btn" data-sim-f5>重新整理</button>
             </div>
           </div>
           <div class="winui-monitor-grid u-my0">
             <div class="winui-console-panel u-minh-310">
               <div class="winui-console-bar">
-                <span>📜 伺服器終端輸出</span>
-                <button type="button" class="winui-btn" id="mon-copy-logs">📋 複製全部紀錄</button>
+                <span>伺服器終端輸出</span>
+                <button type="button" class="winui-btn" id="mon-copy-logs">複製全部紀錄</button>
               </div>
               <div id="mon-logs-box" class="winui-console-logs u-maxh-260"></div>
             </div>
-            <div class="winui-card u-flex u-dir-col u-gap-45">
-              <div class="u-bold">👥 線上玩家</div>
+            <div class="winui-card u-flex u-dir-col u-gap-md">
+              <div class="u-bold">線上玩家</div>
               <div class="winui-sub-label">點選玩家名稱複製 ID</div>
-              <div class="u-flex u-dir-col u-gap-30" id="mon-players-list"></div>
+              <div class="u-flex u-dir-col u-gap-sm" id="mon-players-list"></div>
             </div>
           </div>`;
 
         footer.innerHTML = `
           <form id="mon-cmd-form" class="winui-input-row u-w-full">
-            <input id="mon-cmd-input" class="winui-input u-mono" type="text" placeholder="在此輸入指令 (help, list, say Hello, op AlexBuilder, save-all, stop)... 支援 ↑/↓ 歷史指令">
+            <input id="mon-cmd-input" class="winui-input u-mono" type="text" aria-label="主控台指令" placeholder="在此輸入指令 (help, list, say Hello, op AlexBuilder, save-all, stop)... 支援 ↑/↓ 歷史指令">
             <button type="submit" class="winui-btn winui-btn-accent" id="mon-cmd-send">傳送指令</button>
           </form>`;
 
@@ -1392,7 +1506,7 @@ export function initWinUiSimulator() {
           playerPill.textContent = `${srv.onlinePlayers.length} / ${maxPlayers}`;
           uptimePill.textContent = formatDuration(srv.uptimeSec);
 
-          logsBox.innerHTML = "";
+          logsBox.replaceChildren();
           srv.consoleLogs.forEach((line) => {
             const div = document.createElement("div");
             div.textContent = line;
@@ -1402,7 +1516,7 @@ export function initWinUiSimulator() {
             logsBox.scrollTop = logsBox.scrollHeight;
           }
 
-          playersList.innerHTML = "";
+          playersList.replaceChildren();
           if (srv.onlinePlayers.length === 0) {
             const empty = document.createElement("div");
             empty.className = "winui-sub-label";
@@ -1416,13 +1530,12 @@ export function initWinUiSimulator() {
               pBtn.textContent = `● ${player}`;
               pBtn.title = "點選複製玩家名稱";
               pBtn.addEventListener("click", async () => {
-                try {
-                  await copyPlainText(player);
-                } catch {
-                  // 忽略瀏覽器剪貼簿權限限制
+                if (await copyPlainText(player)) {
+                  srv.consoleLogs.push(`[系統] 已複製玩家名稱「${player}」至剪貼簿`);
+                  refreshMonitor();
+                } else {
+                  showInfoBar("無法複製", "瀏覽器不允許存取剪貼簿。", "warn");
                 }
-                srv.consoleLogs.push(`[系統] 已複製玩家名稱「${player}」至剪貼簿`);
-                refreshMonitor();
               });
               playersList.appendChild(pBtn);
             });
@@ -1461,12 +1574,11 @@ export function initWinUiSimulator() {
           showInfoBar("已重新整理主控台", "已重新載入日誌緩衝區與行程狀態。", "info");
         });
         copyBtn.addEventListener("click", async () => {
-          try {
-            await copyPlainText(srv.consoleLogs.join("\n"));
-          } catch {
-            // 忽略剪貼簿錯誤
+          if (await copyPlainText(srv.consoleLogs.join("\n"))) {
+            showInfoBar("已複製日誌內容", `共複製 ${srv.consoleLogs.length} 行主控台輸出。`, "success");
+          } else {
+            showInfoBar("無法複製", "瀏覽器不允許存取剪貼簿。", "warn");
           }
-          showInfoBar("已複製日誌內容", `共複製 ${srv.consoleLogs.length} 行主控台輸出。`, "success");
         });
 
         cmdInput.addEventListener("keydown", (e) => {
@@ -1506,6 +1618,8 @@ export function initWinUiSimulator() {
             srv.consoleLogs.push(`[${nowTimeStr()}] [Server thread/INFO]: There are ${srv.onlinePlayers.length} of a max of ${maxP} players online: ${srv.onlinePlayers.join(", ")}`);
           } else if (cmd === "say" && parts.length > 1) {
             srv.consoleLogs.push(`[${nowTimeStr()}] [Server thread/INFO]: [Server] ${raw.slice(4)}`);
+          } else if (cmd === "op" && parts.length > 1) {
+            srv.consoleLogs.push(`[${nowTimeStr()}] [Server thread/INFO]: Made ${parts[1]} a server operator`);
           } else if (cmd === "save-all") {
             srv.consoleLogs.push(`[${nowTimeStr()}] [Server thread/INFO]: Saved the game`);
           } else if (cmd === "stop") {
@@ -1537,22 +1651,22 @@ export function initWinUiSimulator() {
     let searchTxt = "";
 
     openModal({
-      title: `👥 伺服器名單管理 — ${srv.name}`,
+      title: `伺服器名單管理 — ${srv.name}`,
       size: "is-wide",
       render({ body, footer }) {
         body.innerHTML = `
           <div class="winui-players-split u-flex-1">
-            <div class="winui-card u-flex u-dir-col u-gap-50">
+            <div class="winui-card u-flex u-dir-col u-gap-md">
               <div class="u-bold">曾連線玩家名冊 (usercache)</div>
-              <input id="dlg-uc-search" class="winui-input u-flex-none" type="search" placeholder="搜尋玩家名稱...">
-              <div class="u-flex u-dir-col u-gap-40 u-scroll-y u-maxh-320" id="dlg-uc-list"></div>
+              <input id="dlg-uc-search" class="winui-input u-flex-none" type="search" aria-label="搜尋曾連線玩家" placeholder="搜尋玩家名稱...">
+              <div class="u-flex u-dir-col u-gap-sm u-scroll-y u-maxh-320" id="dlg-uc-list"></div>
             </div>
-            <div class="winui-card u-flex u-dir-col u-gap-65">
+            <div class="winui-card u-flex u-dir-col u-gap-lg">
               <div class="winui-tab-row u-mb0">
-                <button type="button" class="winui-btn winui-btn-accent" data-ptab="ops">👑 管理員名單 (ops.json)</button>
-                <button type="button" class="winui-btn" data-ptab="whitelist">📋 白名單 (whitelist.json)</button>
-                <button type="button" class="winui-btn" data-ptab="banp">🚫 封鎖玩家 (banned-players)</button>
-                <button type="button" class="winui-btn" data-ptab="banip">🌐 封鎖 IP (banned-ips)</button>
+                <button type="button" class="winui-btn winui-btn-accent" data-ptab="ops">管理員名單 (ops.json)</button>
+                <button type="button" class="winui-btn" data-ptab="whitelist">白名單 (whitelist.json)</button>
+                <button type="button" class="winui-btn" data-ptab="banp">封鎖玩家 (banned-players)</button>
+                <button type="button" class="winui-btn" data-ptab="banip">封鎖 IP (banned-ips)</button>
               </div>
               <div class="u-flex-1 u-scroll-y" id="dlg-ptab-pane"></div>
             </div>
@@ -1562,6 +1676,9 @@ export function initWinUiSimulator() {
         const ucList = body.querySelector("#dlg-uc-list");
         const ptabPane = body.querySelector("#dlg-ptab-pane");
         const tabBtns = body.querySelectorAll("[data-ptab]");
+        const tabList = [...tabBtns];
+        ptabPane.setAttribute("role", "tabpanel");
+        initTabList(tabList, (b) => b.click());
 
         function renderUsercache() {
           const q = searchTxt.trim().toLowerCase();
@@ -1580,10 +1697,7 @@ export function initWinUiSimulator() {
         }
 
         function renderTabPane() {
-          tabBtns.forEach((b) => {
-            const isAct = b.dataset.ptab === activeTab;
-            b.className = `winui-btn ${isAct ? "winui-btn-accent" : ""}`;
-          });
+          syncTabs(tabList, tabList.find((b) => b.dataset.ptab === activeTab));
 
           if (activeTab === "ops") {
             const knownPlayers = new Map();
@@ -1601,12 +1715,12 @@ export function initWinUiSimulator() {
                 .map(([name, uuid]) => {
                   const op = draft.ops.find((o) => o.name === name);
                   return `<tr>
-                          <td><input type="checkbox" data-op-toggle="${escHtml(name)}" data-uuid="${escHtml(uuid)}" ${op ? "checked" : ""}></td>
+                          <td><input type="checkbox" aria-label="${escHtml(name)} 為管理員" data-op-toggle="${escHtml(name)}" data-uuid="${escHtml(uuid)}" ${op ? "checked" : ""}></td>
                           <td>${escHtml(name)}</td>
-                          <td><select class="winui-select" data-op-level="${escHtml(name)}" ${op ? "" : "disabled"}>
+                          <td><select class="winui-select" aria-label="${escHtml(name)} 權限等級" data-op-level="${escHtml(name)}" ${op ? "" : "disabled"}>
                             ${[1, 2, 3, 4].map((lv) => `<option value="${lv}" ${(op?.level || 4) === lv ? "selected" : ""}>${lv}</option>`).join("")}
                           </select></td>
-                          <td><input type="checkbox" data-op-bypass="${escHtml(name)}" ${op?.bypass ? "checked" : ""} ${op ? "" : "disabled"}></td>
+                          <td><input type="checkbox" aria-label="${escHtml(name)} 可略過人數上限" data-op-bypass="${escHtml(name)}" ${op?.bypass ? "checked" : ""} ${op ? "" : "disabled"}></td>
                           <td><code>${escHtml(uuid)}</code></td>
                         </tr>`;
                 })
@@ -1645,7 +1759,7 @@ export function initWinUiSimulator() {
             const candidates = srv.usercache.filter((u) => !draft.whitelist.some((w) => w.name === u.name));
             ptabPane.innerHTML = `
               <div class="winui-input-row mb-1">
-                <select id="dlg-wl-pick" class="winui-select">
+                <select id="dlg-wl-pick" class="winui-select" aria-label="選擇要加入白名單的玩家">
                   ${candidates.length ? candidates.map((u) => `<option value="${escHtml(u.name)}">${escHtml(u.name)}</option>`).join("") : `<option value="">(曾連線玩家皆已在白名單)</option>`}
                 </select>
                 <button type="button" class="winui-btn winui-btn-accent" id="dlg-wl-add" ${candidates.length ? "" : "disabled"}>加入白名單</button>
@@ -1685,10 +1799,10 @@ export function initWinUiSimulator() {
             const candidates = srv.usercache.filter((u) => !draft.bannedPlayers.some((b) => b.name === u.name));
             ptabPane.innerHTML = `
               <div class="winui-input-row mb-1">
-                <select id="dlg-bp-pick" class="winui-select u-maxw-165">
+                <select id="dlg-bp-pick" class="winui-select u-maxw-165" aria-label="選擇要封鎖的玩家">
                   ${candidates.length ? candidates.map((u) => `<option value="${escHtml(u.name)}">${escHtml(u.name)}</option>`).join("") : `<option value="">(無可選玩家)</option>`}
                 </select>
-                <input id="dlg-bp-reason" class="winui-input" type="text" placeholder="封鎖原因 (選填)">
+                <input id="dlg-bp-reason" class="winui-input" type="text" aria-label="玩家封鎖原因" placeholder="封鎖原因 (選填)">
                 <button type="button" class="winui-btn winui-btn-danger" id="dlg-bp-add" ${candidates.length ? "" : "disabled"}>封鎖玩家</button>
               </div>
               <div class="winui-table-scroll">
@@ -1732,8 +1846,8 @@ export function initWinUiSimulator() {
             ptabPane.innerHTML = `
               <div class="winui-sub-label mb-1">支援 IPv4／IPv6 位址封鎖，將寫入 banned-ips.json 並於儲存時套用</div>
               <div class="winui-input-row mb-1">
-                <input id="dlg-ip-val" class="winui-input" type="text" placeholder="輸入 IP 位址 (例如 198.51.100.24)">
-                <input id="dlg-ip-reason" class="winui-input" type="text" placeholder="封鎖原因 (選填)">
+                <input id="dlg-ip-val" class="winui-input" type="text" aria-label="要封鎖的 IP 位址" placeholder="輸入 IP 位址 (例如 198.51.100.24)">
+                <input id="dlg-ip-reason" class="winui-input" type="text" aria-label="IP 封鎖原因" placeholder="封鎖原因 (選填)">
                 <button type="button" class="winui-btn winui-btn-danger" id="dlg-ip-add">封鎖 IP</button>
               </div>
               <div class="winui-table-scroll">
@@ -1810,7 +1924,7 @@ export function initWinUiSimulator() {
           closeModal();
           showInfoBar("名單變更已儲存", `已同步更新「${srv.name}」的 ops / whitelist / ban JSON 設定。`, "success");
         });
-        right.append(cancelBtn, saveBtn);
+        right.append(saveBtn, cancelBtn);
         footer.append(status, right);
       }
     });
@@ -1827,13 +1941,13 @@ export function initWinUiSimulator() {
     let category = "全部";
 
     openModal({
-      title: `🔧 編輯伺服器屬性 — ${srv.name} (server.properties)`,
+      title: `編輯伺服器屬性 — ${srv.name} (server.properties)`,
       size: "is-medium",
       render({ body, footer }) {
         body.innerHTML = `
           <div class="winui-input-row">
-            <input id="dlg-prop-search" class="winui-input" type="search" placeholder="搜尋屬性鍵名或說明...">
-            <select id="dlg-prop-cat" class="winui-select u-maxw-150">
+            <input id="dlg-prop-search" class="winui-input" type="search" aria-label="搜尋伺服器屬性" placeholder="搜尋屬性鍵名或說明...">
+            <select id="dlg-prop-cat" class="winui-select u-maxw-150" aria-label="屬性分類">
               <option value="全部" selected>全部</option>
               <option value="基本設定">基本設定</option>
               <option value="遊戲設定">遊戲設定</option>
@@ -1858,7 +1972,7 @@ export function initWinUiSimulator() {
             return true;
           });
 
-          listEl.innerHTML = "";
+          listEl.replaceChildren();
           items.forEach((p) => {
             const row = document.createElement("div");
             row.className = "winui-prop-row";
@@ -1882,6 +1996,7 @@ export function initWinUiSimulator() {
             } else if (p.type === "options") {
               const sel = document.createElement("select");
               sel.className = "winui-select";
+              sel.setAttribute("aria-label", p.key);
               p.options.forEach((optVal) => {
                 const opt = document.createElement("option");
                 opt.value = optVal;
@@ -1897,6 +2012,7 @@ export function initWinUiSimulator() {
               const inp = document.createElement("input");
               inp.className = "winui-input";
               inp.type = "text";
+              inp.setAttribute("aria-label", p.key);
               inp.value = p.val;
               inp.addEventListener("input", () => {
                 p.val = inp.value;
@@ -1960,7 +2076,7 @@ export function initWinUiSimulator() {
           closeModal();
           showInfoBar("已寫入 server.properties", "已透過 AtomicFileWriter 原子取代設定檔。", "success");
         });
-        right.append(cancelBtn, saveBtn);
+        right.append(saveBtn, cancelBtn);
         footer.append(status, right);
       }
     });
@@ -2003,7 +2119,7 @@ export function initWinUiSimulator() {
     if (!modsServerSelect) return;
     const eligible = getModCapableServers();
     const prev = modsServerSelect.value;
-    modsServerSelect.innerHTML = "";
+    modsServerSelect.replaceChildren();
     if (eligible.length === 0) {
       const opt = document.createElement("option");
       opt.value = "";
@@ -2045,23 +2161,27 @@ export function initWinUiSimulator() {
     if (modSelectionHint) {
       modSelectionHint.textContent =
         selectedCount > 0
-          ? `已選取 ${selectedCount} 個模組（Ctrl+點擊可增減選取；≥1 可檢查更新，≥2 可批次切換）`
-          : "支援 Ctrl+點擊多選或按「全選」以解鎖批次切換與檢查更新；右鍵列可複製資訊或刪除";
+          ? `已選取 ${selectedCount} 個模組（Ctrl+按一下可增減選取；≥1 可檢查更新，≥2 可批次切換）`
+          : "支援 Ctrl+按一下多選或按「全選」以解鎖批次切換與檢查更新；右鍵列可複製資訊或刪除";
     }
   }
 
-  function renderModsTable() {
-    if (!modsTbody) return;
-    const all = getCurrentLocalMods();
+  /** 目前搜尋與篩選條件下顯示的本地模組 */
+  function getVisibleLocalMods() {
     const query = (modSearchInput?.value || "").trim().toLowerCase();
     const filterMode = modFilterSelect ? modFilterSelect.value : "全部";
-
-    const filtered = all.filter((m) => {
+    return getCurrentLocalMods().filter((m) => {
       if (filterMode === "已啟用" && !m.enabled) return false;
       if (filterMode === "已停用" && m.enabled) return false;
       if (query && !m.name.toLowerCase().includes(query) && !m.fileName.toLowerCase().includes(query)) return false;
       return true;
     });
+  }
+
+  function renderModsTable() {
+    if (!modsTbody) return;
+    const all = getCurrentLocalMods();
+    const filtered = getVisibleLocalMods();
 
     const { key, dir } = state.sortState.localMods;
     const mult = dir === "asc" ? 1 : -1;
@@ -2069,7 +2189,7 @@ export function initWinUiSimulator() {
     updateSortIndicators("localMods");
     syncModToolbarButtons(filtered);
 
-    modsTbody.innerHTML = "";
+    modsTbody.replaceChildren();
     if (filtered.length === 0) {
       modsTbody.innerHTML = `<tr><td colspan="9" class="status-stopped">目前沒有符合篩選條件的本地模組</td></tr>`;
       return;
@@ -2128,6 +2248,15 @@ export function initWinUiSimulator() {
         }
         renderModsTable();
       });
+      bindRowKeys(tr, modsTbody, {
+        select: () => {
+          all.forEach((x) => {
+            x.selected = x === mod;
+          });
+          renderModsTable();
+        },
+        remove: () => document.querySelector('[data-sim-action="mod-delete"]')?.click()
+      });
 
       tr.addEventListener("contextmenu", (e) => {
         e.preventDefault();
@@ -2137,23 +2266,22 @@ export function initWinUiSimulator() {
         renderModsTable();
         showContextMenuAt(e.clientX, e.clientY, [
           {
-            label: "📋 複製模組資訊",
+            label: "複製模組資訊",
             onClick: async () => {
               const txt = `模組名稱: ${mod.name}\n版本: ${mod.version}\n狀態: ${mod.enabled ? "啟用" : "停用"}\n載入器: ${mod.loader}`;
-              try {
-                await copyPlainText(txt);
-              } catch {
-                // 忽略
+              if (await copyPlainText(txt)) {
+                showInfoBar("已複製模組資訊", mod.name, "success");
+              } else {
+                showInfoBar("無法複製", "瀏覽器不允許存取剪貼簿。", "warn");
               }
-              showInfoBar("已複製模組資訊", mod.name, "success");
             }
           },
           {
-            label: "📂 在資料夾中顯示",
+            label: "在資料夾中顯示",
             onClick: () => showInfoBar("在資料夾中顯示", `${state.serversRoot}\\${getActiveModServer()?.name}\\mods\\${mod.fileName}`, "info")
           },
           {
-            label: "🗑️ 刪除模組",
+            label: "刪除模組",
             danger: true,
             onClick: async () => {
               const ok = await showConfirmDialog({
@@ -2215,9 +2343,11 @@ export function initWinUiSimulator() {
       return true;
     });
     if (sortMode === "下載量") results.sort((a, b) => b.downloads - a.downloads);
+    else if (sortMode === "最新發布") results.sort((a, b) => b.published.localeCompare(a.published));
+    else if (sortMode === "最近更新") results.sort((a, b) => b.updated.localeCompare(a.updated));
     else if (sortMode === "名稱") results.sort((a, b) => naturalCompare(a.name, b.name));
 
-    onlineTbody.innerHTML = "";
+    onlineTbody.replaceChildren();
     if (results.length === 0) {
       onlineTbody.innerHTML = `<tr><td colspan="5" class="status-stopped">找不到符合條件的相容模組</td></tr>`;
     } else {
@@ -2225,10 +2355,12 @@ export function initWinUiSimulator() {
         const tr = document.createElement("tr");
         tr.setAttribute("aria-selected", state.selectedOnlineModId === m.id ? "true" : "false");
         tr.innerHTML = `<td><strong>${escHtml(m.name)}</strong></td><td>${escHtml(m.author)}</td><td>${escHtml(m.dlText)}</td><td><code>${escHtml(m.latest)}</code></td><td>${escHtml(m.desc)}</td>`;
-        tr.addEventListener("click", () => {
+        const selectOnline = () => {
           state.selectedOnlineModId = m.id;
           renderOnlineModsPane();
-        });
+        };
+        tr.addEventListener("click", selectOnline);
+        bindRowKeys(tr, onlineTbody, { select: selectOnline, invoke: () => openModVersionPickerDialog(m) });
         tr.addEventListener("dblclick", () => {
           state.selectedOnlineModId = m.id;
           openModVersionPickerDialog(m);
@@ -2237,14 +2369,12 @@ export function initWinUiSimulator() {
       });
     }
 
-    const localMods = getCurrentLocalMods();
     const installedMatch = results.find((m) => m.id === state.selectedOnlineModId);
     if (onlineResultHint) onlineResultHint.textContent = `搜尋結果：${results.length} 個相容模組（按兩下可挑選版本）`;
     if (onlineQueueHint) onlineQueueHint.textContent = `安裝清單：${state.installQueue.length} 個項目`;
     if (btnOpenModPage) btnOpenModPage.disabled = !installedMatch;
     if (btnPickVersion) btnPickVersion.disabled = !installedMatch;
     if (btnInstallQueue) btnInstallQueue.disabled = state.installQueue.length === 0;
-    void localMods;
   }
 
   function openModVersionPickerDialog(mod) {
@@ -2312,7 +2442,7 @@ export function initWinUiSimulator() {
         qBtn.addEventListener("click", () => enqueueSelected(false));
         const iBtn = Object.assign(document.createElement("button"), { type: "button", className: "winui-btn winui-btn-accent", textContent: "立即安裝" });
         iBtn.addEventListener("click", () => enqueueSelected(true));
-        right.append(cBtn, qBtn, iBtn);
+        right.append(iBtn, qBtn, cBtn);
         footer.append(document.createElement("span"), right);
       }
     });
@@ -2320,11 +2450,11 @@ export function initWinUiSimulator() {
 
   function openInstallQueueDialog() {
     openModal({
-      title: "📋 待安裝模組清單",
+      title: "待安裝模組清單",
       size: "is-medium",
       render({ body, footer }) {
         body.innerHTML = state.installQueue.length === 0
-          ? `<div class="winui-empty-state">目前安裝佇列為空，請於線上瀏覽點兩下模組挑選版本。</div>`
+          ? `<div class="winui-empty-state">目前安裝佇列為空，請於線上瀏覽按兩下模組挑選版本。</div>`
           : `<div class="winui-table-scroll">
               <table class="winui-table">
                 <thead><tr><th>動作</th><th>模組名稱</th><th>版本</th><th>檔案名稱</th><th>原因 / 說明</th></tr></thead>
@@ -2354,7 +2484,7 @@ export function initWinUiSimulator() {
           closeModal();
           executeInstallQueue();
         });
-        right.append(closeBtn, runBtn);
+        right.append(runBtn, closeBtn);
         footer.append(clearBtn, right);
       }
     });
@@ -2407,7 +2537,7 @@ export function initWinUiSimulator() {
       render({ body, footer }) {
         body.innerHTML = `
           <p class="winui-sub-label">請選擇欲匯出的模組清單檔案格式：</p>
-          <div class="u-flex u-dir-col u-gap-55">
+          <div class="u-flex u-dir-col u-gap-md">
             <label class="winui-input-row"><input type="radio" name="exp-fmt" value="txt" checked> 純文字格式 (*.txt) — 適合快速檢閱與純文字備份</label>
             <label class="winui-input-row"><input type="radio" name="exp-fmt" value="json"> JSON 格式 (*.json) — 包含完整中繼資料與雜湊值</label>
             <label class="winui-input-row"><input type="radio" name="exp-fmt" value="html"> HTML 網頁報表 (*.html) — 具備視覺樣式之獨立表格</label>
@@ -2423,7 +2553,7 @@ export function initWinUiSimulator() {
           closeModal();
           showInfoBar("模組清單已匯出", `已產生 *.${fmt} 報表（共 ${list.length} 個模組；電子試算表自動套用公式注入防護）。`, "success");
         });
-        right.append(cBtn, sBtn);
+        right.append(sBtn, cBtn);
         footer.append(document.createElement("span"), right);
       }
     });
@@ -2437,7 +2567,7 @@ export function initWinUiSimulator() {
       return;
     }
     openModal({
-      title: "📦 發現可用模組更新",
+      title: "發現可用模組更新",
       size: "is-medium",
       render({ body, footer }) {
         body.innerHTML = `
@@ -2452,7 +2582,7 @@ export function initWinUiSimulator() {
         candidates.forEach((c) => {
           const tr = document.createElement("tr");
           const newFile = `${c.mod.id}-${c.mod.latestCompat}.jar`;
-          tr.innerHTML = `<td><input type="checkbox" checked></td><td>${escHtml(c.mod.name)}</td><td>${escHtml(c.mod.version)}</td><td class="status-running">${escHtml(c.mod.latestCompat)}</td><td>${escHtml(c.mod.platform)}</td><td><code>${escHtml(newFile)}</code></td>`;
+          tr.innerHTML = `<td><input type="checkbox" checked aria-label="更新 ${escHtml(c.mod.name)}"></td><td>${escHtml(c.mod.name)}</td><td>${escHtml(c.mod.version)}</td><td class="status-running">${escHtml(c.mod.latestCompat)}</td><td>${escHtml(c.mod.platform)}</td><td><code>${escHtml(newFile)}</code></td>`;
           tr.querySelector("input").addEventListener("change", (e) => {
             c.checked = e.target.checked;
           });
@@ -2478,7 +2608,7 @@ export function initWinUiSimulator() {
           renderModsTable();
           showInfoBar("模組更新完成", `已安全下載與更換 ${count} 個模組。`, "success");
         });
-        right.append(cBtn, uBtn);
+        right.append(uBtn, cBtn);
         footer.append(document.createElement("span"), right);
       }
     });
@@ -2487,6 +2617,7 @@ export function initWinUiSimulator() {
   if (modsServerSelect) {
     modsServerSelect.addEventListener("change", () => {
       state.selectedOnlineModId = null;
+      state.installQueue = [];
       renderModsTable();
       renderOnlineModsPane();
     });
@@ -2519,18 +2650,16 @@ export function initWinUiSimulator() {
     });
   }
 
-  modTabs.forEach((tab) => {
-    tab.addEventListener("click", () => {
-      const isLocal = tab.dataset.modTab === "local";
-      modTabs.forEach((t) => {
-        t.className = `winui-btn ${t === tab ? "winui-btn-accent" : ""}`;
-        t.setAttribute("aria-pressed", String(t === tab));
-      });
-      if (modsLocalPane) modsLocalPane.hidden = !isLocal;
-      if (modsOnlinePane) modsOnlinePane.hidden = isLocal;
-      if (!isLocal) renderOnlineModsPane();
-    });
-  });
+  const activateModTab = (tab) => {
+    const isLocal = tab.dataset.modTab === "local";
+    syncTabs(modTabs, tab);
+    if (modsLocalPane) modsLocalPane.hidden = !isLocal;
+    if (modsOnlinePane) modsOnlinePane.hidden = isLocal;
+    if (!isLocal) renderOnlineModsPane();
+  };
+  initTabList(modTabs, activateModTab);
+  syncTabs(modTabs, modTabs[0]);
+  modTabs.forEach((tab) => tab.addEventListener("click", () => activateModTab(tab)));
 
   // =====================================================
   // Page 4: AboutPreferencesView
@@ -2601,7 +2730,7 @@ export function initWinUiSimulator() {
       checkUpdateBtn.hidden = state.prefs.autoUpdate;
     });
     checkUpdateBtn.addEventListener("click", () => {
-      showInfoBar("檢查更新完成", `目前已是最新版本 (${document.querySelector(".brand-version").textContent})。`, "info");
+      showInfoBar("檢查更新完成", `目前已是最新版本 (${document.querySelector(".brand-version")?.textContent ?? ""})。`, "info");
     });
   }
   if (autoBackupCb) {
@@ -2663,11 +2792,25 @@ export function initWinUiSimulator() {
     });
   });
 
-  // 右鍵選單開啟時的 Esc 由 popover 原生處理，其餘才關閉模擬視窗
+  // 右鍵選單開啟時的 Esc 由 popover 原生處理，其餘才關閉模擬視窗；F5 重新整理、Ctrl+F 移至搜尋框，限目前視窗內可見元素
   app.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && state.activeModal && !state.activeModal.locked && !contextMenu.matches(":popover-open")) {
       e.preventDefault();
       closeModal();
+      return;
+    }
+    const isF5 = e.key === "F5";
+    const isCtrlF = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f";
+    if (!isF5 && !isCtrlF) return;
+    const scope = state.activeModal ? modalDialog : app;
+    const target = [...scope.querySelectorAll(isF5 ? "[data-sim-f5]:not([disabled])" : 'input[type="search"]:not([disabled])')]
+      .find((el) => el.offsetParent !== null);
+    if (!target) return;
+    e.preventDefault();
+    if (isF5) target.click();
+    else {
+      target.focus();
+      target.select();
     }
   });
 
@@ -2751,7 +2894,7 @@ export function initWinUiSimulator() {
             const decision = backupCount > 0
               ? await showConfirmDialog({
                 title: "確認刪除伺服器",
-                message: `確定要刪除伺服器「${srv.name}」嗎？\n\n⚠️ 這將永久刪除伺服器檔案，無法復原！\n\n偵測到此伺服器有 ${backupCount} 個外部備份檔案，是否一併刪除？`,
+                message: `確定要刪除伺服器「${srv.name}」嗎？\n\n⚠ 這將永久刪除伺服器檔案，無法復原！\n\n偵測到此伺服器有 ${backupCount} 個外部備份檔案，是否一併刪除？`,
                 primaryText: "連同備份一併刪除",
                 primaryDanger: true,
                 secondaryText: "僅刪除伺服器",
@@ -2759,7 +2902,7 @@ export function initWinUiSimulator() {
               })
               : await showConfirmDialog({
                 title: "確認刪除伺服器",
-                message: `確定要刪除伺服器「${srv.name}」嗎？\n\n⚠️ 這將永久刪除伺服器檔案，無法復原！`,
+                message: `確定要刪除伺服器「${srv.name}」嗎？\n\n⚠ 這將永久刪除伺服器檔案，無法復原！`,
                 primaryText: "確定刪除",
                 primaryDanger: true
               });
@@ -2811,7 +2954,7 @@ export function initWinUiSimulator() {
           showInfoBar("已重新整理模組清單", "已依據檔案大小與修改時間更新快取索引。", "info");
           break;
         case "mod-select-all": {
-          const mods = getCurrentLocalMods();
+          const mods = getVisibleLocalMods();
           const allSelected = mods.length > 0 && mods.every((m) => m.selected);
           mods.forEach((m) => {
             m.selected = !allSelected;
@@ -2820,7 +2963,7 @@ export function initWinUiSimulator() {
           break;
         }
         case "mod-batch-toggle": {
-          const targets = getCurrentLocalMods().filter((m) => m.selected);
+          const targets = getVisibleLocalMods().filter((m) => m.selected);
           if (targets.length < 2) {
             showInfoBar("選取數量不足", "批次切換功能需選取至少 2 個模組。", "warn");
             return;
@@ -2829,7 +2972,9 @@ export function initWinUiSimulator() {
             m.enabled = !m.enabled;
             m.fileName = m.enabled
               ? m.fileName.replace(/\.jar\.disabled$/i, ".jar")
-              : `${m.fileName}.disabled`;
+              : m.fileName.endsWith(".jar")
+                ? `${m.fileName}.disabled`
+                : m.fileName;
           });
           renderModsTable();
           showInfoBar("批次切換完成", `已反轉 ${targets.length} 個選取模組的啟用狀態。`, "success");
@@ -2840,7 +2985,7 @@ export function initWinUiSimulator() {
           break;
         case "mod-delete": {
           const mods = getCurrentLocalMods();
-          const targets = mods.filter((m) => m.selected);
+          const targets = getVisibleLocalMods().filter((m) => m.selected);
           if (targets.length === 0) return;
           const ok = await showConfirmDialog({
             title: "確認刪除選取模組",
@@ -2851,7 +2996,7 @@ export function initWinUiSimulator() {
           if (ok) {
             const targetSrv = getActiveModServer();
             if (targetSrv) {
-              state.modsByServer[targetSrv.name] = mods.filter((m) => !m.selected);
+              state.modsByServer[targetSrv.name] = mods.filter((m) => !targets.includes(m));
             }
             renderModsTable();
             showInfoBar("已刪除選取模組", `共移除 ${targets.length} 個模組檔案。`, "info");

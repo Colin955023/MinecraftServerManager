@@ -5,11 +5,9 @@
   xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
   xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
   xmlns:controls="using:MinecraftServerManager.App.Controls"
-  xmlns:vm="using:MinecraftServerManager.App.ViewModels"
   mc:Ignorable="d">
 
   <Grid x:Name="RootGrid"
-    Background="{ThemeResource WindowBrush}"
     Padding="16,0,16,16">
     <Grid.RowDefinitions>
       <!-- 原生 TitleBar（自動預留右上角系統 Caption 按鈕區域） -->
@@ -31,8 +29,6 @@
     <!-- 操作按鈕 + 系統資源統計卡片 -->
     <Border Grid.Row="1"
       Style="{StaticResource CardBorderStyle}"
-      CornerRadius="8"
-      Padding="14,10"
       Margin="0,0,0,12">
       <Grid>
         <Grid.ColumnDefinitions>
@@ -42,56 +38,52 @@
         </Grid.ColumnDefinitions>
 
         <!-- 左側：強制終止 -->
-        <StackPanel Grid.Column="0"
-          Orientation="Horizontal"
-          VerticalAlignment="Center">
-          <Button Command="{x:Bind ViewModel.ForceKillCommand}"
-            IsEnabled="{x:Bind ViewModel.IsServerRunning, Mode=OneWay}"
-            Style="{StaticResource DangerButtonStyle}"
-            Height="32"
-            Padding="12,4"
-            VerticalContentAlignment="Center">
-            <TextBlock Text="強制終止"
-              VerticalAlignment="Center" />
-          </Button>
-        </StackPanel>
+        <Button Grid.Column="0"
+          VerticalAlignment="Center"
+          Style="{StaticResource DangerButtonStyle}"
+          Padding="{StaticResource CompactButtonPadding}"
+          Command="{x:Bind ViewModel.ForceKillCommand}">
+          <controls:IconLabel Icon="{StaticResource IconStop}"
+            Text="強制終止" />
+        </Button>
 
         <!-- 系統資源卡片：記憶體、版本、人數、運作時間 -->
-        <StackPanel Grid.Column="1"
-          Orientation="Horizontal"
+        <controls:WrapPanel Grid.Column="1"
           HorizontalAlignment="Center"
           VerticalAlignment="Center"
-          Spacing="8">
-          <Border Background="{ThemeResource WindowBrush}"
-            CornerRadius="4"
+          Margin="8,0"
+          ItemSpacing="8"
+          LineSpacing="4">
+          <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+            CornerRadius="{StaticResource ControlCornerRadius}"
             Padding="8,4">
             <TextBlock Text="{x:Bind ViewModel.MemoryUsageText, Mode=OneWay}"
-              FontSize="12"
-              Foreground="{ThemeResource TextBrush}" />
+              FontSize="{StaticResource CaptionTextBlockFontSize}"
+              Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
           </Border>
-          <Border Background="{ThemeResource WindowBrush}"
-            CornerRadius="4"
+          <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+            CornerRadius="{StaticResource ControlCornerRadius}"
             Padding="8,4">
             <TextBlock Text="{x:Bind ViewModel.MinecraftVersionText}"
-              FontSize="12"
-              Foreground="{ThemeResource TextBrush}" />
+              FontSize="{StaticResource CaptionTextBlockFontSize}"
+              Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
           </Border>
-          <Border Background="{ThemeResource WindowBrush}"
-            CornerRadius="4"
+          <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+            CornerRadius="{StaticResource ControlCornerRadius}"
             Padding="8,4">
             <TextBlock Text="{x:Bind ViewModel.OnlinePlayersText, Mode=OneWay}"
-              FontSize="12"
+              FontSize="{StaticResource CaptionTextBlockFontSize}"
               FontWeight="SemiBold"
-              Foreground="{ThemeResource AccentBrush}" />
+              Foreground="{ThemeResource AccentTextBrush}" />
           </Border>
-          <Border Background="{ThemeResource WindowBrush}"
-            CornerRadius="4"
+          <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+            CornerRadius="{StaticResource ControlCornerRadius}"
             Padding="8,4">
             <TextBlock Text="{x:Bind ViewModel.UptimeText, Mode=OneWay}"
-              FontSize="12"
-              Foreground="{ThemeResource TextBrush}" />
+              FontSize="{StaticResource CaptionTextBlockFontSize}"
+              Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
           </Border>
-        </StackPanel>
+        </controls:WrapPanel>
 
         <!-- 右側控制：自動捲動 + 啟動 / 停止 / 重新整理 -->
         <StackPanel Grid.Column="2"
@@ -100,39 +92,34 @@
           Spacing="8">
           <CheckBox Content="自動捲動"
             IsChecked="{x:Bind ViewModel.IsAutoScrollEnabled, Mode=TwoWay}"
-            Foreground="{ThemeResource TextBrush}"
+            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
             VerticalAlignment="Center" />
-          <Button Command="{x:Bind ViewModel.StartServerCommand}"
-            Style="{StaticResource SuccessButtonStyle}"
-            Height="32"
-            Padding="12,4"
-            VerticalContentAlignment="Center">
-            <TextBlock Text="🚀 啟動"
-              VerticalAlignment="Center" />
+          <Button Style="{StaticResource PrimaryButtonStyle}"
+            Padding="{StaticResource CompactButtonPadding}"
+            Command="{x:Bind ViewModel.StartServerCommand}">
+            <controls:IconLabel Icon="{StaticResource IconStart}"
+              Text="啟動" />
           </Button>
-          <Button Command="{x:Bind ViewModel.StopServerCommand}"
-            Style="{StaticResource DangerButtonStyle}"
-            Height="32"
-            Padding="12,4"
-            VerticalContentAlignment="Center">
-            <TextBlock Text="⏹️ 停止"
-              VerticalAlignment="Center" />
+          <Button Style="{StaticResource DangerButtonStyle}"
+            Padding="{StaticResource CompactButtonPadding}"
+            Command="{x:Bind ViewModel.StopServerCommand}">
+            <controls:IconLabel Icon="{StaticResource IconStop}"
+              Text="停止" />
           </Button>
-          <Button Command="{x:Bind ViewModel.ClearLogsCommand}"
-            Height="32"
-            Padding="12,4"
-            VerticalContentAlignment="Center">
-            <TextBlock Text="🧹 清除紀錄"
-              VerticalAlignment="Center"
-              Foreground="{ThemeResource TextBrush}" />
+          <Button Padding="{StaticResource CompactButtonPadding}"
+            VerticalContentAlignment="Center"
+            Command="{x:Bind ViewModel.ClearLogsCommand}">
+            <controls:IconLabel Icon="{StaticResource IconClear}"
+              Text="清除紀錄" />
           </Button>
-          <Button Command="{x:Bind ViewModel.RefreshStateCommand}"
-            Height="32"
-            Padding="12,4"
-            VerticalContentAlignment="Center">
-            <TextBlock Text="🔄 重新整理"
-              VerticalAlignment="Center"
-              Foreground="{ThemeResource TextBrush}" />
+          <Button Padding="{StaticResource CompactButtonPadding}"
+            VerticalContentAlignment="Center"
+            Command="{x:Bind ViewModel.RefreshStateCommand}">
+            <Button.KeyboardAccelerators>
+              <KeyboardAccelerator Key="F5" />
+            </Button.KeyboardAccelerators>
+            <controls:IconLabel Icon="{StaticResource IconRefresh}"
+              Text="重新整理" />
           </Button>
         </StackPanel>
       </Grid>
@@ -145,14 +132,15 @@
         <ColumnDefinition Width="220" />
       </Grid.ColumnDefinitions>
 
-      <!-- 終端機紀錄檢視區 (黑底綠字) -->
+      <!-- 終端機紀錄檢視區（黑底綠字） -->
       <Border Grid.Column="0"
-        Background="{StaticResource ConsoleBackgroundBrush}"
-        BorderBrush="{ThemeResource BorderBrush}"
-        BorderThickness="1"
-        CornerRadius="8"
+        Margin="0,0,12,0"
         Padding="10"
-        Margin="0,0,12,0">
+        Background="{StaticResource ConsoleBackgroundBrush}"
+        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+        BorderThickness="1"
+        CornerRadius="{StaticResource OverlayCornerRadius}"
+        RequestedTheme="Dark">
         <Grid>
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -162,54 +150,33 @@
           <!-- 工具列：複製日誌與狀態摘要 -->
           <Grid Grid.Row="0"
             Margin="0,0,0,8">
-            <TextBlock Text="📜 伺服器終端輸出"
-              FontSize="13"
+            <TextBlock VerticalAlignment="Center"
+              Text="伺服器終端輸出"
+              FontSize="{StaticResource BodyTextBlockFontSize}"
               FontWeight="SemiBold"
-              Foreground="{StaticResource ConsoleMutedTextBrush}"
-              VerticalAlignment="Center" />
-            <Button HorizontalAlignment="Right"
-              Content="📋 複製全部紀錄"
-              Click="OnCopyAllLogsClicked"
-              Padding="10,3"
-              FontSize="12" />
+              Foreground="{StaticResource ConsoleMutedTextBrush}" />
+            <Button Padding="10,3"
+              HorizontalAlignment="Right"
+              Command="{x:Bind ViewModel.CopyAllLogsCommand}"
+              FontSize="{StaticResource CaptionTextBlockFontSize}">
+              <controls:IconLabel Icon="{StaticResource IconCopy}"
+                Text="複製全部紀錄"
+                IconSize="12" />
+            </Button>
           </Grid>
 
           <!-- 虛擬化日誌清單 -->
           <ListView x:Name="LogListView"
             Grid.Row="1"
+            Style="{StaticResource ConsoleLogListViewStyle}"
             ItemsSource="{x:Bind ViewModel.Logs}"
-            SelectionMode="None"
-            ScrollViewer.VerticalScrollBarVisibility="Auto"
-            ScrollViewer.HorizontalScrollBarVisibility="Auto">
-            <!-- 取消 ListViewItem 預設 40px 最小列高，行距縮為原本約一半 -->
-            <ListView.ItemContainerStyle>
-              <Style TargetType="ListViewItem">
-                <Setter Property="MinHeight"
-                  Value="0" />
-                <Setter Property="Padding"
-                  Value="8,0" />
-              </Style>
-            </ListView.ItemContainerStyle>
-            <ListView.ItemTemplate>
-              <DataTemplate x:DataType="x:String">
-                <TextBlock Text="{x:Bind}"
-                  FontFamily="Consolas, Cascadia Code, Courier New"
-                  FontSize="12"
-                  Foreground="{StaticResource ConsoleForegroundBrush}"
-                  TextWrapping="NoWrap"
-                  IsTextSelectionEnabled="True"
-                  Padding="2,1" />
-              </DataTemplate>
-            </ListView.ItemTemplate>
-          </ListView>
+            AutomationProperties.Name="伺服器日誌" />
         </Grid>
       </Border>
 
       <!-- 右側線上玩家清單卡片 -->
       <Border Grid.Column="1"
-        Style="{StaticResource CardBorderStyle}"
-        CornerRadius="8"
-        Padding="12,10">
+        Style="{StaticResource CardBorderStyle}">
         <Grid>
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -217,38 +184,41 @@
           </Grid.RowDefinitions>
 
           <TextBlock Grid.Row="0"
-            Text="👥 線上玩家"
-            FontSize="14"
+            Margin="0,0,0,8"
+            Text="線上玩家"
+            FontSize="{StaticResource BodyTextBlockFontSize}"
             FontWeight="SemiBold"
-            Foreground="{ThemeResource TextBrush}"
-            Margin="0,0,0,8" />
+            Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
           <TextBlock Grid.Row="1"
-            Text="無玩家線上"
-            FontSize="13"
-            Foreground="{ThemeResource MutedTextBrush}"
             HorizontalAlignment="Center"
             VerticalAlignment="Center"
+            Text="無玩家線上"
+            FontSize="{StaticResource BodyTextBlockFontSize}"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
             Visibility="{x:Bind ViewModel.HasNoOnlinePlayers, Mode=OneWay}" />
           <ListView Grid.Row="1"
-            ItemsSource="{x:Bind ViewModel.OnlinePlayers}"
             Background="Transparent"
             BorderThickness="0"
+            ItemsSource="{x:Bind ViewModel.OnlinePlayers}"
             SelectionMode="None"
             IsItemClickEnabled="True"
-            ItemClick="OnPlayerItemClicked">
+            ItemClick="OnPlayerItemClicked"
+            AutomationProperties.Name="線上玩家">
             <ListView.ItemTemplate>
               <DataTemplate x:DataType="x:String">
-                <StackPanel Orientation="Horizontal"
-                  Spacing="6"
-                  Padding="4,2">
-                  <ContentPresenter ContentTemplate="{StaticResource IconCheck}"
-                    Width="13"
-                    Height="13"
-                    VerticalAlignment="Center" />
-                  <TextBlock Text="{x:Bind}"
+                <StackPanel Padding="4,2"
+                  Orientation="Horizontal"
+                  Spacing="6">
+                  <FontIcon Glyph="{StaticResource IconCheck}"
+                    FontFamily="{StaticResource SymbolThemeFontFamily}"
+                    FontSize="{StaticResource CaptionTextBlockFontSize}"
                     VerticalAlignment="Center"
-                    FontSize="13"
-                    Foreground="{ThemeResource TextBrush}" />
+                    Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                    AutomationProperties.AccessibilityView="Raw" />
+                  <TextBlock VerticalAlignment="Center"
+                    Text="{x:Bind}"
+                    FontSize="{StaticResource BodyTextBlockFontSize}"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                 </StackPanel>
               </DataTemplate>
             </ListView.ItemTemplate>
@@ -266,22 +236,20 @@
       </Grid.ColumnDefinitions>
 
       <TextBox Grid.Column="0"
-        Text="{x:Bind ViewModel.CommandText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-        IsEnabled="{x:Bind ViewModel.IsServerRunning, Mode=OneWay}"
-        KeyDown="CommandInputBox_KeyDown"
-        PreviewKeyDown="CommandInputBox_PreviewKeyDown"
         Margin="0,0,10,0"
-        Padding="8,8"
-        PlaceholderText="在此輸入伺服器指令 (如 list, op, stop)..."
-        FontFamily="Consolas, Cascadia Code, Courier New"
-        FontSize="13" />
+        Text="{x:Bind ViewModel.CommandText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+        PlaceholderText="在此輸入伺服器指令（如 list, op, stop）..."
+        controls:TextBoxShortcuts.EnterCommand="{x:Bind ViewModel.SendCommandCommand}"
+        IsEnabled="{x:Bind ViewModel.IsServerRunning, Mode=OneWay}"
+        PreviewKeyDown="OnCommandInputBoxPreviewKeyDown"
+        FontFamily="{StaticResource ConsoleFontFamily}"
+        FontSize="{StaticResource BodyTextBlockFontSize}"
+        AutomationProperties.Name="伺服器指令" />
 
       <Button Grid.Column="1"
         Content="傳送指令"
         Command="{x:Bind ViewModel.SendCommandCommand}"
-        IsEnabled="{x:Bind ViewModel.IsServerRunning, Mode=OneWay}"
-        Style="{StaticResource PrimaryButtonStyle}"
-        Padding="18,8" />
+        Style="{StaticResource PrimaryButtonStyle}" />
     </Grid>
   </Grid>
 </Window>

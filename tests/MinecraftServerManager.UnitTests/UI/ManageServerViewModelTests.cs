@@ -28,18 +28,16 @@ public sealed class ManageServerViewModelTests : IDisposable
         string? customRoot = null)
     {
         string root = customRoot ?? CreateTemp("msm-manage-test-").FullName;
-        var settings = new Infrastructure.Settings.SettingsManager(root);
-        settings.SetExactServersRoot(root);
+        var settings = TestDependencies.CreateSettings(root);
         var deps = TestDependencies.Create(root, uiService, launcher, settings);
         return TestDependencies.CreateManagePage(deps);
     }
 
     [Fact]
-    public async Task SelectedServerMemory_ShouldUpdateWhenRowMemoryChangesAndRefreshed()
+    public async Task SelectedServerMemory_RowChangedAndRefreshed_Updates()
     {
         string root = CreateTemp("msm-manage-test-").FullName;
-        var settings = new Infrastructure.Settings.SettingsManager(root);
-        settings.SetExactServersRoot(root);
+        var settings = TestDependencies.CreateSettings(root);
         var deps = TestDependencies.Create(root, settings: settings);
         var manager = deps.ServerManager;
         var vm = TestDependencies.CreateManagePage(deps);
@@ -51,10 +49,10 @@ public sealed class ManageServerViewModelTests : IDisposable
             memoryMaxMb: 2048,
             memoryMinMb: 1024);
 
-        var created = await manager.CreateServerAsync(plan);
+        var created = await manager.CreateServerAsync(plan, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(created.Completed);
 
-        await vm.List.RefreshServers();
+        await vm.List.RefreshServersAsync();
         var server = vm.List.Servers.FirstOrDefault(s => s.Name == "MemoryServer");
         Assert.NotNull(server);
         vm.List.SelectedServer = server;
@@ -69,7 +67,7 @@ public sealed class ManageServerViewModelTests : IDisposable
             memoryMaxMb: 20480,
             memoryMinMb: 10240,
             path: server.Path);
-        await manager.UpdateServerAsync(updatedConfig);
+        await manager.UpdateServerAsync(updatedConfig, TestContext.Current.CancellationToken);
 
         await vm.List.RefreshAndSelectServerAsync("MemoryServer");
 
@@ -99,7 +97,7 @@ public sealed class ManageServerViewModelTests : IDisposable
         string newRoot = Path.Combine(CreateTemp("msm-new-root-").FullName, "target");
         string serverDir = Path.Combine(oldRoot, "MyServer");
         Directory.CreateDirectory(serverDir);
-        await File.WriteAllTextAsync(Path.Combine(serverDir, "server.jar"), "jar");
+        await File.WriteAllTextAsync(Path.Combine(serverDir, "server.jar"), "jar", TestContext.Current.CancellationToken);
 
         var ui = new ManualUiService
         {
@@ -122,7 +120,7 @@ public sealed class ManageServerViewModelTests : IDisposable
         string newRoot = Path.Combine(CreateTemp("msm-new-root-").FullName, "target");
         string serverDir = Path.Combine(oldRoot, "MyServer");
         Directory.CreateDirectory(serverDir);
-        await File.WriteAllTextAsync(Path.Combine(serverDir, "server.jar"), "jar");
+        await File.WriteAllTextAsync(Path.Combine(serverDir, "server.jar"), "jar", TestContext.Current.CancellationToken);
 
         var ui = new ManualUiService
         {
@@ -141,7 +139,7 @@ public sealed class ManageServerViewModelTests : IDisposable
     }
 
     [Fact]
-    public void SelectionShouldUpdateActionState()
+    public void SelectedServer_Changed_UpdatesActionStates()
     {
         var vm = CreateTestViewModel();
         Assert.False(vm.List.HasSelectedServer);
@@ -182,7 +180,44 @@ public sealed class ManageServerViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task OpenBackupFolderWithoutBackupPathShouldNotCreateOrOpenServerInternalBackups()
+    public async Task ChangeServersRoot_WhenUserDefersRestart_SavesSettingAndDoesNotRestart()
+    {
+        string root = CreateTemp("msm-defer-root-").FullName;
+        string subDir = Path.Combine(root, "SubFolder");
+        Directory.CreateDirectory(subDir);
+        var ui = new ManualUiService { FolderToPick = subDir };
+        ui.ChoiceResults.Enqueue(false);
+        var vm = CreateTestViewModel(uiService: ui, customRoot: root);
+
+        await vm.ServersRoot.ChangeServersRootCommand.ExecuteAsync(null);
+
+        Assert.False(ui.RestartCalled);
+        Assert.Equal(Path.Combine(subDir, "servers"), vm.List.DetectPath);
+        Assert.Equal(NotificationType.Info, ui.LastNotification?.Type);
+    }
+
+    [Fact]
+    public async Task OpenBackupFolder_WhenConfiguredFolderMissing_AsksToReconfigure()
+    {
+        var ui = new ManualUiService { ConfirmResult = false };
+        var vm = CreateTestViewModel(uiService: ui);
+        vm.List.SelectedServer = new ServerRowItem
+        {
+            Name = "TestServer",
+            Version = "1.21.4",
+            Loader = "Paper",
+            Status = "已停止",
+            Path = CreateTemp("msm-backup-missing-").FullName,
+            BackupPath = Path.Combine(CreateTemp("msm-backup-parent-").FullName, "missing")
+        };
+
+        await vm.Backup.OpenBackupFolderCommand.ExecuteAsync(null);
+
+        Assert.Contains("備份資料夾不存在", Assert.Single(ui.ConfirmMessages), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task OpenBackupFolder_NoBackupPath_DoesNotCreateOrOpen()
     {
         string tempDir = CreateTemp("msm-backup-test-").FullName;
         var fakeLauncher = new RecordingLauncher();
@@ -205,7 +240,7 @@ public sealed class ManageServerViewModelTests : IDisposable
     }
 
     [Fact]
-    public void MissingImportantFilesShouldDisableStartAndDisplayDetail()
+    public void SelectedServer_MissingFiles_DisablesStartAndShowsDetail()
     {
         var vm = CreateTestViewModel();
         var server = new ServerRowItem

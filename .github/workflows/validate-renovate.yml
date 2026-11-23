@@ -5,16 +5,20 @@ concurrency:
   cancel-in-progress: true
 
 on:
+  push:
+    branches:
+      - master
+    paths:
+      - ".github/renovate.json"
+      - ".github/workflows/validate-renovate.yml"
   pull_request:
     paths:
       - ".github/renovate.json"
+      - ".github/workflows/validate-renovate.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
-
-defaults:
-  run:
-    shell: pwsh
 
 jobs:
   validate-renovate-config:
@@ -26,6 +30,18 @@ jobs:
         with:
           persist-credentials: false
 
+      # Renovate engines 要求 Node ^24.11.0 || ^26.13.0
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: Cache npm
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.npm
+          key: npm-renovate-${{ hashFiles('.github/workflows/validate-renovate.yml') }}
+
       - name: Validate renovate.json
         run: |
-          npx --yes --package renovate@44.251.0 -- renovate-config-validator ./.github/renovate.json --strict
+          npx --yes --package renovate@44.256.0 -- renovate-config-validator ./.github/renovate.json --strict

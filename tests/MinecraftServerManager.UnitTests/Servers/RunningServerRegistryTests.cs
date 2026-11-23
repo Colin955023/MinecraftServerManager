@@ -11,10 +11,10 @@ public sealed class RunningServerRegistryTests : IDisposable
 
     private sealed class FakeInspector : IProcessInspector
     {
-        public Dictionary<int, DateTime> Alive { get; } = [];
+        public Dictionary<int, DateTimeOffset> Alive { get; } = [];
         public List<int> Killed { get; } = [];
 
-        public DateTime? GetStartTimeUtc(int pid) => Alive.TryGetValue(pid, out var t) ? t : null;
+        public DateTimeOffset? GetStartTimeUtc(int pid) => Alive.TryGetValue(pid, out var t) ? t : null;
 
         public bool KillProcessTree(int pid)
         {
@@ -26,37 +26,35 @@ public sealed class RunningServerRegistryTests : IDisposable
 
     private string FilePath => Path.Combine(_temp.FullName, "running_servers.json");
 
-    // 登記與移除為背景寫入，輪詢等待檔案內容符合條件
+    // 登記與移除為背景寫入，以條件等待檔案內容符合預期
     private async Task<string> WaitForFileAsync(Func<string, bool> predicate)
     {
-        for (int i = 0; i < 200; i++)
+        string latest = string.Empty;
+        await TestWait.UntilAsync(() =>
         {
-            if (File.Exists(FilePath))
+            if (!File.Exists(FilePath))
             {
-                try
-                {
-                    string text = File.ReadAllText(FilePath);
-                    if (predicate(text))
-                    {
-                        return text;
-                    }
-                }
-                catch (IOException)
-                {
-                }
+                return false;
             }
 
-            await Task.Delay(25, TestContext.Current.CancellationToken);
-        }
-
-        return File.Exists(FilePath) ? File.ReadAllText(FilePath) : string.Empty;
+            try
+            {
+                latest = File.ReadAllText(FilePath);
+                return predicate(latest);
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+        }, "RunningServerRegistry 寫入磁碟完成");
+        return latest;
     }
 
     [Fact]
     public async Task Record_WritesEntry_AndRemoveDeletesIt()
     {
         var inspector = new FakeInspector();
-        inspector.Alive[100] = DateTime.UtcNow;
+        inspector.Alive[100] = DateTimeOffset.UtcNow;
         var registry = new RunningServerRegistry(_temp.FullName, inspector);
 
         registry.Record("Alpha", 100);
@@ -69,21 +67,37 @@ public sealed class RunningServerRegistryTests : IDisposable
     }
 
     [Fact]
+    public async Task FlushAsync_QueuedWrites_WaitsForCompletion()
+    {
+        var inspector = new FakeInspector();
+        inspector.Alive[100] = DateTimeOffset.UtcNow;
+        var registry = new RunningServerRegistry(_temp.FullName, inspector);
+
+        registry.Record("Alpha", 100);
+        await registry.FlushAsync();
+        Assert.Contains("Alpha", File.ReadAllText(FilePath), StringComparison.Ordinal);
+
+        registry.Remove("Alpha");
+        await registry.FlushAsync();
+        Assert.DoesNotContain("Alpha", File.ReadAllText(FilePath), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Record_WhenStartTimeUnavailable_DoesNotWrite()
     {
         var registry = new RunningServerRegistry(_temp.FullName, new FakeInspector());
 
         registry.Record("Ghost", 999);
-        await Task.Delay(200, TestContext.Current.CancellationToken);
+        await registry.FlushAsync();
 
         Assert.False(File.Exists(FilePath));
     }
 
     [Fact]
-    public async Task FindOrphans_ReturnsAliveEntriesAndPurgesDeadOnes()
+    public async Task FindOrphans_MixedEntries_ReturnsAliveAndPurgesDead()
     {
         var inspector = new FakeInspector();
-        var start = DateTime.UtcNow;
+        var start = DateTimeOffset.UtcNow;
         inspector.Alive[100] = start;
         inspector.Alive[200] = start;
         var previous = new RunningServerRegistry(_temp.FullName, inspector);
@@ -104,11 +118,11 @@ public sealed class RunningServerRegistryTests : IDisposable
     public async Task FindOrphans_SamePidDifferentStartTime_IsNotOrphan()
     {
         var inspector = new FakeInspector();
-        inspector.Alive[100] = DateTime.UtcNow;
+        inspector.Alive[100] = DateTimeOffset.UtcNow;
         var previous = new RunningServerRegistry(_temp.FullName, inspector);
         previous.Record("Reused", 100);
         await WaitForFileAsync(static t => t.Contains("Reused", StringComparison.Ordinal));
-        inspector.Alive[100] = DateTime.UtcNow.AddHours(1);
+        inspector.Alive[100] = DateTimeOffset.UtcNow.AddHours(1);
 
         var orphans = await new RunningServerRegistry(_temp.FullName, inspector).FindOrphansAsync(TestContext.Current.CancellationToken);
 
@@ -116,10 +130,10 @@ public sealed class RunningServerRegistryTests : IDisposable
     }
 
     [Fact]
-    public async Task FindOrphans_ExcludesEntriesRecordedByCurrentSession()
+    public async Task FindOrphans_CurrentSessionEntry_Excludes()
     {
         var inspector = new FakeInspector();
-        inspector.Alive[100] = DateTime.UtcNow;
+        inspector.Alive[100] = DateTimeOffset.UtcNow;
         var registry = new RunningServerRegistry(_temp.FullName, inspector);
         registry.Record("Mine", 100);
         await WaitForFileAsync(static t => t.Contains("Mine", StringComparison.Ordinal));
@@ -128,10 +142,10 @@ public sealed class RunningServerRegistryTests : IDisposable
     }
 
     [Fact]
-    public async Task Terminate_KillsProcessTreeAndRemovesEntry()
+    public async Task Terminate_RegisteredEntry_KillsTreeAndRemoves()
     {
         var inspector = new FakeInspector();
-        inspector.Alive[100] = DateTime.UtcNow;
+        inspector.Alive[100] = DateTimeOffset.UtcNow;
         new RunningServerRegistry(_temp.FullName, inspector).Record("Alpha", 100);
         await WaitForFileAsync(static t => t.Contains("Alpha", StringComparison.Ordinal));
         var current = new RunningServerRegistry(_temp.FullName, inspector);

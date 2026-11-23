@@ -3,6 +3,7 @@ using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
@@ -16,11 +17,11 @@ internal static partial class ServerLaunchTargetResolver
         "paper.jar",
         "fabric-server-launch.jar",
         "quilt-server-launch.jar",
-        "server.jar",
+        ServerDefaults.ServerJarFileName,
         "minecraft_server.jar",
     ];
 
-    [GeneratedRegex(@"(?i)@([^\s""]+win_args\.txt)")]
+    [GeneratedRegex(@"(?i)@([^\s""]+win_args\.txt)", RegexOptions.CultureInvariant)]
     private static partial Regex WinArgsRegex();
 
     /// <summary>解析伺服器目錄的啟動目標</summary>
@@ -31,7 +32,7 @@ internal static partial class ServerLaunchTargetResolver
         string stableDir = SafeFileSystem.ResolveStableDirectory(serverDirectory);
 
         // 1. 優先從 Forge / NeoForge 的 run.bat 提取 @...win_args.txt
-        string runBat = Path.Combine(stableDir, "run.bat");
+        string runBat = Path.Combine(stableDir, ServerDefaults.RunBatFileName);
         if (SafeFileSystem.FileExists(runBat))
         {
             try
@@ -41,7 +42,13 @@ internal static partial class ServerLaunchTargetResolver
                 if (match.Success)
                 {
                     string matchedArgs = match.Groups[1].Value.Trim().Trim('"').Replace('\\', '/');
-                    return "@" + matchedArgs;
+                    string argsFullPath = Path.GetFullPath(matchedArgs, stableDir);
+                    if (SafeFileSystem.IsPathWithin(stableDir, argsFullPath, strict: true) && SafeFileSystem.FileExists(argsFullPath))
+                    {
+                        return "@" + matchedArgs;
+                    }
+
+                    Logger.Warning("run.bat 引用之引數檔不存在或超出伺服器目錄，改用其他啟動目標: {Target}", argsFullPath);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -63,23 +70,15 @@ internal static partial class ServerLaunchTargetResolver
             .Select(static e => Path.GetFileName(e.FullPath))
             .ToList();
 
-        string? preferredByLoader = loader switch
-        {
-            LoaderKind.Paper => jarFiles.FirstOrDefault(static f => f.StartsWith("paper", StringComparison.OrdinalIgnoreCase)),
-            LoaderKind.Fabric => jarFiles.FirstOrDefault(static f => f.StartsWith("fabric-server-launch", StringComparison.OrdinalIgnoreCase)),
-            LoaderKind.Quilt => jarFiles.FirstOrDefault(static f => f.StartsWith("quilt-server-launch", StringComparison.OrdinalIgnoreCase)),
-            LoaderKind.Forge => jarFiles.FirstOrDefault(static f => f.StartsWith("forge", StringComparison.OrdinalIgnoreCase) && !f.Contains("installer", StringComparison.OrdinalIgnoreCase)),
-            LoaderKind.NeoForge => jarFiles.FirstOrDefault(static f => f.StartsWith("neoforge", StringComparison.OrdinalIgnoreCase) && !f.Contains("installer", StringComparison.OrdinalIgnoreCase)),
-            _ => null
-        };
-
+        var layout = LoaderLayout.For(loader);
+        string? preferredByLoader = jarFiles.FirstOrDefault(layout.IsLaunchJarName);
         if (preferredByLoader is not null)
         {
             return preferredByLoader;
         }
 
         // 4. 通用 Paper JAR 搜尋
-        string? paperJar = jarFiles.FirstOrDefault(static f => f.StartsWith("paper", StringComparison.OrdinalIgnoreCase));
+        string? paperJar = jarFiles.FirstOrDefault(LoaderLayout.IsPaperJarName);
         if (paperJar is not null)
         {
             return paperJar;
@@ -104,31 +103,29 @@ internal static partial class ServerLaunchTargetResolver
         // 7. 改用 run.bat 或預設 server.jar
         if (SafeFileSystem.FileExists(runBat))
         {
-            return "run.bat";
+            return ServerDefaults.RunBatFileName;
         }
 
-        return "server.jar";
+        return ServerDefaults.ServerJarFileName;
     }
 
-    private static readonly (string Group, string Artifact)[] LibraryWinArgsCandidates =
-    [
-        ("minecraftforge", "forge"),
-        ("neoforged", "neoforge")
-    ];
+    /// <summary>具 win_args.txt 函式庫之載入器（依序搜尋）</summary>
+    private static readonly LoaderKind[] WinArgsLoaderKinds = [LoaderKind.Forge, LoaderKind.NeoForge];
 
     internal static string? FindLibraryWinArgs(string directory)
     {
-        foreach (var (group, artifact) in LibraryWinArgsCandidates)
+        foreach (var kind in WinArgsLoaderKinds)
         {
-            string libDir = Path.Combine(directory, "libraries", "net", group, artifact);
+            string libDir = LoaderLayout.For(kind).GetLibraryDirectory(directory);
             if (!SafeFileSystem.DirectoryExists(libDir))
             {
                 continue;
             }
 
-            foreach (string sub in SafeFileSystem.EnumerateDirectories(libDir))
+            // 同時存在多個版本時取最新版
+            foreach (string sub in SafeFileSystem.EnumerateDirectories(libDir).OrderDescending(VersionNameComparer.Instance))
             {
-                string winArgs = Path.Combine(sub, "win_args.txt");
+                string winArgs = Path.Combine(sub, ServerDefaults.WinArgsFileName);
                 if (SafeFileSystem.FileExists(winArgs))
                 {
                     return "@" + Path.GetRelativePath(directory, winArgs).Replace('\\', '/');

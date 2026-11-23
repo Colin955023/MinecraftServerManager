@@ -1,17 +1,35 @@
-using MinecraftServerManager.Infrastructure.Logging;
-using MinecraftServerManager.Infrastructure.Utilities;
 using System.Globalization;
 using MinecraftServerManager.Core.Ports;
-using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Domain.Servers;
+using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
 /// <summary>伺服器備份與交易式還原服務</summary>
-public sealed class ServerBackupService(string serversRoot, Func<int> retentionCountProvider) : IServerBackupService
+public sealed class ServerBackupService : IServerBackupService
 {
+    private const int CleanupRetryCount = 3;
+
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerBackupService));
-    private readonly string _resolvedServersRoot = SafeFileSystem.ResolveStableDirectory(serversRoot);
+    private static readonly TimeSpan CleanupRetryDelay = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan ProgressReportInterval = TimeSpan.FromMilliseconds(100);
+
+    private readonly string _resolvedServersRoot;
+    private readonly Func<int> _retentionCountProvider;
+    private readonly KeyedAsyncLock _serverGates = new();
+    private readonly TimeProvider _timeProvider;
+
+    public ServerBackupService(string serversRoot, Func<int> retentionCountProvider, TimeProvider timeProvider)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serversRoot);
+        ArgumentNullException.ThrowIfNull(retentionCountProvider);
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        _timeProvider = timeProvider;
+        _resolvedServersRoot = SafeFileSystem.ResolveStableDirectory(serversRoot);
+        _retentionCountProvider = retentionCountProvider;
+    }
 
     public Task<IReadOnlyList<ServerBackupInfo>> ListBackupsAsync(
         string serverName,
@@ -26,41 +44,30 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
             return Task.FromResult<IReadOnlyList<ServerBackupInfo>>([]);
         }
 
-        string backupsDir = ResolveExternalBackupDirectory(backupDirectory);
-        if (!SafeFileSystem.DirectoryExists(backupsDir))
-        {
-            return Task.FromResult<IReadOnlyList<ServerBackupInfo>>([]);
-        }
-
-        var list = new List<ServerBackupInfo>();
-        var entries = SafeFileSystem.ListBoundedDirectory(backupsDir, rejectReparse: false);
-        foreach (var entry in entries)
-        {
-            if (!entry.IsDirectory && entry.FullPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-            {
-                string fn = Path.GetFileName(entry.FullPath);
-                if (IsBackupFileFor(serverName, fn))
-                {
-                    list.Add(new ServerBackupInfo(
-                        FileName: fn,
-                        FullPath: entry.FullPath,
-                        SizeBytes: entry.Length,
-                        CreatedAt: entry.CreationTimeUtc));
-                }
-            }
-        }
-
-        return Task.FromResult<IReadOnlyList<ServerBackupInfo>>([.. list.OrderByDescending(static b => b.CreatedAt)]);
+        return Task.Run(() => ListBackups(serverName, backupDirectory), cancellationToken);
     }
 
-    public ServerBackupSummary GetBackupSummary(string serverName, string? backupDirectory)
+    private IReadOnlyList<ServerBackupInfo> ListBackups(string serverName, string backupDirectory)
+    {
+        string backupsDir = ResolveExternalBackupDirectory(backupDirectory);
+        return !SafeFileSystem.DirectoryExists(backupsDir)
+            ? []
+            : [.. EnumerateServerBackups(serverName, backupsDir).OrderByDescending(static b => b.CreatedAt)];
+    }
+
+    public Task<ServerBackupSummary> GetBackupSummaryAsync(string serverName, string? backupDirectory, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverName);
         if (string.IsNullOrWhiteSpace(backupDirectory))
         {
-            return new ServerBackupSummary(ServerBackupSummaryStatus.NotConfigured);
+            return Task.FromResult(new ServerBackupSummary(ServerBackupSummaryStatus.NotConfigured));
         }
 
+        return Task.Run(() => GetBackupSummary(serverName, backupDirectory), cancellationToken);
+    }
+
+    private static ServerBackupSummary GetBackupSummary(string serverName, string backupDirectory)
+    {
         try
         {
             if (!SafeFileSystem.DirectoryExists(backupDirectory))
@@ -69,20 +76,13 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
             }
 
             int count = 0;
-            DateTime? latestUtc = null;
-            foreach (var entry in SafeFileSystem.ListBoundedDirectory(backupDirectory))
+            DateTimeOffset? latestUtc = null;
+            foreach (var backup in EnumerateServerBackups(serverName, backupDirectory))
             {
-                if (entry.IsDirectory
-                    || !entry.FullPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
-                    || !IsBackupFileFor(serverName, Path.GetFileName(entry.FullPath)))
-                {
-                    continue;
-                }
-
                 count++;
-                if (latestUtc is null || entry.LastWriteTimeUtc > latestUtc)
+                if (latestUtc is null || backup.CreatedAt > latestUtc)
                 {
-                    latestUtc = entry.LastWriteTimeUtc;
+                    latestUtc = backup.CreatedAt;
                 }
             }
 
@@ -97,16 +97,43 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
         }
     }
 
-    public string? ValidateBackupDestination(string destinationPath)
+    private static IEnumerable<ServerBackupInfo> EnumerateServerBackups(string serverName, string backupDirectory)
+    {
+        foreach (var entry in SafeFileSystem.ListBoundedDirectory(backupDirectory, rejectReparse: false))
+        {
+            if (entry.IsDirectory || !entry.FullPath.EndsWith(ZipExtension, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string fileName = Path.GetFileName(entry.FullPath);
+            if (IsBackupFileFor(serverName, fileName))
+            {
+                yield return new ServerBackupInfo(
+                    FileName: fileName,
+                    FullPath: entry.FullPath,
+                    SizeBytes: entry.Length,
+                    CreatedAt: new DateTimeOffset(DateTime.SpecifyKind(entry.LastWriteTimeUtc, DateTimeKind.Utc)));
+            }
+        }
+    }
+
+    public Task<string?> ValidateBackupDestinationAsync(string destinationPath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(destinationPath))
         {
-            return "未指定備份路徑";
+            return Task.FromResult<string?>("未指定備份路徑");
         }
+
+        return Task.Run(() => ValidateBackupDestination(destinationPath), cancellationToken);
+    }
+
+    private string? ValidateBackupDestination(string destinationPath)
+    {
 
         try
         {
-            string targetDir = SafeFileSystem.FileExists(destinationPath) || destinationPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+            string targetDir = SafeFileSystem.FileExists(destinationPath) || destinationPath.EndsWith(ZipExtension, StringComparison.OrdinalIgnoreCase)
                 ? (Path.GetDirectoryName(destinationPath) ?? destinationPath)
                 : destinationPath;
 
@@ -121,18 +148,33 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
         }
     }
 
-    public string PrepareBackupFilePath(string serverName, string destinationDirectory)
+    public Task<string> PrepareBackupFilePathAsync(string serverName, string destinationDirectory, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverName);
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationDirectory);
 
-        SafeFileSystem.CreateDirectory(destinationDirectory);
-        string timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
-        return Path.Combine(destinationDirectory, $"backup-{serverName}-{timestamp}.zip");
+        return Task.Run(() =>
+        {
+            SafeFileSystem.CreateDirectory(destinationDirectory);
+            return Path.Combine(destinationDirectory, BuildBackupFileName(serverName, shortId: null));
+        }, cancellationToken);
     }
 
     private const string BackupPrefix = "backup-";
     private const string ZipExtension = ".zip";
+    private const string TimestampFormat = "yyyyMMdd-HHmmss";
+
+    /// <summary>以本機時間產生備份檔名：<c>backup-{伺服器}-{時間戳記}[-{識別碼}].zip</c></summary>
+    private string BuildBackupFileName(string serverName, string? shortId)
+    {
+        string timestamp = FormatLocalTimestamp();
+        return shortId is null
+            ? $"{BackupPrefix}{serverName}-{timestamp}{ZipExtension}"
+            : $"{BackupPrefix}{serverName}-{timestamp}-{shortId}{ZipExtension}";
+    }
+
+    private string FormatLocalTimestamp() =>
+        _timeProvider.GetLocalNow().ToString(TimestampFormat, CultureInfo.InvariantCulture);
 
     /// <summary>是否為指定伺服器的備份檔（名稱後須接時間戳記）</summary>
     internal static bool IsBackupFileFor(string serverName, string fileName)
@@ -161,9 +203,10 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
             return true;
         }
 
-        // 時間戳記格式：-yyyyMMdd-HHmmss
+        // 時間戳記格式：-yyyyMMdd-HHmmss，後接選用識別碼與 .zip
         const int stampLength = 1 + 8 + 1 + 6;
-        return rest.Length >= stampLength
+        return rest.Length >= stampLength + ZipExtension.Length
+            && rest.EndsWith(ZipExtension, StringComparison.OrdinalIgnoreCase)
             && rest[0] == '-'
             && rest.Slice(1, 8).ContainsAnyExceptInRange('0', '9') is false
             && rest[9] == '-'
@@ -196,13 +239,14 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
             throw new InvalidOperationException("備份路徑不得位於伺服器根目錄 (servers/) 或其子目錄內，請選擇其他儲存位置");
         }
 
-        string timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
-        string shortId = Guid.NewGuid().ToString("N")[..6];
-        string backupFileName = $"backup-{serverName}-{timestamp}-{shortId}.zip";
+        // 同伺服器的備份與還原互斥
+        using var gate = await _serverGates.AcquireAsync(serverName, cancellationToken).ConfigureAwait(false);
+
+        string backupFileName = BuildBackupFileName(serverName, Guid.NewGuid().ToString("N")[..6]);
 
         string backupDirectory;
         string backupFilePath;
-        if (destinationPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+        if (destinationPath.EndsWith(ZipExtension, StringComparison.OrdinalIgnoreCase))
         {
             backupFilePath = Path.GetFullPath(destinationPath);
             backupFileName = Path.GetFileName(backupFilePath);
@@ -231,9 +275,9 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
                     // 只略過根目錄下的 logs、crash-reports 與 backups
                     pruneDirectory: (fullPath, name) =>
                         string.Equals(Path.GetDirectoryName(fullPath), serverDir, StringComparison.OrdinalIgnoreCase) &&
-                        (name.Equals("logs", StringComparison.OrdinalIgnoreCase) ||
-                         name.Equals("crash-reports", StringComparison.OrdinalIgnoreCase) ||
-                         name.Equals("backups", StringComparison.OrdinalIgnoreCase)));
+                        (name.Equals(ServerDefaults.LogsDirectoryName, StringComparison.OrdinalIgnoreCase) ||
+                         name.Equals(ServerDefaults.CrashReportsDirectoryName, StringComparison.OrdinalIgnoreCase) ||
+                         name.Equals(ServerDefaults.BackupsDirectoryName, StringComparison.OrdinalIgnoreCase)));
 
                 filesToBackup = [.. entries
                     .Where(static e => !e.IsDirectory &&
@@ -247,6 +291,7 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
 
             long totalBytes = filesToBackup.Sum(static f => f.Length);
             long processedBytes = 0;
+            var progressThrottle = new ProgressThrottle(ProgressReportInterval, _timeProvider);
 
             SafeZipArchive.WriteArchive(backupFilePath, writer =>
             {
@@ -264,11 +309,21 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
                     long writtenBytes = writer.WriteFile(relativePath, filePath);
                     processedBytes += writtenBytes;
 
-                    progress?.Report(new ServerBackupProgressReport(
-                        PercentCompleted: totalBytes > 0 ? (int)(processedBytes * 100 / totalBytes) : 0,
-                        CurrentFile: relativePath,
-                        ProcessedBytes: processedBytes,
-                        TotalBytes: totalBytes));
+                    if (progress is null)
+                    {
+                        continue;
+                    }
+
+                    // 大量小檔案時節流進度回報，避免灌爆 UI 執行緒
+                    int percent = ProgressMapping.Map(processedBytes, totalBytes, 0, 100);
+                    if (progressThrottle.ShouldReport(percent))
+                    {
+                        progress.Report(new ServerBackupProgressReport(
+                            PercentCompleted: percent,
+                            CurrentFile: relativePath,
+                            ProcessedBytes: processedBytes,
+                            TotalBytes: totalBytes));
+                    }
                 }
 
                 progress?.Report(new ServerBackupProgressReport(
@@ -288,7 +343,7 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
             FileName: fileInfo.Name,
             FullPath: fileInfo.FullPath,
             SizeBytes: fileInfo.Length,
-            CreatedAt: fileInfo.CreationTimeUtc);
+            CreatedAt: fileInfo.LastWriteTimeUtc);
     }
 
     public async Task<bool> RestoreBackupAsync(
@@ -307,6 +362,13 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
             throw new InvalidOperationException("未指定備份資料夾路徑。備份必須位於伺服器目錄以外之外部資料夾。");
         }
 
+        if (!string.Equals(Path.GetFileName(backupFileName), backupFileName, StringComparison.Ordinal)
+            || !IsBackupFileFor(serverName, backupFileName))
+        {
+            Logger.Warning("拒絕還原非該伺服器之備份檔: {Server}: {FileName}", serverName, backupFileName);
+            return false;
+        }
+
         string serverDir = GetServerDirectory(serverName);
         string backupsDir = ResolveExternalBackupDirectory(backupDirectory);
         string backupFilePath = Path.Combine(backupsDir, Path.GetFileName(backupFileName));
@@ -315,6 +377,8 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
         {
             return false;
         }
+
+        using var gate = await _serverGates.AcquireAsync(serverName, cancellationToken).ConfigureAwait(false);
 
         string stagingDir = Path.Combine(_resolvedServersRoot, $"{ServerDefaults.InternalPrefix}restore-staging-{Guid.NewGuid():N}");
         string rollbackDir = Path.Combine(_resolvedServersRoot, $"{ServerDefaults.InternalPrefix}restore-rollback-{Guid.NewGuid():N}");
@@ -339,17 +403,26 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
                 // 階段一：在暫存 staging 目錄解壓縮並驗證完整性
                 SafeFileSystem.CreateDirectory(stagingDir);
                 progress?.Report(new ServerBackupProgressReport(10, "正在解壓縮備份檔案...", 0, 0));
+                var extractThrottle = new ProgressThrottle(ProgressReportInterval, _timeProvider);
                 SafeZipArchive.Extract(backupFilePath, stagingDir, (extracted, total) =>
                 {
+                    if (progress is null)
+                    {
+                        return;
+                    }
+
                     int pct = ProgressMapping.Map(extracted, total, 10, 60, unknown: 35);
-                    progress?.Report(new ServerBackupProgressReport(pct, $"正在解壓縮檔案 ({pct}%)...", extracted, total));
+                    if (extractThrottle.ShouldReport(pct))
+                    {
+                        progress.Report(new ServerBackupProgressReport(pct, $"正在解壓縮檔案 ({pct}%)...", extracted, total));
+                    }
                 }, cancellationToken);
                 SafeFileSystem.RemoveReadOnlyAttributesRecursive(stagingDir);
 
                 // 階段二：建立既有伺服器檔案之 rollback 快照
                 progress?.Report(new ServerBackupProgressReport(65, "正在建立伺服器現況快照...", 0, 0));
                 SafeFileSystem.CreateDirectory(rollbackDir);
-                string legacyBackupsDir = Path.Combine(serverDir, "backups");
+                string legacyBackupsDir = Path.Combine(serverDir, ServerDefaults.BackupsDirectoryName);
                 SafeFileSystem.MoveChildren(
                     serverDir,
                     rollbackDir,
@@ -360,6 +433,7 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
 
                 // 階段三：將 staging 中的還原內容搬移至伺服器目錄
                 progress?.Report(new ServerBackupProgressReport(80, "正在還原備份檔案至伺服器目錄...", 0, 0));
+
                 SafeFileSystem.MoveChildren(
                     stagingDir,
                     serverDir,
@@ -392,24 +466,8 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
                     {
                         if (snapshotCompleted)
                         {
-                            // 快照完成後先清除已搬入的還原內容，避免新舊檔案混雜
-                            string keptBackupsDir = Path.Combine(serverDir, "backups");
-                            foreach (var leftover in SafeFileSystem.ListBoundedDirectory(serverDir, rejectReparse: false))
-                            {
-                                if (string.Equals(leftover.FullPath, keptBackupsDir, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    continue;
-                                }
-
-                                if (leftover.IsDirectory)
-                                {
-                                    SafeFileSystem.DeleteDirectory(leftover.FullPath, recursive: true);
-                                }
-                                else
-                                {
-                                    SafeFileSystem.DeleteFile(leftover.FullPath);
-                                }
-                            }
+                            // 快照完成後先清除已搬入的還原內容，避免新舊檔案混雜；單項失敗不阻擋搬回快照
+                            RemoveRestoredLeftovers(serverDir);
                         }
 
                         SafeFileSystem.MoveChildren(
@@ -417,14 +475,24 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
                             serverDir,
                             beforeMove: (_, targetLive) =>
                             {
-                                if (SafeFileSystem.FileExists(targetLive))
-                                {
-                                    SafeFileSystem.DeleteFile(targetLive);
-                                }
-                                else if (SafeFileSystem.DirectoryExists(targetLive))
-                                {
-                                    SafeFileSystem.DeleteDirectory(targetLive, recursive: true);
-                                }
+                                SafeFileSystem.RetryOnTransientIo(
+                                    () =>
+                                    {
+                                        if (SafeFileSystem.FileExists(targetLive))
+                                        {
+                                            SafeFileSystem.ClearReadOnlyAttribute(targetLive);
+                                            SafeFileSystem.DeleteFile(targetLive);
+                                        }
+                                        else if (SafeFileSystem.DirectoryExists(targetLive))
+                                        {
+                                            SafeFileSystem.ClearReadOnlyAttribute(targetLive);
+                                            SafeFileSystem.DeleteDirectory(targetLive, recursive: true);
+                                        }
+                                    },
+                                    targetLive,
+                                    maxAttempts: 3,
+                                    baseDelay: TimeSpan.FromMilliseconds(100),
+                                    shouldRetry: static (ioEx, _) => ioEx is IOException or UnauthorizedAccessException);
                             });
                     }
 
@@ -471,16 +539,26 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
             return Task.FromResult(false);
         }
 
-        string backupsDir = ResolveExternalBackupDirectory(backupDirectory);
-        string targetPath = Path.Combine(backupsDir, Path.GetFileName(backupFileName));
-
-        if (SafeFileSystem.FileExists(targetPath))
+        // 只允許刪除屬於該伺服器的備份檔，名稱不得含路徑
+        if (!string.Equals(Path.GetFileName(backupFileName), backupFileName, StringComparison.Ordinal)
+            || !IsBackupFileFor(serverName, backupFileName))
         {
-            SafeFileSystem.DeleteFile(targetPath);
-            return Task.FromResult(true);
+            Logger.Warning("拒絕刪除非該伺服器之備份檔: {Server}: {FileName}", serverName, backupFileName);
+            return Task.FromResult(false);
         }
 
-        return Task.FromResult(false);
+        return Task.Run(() =>
+        {
+            string backupsDir = ResolveExternalBackupDirectory(backupDirectory);
+            string targetPath = Path.Combine(backupsDir, backupFileName);
+            if (!SafeFileSystem.IsPathWithin(backupsDir, targetPath, strict: true) || !SafeFileSystem.FileExists(targetPath))
+            {
+                return false;
+            }
+
+            SafeFileSystem.DeleteFile(targetPath);
+            return true;
+        }, cancellationToken);
     }
 
     private async Task PruneOldBackupsAsync(
@@ -489,21 +567,66 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
         CancellationToken cancellationToken)
     {
         var existing = await ListBackupsAsync(serverName, backupDirectory, cancellationToken).ConfigureAwait(false);
-        int maxRetentionCount = Math.Max(1, retentionCountProvider());
+        int maxRetentionCount = Math.Max(ServerDefaults.MinBackupRetentionCount, _retentionCountProvider());
         if (existing.Count <= maxRetentionCount)
         {
             return;
         }
 
-        var toRemove = existing.Skip(maxRetentionCount).ToList();
-        foreach (var backup in toRemove)
+        foreach (var backup in existing.Skip(maxRetentionCount))
         {
-            await DeleteBackupAsync(serverName, backup.FileName, backupDirectory, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await DeleteBackupAsync(serverName, backup.FileName, backupDirectory, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // 單筆清理失敗不影響已完成的備份
+                Logger.Warning(ex, "清理舊備份失敗: {FileName}", backup.FileName);
+            }
         }
     }
 
+    /// <summary>伺服器名稱須為單一路徑段且解析後位於伺服器根目錄內</summary>
     private string GetServerDirectory(string serverName) =>
-        SafeFileSystem.ResolveStableDirectory(Path.Combine(_resolvedServersRoot, serverName));
+        ServerSetupHelpers.ResolveServerDirectory(_resolvedServersRoot, serverName);
+
+    /// <summary>逐項刪除伺服器目錄內已搬入的還原內容（保留 backups），失敗項目重試後記錄警告</summary>
+    private static void RemoveRestoredLeftovers(string serverDir)
+    {
+        string keptBackupsDir = Path.Combine(serverDir, ServerDefaults.BackupsDirectoryName);
+        foreach (var leftover in SafeFileSystem.ListBoundedDirectory(serverDir, rejectReparse: false))
+        {
+            if (string.Equals(leftover.FullPath, keptBackupsDir, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            try
+            {
+                SafeFileSystem.RetryOnTransientIo(
+                    () =>
+                    {
+                        if (leftover.IsDirectory)
+                        {
+                            SafeFileSystem.DeleteDirectory(leftover.FullPath, recursive: true);
+                        }
+                        else
+                        {
+                            SafeFileSystem.DeleteFile(leftover.FullPath);
+                        }
+                    },
+                    leftover.FullPath,
+                    CleanupRetryCount,
+                    CleanupRetryDelay,
+                    static (ex, _) => ex is IOException or UnauthorizedAccessException);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Logger.Warning(ex, "交易復原時無法清除還原殘留: {Path}", leftover.FullPath);
+            }
+        }
+    }
 
     private string ResolveExternalBackupDirectory(string backupDirectory)
     {
@@ -522,35 +645,46 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
 
     private static void PreserveLiveDiagnostics(string serverDir, string destinationDir, CancellationToken cancellationToken = default)
     {
-        string liveLogs = Path.Combine(serverDir, "logs");
-        string liveCrash = Path.Combine(serverDir, "crash-reports");
+        string liveLogs = Path.Combine(serverDir, ServerDefaults.LogsDirectoryName);
+        string liveCrash = Path.Combine(serverDir, ServerDefaults.CrashReportsDirectoryName);
 
         if (SafeFileSystem.DirectoryExists(liveLogs))
         {
-            SafeFileSystem.CopyDirectoryTreeSafe(liveLogs, Path.Combine(destinationDir, "logs"), cancellationToken);
+            SafeFileSystem.CopyDirectoryTreeSafe(liveLogs, Path.Combine(destinationDir, ServerDefaults.LogsDirectoryName), cancellationToken);
         }
         if (SafeFileSystem.DirectoryExists(liveCrash))
         {
-            SafeFileSystem.CopyDirectoryTreeSafe(liveCrash, Path.Combine(destinationDir, "crash-reports"), cancellationToken);
+            SafeFileSystem.CopyDirectoryTreeSafe(liveCrash, Path.Combine(destinationDir, ServerDefaults.CrashReportsDirectoryName), cancellationToken);
         }
     }
 
     private static void RestorePreservedDiagnostics(string sourceDir, string serverDir)
     {
-        MergeMissingFiles(Path.Combine(sourceDir, "crash-reports"), Path.Combine(serverDir, "crash-reports"));
-        MergeMissingFiles(Path.Combine(sourceDir, "logs"), Path.Combine(serverDir, "logs"), static (file, targetDir) =>
+        MergeMissingFiles(Path.Combine(sourceDir, ServerDefaults.CrashReportsDirectoryName), Path.Combine(serverDir, ServerDefaults.CrashReportsDirectoryName));
+        MergeMissingFiles(Path.Combine(sourceDir, ServerDefaults.LogsDirectoryName), Path.Combine(serverDir, ServerDefaults.LogsDirectoryName), static (file, targetFile) =>
         {
-            // 還原出的 latest.log 已存在時，現場記錄另存為 pre-restore
+            // 還原出的 latest.log 已存在時，現場記錄另存為 pre-restore；該名稱已被占用則加時間戳記
+            if (!string.Equals(Path.GetFileName(file), ServerDefaults.LatestLogFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            string targetDir = Path.GetDirectoryName(targetFile)!;
             string preRestoreFile = Path.Combine(targetDir, "latest.log.pre-restore");
-            if (string.Equals(Path.GetFileName(file), "latest.log", StringComparison.OrdinalIgnoreCase)
-                && !SafeFileSystem.FileExists(preRestoreFile))
+            if (SafeFileSystem.FileExists(preRestoreFile))
+            {
+                string stamp = DateTime.Now.ToString(TimestampFormat, CultureInfo.InvariantCulture);
+                preRestoreFile = Path.Combine(targetDir, $"latest.log.pre-restore-{stamp}");
+            }
+
+            if (!SafeFileSystem.FileExists(preRestoreFile))
             {
                 SafeFileSystem.CopyFile(file, preRestoreFile);
             }
         });
     }
 
-    /// <summary>把來源資料夾中目標沒有的檔案複製過去；同名檔交由 onExisting 處理</summary>
+    /// <summary>遞迴把來源資料夾中目標沒有的檔案複製過去；同名檔交由 onExisting（來源檔、目標檔）處理</summary>
     private static void MergeMissingFiles(string sourceDir, string targetDir, Action<string, string>? onExisting = null)
     {
         if (!SafeFileSystem.DirectoryExists(sourceDir))
@@ -559,16 +693,21 @@ public sealed class ServerBackupService(string serversRoot, Func<int> retentionC
         }
 
         SafeFileSystem.CreateDirectory(targetDir);
-        foreach (string file in SafeFileSystem.EnumerateFiles(sourceDir, "*"))
+        foreach (var entry in SafeFileSystem.EnumerateBoundedTree(sourceDir))
         {
-            string targetFile = Path.Combine(targetDir, Path.GetFileName(file));
-            if (!SafeFileSystem.FileExists(targetFile))
+            string targetPath = Path.Combine(targetDir, Path.GetRelativePath(sourceDir, entry.FullPath));
+            if (entry.IsDirectory)
             {
-                SafeFileSystem.CopyFile(file, targetFile);
+                SafeFileSystem.CreateDirectory(targetPath);
+            }
+            else if (!SafeFileSystem.FileExists(targetPath))
+            {
+                SafeFileSystem.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                SafeFileSystem.CopyFile(entry.FullPath, targetPath);
             }
             else
             {
-                onExisting?.Invoke(file, targetDir);
+                onExisting?.Invoke(entry.FullPath, targetPath);
             }
         }
     }

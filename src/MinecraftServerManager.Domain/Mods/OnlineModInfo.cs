@@ -8,5 +8,5 @@ public sealed record OnlineModInfo(
     string Author,
     string Description = "",
     string LatestVersion = "",
-    int Downloads = 0,
+    long Downloads = 0,
     string ServerSide = "");

@@ -1,8 +1,6 @@
-using System.Collections.Specialized;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using MinecraftServerManager.App.Controls;
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
@@ -11,31 +9,27 @@ using MinecraftServerManager.Infrastructure.Logging;
 namespace MinecraftServerManager.App.Views;
 
 /// <summary>伺服器監控與主控台即時視窗</summary>
-public sealed partial class ServerMonitorWindow : Window
+public sealed partial class ServerMonitorWindow : Window, IDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerMonitorWindow));
 
     private readonly ServerMonitorViewModel _viewModel;
-    private readonly IUiService _ui;
-    private bool _scrollQueued;
-    private ScrollViewer? _logScrollViewer;
+    private readonly LogListAutoScroller _autoScroller;
 
-    public ServerMonitorViewModel ViewModel => _viewModel;
-
-    public ServerMonitorWindow(ServerMonitorViewModel viewModel, IUiService ui)
+    public ServerMonitorWindow(ServerMonitorViewModel viewModel, IUiService ui, ElementTheme theme)
     {
-        _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
-        _ui = ui ?? throw new ArgumentNullException(nameof(ui));
+        ArgumentNullException.ThrowIfNull(viewModel);
+        ArgumentNullException.ThrowIfNull(ui);
+        _viewModel = viewModel;
 
         InitializeComponent();
-
-        ExtendsContentIntoTitleBar = true;
 
         WindowIconHelper.SetIcon(AppWindow);
         Title = _viewModel.WindowTitle;
 
         WindowLayoutHelper.ResizeToDip(this, 1050, 680);
-        SetTitleBar(AppTitleBar);
+        WindowLayoutHelper.SetMinimumSizeDip(this, 720, 480);
+        WindowChromeService.Apply(this, AppTitleBar);
 
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
@@ -44,88 +38,21 @@ public sealed partial class ServerMonitorWindow : Window
             presenter.IsResizable = true;
         }
 
-        if (_ui is WinUiService winUi)
-        {
-            RootGrid.RequestedTheme = winUi.CurrentTheme;
-            TitleBarThemeHelper.ApplyTitleBarTheme(AppWindow, winUi.CurrentTheme);
-        }
+        RootGrid.RequestedTheme = theme;
+        WindowChromeService.ApplyTheme(AppWindow, theme);
 
-        if (_viewModel.Logs is INotifyCollectionChanged notify)
-        {
-            notify.CollectionChanged += OnLogsCollectionChanged;
-        }
+        _autoScroller = new LogListAutoScroller(LogListView, _viewModel.Logs, ui, () => _viewModel.IsAutoScrollEnabled);
 
-        Closed += ServerMonitorWindow_Closed;
+        Closed += OnServerMonitorWindowClosed;
     }
 
-    private void OnLogsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
-    {
-        if (_viewModel.IsAutoScrollEnabled &&
-            e.Action is NotifyCollectionChangedAction.Add or NotifyCollectionChangedAction.Reset &&
-            _viewModel.Logs.Count > 0 &&
-            !_scrollQueued)
-        {
-            _scrollQueued = true;
-            _ui.PostToUi(() =>
-            {
-                _scrollQueued = false;
-                if (!_viewModel.IsAutoScrollEnabled || _viewModel.Logs.Count == 0)
-                {
-                    return;
-                }
+    public ServerMonitorViewModel ViewModel => _viewModel;
 
-                try
-                {
-                    // ScrollIntoView(字串) 會定位到第一個相同字串而造成跳動，改為直接捲動內部 ScrollViewer
-                    _logScrollViewer ??= FindDescendant<ScrollViewer>(LogListView);
-                    if (_logScrollViewer is not null)
-                    {
-                        _logScrollViewer.ChangeView(null, _logScrollViewer.ScrollableHeight, null, disableAnimation: true);
-                    }
-                    else
-                    {
-                        LogListView.ScrollIntoView(_viewModel.Logs[^1]);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning(ex, "日誌自動捲動失敗");
-                }
-            }, afterLayout: true);
-        }
-    }
-
-    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
-    {
-        int count = VisualTreeHelper.GetChildrenCount(root);
-        for (int i = 0; i < count; i++)
-        {
-            DependencyObject child = VisualTreeHelper.GetChild(root, i);
-            if (child is T match)
-            {
-                return match;
-            }
-
-            if (FindDescendant<T>(child) is { } nested)
-            {
-                return nested;
-            }
-        }
-
-        return null;
-    }
-
-    private void CommandInputBox_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
-    {
-        if (e.Key == Windows.System.VirtualKey.Enter)
-        {
-            e.Handled = true;
-            _viewModel.SendCommandCommand.TryExecute();
-        }
-    }
+    /// <summary>解除日誌自動捲動訂閱</summary>
+    public void Dispose() => _autoScroller.Dispose();
 
     /// <summary>方向鍵瀏覽歷史指令（TextBox 會自行處理方向鍵，故用 PreviewKeyDown）</summary>
-    private void CommandInputBox_PreviewKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    private void OnCommandInputBoxPreviewKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
         if (e.Key is not (Windows.System.VirtualKey.Up or Windows.System.VirtualKey.Down) || sender is not TextBox box)
         {
@@ -144,18 +71,13 @@ public sealed partial class ServerMonitorWindow : Window
     {
         if (e.ClickedItem is string playerName)
         {
-            _viewModel.CopyPlayerName(playerName);
+            _viewModel.CopyPlayerNameCommand.Execute(playerName);
         }
     }
 
-    private void OnCopyAllLogsClicked(object sender, RoutedEventArgs e) => _viewModel.CopyAllLogs();
-
-    private void ServerMonitorWindow_Closed(object sender, WindowEventArgs args)
+    private void OnServerMonitorWindowClosed(object sender, WindowEventArgs args)
     {
-        if (_viewModel.Logs is INotifyCollectionChanged notify)
-        {
-            notify.CollectionChanged -= OnLogsCollectionChanged;
-        }
+        Dispose();
         Bindings.StopTracking();
         Logger.Information("伺服器監控視窗已關閉");
     }

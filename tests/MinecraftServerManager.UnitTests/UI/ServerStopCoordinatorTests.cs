@@ -139,6 +139,23 @@ public sealed class ServerStopCoordinatorTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task StopAllForShutdownAsync_RunningServers_MarksStoppingThenClears()
+    {
+        var a = _host.GetFake("A");
+        a.IsRunning = true;
+        a.WaitResults.Enqueue(Exited());
+        _ui.ChoiceResults.Enqueue(true);
+        var coordinator = CreateCoordinator();
+        var changes = new List<string>();
+        coordinator.StoppingStateChanged += changes.Add;
+
+        Assert.True(await coordinator.StopAllForShutdownAsync());
+
+        Assert.Equal(["A", "A"], changes);
+        Assert.False(coordinator.IsStopping("A"));
+    }
+
+    [Fact]
     public async Task StopAllForShutdownAsync_WhenOneTimesOutAndForced_ForceKillsOnlyThatServer()
     {
         var a = _host.GetFake("A");

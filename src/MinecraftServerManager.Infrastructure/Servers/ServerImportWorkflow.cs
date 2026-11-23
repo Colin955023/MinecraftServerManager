@@ -10,17 +10,30 @@ using MinecraftServerManager.Infrastructure.Utilities;
 namespace MinecraftServerManager.Infrastructure.Servers;
 
 /// <summary>伺服器匯入流程</summary>
-internal sealed class ServerImportWorkflow(
-    string serversRoot,
-    ServerRegistryStore registry,
-    IServerInspector inspector,
-    Func<string?, string, LoaderKind, CancellationToken, Task<string?>> resolveJavaExecutableAsync)
+internal sealed class ServerImportWorkflow
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerImportWorkflow));
-    private readonly string _serversRoot = serversRoot;
-    private readonly ServerRegistryStore _registry = registry;
-    private readonly IServerInspector _inspector = inspector;
-    private readonly Func<string?, string, LoaderKind, CancellationToken, Task<string?>> _resolveJavaExecutableAsync = resolveJavaExecutableAsync;
+
+    private readonly string _serversRoot;
+    private readonly ServerRegistryStore _registry;
+    private readonly IServerInspector _inspector;
+    private readonly Func<string?, string, CancellationToken, Task<ResolvedJavaRuntime?>> _resolveJavaExecutableAsync;
+
+    public ServerImportWorkflow(
+        string serversRoot,
+        ServerRegistryStore registry,
+        IServerInspector inspector,
+        Func<string?, string, CancellationToken, Task<ResolvedJavaRuntime?>> resolveJavaExecutableAsync)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serversRoot);
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(inspector);
+        ArgumentNullException.ThrowIfNull(resolveJavaExecutableAsync);
+        _serversRoot = serversRoot;
+        _registry = registry;
+        _inspector = inspector;
+        _resolveJavaExecutableAsync = resolveJavaExecutableAsync;
+    }
 
     public async Task<ServerImportResult> ImportAsync(
         string sourceDirectory,
@@ -45,35 +58,31 @@ internal sealed class ServerImportWorkflow(
         }
 
         bool isZip = SafeFileSystem.FileExists(sourceDirectory) && sourceDirectory.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
-        if (!isZip && DescribeUnsafeSourceDirectory(sourceDirectory) is { } unsafeReason)
+        if (!isZip && DescribeUnsafeSourceDirectory(sourceDirectory, mode) is { } unsafeReason)
         {
             Logger.Warning("匯入來源目錄不安全（{Reason}）: {Source}", unsafeReason, sourceDirectory);
             return ServerImportResult.Failed(targetName, unsafeReason);
         }
 
         string targetDir = Path.Combine(_serversRoot, targetName);
-        bool targetExisted = SafeFileSystem.DirectoryExists(targetDir);
-        if (targetExisted && !SafeFileSystem.IsDirectoryEmpty(targetDir))
+        if (ServerSetupHelpers.ValidateEmptyTargetDirectory(targetDir, out bool targetExisted) is { } targetError)
         {
             Logger.Warning("匯入目標目錄已存在且非空: {TargetDir}", targetDir);
-            return ServerImportResult.Failed(targetName, $"目標目錄已存在且非空：{targetDir}");
+            return ServerImportResult.Failed(targetName, targetError);
         }
 
-        string stagingDir = Path.Combine(_serversRoot, $"{ServerDefaults.InternalPrefix}import-staging-{Guid.NewGuid():N}");
-        bool completedSuccessfully = false;
-
         progress?.Report(new ServerImportProgressReport(5, "正在準備暫存環境..."));
+        using EphemeralStagingScope staging = new(_serversRoot, targetDir, targetExisted, "import-staging");
+        string stableStaging = staging.StableStaging;
 
         try
         {
-            SafeFileSystem.CreateDirectory(stagingDir);
-
             if (isZip)
             {
                 progress?.Report(new ServerImportProgressReport(10, "正在解壓縮伺服器封存檔..."));
                 await Task.Run(() =>
                 {
-                    SafeZipArchive.Extract(sourceDirectory, stagingDir, (extracted, total) =>
+                    SafeZipArchive.Extract(sourceDirectory, stableStaging, (extracted, total) =>
                     {
                         int pct = ProgressMapping.Map(extracted, total, 10, 55, unknown: 35);
                         progress?.Report(new ServerImportProgressReport(pct, $"正在解壓縮檔案 ({pct}%)..."));
@@ -82,12 +91,25 @@ internal sealed class ServerImportWorkflow(
             }
             else
             {
-                progress?.Report(new ServerImportProgressReport(20, "正在複製伺服器檔案..."));
+                progress?.Report(new ServerImportProgressReport(15, "正在檢查磁碟可用空間..."));
                 string stableSource = SafeFileSystem.ResolveStableDirectory(sourceDirectory);
-                await Task.Run(() => SafeFileSystem.CopyDirectoryTreeSafe(stableSource, stagingDir, cancellationToken), cancellationToken).ConfigureAwait(false);
-            }
+                long requiredBytes = 0;
+                foreach (var entry in SafeFileSystem.EnumerateBoundedTree(stableSource, rejectReparse: true))
+                {
+                    if (!entry.IsDirectory)
+                    {
+                        requiredBytes += entry.Length;
+                    }
+                }
 
-            string stableStaging = SafeFileSystem.ResolveStableDirectory(stagingDir);
+                if (ServerSetupHelpers.CheckFreeSpace(stableStaging, requiredBytes) is { } insufficientSpace)
+                {
+                    return ServerImportResult.Failed(targetName, insufficientSpace);
+                }
+
+                progress?.Report(new ServerImportProgressReport(20, "正在複製伺服器檔案..."));
+                await Task.Run(() => SafeFileSystem.CopyDirectoryTreeSafe(stableSource, stableStaging, cancellationToken), cancellationToken).ConfigureAwait(false);
+            }
 
             progress?.Report(new ServerImportProgressReport(60, "正在正規化伺服器檔案結構..."));
             FlattenSingleWrapper(stableStaging);
@@ -100,14 +122,14 @@ internal sealed class ServerImportWorkflow(
                 return ServerImportResult.Failed(targetName, "來源目錄不包含有效的 Minecraft 伺服器檔案 (未找到伺服器核心 jar 或關鍵執行檔案)");
             }
 
-            progress?.Report(new ServerImportProgressReport(80, "正在設定伺服器環境與屬性..."));
-
-            // 確保 eula.txt 存在
-            string eulaFile = Path.Combine(stableStaging, ServerDefaults.EulaFileName);
-            if (!SafeFileSystem.FileExists(eulaFile))
+            if (inspection.MinecraftVersion is null)
             {
-                AtomicFileWriter.WriteTextOrThrow(eulaFile, "eula=true\n");
+                Logger.Warning("無法辨識匯入來源的 Minecraft 版本: {Source}", sourceDirectory);
+                return ServerImportResult.Failed(targetName, ServerSetupHelpers.UnknownVersionMessage);
             }
+
+            progress?.Report(new ServerImportProgressReport(80, "正在設定伺服器環境與屬性..."));
+            staging.EnsureEula();
 
             // 自動遷移舊版 server.properties 屬性
             string propsPath = Path.Combine(stableStaging, ServerDefaults.ServerPropertiesFileName);
@@ -117,21 +139,21 @@ internal sealed class ServerImportWorkflow(
                 {
                     string propsContent = await SafeFileSystem.ReadAllTextAsync(propsPath, Encoding.UTF8, cancellationToken: cancellationToken).ConfigureAwait(false);
                     var rawProps = PropertiesDocumentCodec.Parse(propsContent);
-                    var migrationPlan = ServerPropertiesMigrationService.PlanMigration(rawProps, inspection.MinecraftVersion);
+                    var migrationPlan = ServerPropertiesMigrationService.PlanMigration(rawProps, inspection.MinecraftVersion.Value.Value);
                     if (migrationPlan.NeedsMigration)
                     {
                         ServerPropertiesMigrationService.ApplyMigrationToDirectory(stableStaging, migrationPlan, createBackup: true);
                         Logger.Information("伺服器「{Name}」匯入時已自動遷移 server.properties 設定", targetName);
                     }
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     Logger.Warning(ex, "伺服器匯入屬性遷移略過");
                 }
             }
 
             progress?.Report(new ServerImportProgressReport(85, "正在維護受管啟動腳本..."));
-            var loaderKind = LoaderKinds.ParseOrDefault(inspection.LoaderType, LoaderKind.Vanilla);
+            var loaderKind = inspection.LoaderType is LoaderKind.Unknown ? LoaderKind.Vanilla : inspection.LoaderType;
             string launchTarget = !string.IsNullOrWhiteSpace(inspection.LaunchTarget.Value)
                 ? inspection.LaunchTarget.Value
                 : ServerLaunchTargetResolver.ResolveLaunchTarget(stableStaging, loaderKind);
@@ -151,22 +173,21 @@ internal sealed class ServerImportWorkflow(
             }
 
             int memMax = inspection.MemoryMaxMb > 0 ? inspection.MemoryMaxMb : ServerDefaults.DefaultMemoryMaxMb;
-            int memMin = inspection.MemoryMinMb is > 0 ? inspection.MemoryMinMb.Value : ServerDefaults.DefaultMemoryMinMb;
-            string? importJavaPath = await _resolveJavaExecutableAsync(null, inspection.MinecraftVersion, loaderKind, cancellationToken).ConfigureAwait(false);
-            StartScriptWriter.Write(stableStaging, launchTarget, memMax, memMin, importJavaPath, null, loaderKind);
-            ServerSetupHelpers.CleanupRedundantStartupScripts(stableStaging);
+            ResolvedJavaRuntime? importJava = await _resolveJavaExecutableAsync(null, inspection.MinecraftVersion.Value.Value, cancellationToken).ConfigureAwait(false);
+            ServerSetupHelpers.FinalizeLaunchScripts(stableStaging, launchTarget, memMax, inspection.MemoryMinMb, importJava?.ExecutablePath, null, loaderKind, importJava?.MajorVersion);
 
             progress?.Report(new ServerImportProgressReport(90, "正在移入伺服器主資料夾..."));
 
-            // 將 staging 移至 targetDir
-            SafeFileSystem.ResolveStableDirectory(targetDir, create: true);
-            SafeFileSystem.MoveChildren(stableStaging, targetDir);
+            // 整目錄原子 MoveWithin 至 targetDir
+            if (!staging.TryCommitToTarget())
+            {
+                return ServerImportResult.Failed(targetName, "原子移動暫存目錄至正式伺服器目錄失敗");
+            }
 
             var config = ServerSetupHelpers.CreateConfigFromInspection(serverName, loaderKind, inspection, targetDir);
 
             _registry.Set(targetName, config);
-
-            completedSuccessfully = true;
+            staging.Complete();
 
             if (mode == ImportTransferMode.Move)
             {
@@ -196,46 +217,17 @@ internal sealed class ServerImportWorkflow(
         catch (OperationCanceledException)
         {
             Logger.Information("使用者已取消匯入伺服器「{Name}」", targetName);
-            CleanupFailedTarget();
             return ServerImportResult.Failed(targetName, "已取消匯入伺服器");
         }
         catch (Exception ex)
         {
             Logger.Error(ex, "匯入伺服器「{Name}」失敗", targetName);
-            CleanupFailedTarget();
             return ServerImportResult.Failed(targetName, $"匯入伺服器失敗：{ex.Message}");
-        }
-        finally
-        {
-            // DeleteWithin 對不存在的路徑與失敗皆自行處理並記錄
-            SafeFileSystem.DeleteWithin(_serversRoot, stagingDir);
-        }
-
-        // 只清理本流程建立的目標目錄；原本就存在的（空）目錄僅清空本次搬入的內容
-        void CleanupFailedTarget()
-        {
-            if (completedSuccessfully || !SafeFileSystem.DirectoryExists(targetDir))
-            {
-                return;
-            }
-
-            try
-            {
-                SafeFileSystem.DeleteWithin(_serversRoot, targetDir);
-                if (targetExisted)
-                {
-                    SafeFileSystem.CreateDirectory(targetDir);
-                }
-            }
-            catch (Exception cleanEx) when (cleanEx is not OperationCanceledException)
-            {
-                Logger.Warning(cleanEx, "匯入失敗後清理目標目錄失敗: {TargetDir}", targetDir);
-            }
         }
     }
 
-    /// <summary>來源為磁碟根目錄、伺服器根目錄或其上層時回傳拒絕原因（遷移模式會遞迴刪除來源）</summary>
-    private string? DescribeUnsafeSourceDirectory(string sourceDirectory)
+    /// <summary>來源為磁碟根目錄、伺服器根目錄或其上層時回傳拒絕原因；遷移模式會遞迴刪除來源，另禁止與已註冊伺服器重疊</summary>
+    private string? DescribeUnsafeSourceDirectory(string sourceDirectory, ImportTransferMode mode)
     {
         string source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourceDirectory));
         if (Path.GetPathRoot(source) is { Length: > 0 } volumeRoot &&
@@ -251,6 +243,23 @@ internal sealed class ServerImportWorkflow(
             return "來源不可為伺服器存放根目錄或其上層資料夾";
         }
 
+        if (mode == ImportTransferMode.Move)
+        {
+            foreach (var server in _registry.GetAll())
+            {
+                if (string.IsNullOrWhiteSpace(server.Path))
+                {
+                    continue;
+                }
+
+                string serverPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(server.Path));
+                if (SafeFileSystem.IsPathWithin(serverPath, source, strict: false) || SafeFileSystem.IsPathWithin(source, serverPath, strict: false))
+                {
+                    return $"遷移模式的來源不可與已註冊的伺服器「{server.Name.Value}」目錄重疊";
+                }
+            }
+        }
+
         return null;
     }
 
@@ -262,14 +271,17 @@ internal sealed class ServerImportWorkflow(
             if (entries.Count == 1 && entries[0].IsDirectory)
             {
                 string wrapperPath = entries[0].FullPath;
-                if (SafeFileSystem.ListBoundedDirectory(wrapperPath, rejectReparse: false).Count == 0)
+                if (SafeFileSystem.IsDirectoryEmpty(wrapperPath))
                 {
                     break;
                 }
 
-                SafeFileSystem.MoveChildren(wrapperPath, stagingDir);
+                // 先改為暫存名稱，避免包裝資料夾內含同名子項目（如 server/server）時搬移衝突
+                string renamedWrapper = Path.Combine(stagingDir, $"{ServerDefaults.InternalPrefix}flatten-{Guid.NewGuid():N}");
+                SafeFileSystem.MovePath(wrapperPath, renamedWrapper, overwrite: false);
+                SafeFileSystem.MoveChildren(renamedWrapper, stagingDir);
 
-                SafeFileSystem.DeleteDirectory(wrapperPath, recursive: true);
+                SafeFileSystem.DeleteDirectory(renamedWrapper, recursive: true);
             }
             else
             {

@@ -1,4 +1,4 @@
-name: "CodeQL Analysis (C#)"
+name: "CodeQL Analysis"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -21,9 +21,9 @@ defaults:
     shell: pwsh
 
 jobs:
-  analyze-csharp:
-    name: CodeQL (C#)
-    runs-on: windows-latest
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
       DOTNET_CLI_FORCE_UTF8_ENCODING: "1"
@@ -31,31 +31,44 @@ jobs:
       security-events: write
       contents: read
       actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: csharp
+            build-mode: manual
+            os: windows-latest
+          - language: actions
+            build-mode: none
+            os: ubuntu-latest
+          - language: javascript-typescript
+            build-mode: none
+            os: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
           persist-credentials: false
 
       - name: Setup .NET SDK
+        if: matrix.language == 'csharp'
         uses: ./.github/actions/setup-dotnet
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
-          languages: csharp
-          build-mode: manual
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
           config-file: ./.github/codeql/codeql-config.yml
 
       - name: Build Solution for CodeQL
+        if: matrix.language == 'csharp'
         env:
           MSBUILDDISABLENODEREUSE: "1"
-        run: dotnet build src/MinecraftServerManager.App/MinecraftServerManager.App.csproj -p:UseSharedCompilation=false
+        run: dotnet build src/MinecraftServerManager.App/MinecraftServerManager.App.csproj -c Release
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
-          category: "/language:csharp"
-          upload: true
+          category: "/language:${{ matrix.language }}"

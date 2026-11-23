@@ -1,0 +1,41 @@
+name: 問題回報
+description: 回報主程式的錯誤或異常行為
+labels: ["bug"]
+body:
+  - type: input
+    id: app-version
+    attributes:
+      label: 主程式版本
+      description: 「關於」頁面顯示的版本號
+      placeholder: 例如 v2.x.x
+    validations:
+      required: true
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows 版本
+      description: 於「設定 > 系統 > 系統資訊」檢視，例如 Windows 11 24H2（26100.4061）
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 重現步驟
+      placeholder: |
+        1. 開啟「管理伺服器」
+        2. 選擇伺服器並按下「啟動」
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 預期與實際結果
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 記錄檔
+      description: 位於 `%LOCALAPPDATA%\Programs\MinecraftServerManager\Logs`，請附上發生問題時段的內容並移除個人資訊
+      render: text

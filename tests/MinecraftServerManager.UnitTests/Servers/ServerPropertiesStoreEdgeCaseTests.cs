@@ -78,7 +78,7 @@ public sealed class ServerPropertiesStoreEdgeCaseTests : IDisposable
     }
 
     [Fact]
-    public async Task Update_PreservesExistingUnrelatedKeysAndWritesPatch()
+    public async Task Update_ExistingFile_PreservesUnrelatedKeys()
     {
         CreateServer("S");
         File.WriteAllText(PropsPath("S"), "motd=Keep me\nlevel-name=world\n");
@@ -95,7 +95,7 @@ public sealed class ServerPropertiesStoreEdgeCaseTests : IDisposable
     }
 
     [Fact]
-    public async Task Update_MissingFileCreatesItFromDefaultsPlusPatch()
+    public async Task Update_MissingFile_CreatesFromDefaults()
     {
         CreateServer("S");
         var before = await _store.ReadAsync("S", TestContext.Current.CancellationToken);

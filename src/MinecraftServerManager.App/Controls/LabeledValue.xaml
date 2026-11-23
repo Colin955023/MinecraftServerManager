@@ -1,13 +1,15 @@
 <UserControl
   x:Class="MinecraftServerManager.App.Controls.LabeledValue"
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:local="using:MinecraftServerManager.App.Controls">
 
-  <TextBlock TextTrimming="CharacterEllipsis">
-    <Run Text="{x:Bind Label, Mode=OneWay}"
-      Foreground="{ThemeResource MutedTextBrush}" />
+  <TextBlock TextTrimming="CharacterEllipsis"
+    ToolTipService.ToolTip="{x:Bind local:LabeledValue.ToToolTip(Label, Value), Mode=OneWay}">
+    <Run Text="{x:Bind Label}"
+      Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
     <Run Text="{x:Bind Value, Mode=OneWay}"
-      Foreground="{ThemeResource TextBrush}"
+      Foreground="{ThemeResource TextFillColorPrimaryBrush}"
       FontWeight="{x:Bind ValueWeight, Mode=OneWay}" />
   </TextBlock>
 </UserControl>

@@ -1,6 +1,6 @@
 namespace MinecraftServerManager.Domain.Mods;
 
-/// <summary>本地模組狀態</summary>
+/// <summary>本機模組狀態</summary>
 public enum ModStatus
 {
     Enabled,
@@ -11,7 +11,8 @@ public enum ModStatus
 public enum ModPlatform
 {
     Local,
-    CurseForge
+    CurseForge,
+    Modrinth
 }
 
 /// <summary>模組相依性類型</summary>
@@ -29,4 +30,3 @@ public enum ModInstallAction
     Install,
     Update
 }
-

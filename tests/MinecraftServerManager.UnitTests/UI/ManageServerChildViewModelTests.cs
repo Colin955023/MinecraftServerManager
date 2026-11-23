@@ -1,15 +1,12 @@
-using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.App.Services;
+using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Domain.ValueObjects;
-using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Servers;
-using MinecraftServerManager.Infrastructure.Settings;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-/// <summary>伺服器管理頁子 ViewModel 測試</summary>
 public sealed class ManageServerChildViewModelTests : IDisposable
 {
     private readonly TempDirectory _rootTemp = new("msm-manage-child-");
@@ -40,6 +37,18 @@ public sealed class ManageServerChildViewModelTests : IDisposable
     private sealed class MonitorUiService : ManualUiService
     {
         public List<FakeMonitorWindow> Windows { get; } = [];
+        public Queue<string?> FolderPickQueue { get; } = new();
+        public Func<RestoreBackupViewModel, Task<bool?>>? OnShowRestoreBackup { get; set; }
+
+        public override Task<string?> PickFolderAsync(string title, string? initialDirectory = null) =>
+            FolderPickQueue.Count > 0
+                ? Task.FromResult(FolderPickQueue.Dequeue())
+                : base.PickFolderAsync(title, initialDirectory);
+
+        public override Task<bool?> ShowRestoreBackupAsync(RestoreBackupViewModel viewModel) =>
+            OnShowRestoreBackup is not null
+                ? OnShowRestoreBackup(viewModel)
+                : base.ShowRestoreBackupAsync(viewModel);
 
         public override IMonitorWindow OpenServerMonitor(ServerMonitorViewModel viewModel)
         {
@@ -61,8 +70,7 @@ public sealed class ManageServerChildViewModelTests : IDisposable
 
     private (ManageServerViewModel Vm, ServerManager Manager) CreateViewModel()
     {
-        var settings = new SettingsManager(_root);
-        settings.SetExactServersRoot(_root);
+        var settings = TestDependencies.CreateSettings(_root);
         var deps = TestDependencies.Create(_root, _ui, settings: settings, runtimeHost: _host);
         _coordinator = deps.StopCoordinator;
         return (TestDependencies.CreateManagePage(deps), (ServerManager)deps.ServerManager);
@@ -73,12 +81,12 @@ public sealed class ManageServerChildViewModelTests : IDisposable
     [InlineData(ServerBackupSummaryStatus.DirectoryMissing, "備份資料夾不存在")]
     [InlineData(ServerBackupSummaryStatus.NoBackups, "尚無備份")]
     [InlineData(ServerBackupSummaryStatus.ReadFailed, "讀取備份失敗")]
-    public void FormatBackupStatus_MapsSummaryStates(ServerBackupSummaryStatus status, string expected) => Assert.Equal(expected, ServerListViewModel.FormatBackupStatus(new ServerBackupSummary(status)));
+    public void FormatBackupStatus_SummaryState_MapsText(ServerBackupSummaryStatus status, string expected) => Assert.Equal(expected, ServerStatusFormatter.FormatBackupStatus(new ServerBackupSummary(status)));
 
     [Fact]
-    public void FormatBackupStatus_IncludesCountAndRelativeTime()
+    public void FormatBackupStatus_HasBackups_IncludesCountAndRelativeTime()
     {
-        string text = ServerListViewModel.FormatBackupStatus(new ServerBackupSummary(ServerBackupSummaryStatus.HasBackups, 3, DateTime.Now));
+        string text = ServerStatusFormatter.FormatBackupStatus(new ServerBackupSummary(ServerBackupSummaryStatus.HasBackups, 3, DateTime.Now));
 
         Assert.Equal("3 個備份（剛剛）", text);
     }
@@ -89,10 +97,10 @@ public sealed class ManageServerChildViewModelTests : IDisposable
     [InlineData(180, "3 小時前")]
     [InlineData(60 * 50, "2 天前")]
     [InlineData(-10, "剛剛")]
-    public void FormatRelativeTime_UsesLargestUnit(int minutesAgo, string expected) => Assert.Equal(expected, ServerListViewModel.FormatRelativeTime(DateTime.Now.AddMinutes(-minutesAgo)));
+    public void FormatRelativeTime_Elapsed_UsesLargestUnit(int minutesAgo, string expected) => Assert.Equal(expected, ServerStatusFormatter.FormatRelativeTime(DateTime.Now.AddMinutes(-minutesAgo)));
 
     [Fact]
-    public void SelectionChange_RefreshesCommandsAcrossChildren()
+    public void SelectedServer_Changed_RefreshesChildCommands()
     {
         var (vm, _) = CreateViewModel();
         using (vm)
@@ -111,7 +119,7 @@ public sealed class ManageServerChildViewModelTests : IDisposable
     }
 
     [Fact]
-    public void RunningSelectedServer_DisablesPlayerManagement()
+    public void CanManagePlayers_SelectedServerRunning_IsFalse()
     {
         var (vm, _) = CreateViewModel();
         using (vm)
@@ -142,6 +150,42 @@ public sealed class ManageServerChildViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task StopServer_SelectedRunningServer_StopsGracefullyViaCoordinator()
+    {
+        var (vm, _) = CreateViewModel();
+        using (vm)
+        {
+            var runtime = _host.GetFake("Live");
+            runtime.IsRunning = true;
+            runtime.WaitResults.Enqueue(new ProcessExitResult(0, false));
+            vm.List.SelectedServer = new ServerRowItem { Name = "Live", Path = _root };
+
+            await vm.Lifecycle.StopServerCommand.ExecuteAsync(null);
+
+            Assert.Equal(["stop"], runtime.SentCommands);
+            Assert.Equal(0, runtime.StopCount);
+            Assert.False(runtime.IsRunning);
+            Assert.DoesNotContain(Notifications, static n => n.Type == NotificationType.Error);
+        }
+    }
+
+    [Fact]
+    public async Task StopServer_SelectedServerNotRunning_DoesNothing()
+    {
+        var (vm, _) = CreateViewModel();
+        using (vm)
+        {
+            var runtime = _host.GetFake("Idle");
+            vm.List.SelectedServer = new ServerRowItem { Name = "Idle", Path = _root };
+
+            await vm.Lifecycle.StopServerCommand.ExecuteAsync(null);
+
+            Assert.Empty(runtime.SentCommands);
+            Assert.Equal(0, runtime.StopCount);
+        }
+    }
+
+    [Fact]
     public void MonitorServerByName_DifferentServers_OpenSeparateWindows()
     {
         var (vm, _) = CreateViewModel();
@@ -158,7 +202,7 @@ public sealed class ManageServerChildViewModelTests : IDisposable
     }
 
     [Fact]
-    public void MonitorViewModel_OnlyReceivesOutputOfItsOwnServer()
+    public void MonitorServerByName_TwoServers_ReceivesOnlyOwnOutput()
     {
         var (vm, _) = CreateViewModel();
         using (vm)
@@ -180,7 +224,7 @@ public sealed class ManageServerChildViewModelTests : IDisposable
     }
 
     [Fact]
-    public void Dispose_ClosesAllMonitorWindows()
+    public void Dispose_OpenMonitors_ClosesAll()
     {
         var (vm, _) = CreateViewModel();
         vm.Lifecycle.MonitorServerByName("A", _root, "1.21.4");
@@ -201,7 +245,7 @@ public sealed class ManageServerChildViewModelTests : IDisposable
                 name: ServerName.Parse("Busy"),
                 minecraftVersion: MinecraftVersion.Parse("1.21.4"),
                 loaderType: LoaderKind.Vanilla,
-                memoryMaxMb: 1024));
+                memoryMaxMb: 1024), cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(created.Completed);
             await vm.List.RefreshAndSelectServerAsync("Busy");
             _host.GetFake("Busy").IsRunning = true;
@@ -214,7 +258,7 @@ public sealed class ManageServerChildViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task StoppingServer_ShowsStoppingStatusUntilFinished()
+    public async Task UpdateServerStatusInPlaceAsync_Stopping_ShowsStoppingUntilFinished()
     {
         var (vm, _) = CreateViewModel();
         using (vm)
@@ -236,28 +280,18 @@ public sealed class ManageServerChildViewModelTests : IDisposable
         }
     }
 
-    private sealed class FixedJavaDetector : IJavaRuntimeDetector
-    {
-        public Task<IReadOnlyList<JavaRuntimeInfo>> DetectAsync(bool forceRefresh = false, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<JavaRuntimeInfo>>([new JavaRuntimeInfo("java.exe", 21)]);
-
-        public Task<JavaRuntimeInfo?> FindBestMatchAsync(int targetMajor, CancellationToken cancellationToken = default) =>
-            Task.FromResult<JavaRuntimeInfo?>(new JavaRuntimeInfo("java.exe", targetMajor));
-    }
-
     [Fact]
     public async Task StartServerByName_WhenAnotherServerRunning_StillStarts()
     {
-        var settings = new SettingsManager(_root);
-        settings.SetExactServersRoot(_root);
-        var deps = TestDependencies.Create(_root, _ui, settings: settings, runtimeHost: _host, javaDetector: new FixedJavaDetector());
+        var settings = TestDependencies.CreateSettings(_root);
+        var deps = TestDependencies.Create(_root, _ui, settings: settings, runtimeHost: _host, javaDetector: new FixedJavaRuntimeDetector(21, "java.exe"), javaRequirementService: new FixedJavaRequirementService(21));
         using var vm = TestDependencies.CreateManagePage(deps);
         var manager = (ServerManager)deps.ServerManager;
         var created = await manager.CreateServerAsync(ServerCreationPlan.Create(
             name: ServerName.Parse("Target"),
             minecraftVersion: MinecraftVersion.Parse("1.21.4"),
             loaderType: LoaderKind.Vanilla,
-            memoryMaxMb: 1024));
+            memoryMaxMb: 1024), cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(created.Completed);
 
         // 另一台伺服器執行中，且使用不同連接埠
@@ -275,8 +309,7 @@ public sealed class ManageServerChildViewModelTests : IDisposable
     [Fact]
     public async Task StartServerByName_WhenJavaMajorDiffersFromOfficial_BlocksAndShowsError()
     {
-        var settings = new SettingsManager(_root);
-        settings.SetExactServersRoot(_root);
+        var settings = TestDependencies.CreateSettings(_root);
         var deps = TestDependencies.Create(_root, _ui, settings: settings, runtimeHost: _host, javaDetector: new FixedJavaRuntimeDetector(21), javaRequirementService: new FixedJavaRequirementService(17));
         using var vm = TestDependencies.CreateManagePage(deps);
         var manager = (ServerManager)deps.ServerManager;
@@ -284,7 +317,7 @@ public sealed class ManageServerChildViewModelTests : IDisposable
             name: ServerName.Parse("Mismatch"),
             minecraftVersion: MinecraftVersion.Parse("1.20.1"),
             loaderType: LoaderKind.Vanilla,
-            memoryMaxMb: 1024));
+            memoryMaxMb: 1024), cancellationToken: TestContext.Current.CancellationToken);
 
         bool started = await vm.Lifecycle.StartServerByNameAsync("Mismatch");
 
@@ -304,7 +337,7 @@ public sealed class ManageServerChildViewModelTests : IDisposable
                 name: ServerName.Parse("NoJar"),
                 minecraftVersion: MinecraftVersion.Parse("1.21.4"),
                 loaderType: LoaderKind.Vanilla,
-                memoryMaxMb: 1024));
+                memoryMaxMb: 1024), cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(created.Completed);
             foreach (string jar in Directory.EnumerateFiles(created.Config!.Path, "*.jar"))
             {
@@ -321,7 +354,7 @@ public sealed class ManageServerChildViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task BackupServer_CreatesBackupAndRefreshesBackupStatus()
+    public async Task BackupServer_ValidServer_CreatesBackupAndRefreshesStatus()
     {
         var (vm, manager) = CreateViewModel();
         using (vm)
@@ -330,12 +363,14 @@ public sealed class ManageServerChildViewModelTests : IDisposable
                 name: ServerName.Parse("Backed"),
                 minecraftVersion: MinecraftVersion.Parse("1.21.4"),
                 loaderType: LoaderKind.Vanilla,
-                memoryMaxMb: 1024));
+                memoryMaxMb: 1024), cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(created.Completed);
             using var externalDirTemp = new TempDirectory("msm-manage-child-ext-");
             string externalDir = Path.Combine(externalDirTemp.FullName, "root");
             var config = created.Config!;
-            await manager.UpdateServerAsync(new ServerConfig(config.Name, config.MinecraftVersion, config.LoaderType, config.LoaderVersion, config.MemoryMaxMb, config.MemoryMinMb, config.Path, config.JvmArgs, externalDir));
+            await manager.UpdateServerAsync(
+                new ServerConfig(config.Name, config.MinecraftVersion, config.LoaderType, config.LoaderVersion, config.MemoryMaxMb, config.MemoryMinMb, config.Path, config.JvmArgs, externalDir),
+                TestContext.Current.CancellationToken);
             await vm.List.RefreshAndSelectServerAsync("Backed");
 
             await vm.Backup.BackupServerCommand.ExecuteAsync(null);
@@ -355,11 +390,13 @@ public sealed class ManageServerChildViewModelTests : IDisposable
                 name: ServerName.Parse("RunningBackup"),
                 minecraftVersion: MinecraftVersion.Parse("1.21.4"),
                 loaderType: LoaderKind.Vanilla,
-                memoryMaxMb: 1024));
+                memoryMaxMb: 1024), cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(created.Completed);
             using var externalDirTemp = new TempDirectory("msm-manage-child-ext-");
             var config = created.Config!;
-            await manager.UpdateServerAsync(new ServerConfig(config.Name, config.MinecraftVersion, config.LoaderType, config.LoaderVersion, config.MemoryMaxMb, config.MemoryMinMb, config.Path, config.JvmArgs, externalDirTemp.FullName));
+            await manager.UpdateServerAsync(
+                new ServerConfig(config.Name, config.MinecraftVersion, config.LoaderType, config.LoaderVersion, config.MemoryMaxMb, config.MemoryMinMb, config.Path, config.JvmArgs, externalDirTemp.FullName),
+                TestContext.Current.CancellationToken);
             await vm.List.RefreshAndSelectServerAsync("RunningBackup");
             _host.GetFake("RunningBackup").IsRunning = true;
 
@@ -371,7 +408,7 @@ public sealed class ManageServerChildViewModelTests : IDisposable
     }
 
     [Fact]
-    public void Dispose_UnsubscribesRuntimeEventsAndChildHandlers()
+    public void Dispose_AfterUse_UnsubscribesRuntimeAndChildHandlers()
     {
         var (vm, _) = CreateViewModel();
         Assert.True(_host.SubscriberCount > 0);
@@ -379,5 +416,73 @@ public sealed class ManageServerChildViewModelTests : IDisposable
         vm.Dispose();
 
         Assert.Equal(0, _host.SubscriberCount);
+    }
+
+    [Fact]
+    public async Task EditBackupPathCommand_SubdirectoryThenValidFolder_RejectsSubdirectoryAndUpdatesValid()
+    {
+        var (vm, manager) = CreateViewModel();
+        using (vm)
+        {
+            var created = await manager.CreateServerAsync(ServerCreationPlan.Create(
+                name: ServerName.Parse("PathCheck"),
+                minecraftVersion: MinecraftVersion.Parse("1.21.4"),
+                loaderType: LoaderKind.Vanilla,
+                memoryMaxMb: 1024), cancellationToken: TestContext.Current.CancellationToken);
+            Assert.True(created.Completed);
+            await vm.List.RefreshAndSelectServerAsync("PathCheck");
+
+            using var externalDirTemp = new TempDirectory("msm-manage-child-valid-");
+            string serverSubdir = Path.Combine(created.Config!.Path, "backups");
+            _ui.FolderPickQueue.Enqueue(serverSubdir);
+            _ui.FolderPickQueue.Enqueue(externalDirTemp.FullName);
+
+            await vm.Backup.EditBackupPathCommand.ExecuteAsync(null);
+
+            Assert.Contains(Notifications, static n => n.Type == NotificationType.Warning && n.Message.Contains("不得位於", StringComparison.Ordinal));
+            Assert.Contains(Notifications, static n => n.Type == NotificationType.Success && n.Message.Contains("備份資料夾路徑", StringComparison.Ordinal));
+            Assert.Equal(externalDirTemp.FullName, vm.List.SelectedServer!.BackupPath);
+        }
+    }
+
+    [Fact]
+    public async Task RestoreBackupCommand_Confirmed_RestoresFilesAndRefreshesServer()
+    {
+        var (vm, manager) = CreateViewModel();
+        using (vm)
+        {
+            var created = await manager.CreateServerAsync(ServerCreationPlan.Create(
+                name: ServerName.Parse("Restorable"),
+                minecraftVersion: MinecraftVersion.Parse("1.21.4"),
+                loaderType: LoaderKind.Vanilla,
+                memoryMaxMb: 1024), cancellationToken: TestContext.Current.CancellationToken);
+            Assert.True(created.Completed);
+
+            using var externalDirTemp = new TempDirectory("msm-manage-child-restore-");
+            var config = created.Config!;
+            string markerFile = Path.Combine(config.Path, "world-marker.txt");
+            await File.WriteAllTextAsync(markerFile, "original-state", TestContext.Current.CancellationToken);
+            await manager.UpdateServerAsync(
+                new ServerConfig(config.Name, config.MinecraftVersion, config.LoaderType, config.LoaderVersion, config.MemoryMaxMb, config.MemoryMinMb, config.Path, config.JvmArgs, externalDirTemp.FullName),
+                TestContext.Current.CancellationToken);
+            await vm.List.RefreshAndSelectServerAsync("Restorable");
+
+            // 建立真實備份，再竄改檔案以驗證還原效果
+            await vm.Backup.BackupServerCommand.ExecuteAsync(null);
+            await File.WriteAllTextAsync(markerFile, "modified-state", TestContext.Current.CancellationToken);
+
+            _ui.OnShowRestoreBackup = async restoreVm =>
+            {
+                await TestWait.UntilAsync(() => restoreVm.Backups.Count > 0, "備份清單載入");
+                await restoreVm.RestoreCommand.ExecuteAsync(null);
+                return true;
+            };
+
+            await vm.Backup.RestoreBackupCommand.ExecuteAsync(null);
+
+            Assert.Equal("original-state", await File.ReadAllTextAsync(markerFile, TestContext.Current.CancellationToken));
+            Assert.Equal("Restorable", vm.List.SelectedServer?.Name);
+            Assert.DoesNotContain(Notifications, static n => n.Type == NotificationType.Error);
+        }
     }
 }

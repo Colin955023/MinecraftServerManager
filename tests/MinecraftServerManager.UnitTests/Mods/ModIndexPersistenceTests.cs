@@ -2,7 +2,6 @@ using MinecraftServerManager.Infrastructure.Mods;
 
 namespace MinecraftServerManager.UnitTests.Mods;
 
-/// <summary>模組快取索引持久化測試</summary>
 public sealed class ModIndexPersistenceTests : IDisposable
 {
     private readonly TempDirectory _testDirTemp = new("msm_test_mod_index_");
@@ -16,7 +15,7 @@ public sealed class ModIndexPersistenceTests : IDisposable
     public void Dispose() => _testDirTemp.Dispose();
 
     [Fact]
-    public void CacheMetadataAndRetrieveShouldPersistAcrossInstances()
+    public void CacheMetadata_NewInstance_PersistsEntries()
     {
         var persistence1 = new ModIndexPersistence(_testDir);
         var meta = new Dictionary<string, string>
@@ -38,7 +37,7 @@ public sealed class ModIndexPersistenceTests : IDisposable
     }
 
     [Fact]
-    public void CacheHashAndRetrieveShouldWorkCorrectly()
+    public void CacheHash_Retrieve_ReturnsHash()
     {
         var persistence = new ModIndexPersistence(_testDir);
         persistence.CacheHash("test-mod.jar", "sha256", "abcdef123456");
@@ -52,7 +51,7 @@ public sealed class ModIndexPersistenceTests : IDisposable
     }
 
     [Fact]
-    public void CleanupStaleEntriesShouldRemoveMissingFiles()
+    public void CleanupStaleEntries_MissingFiles_RemovesEntries()
     {
         var persistence = new ModIndexPersistence(_testDir);
         persistence.CacheMetadata("active.jar", new Dictionary<string, string> { ["id"] = "active" }, 1, 1);

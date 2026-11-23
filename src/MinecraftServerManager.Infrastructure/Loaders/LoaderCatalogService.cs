@@ -1,37 +1,69 @@
-using System.Text.Json;
-using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
 using MinecraftServerManager.Core.Loaders;
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
-using MinecraftServerManager.Core.Utilities;
-using System.Collections.Concurrent;
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Loaders;
 
-public sealed partial class LoaderCatalogService(IHttpPort httpPort, string cacheDirectory) : ILoaderCatalogService
+public sealed partial class LoaderCatalogService : ILoaderCatalogService
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(LoaderCatalogService));
     private static readonly LoaderKind[] ReloadableLoaders = [LoaderKind.Fabric, LoaderKind.Quilt, LoaderKind.Forge, LoaderKind.NeoForge];
-    private readonly string _cacheDir = SafeFileSystem.ResolveStableDirectory(cacheDirectory, create: true);
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(12);
+
+    private readonly IHttpPort _httpPort;
+    private readonly string _cacheDir;
+    // 記憶體快取皆為帶到期時間的不可變快照；降級（過期快取）結果不寫入，下次仍重試遠端
+    private readonly ConcurrentDictionary<(LoaderKind, string), MemoryEntry> _memoryLoaderCache = new();
+    private volatile MemoryEntry? _memoryMinecraftVersions;
+    private volatile MemoryEntry? _memoryPaperMinecraftVersions;
+    private readonly SingleFlight<(LoaderKind, string), IReadOnlyList<LoaderVersion>> _loaderVersionsSingleFlight = new();
+    private readonly SingleFlight<LoaderKind, IReadOnlyList<LoaderVersion>> _loaderCatalogSingleFlight = new();
+    private readonly TimeProvider _timeProvider;
+
+    public LoaderCatalogService(IHttpPort httpPort, string cacheDirectory, TimeProvider timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(httpPort);
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        _timeProvider = timeProvider;
+        ArgumentException.ThrowIfNullOrWhiteSpace(cacheDirectory);
+        _httpPort = httpPort;
+        _cacheDir = SafeFileSystem.ResolveStableDirectory(cacheDirectory, create: true);
+    }
 
     private string GetMinecraftCacheFilePath() => MojangVersionCatalog.GetVersionsCachePath(_cacheDir);
     private string GetPaperCacheFilePath() => MojangVersionCatalog.GetPaperVersionsCachePath(_cacheDir);
     private string GetLoaderCacheFilePath(LoaderKind loader) => Path.Combine(_cacheDir, $"{loader.ToString().ToLowerInvariant()}_versions_cache.json");
-    private readonly TimeSpan _cacheTtl = TimeSpan.FromHours(12);
-    private readonly ConcurrentDictionary<(LoaderKind, string), IReadOnlyList<LoaderVersion>> _memoryLoaderCache = new();
-    private IReadOnlyList<LoaderVersion>? _memoryMinecraftVersions;
-    private IReadOnlyList<LoaderVersion>? _memoryPaperMinecraftVersions;
+
+    private sealed record MemoryEntry(IReadOnlyList<LoaderVersion> Versions, DateTimeOffset ExpiresAtUtc);
+
+    private MemoryEntry CreateMemoryEntry(IEnumerable<LoaderVersion> versions) =>
+        new([.. versions], _timeProvider.GetUtcNow() + CacheTtl);
+
+    private bool TryGetFresh(MemoryEntry? entry, out IReadOnlyList<LoaderVersion> versions)
+    {
+        if (entry is not null && entry.Versions.Count > 0 && _timeProvider.GetUtcNow() < entry.ExpiresAtUtc)
+        {
+            versions = entry.Versions;
+            return true;
+        }
+
+        versions = [];
+        return false;
+    }
 
     internal async Task<IReadOnlyList<LoaderVersion>> GetMinecraftVersionsAsync(
         bool includeSnapshots = false,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!includeSnapshots && _memoryMinecraftVersions is { Count: > 0 })
+        if (!includeSnapshots && TryGetFresh(_memoryMinecraftVersions, out var memoryVersions))
         {
-            return _memoryMinecraftVersions;
+            return memoryVersions;
         }
 
         string cacheFile = GetMinecraftCacheFilePath();
@@ -42,38 +74,42 @@ public sealed partial class LoaderCatalogService(IHttpPort httpPort, string cach
             if (validCached.Count > 0)
             {
                 var filtered = FilterMinecraftVersions(validCached, includeSnapshots: false);
-                _memoryMinecraftVersions = filtered;
+                _memoryMinecraftVersions = CreateMemoryEntry(filtered);
                 return filtered;
             }
         }
 
-        var parsed = await MojangVersionCatalog.FetchManifestAsync(httpPort, cancellationToken).ConfigureAwait(false);
+        var parsed = await MojangVersionCatalog.FetchManifestAsync(_httpPort, cancellationToken).ConfigureAwait(false);
         if (parsed is { Count: > 0 })
         {
-            var cacheable = parsed.Where(IsStableOfficialRelease).ToList();
-            MojangVersionCatalog.SaveCachedVersions(cacheFile, cacheable);
-            var filtered = FilterMinecraftVersions(parsed, includeSnapshots);
-            if (!includeSnapshots)
+            // 寫回時保留快取既有的 JavaMajor，避免每次重抓清單都需重新查詢
+            List<LoaderVersion> withJavaMajor = parsed;
+            MojangVersionCatalog.UpdateCachedVersions(cacheFile, current =>
             {
-                _memoryMinecraftVersions = filtered;
-            }
-            return filtered;
+                var knownJavaMajors = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                foreach (var cached in current)
+                {
+                    if (cached.JavaMajor is > 0 and int javaMajor)
+                    {
+                        knownJavaMajors[cached.Version] = javaMajor;
+                    }
+                }
+
+                withJavaMajor = [.. parsed.Select(v => v.JavaMajor is null && knownJavaMajors.TryGetValue(v.Version, out int major)
+                    ? v with { JavaMajor = major }
+                    : v)];
+                return [.. withJavaMajor.Where(IsStableOfficialRelease)];
+            });
+
+            var stable = FilterMinecraftVersions(withJavaMajor, includeSnapshots: false);
+            _memoryMinecraftVersions = CreateMemoryEntry(stable);
+            return includeSnapshots ? withJavaMajor : stable;
         }
 
-        // 遠端失敗時嘗試過期快取
+        // 遠端失敗時嘗試過期快取；降級結果不寫入記憶體快取
         Logger.Warning("抓取 Mojang 版本清單失敗，改用過期快取");
         var validStale = LoadValidatedCache(cacheFile, IsStableOfficialRelease);
-        if (validStale.Count == 0)
-        {
-            return [];
-        }
-
-        var staleFiltered = FilterMinecraftVersions(validStale, includeSnapshots);
-        if (!includeSnapshots)
-        {
-            _memoryMinecraftVersions = staleFiltered;
-        }
-        return staleFiltered;
+        return validStale.Count == 0 ? [] : FilterMinecraftVersions(validStale, includeSnapshots);
     }
 
     public async Task<IReadOnlyList<LoaderVersion>> GetMinecraftVersionsForLoaderAsync(
@@ -108,98 +144,21 @@ public sealed partial class LoaderCatalogService(IHttpPort httpPort, string cach
         return baseVersions;
     }
 
-    public async Task<IReadOnlyList<LoaderVersion>> GetPaperMinecraftVersionsAsync(
-        bool forceReload = false,
-        CancellationToken cancellationToken = default)
+    private async Task<int?> GetOfficialJavaMajorAsync(
+        Dictionary<string, LoaderVersion> official,
+        string minecraftVersion,
+        CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (!forceReload && _memoryPaperMinecraftVersions is { Count: > 0 })
+        if (!official.TryGetValue(minecraftVersion, out var version))
         {
-            return _memoryPaperMinecraftVersions;
+            return null;
         }
 
-        string cacheFile = GetPaperCacheFilePath();
-
-        if (!forceReload && IsCacheFresh(cacheFile))
-        {
-            var validCached = LoadValidatedCache(cacheFile, IsValidPaperEntry);
-            if (validCached.Count > 0)
-            {
-                _memoryPaperMinecraftVersions = validCached;
-                return validCached;
-            }
-        }
-
-        try
-        {
-            string url = MojangVersionCatalog.PaperProjectUrl;
-            var response = await httpPort.GetJsonDocumentAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
-            if (response.IsSuccess && response.Payload is not null)
-            {
-                List<LoaderVersion> baseVersions;
-                using (response.Payload)
-                {
-                    baseVersions = ParsePaperMinecraftVersions(response.Payload);
-                }
-                if (baseVersions.Count > 0)
-                {
-                    // 已有 JavaMajor 與 Build 的版本不重複呼叫 API
-                    var existingMap = new Dictionary<string, (int JavaMajor, string Build)>(StringComparer.OrdinalIgnoreCase);
-                    if (SafeFileSystem.FileExists(cacheFile))
-                    {
-                        foreach (var ev in MojangVersionCatalog.LoadCachedVersions(cacheFile))
-                        {
-                            if (IsValidPaperEntry(ev))
-                            {
-                                existingMap[ev.Version] = (ev.JavaMajor!.Value, ev.Build!);
-                            }
-                        }
-                    }
-
-                    var fullVersions = new LoaderVersion?[baseVersions.Count];
-                    await Parallel.ForAsync(
-                        0,
-                        baseVersions.Count,
-                        new ParallelOptions { MaxDegreeOfParallelism = 5, CancellationToken = cancellationToken },
-                        async (index, token) =>
-                        {
-                            var v = baseVersions[index];
-                            if (existingMap.TryGetValue(v.Version, out var existing))
-                            {
-                                fullVersions[index] = v with { JavaMajor = existing.JavaMajor, Build = existing.Build };
-                                return;
-                            }
-
-                            // 查詢 STABLE 建置清單；若無任何 STABLE 建置，直接剔除（不納入快取）
-                            var builds = await FetchPaperBuildsAsync(v.Version, token, updateCache: false).ConfigureAwait(false);
-                            if (builds.Count == 0 || string.IsNullOrWhiteSpace(builds[0].Version))
-                            {
-                                return;
-                            }
-
-                            int? javaMajor = await MojangVersionCatalog.FetchPaperJavaMajorAsync(httpPort, v.Version, token).ConfigureAwait(false);
-                            fullVersions[index] = v with { JavaMajor = javaMajor, Build = builds[0].Version };
-                        }).ConfigureAwait(false);
-
-                    var result = fullVersions
-                        .OfType<LoaderVersion>()
-                        .OrderByDescending(static v => VersionValue.ParseOrZero(v.Version))
-                        .ToList();
-
-                    MojangVersionCatalog.SaveCachedVersions(cacheFile, result);
-                    _memoryPaperMinecraftVersions = result;
-                    return result;
-                }
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning(ex, "抓取 Paper 版本清單時發生例外");
-        }
-
-        // IHttpPort 失敗時回傳失敗結果而非擲出，故一律在此改用過期快取
-        Logger.Warning("抓取 Paper 版本清單失敗，改用過期快取");
-        return [.. MojangVersionCatalog.LoadCachedVersions(cacheFile).Where(IsValidPaperEntry)];
+        return version.JavaMajor is > 0
+            ? version.JavaMajor
+            : string.IsNullOrWhiteSpace(version.Url)
+                ? null
+                : await MojangVersionCatalog.FetchOfficialJavaMajorAsync(_httpPort, version.Url, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>讀取快取並剔除無效項目；有剔除時回寫</summary>
@@ -215,9 +174,6 @@ public sealed partial class LoaderCatalogService(IHttpPort httpPort, string cach
         return valid;
     }
 
-    private static bool IsValidPaperEntry(LoaderVersion version) =>
-        !string.IsNullOrWhiteSpace(version.Build) && version.JavaMajor is > 0;
-
     public async Task<IReadOnlyList<LoaderVersion>> GetLoaderVersionsAsync(
         LoaderKind loader,
         string minecraftVersion,
@@ -226,69 +182,114 @@ public sealed partial class LoaderCatalogService(IHttpPort httpPort, string cach
         ArgumentException.ThrowIfNullOrWhiteSpace(minecraftVersion);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (loader == LoaderKind.Paper)
+        var memoryKey = (loader, minecraftVersion);
+        if (_memoryLoaderCache.TryGetValue(memoryKey, out var memoryEntry) && TryGetFresh(memoryEntry, out var memoryVersions))
         {
-            if (_memoryLoaderCache.TryGetValue((loader, minecraftVersion), out var memCachedPaper))
-            {
-                return memCachedPaper;
-            }
-
-            try
-            {
-                var fetched = await FetchPaperBuildsAsync(minecraftVersion, cancellationToken).ConfigureAwait(false);
-                if (fetched.Count > 0)
-                {
-                    _memoryLoaderCache[(loader, minecraftVersion)] = fetched;
-                    return fetched;
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Logger.Warning(ex, "取得 Paper 組建版本清單失敗");
-            }
-
-            return [];
+            return memoryVersions;
         }
 
-        if (_memoryLoaderCache.TryGetValue((loader, minecraftVersion), out var memCached))
+        if (loader == LoaderKind.Paper)
         {
-            return memCached;
+            string paperCache = GetPaperCacheFilePath();
+            if (IsCacheFresh(paperCache))
+            {
+                var cachedPaper = MojangVersionCatalog.LoadCachedVersions(paperCache);
+                var match = cachedPaper.FirstOrDefault(v => string.Equals(v.Version, minecraftVersion, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(v.Build));
+                if (match is not null)
+                {
+                    List<LoaderVersion> builds = [new LoaderVersion(match.Build!, Stable: true, MinecraftVersion: minecraftVersion)];
+                    _memoryLoaderCache[memoryKey] = CreateMemoryEntry(builds);
+                    return builds;
+                }
+            }
+
+            return await _loaderVersionsSingleFlight.WaitAsync(memoryKey, async _ =>
+            {
+                try
+                {
+                    var fetched = await FetchPaperBuildsAsync(minecraftVersion, CancellationToken.None).ConfigureAwait(false);
+                    if (fetched.Count > 0)
+                    {
+                        _memoryLoaderCache[memoryKey] = CreateMemoryEntry(fetched);
+                        return fetched;
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Logger.Warning(ex, "取得 Paper 組建版本清單失敗");
+                }
+
+                return [];
+            }, cancellationToken).ConfigureAwait(false);
         }
 
         string cacheFile = GetLoaderCacheFilePath(loader);
 
-        if (IsCacheFresh(cacheFile))
+        if (TryGetFreshLoaderCache(cacheFile, loader, minecraftVersion, memoryKey) is { } cachedResult)
         {
-            var cached = MojangVersionCatalog.LoadCachedVersions(cacheFile);
-            var filtered = FilterLoaderByMcVersion(cached, loader, minecraftVersion);
-            if (filtered.Count > 0)
+            return cachedResult;
+        }
+
+        return await _loaderVersionsSingleFlight.WaitAsync(memoryKey, async _ =>
+        {
+            if (TryGetFreshLoaderCache(cacheFile, loader, minecraftVersion, memoryKey) is { } cachedResult)
             {
-                _memoryLoaderCache[(loader, minecraftVersion)] = filtered;
-                return filtered;
+                return cachedResult;
             }
-        }
 
-        try
-        {
-            IReadOnlyList<LoaderVersion> fetched = await FetchLoaderVersionsAsync(loader, cancellationToken).ConfigureAwait(false);
-
-            if (fetched.Count > 0)
+            try
             {
-                var pruned = PruneVersionsForCache(loader, fetched);
-                MojangVersionCatalog.SaveCachedVersions(cacheFile, pruned);
-                var filtered = FilterLoaderByMcVersion(pruned, loader, minecraftVersion);
-                _memoryLoaderCache[(loader, minecraftVersion)] = filtered;
-                return filtered;
+                IReadOnlyList<LoaderVersion> fetched = await _loaderCatalogSingleFlight.WaitAsync(loader, l => FetchLoaderVersionsAsync(l, CancellationToken.None), CancellationToken.None).ConfigureAwait(false);
+
+                if (fetched.Count > 0)
+                {
+                    var pruned = PruneVersionsForCache(loader, fetched);
+                    MojangVersionCatalog.SaveCachedVersions(cacheFile, pruned);
+                    var filtered = FilterLoaderByMcVersion(pruned, loader, minecraftVersion);
+                    if (filtered.Count > 0)
+                    {
+                        _memoryLoaderCache[memoryKey] = CreateMemoryEntry(filtered);
+                    }
+
+                    return filtered;
+                }
             }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Logger.Warning(ex, "抓取載入器版本清單時發生例外");
+            }
+
+            // 失敗結果與例外一律改用過期快取；不寫入記憶體快取，下次呼叫仍會重試遠端
+            Logger.Warning("抓取 {Loader} 版本清單失敗，改用過期快取", loader);
+            return FilterLoaderByMcVersion(MojangVersionCatalog.LoadCachedVersions(cacheFile), loader, minecraftVersion);
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private List<LoaderVersion>? TryGetFreshLoaderCache(
+        string cacheFile,
+        LoaderKind loader,
+        string minecraftVersion,
+        (LoaderKind, string) memoryKey)
+    {
+        if (!IsCacheFresh(cacheFile))
         {
-            Logger.Warning(ex, "抓取載入器版本清單時發生例外");
+            return null;
         }
 
-        // 失敗結果與例外一律改用過期快取；不寫入記憶體快取，下次呼叫仍會重試遠端
-        Logger.Warning("抓取 {Loader} 版本清單失敗，改用過期快取", loader);
-        return FilterLoaderByMcVersion(MojangVersionCatalog.LoadCachedVersions(cacheFile), loader, minecraftVersion);
+        // 新鮮快取即為完整清單；篩選結果為空代表此版本無對應載入器，不重抓全量 metadata
+        var cached = MojangVersionCatalog.LoadCachedVersions(cacheFile);
+        if (cached.Count == 0)
+        {
+            return null;
+        }
+
+        var filtered = FilterLoaderByMcVersion(cached, loader, minecraftVersion);
+        if (filtered.Count > 0)
+        {
+            _memoryLoaderCache[memoryKey] = CreateMemoryEntry(filtered);
+        }
+
+        return filtered;
     }
 
     private static IReadOnlyList<LoaderVersion> PruneVersionsForCache(LoaderKind loader, IReadOnlyList<LoaderVersion> versions)
@@ -316,46 +317,6 @@ public sealed partial class LoaderCatalogService(IHttpPort httpPort, string cach
         return versions;
     }
 
-    private Task<IReadOnlyList<LoaderVersion>> FetchLoaderVersionsAsync(LoaderKind loader, CancellationToken cancellationToken) => loader switch
-    {
-        LoaderKind.Fabric => FetchMetaLoaderVersionsAsync("https://meta.fabricmc.net/v2/versions/loader", cancellationToken),
-        LoaderKind.Quilt => FetchMetaLoaderVersionsAsync("https://meta.quiltmc.org/v3/versions/loader", cancellationToken),
-        LoaderKind.Forge => FetchMavenVersionsAsync("https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml", isNeoForge: false, cancellationToken),
-        LoaderKind.NeoForge => FetchMavenVersionsAsync("https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml", isNeoForge: true, cancellationToken),
-        _ => Task.FromResult<IReadOnlyList<LoaderVersion>>([]),
-    };
-
-    /// <summary>取得 Fabric／Quilt 載入器版本（排除預發布）</summary>
-    private async Task<IReadOnlyList<LoaderVersion>> FetchMetaLoaderVersionsAsync(string url, CancellationToken cancellationToken)
-    {
-        var response = await httpPort.GetJsonDocumentAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
-        using var doc = response.Payload;
-        if (doc is null || doc.RootElement.ValueKind != JsonValueKind.Array)
-        {
-            return [];
-        }
-
-        var list = new List<LoaderVersion>();
-        foreach (var element in doc.RootElement.EnumerateArray())
-        {
-            if (element.TryGetProperty("version", out var vProp) &&
-                vProp.GetString() is { Length: > 0 } ver &&
-                !ContainsPreReleaseKeyword(ver))
-            {
-                list.Add(new LoaderVersion(ver, Stable: true));
-            }
-        }
-
-        return list;
-    }
-
-    /// <summary>取得 Forge／NeoForge Maven 中繼資料內的版本清單</summary>
-    private async Task<IReadOnlyList<LoaderVersion>> FetchMavenVersionsAsync(string url, bool isNeoForge, CancellationToken cancellationToken)
-    {
-        string? xml = await httpPort.GetTextAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
-        return string.IsNullOrWhiteSpace(xml) ? [] : ParseMavenMetadataXml(xml, isNeoForge);
-    }
-
     /// <summary>僅保留有官方伺服器 jar 的穩定版本（供快取寫入與讀取時共用）</summary>
     private static bool IsStableOfficialRelease(LoaderVersion version) =>
         version.Stable && MojangVersionCatalog.HasOfficialServerJar(version.Version);
@@ -369,6 +330,17 @@ public sealed partial class LoaderCatalogService(IHttpPort httpPort, string cach
         _memoryLoaderCache.Clear();
     }
 
+    private void ClearLoaderMemory(Func<LoaderKind, bool> predicate)
+    {
+        foreach (var key in _memoryLoaderCache.Keys)
+        {
+            if (predicate(key.Item1))
+            {
+                _memoryLoaderCache.TryRemove(key, out _);
+            }
+        }
+    }
+
     public async Task WarmupLoadersAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -379,6 +351,7 @@ public sealed partial class LoaderCatalogService(IHttpPort httpPort, string cach
         if (staleLoaders.Count > 0)
         {
             await Task.WhenAll(staleLoaders.Select(loader => ReloadLoaderAsync(loader, cancellationToken))).ConfigureAwait(false);
+            ClearLoaderMemory(staleLoaders.Contains);
         }
     }
 
@@ -409,7 +382,7 @@ public sealed partial class LoaderCatalogService(IHttpPort httpPort, string cach
 
         try
         {
-            var fetched = await MojangVersionCatalog.FetchManifestAsync(httpPort, cancellationToken).ConfigureAwait(false);
+            var fetched = await MojangVersionCatalog.FetchManifestAsync(_httpPort, cancellationToken).ConfigureAwait(false);
             if (fetched is not null)
             {
                 if (fetched.Count > 0)
@@ -439,7 +412,7 @@ public sealed partial class LoaderCatalogService(IHttpPort httpPort, string cach
                             else
                             {
                                 // 新增版本：同步取得官方指定的 Java 主要版本
-                                int? javaMajor = await MojangVersionCatalog.FetchOfficialJavaMajorAsync(httpPort, v.Url, token).ConfigureAwait(false);
+                                int? javaMajor = await MojangVersionCatalog.FetchOfficialJavaMajorAsync(_httpPort, v.Url, token).ConfigureAwait(false);
                                 updatedFetched[index] = v with { JavaMajor = javaMajor };
                             }
                         }).ConfigureAwait(false);
@@ -472,7 +445,9 @@ public sealed partial class LoaderCatalogService(IHttpPort httpPort, string cach
                         return [.. merged.Where(IsStableOfficialRelease)];
                     });
 
-                    return FilterMinecraftVersions(merged, includeSnapshots);
+                    var stable = FilterMinecraftVersions(merged, includeSnapshots: false);
+                    _memoryMinecraftVersions = CreateMemoryEntry(stable);
+                    return includeSnapshots ? merged : stable;
                 }
             }
         }
@@ -483,110 +458,6 @@ public sealed partial class LoaderCatalogService(IHttpPort httpPort, string cach
 
         return FilterMinecraftVersions(existing, includeSnapshots);
     }
-
-    [GeneratedRegex("<version>([^<]+)</version>", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
-    private static partial Regex MavenVersionPattern();
-
-    private static List<LoaderVersion> ParseMavenMetadataXml(string xmlContent, bool isNeoForge)
-    {
-        // 直接擷取 <version> 標籤，免載入 XML 解析器
-        var versions = new List<string>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (Match match in MavenVersionPattern().Matches(xmlContent))
-        {
-            string raw = match.Groups[1].Value.Trim();
-            if (raw.Length > 0 && seen.Add(raw))
-            {
-                versions.Add(raw);
-            }
-        }
-
-        var list = new List<LoaderVersion>();
-        foreach (string raw in versions)
-        {
-            if (isNeoForge)
-            {
-                string? mcVer = MinecraftVersionSemantics.DeriveMinecraftVersionFromNeoForge(raw);
-                bool isStable = !raw.Contains("alpha", StringComparison.OrdinalIgnoreCase)
-                             && !raw.Contains("beta", StringComparison.OrdinalIgnoreCase);
-                list.Add(new LoaderVersion(raw, Stable: isStable, MinecraftVersion: mcVer));
-            }
-            else
-            {
-                int dashIndex = raw.IndexOf('-');
-                if (dashIndex > 0)
-                {
-                    string mcVer = raw[..dashIndex];
-                    string loaderVer = raw[(dashIndex + 1)..];
-                    if (!ContainsPreReleaseKeyword(loaderVer))
-                    {
-                        list.Add(new LoaderVersion(loaderVer, Stable: true, MinecraftVersion: mcVer));
-                    }
-                }
-            }
-        }
-
-        return list;
-    }
-
-    private static readonly System.Buffers.SearchValues<string> PreReleaseKeywords =
-        System.Buffers.SearchValues.Create(["alpha", "beta", "snapshot", "rc", "pre", "prerelease"], StringComparison.OrdinalIgnoreCase);
-
-    private static bool ContainsPreReleaseKeyword(string version) =>
-        version.AsSpan().ContainsAny(PreReleaseKeywords);
-
-    private static List<LoaderVersion> FilterLoaderByMcVersion(
-        IReadOnlyList<LoaderVersion> versions,
-        LoaderKind loader,
-        string minecraftVersion)
-    {
-        if (loader is LoaderKind.Fabric or LoaderKind.Quilt)
-        {
-            if (!MinecraftVersionSemantics.IsFabricCompatible(minecraftVersion))
-            {
-                return [];
-            }
-
-            // Fabric／Quilt：只保留最新正式版
-            return [.. versions
-                .Where(static v => v.Stable && !ContainsPreReleaseKeyword(v.Version))
-                .Take(1)];
-        }
-
-        if (loader == LoaderKind.Forge)
-        {
-            // Forge：保留最新 4 個，排除預發布版本
-            return [.. versions
-                .Where(v => string.Equals(v.MinecraftVersion, minecraftVersion, StringComparison.OrdinalIgnoreCase))
-                .Where(static v => !ContainsPreReleaseKeyword(v.Version))
-                .OrderByDescending(VersionSortKey)
-                .Take(4)];
-        }
-
-        if (loader == LoaderKind.NeoForge)
-        {
-            if (!MinecraftVersionSemantics.IsNeoForgeCompatible(minecraftVersion))
-            {
-                return [];
-            }
-
-            bool isMc26Plus = VersionValue.TryParse(minecraftVersion, out var val) && val.Major >= 26;
-            string prefixedVersion = isMc26Plus ? $"1.{minecraftVersion}" : minecraftVersion;
-
-            // NeoForge：保留最新 4 個
-            return [.. versions
-                .Where(v => string.Equals(v.MinecraftVersion, minecraftVersion, StringComparison.OrdinalIgnoreCase)
-                         || (isMc26Plus && string.Equals(v.MinecraftVersion, prefixedVersion, StringComparison.OrdinalIgnoreCase)))
-                .OrderByDescending(VersionSortKey)
-                .Take(4)];
-        }
-
-        return [];
-    }
-
-    /// <summary>以語意版本排序（47.10 大於 47.9）</summary>
-    private static VersionValue VersionSortKey(LoaderVersion version) =>
-        VersionValue.ParseOrZero(version.Version);
 
     private static IReadOnlyList<LoaderVersion> FilterMinecraftVersions(
         IReadOnlyList<LoaderVersion> versions,
@@ -602,166 +473,6 @@ public sealed partial class LoaderCatalogService(IHttpPort httpPort, string cach
         }
 
         var writeTime = SafeFileSystem.GetFileLastWriteTimeUtc(cachePath);
-        return DateTime.UtcNow - writeTime < _cacheTtl;
-    }
-
-    private static List<LoaderVersion> ParsePaperMinecraftVersions(JsonDocument doc)
-    {
-        if (!doc.RootElement.TryGetProperty("versions", out var versionsProp) ||
-            versionsProp.ValueKind != JsonValueKind.Object)
-        {
-            return [];
-        }
-
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var group in versionsProp.EnumerateObject())
-        {
-            if (group.Value.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var item in group.Value.EnumerateArray())
-                {
-                    string? ver = item.GetString();
-                    if (!string.IsNullOrWhiteSpace(ver))
-                    {
-                        string trimmed = ver.Trim();
-                        // 只保留正式發布版號
-                        if (MinecraftVersionSemantics.IsOfficialReleaseVersion(trimmed))
-                        {
-                            set.Add(trimmed);
-                        }
-                    }
-                }
-            }
-        }
-
-        return [.. set
-            .OrderByDescending(static v => VersionValue.ParseOrZero(v))
-            .Select(static v => new LoaderVersion(v, Stable: true, MinecraftVersion: v))];
-    }
-
-    private async Task<IReadOnlyList<LoaderVersion>> FetchPaperBuildsAsync(
-        string minecraftVersion,
-        CancellationToken cancellationToken,
-        bool updateCache = true)
-    {
-        Uri buildsUrl = MojangVersionCatalog.PaperBuildsUri(minecraftVersion);
-        var response = await httpPort.GetJsonDocumentAsync(buildsUrl, cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccess || response.Payload is null)
-        {
-            return [];
-        }
-
-        using var doc = response.Payload;
-        if (doc.RootElement.ValueKind != JsonValueKind.Array)
-        {
-            return [];
-        }
-
-        var list = new List<LoaderVersion>();
-        foreach (var buildElem in doc.RootElement.EnumerateArray())
-        {
-            if (!buildElem.TryGetProperty("id", out var idProp) || !idProp.TryGetInt32(out int buildId))
-            {
-                continue;
-            }
-
-            string? channel = buildElem.TryGetProperty("channel", out var cProp) ? cProp.GetString() : null;
-            bool isStable = string.Equals(channel, "STABLE", StringComparison.OrdinalIgnoreCase);
-
-            string? downloadUrl = MojangVersionCatalog.TryGetPaperDownload(buildElem, out var download) && download.TryGetProperty("url", out var urlProp)
-                ? urlProp.GetString()
-                : null;
-
-            list.Add(new LoaderVersion(
-                Version: buildId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                Url: downloadUrl,
-                Stable: isStable,
-                MinecraftVersion: minecraftVersion));
-        }
-
-        // PaperMC: 只保留最新正式版（篩選 stable 且排除預發布關鍵字）
-        var stableList = list
-            .Where(static b => b.Stable && !ContainsPreReleaseKeyword(b.Version))
-            .OrderByDescending(static b => int.TryParse(b.Version, out int id) ? id : 0)
-            .ToList();
-
-        if (stableList.Count > 0)
-        {
-            var latestBuild = stableList[0];
-            if (updateCache)
-            {
-                UpdatePaperVersionLatestBuild(minecraftVersion, latestBuild.Version);
-            }
-            return [latestBuild];
-        }
-
-        if (updateCache)
-        {
-            RemovePaperVersionIfNoStableBuild(minecraftVersion);
-        }
-        return [];
-    }
-
-    private void RemovePaperVersionIfNoStableBuild(string minecraftVersion)
-    {
-        try
-        {
-            string cacheFile = GetPaperCacheFilePath();
-            var versions = _memoryPaperMinecraftVersions ?? (SafeFileSystem.FileExists(cacheFile) ? MojangVersionCatalog.LoadCachedVersions(cacheFile) : null);
-            if (versions is null || versions.Count == 0)
-            {
-                return;
-            }
-
-            var updated = versions.Where(v => !string.Equals(v.Version, minecraftVersion, StringComparison.OrdinalIgnoreCase)).ToList();
-            if (updated.Count != versions.Count)
-            {
-                _memoryPaperMinecraftVersions = updated;
-                MojangVersionCatalog.SaveCachedVersions(cacheFile, updated);
-                Logger.Information("Paper 版本 {Version} 因無 STABLE 建置已自快取與清單中剔除", minecraftVersion);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning(ex, "剔除無 STABLE 建置之 Paper 版本失敗");
-        }
-    }
-
-    private void UpdatePaperVersionLatestBuild(string minecraftVersion, string build)
-    {
-        try
-        {
-            string cacheFile = GetPaperCacheFilePath();
-            var versions = _memoryPaperMinecraftVersions ?? (SafeFileSystem.FileExists(cacheFile) ? MojangVersionCatalog.LoadCachedVersions(cacheFile) : null);
-            if (versions is null || versions.Count == 0)
-            {
-                return;
-            }
-
-            bool changed = false;
-            var updated = new List<LoaderVersion>(versions.Count);
-            foreach (var v in versions)
-            {
-                if (string.Equals(v.Version, minecraftVersion, StringComparison.OrdinalIgnoreCase) && v.Build != build)
-                {
-                    updated.Add(v with { Build = build });
-                    changed = true;
-                }
-                else
-                {
-                    updated.Add(v);
-                }
-            }
-
-            if (changed)
-            {
-                _memoryPaperMinecraftVersions = updated;
-                MojangVersionCatalog.SaveCachedVersions(cacheFile, updated);
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning(ex, "更新 Paper 快取版本失敗");
-        }
+        return _timeProvider.GetUtcNow().UtcDateTime - writeTime < CacheTtl;
     }
 }

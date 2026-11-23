@@ -1,4 +1,3 @@
-using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
@@ -8,6 +7,18 @@ namespace MinecraftServerManager.UnitTests.UI;
 
 public sealed class ImportServerViewModelTests
 {
+    [Fact]
+    public async Task BrowseFolder_TrailingSeparator_UsesFolderNameAsServerName()
+    {
+        var ui = new ManualUiService { FolderToPick = @"C:\Servers\MyServer\" };
+        var vm = new ImportServerViewModel(new FakeServerManager(), ui);
+
+        await vm.BrowseFolderAsync();
+
+        Assert.Equal(@"C:\Servers\MyServer", vm.SourcePath);
+        Assert.Equal("MyServer", vm.ServerName);
+    }
+
     [Fact]
     public async Task ExecuteImportAsync_WhenSourcePathEmpty_SetsStatusMessageAndFails()
     {

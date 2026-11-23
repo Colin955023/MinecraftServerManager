@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Infrastructure.Settings;
 
@@ -20,15 +21,18 @@ public sealed record WindowPreferences(
     }
 }
 
+/// <summary>偏好設定頁可編輯欄位，供單次批次寫入</summary>
+public sealed record UserPreferences(bool AutoUpdateEnabled, bool AutoBackupBeforeStart, int BackupRetentionCount, string ThemeMode, string? CustomAccentColor);
+
 public sealed record UserSettings(
     [property: JsonPropertyName("servers_root")] string ServersRoot = "",
     [property: JsonPropertyName("auto_update_enabled")] bool AutoUpdateEnabled = true,
     [property: JsonPropertyName("window_preferences")] WindowPreferences WindowPreferences = null!,
     [property: JsonPropertyName("auto_backup_before_start")] bool AutoBackupBeforeStart = false,
-    [property: JsonPropertyName("backup_retention_count")] int BackupRetentionCount = 10)
+    [property: JsonPropertyName("backup_retention_count")] int BackupRetentionCount = ServerDefaults.DefaultBackupRetentionCount)
 {
     public UserSettings()
-        : this("", true, new WindowPreferences(), false, 10)
+        : this(string.Empty, true, new WindowPreferences(), false, ServerDefaults.DefaultBackupRetentionCount)
     {
     }
 }

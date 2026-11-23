@@ -29,7 +29,7 @@ public abstract class ViewModelBase : ObservableObject
 
         try
         {
-            await work().ConfigureAwait(true);
+            await work();
         }
         catch (OperationCanceledException)
         {

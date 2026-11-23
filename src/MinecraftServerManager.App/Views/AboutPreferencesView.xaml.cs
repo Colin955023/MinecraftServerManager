@@ -6,14 +6,14 @@ namespace MinecraftServerManager.App.Views;
 
 public sealed partial class AboutPreferencesView : UserControl
 {
-    public AboutPreferencesViewModel ViewModel { get; }
-
     public AboutPreferencesView(AboutPreferencesViewModel viewModel)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         ViewModel = viewModel;
         InitializeComponent();
     }
+
+    public AboutPreferencesViewModel ViewModel { get; }
 
     public static string FormatVersion(string version) => $"版本 {version}";
 
@@ -26,6 +26,9 @@ public sealed partial class AboutPreferencesView : UserControl
         ViewModel.SelectAccentColor(AccentPicker.Color);
         AccentColorFlyout.Hide();
     }
+
+    /// <summary>每次開啟重設為目前色彩，捨棄上次未套用的調整</summary>
+    private void OnAccentColorFlyoutOpening(object sender, object e) => AccentPicker.Color = ViewModel.CurrentAccentColor;
 
     private void OnCancelAccentColorClicked(object sender, RoutedEventArgs e) => AccentColorFlyout.Hide();
 }

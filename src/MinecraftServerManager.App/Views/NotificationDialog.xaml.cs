@@ -1,27 +1,70 @@
 using System.ComponentModel;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using MinecraftServerManager.App.Controls;
 using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
-/// <summary>具備自主倒數、滑鼠暫停功能的錯誤對話方塊</summary>
-public sealed partial class NotificationDialog : ContentDialog, INotifyPropertyChanged
+/// <summary>具備自主倒數的錯誤對話框；滑鼠停留或鍵盤焦點在內時暫停倒數</summary>
+public sealed partial class NotificationDialog : ContentDialog, INotifyPropertyChanged, INestableContentDialog
 {
     private static readonly PropertyChangedEventArgs ButtonTextChangedArgs = new(nameof(ButtonText));
 
     private readonly IUiTimer _autoCloseTimer;
     private readonly double _totalSeconds;
     private double _elapsedSeconds;
-    private bool _isPaused;
+    private bool _pointerInside;
+    private bool _keyboardFocused;
     private bool _isClosing;
+    private bool _temporarilyHidden;
     private string _buttonText;
+
+    public NotificationDialog(IUiService ui, string title, string message)
+    {
+        ArgumentNullException.ThrowIfNull(ui);
+
+        DialogTitle = title;
+        Message = message;
+        _totalSeconds = 10.0;
+        _buttonText = $"確定（{(int)_totalSeconds}s）";
+
+        InitializeComponent();
+
+        _autoCloseTimer = ui.CreateUiTimer(TimeSpan.FromMilliseconds(100), OnAutoCloseTimerTick);
+        // 倒數僅於實際顯示期間進行：排隊等待或被巢狀對話框暫時隱藏時不計時，重新顯示後續算
+        Opened += (_, _) =>
+        {
+            _temporarilyHidden = false;
+            if (!_isClosing)
+            {
+                _autoCloseTimer.StartTimer();
+            }
+        };
+        GotFocus += (_, e) => SetPauseState(ref _keyboardFocused, e.OriginalSource is Control { FocusState: FocusState.Keyboard });
+        LostFocus += (_, _) => SetPauseState(ref _keyboardFocused, false);
+        // 巢狀隱藏也會觸發 Closed，僅停止計時；真正關閉（含按 Escape）後立即釋放計時器
+        Closed += (_, _) =>
+        {
+            _autoCloseTimer.StopTimer();
+            if (!_temporarilyHidden)
+            {
+                _isClosing = true;
+                _autoCloseTimer.Dispose();
+                Bindings.StopTracking();
+            }
+        };
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public string DialogTitle { get; }
+
     public string Message { get; }
-    public string IconGlyph { get; }
+
+    /// <summary>圖示前景主題資源鍵</summary>
+    public string IconBrushKey { get; } = UiBindHelpers.DangerTextBrushKey;
 
     public string ButtonText
     {
@@ -38,50 +81,34 @@ public sealed partial class NotificationDialog : ContentDialog, INotifyPropertyC
         }
     }
 
-    public NotificationDialog(IUiService ui, string title, string message)
+    private bool IsPaused => _pointerInside || _keyboardFocused;
+
+    /// <summary>暫時隱藏以讓位給巢狀對話框</summary>
+    public void HideForNestedDialog()
     {
-        ArgumentNullException.ThrowIfNull(ui);
-        InitializeComponent();
-
-        DialogTitle = title;
-        Message = message;
-        IconGlyph = "❌";
-        _totalSeconds = 10.0;
-        _buttonText = $"確定 ({(int)_totalSeconds}s)";
-
-        _autoCloseTimer = ui.CreateUiTimer(TimeSpan.FromMilliseconds(100), AutoCloseTimer_Tick);
-        // 倒數僅於實際顯示期間進行：排隊等待或被巢狀對話框暫時隱藏時不計時，重新顯示後續算
-        Opened += (_, _) =>
-        {
-            if (!_isClosing)
-            {
-                _autoCloseTimer.StartTimer();
-            }
-        };
-        Closed += (_, _) => _autoCloseTimer.StopTimer();
+        _temporarilyHidden = true;
+        Hide();
     }
 
-    private void Dialog_PointerEntered(object sender, PointerRoutedEventArgs e)
+    private void OnDialogPointerEntered(object sender, PointerRoutedEventArgs e) => SetPauseState(ref _pointerInside, true);
+
+    private void OnDialogPointerExited(object sender, PointerRoutedEventArgs e) => SetPauseState(ref _pointerInside, false);
+
+    private void SetPauseState(ref bool field, bool value)
     {
-        _isPaused = true;
+        field = value;
         UpdateCountdownUi();
     }
 
-    private void Dialog_PointerExited(object sender, PointerRoutedEventArgs e)
-    {
-        _isPaused = false;
-        UpdateCountdownUi();
-    }
-
-    private void Dialog_PrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)
+    private void OnPrimaryButtonClicked(ContentDialog sender, ContentDialogButtonClickEventArgs args)
     {
         _autoCloseTimer.StopTimer();
         _isClosing = true;
     }
 
-    private void AutoCloseTimer_Tick()
+    private void OnAutoCloseTimerTick()
     {
-        if (_isPaused || _isClosing)
+        if (IsPaused || _isClosing)
         {
             return;
         }
@@ -104,7 +131,7 @@ public sealed partial class NotificationDialog : ContentDialog, INotifyPropertyC
         double remaining = Math.Max(0, _totalSeconds - _elapsedSeconds);
         int ceilSeconds = (int)Math.Ceiling(remaining);
 
-        ButtonText = _isPaused ? "確定 (已暫停)" : $"確定 ({ceilSeconds}s)";
+        ButtonText = IsPaused ? "確定（已暫停）" : $"確定（{ceilSeconds}s）";
 
         double percent = Math.Clamp(remaining / _totalSeconds * 100.0, 0, 100);
         CountdownProgress.Value = percent;

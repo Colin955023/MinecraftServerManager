@@ -2,7 +2,7 @@ using MinecraftServerManager.Domain.Mods;
 
 namespace MinecraftServerManager.Core.Ports;
 
-/// <summary>本地模組目錄掃描與 JAR 詮釋資料抽取介面</summary>
+/// <summary>本機模組目錄掃描與 JAR 詮釋資料抽取介面</summary>
 public interface ILocalModScanner
 {
     /// <summary>掃描指定目錄下之所有 .jar 與 .jar.disabled 檔案</summary>

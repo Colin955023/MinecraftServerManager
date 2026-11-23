@@ -2,10 +2,9 @@ using MinecraftServerManager.Core.Ports;
 
 namespace MinecraftServerManager.UnitTests.TestSupport;
 
-/// <summary>測試用行程啟動器替身</summary>
 internal sealed class StubProcessRunner : IProcessRunner
 {
-    private readonly Func<ProcessStartSpec, IManagedProcess> _factory;
+    private readonly Func<ProcessStartSpec, Action<ProcessOutput>?, IManagedProcess> _factory;
 
     public ProcessStartSpec? LastSpecification { get; private set; }
     public StubManagedProcess? LastCreatedProcess { get; private set; }
@@ -16,7 +15,7 @@ internal sealed class StubProcessRunner : IProcessRunner
         bool shouldFailStart = false,
         bool interactive = false)
     {
-        _factory = spec =>
+        _factory = (spec, outputLineObserved) =>
         {
             if (shouldFailStart)
             {
@@ -24,7 +23,7 @@ internal sealed class StubProcessRunner : IProcessRunner
             }
 
             onStart?.Invoke(spec);
-            var proc = new StubManagedProcess(exitCode, interactive);
+            var proc = new StubManagedProcess(exitCode, interactive, outputLineObserved: outputLineObserved);
             LastCreatedProcess = proc;
             return proc;
         };
@@ -33,19 +32,33 @@ internal sealed class StubProcessRunner : IProcessRunner
     public StubProcessRunner(Func<ProcessStartSpec, StubManagedProcess> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
-        _factory = spec =>
+        _factory = (spec, outputLineObserved) =>
         {
             var proc = factory(spec);
+            proc.AddOutputLineObserver(outputLineObserved);
             LastCreatedProcess = proc;
             return proc;
         };
     }
 
-    public Task<IManagedProcess> StartAsync(ProcessStartSpec specification, CancellationToken cancellationToken = default)
+    public Task<IManagedProcess> StartAsync(
+        ProcessStartSpec specification,
+        Action<ProcessOutput>? outputLineObserved = null,
+        CancellationToken cancellationToken = default)
     {
+        // 與正式 ProcessRunner 一致：已取消即不啟動
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled<IManagedProcess>(cancellationToken);
+        }
+
         LastSpecification = specification;
-        return Task.FromResult(_factory(specification));
+        return Task.FromResult(_factory(specification, outputLineObserved));
     }
+
+    public void StartDetached(ProcessStartSpec specification) =>
+        // 測試不啟動獨立行程；呼叫端的啟動行為由其他測試驗證
+        _ = specification;
 }
 
 /// <summary>測試用受控外部行程替身：支援立即完成模式與互動式等待模式</summary>
@@ -59,16 +72,22 @@ internal sealed class StubManagedProcess : IManagedProcess
     public int? ExitCode => HasExited ? _defaultExitCode : null;
     public List<string> WrittenLines { get; } = [];
 
-    /// <summary>行程被處置後完成</summary>
     public Task Disposed => _disposedTcs.Task;
 
     private readonly TaskCompletionSource _disposedTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public event Action<ProcessOutput>? OutputReceived;
+    public event Action<ProcessOutput>? OutputLineObserved;
+    public long DroppedOutputLines { get; private set; }
 
-    public StubManagedProcess(int exitCode = 0, bool interactive = false, IEnumerable<ProcessOutput>? initialOutputs = null)
+    public StubManagedProcess(
+        int exitCode = 0,
+        bool interactive = false,
+        IEnumerable<ProcessOutput>? initialOutputs = null,
+        Action<ProcessOutput>? outputLineObserved = null)
     {
         _defaultExitCode = exitCode;
+        OutputLineObserved += outputLineObserved;
         if (!interactive)
         {
             HasExited = true;
@@ -81,10 +100,16 @@ internal sealed class StubManagedProcess : IManagedProcess
         }
     }
 
+    public void AddOutputLineObserver(Action<ProcessOutput>? observer) => OutputLineObserved += observer;
+
     private readonly List<ProcessOutput>? _initialOutputs;
 
-    public void RaiseOutput(string line, ProcessOutputKind kind = ProcessOutputKind.StandardOutput) =>
-        OutputReceived?.Invoke(new ProcessOutput(kind, line));
+    public void RaiseOutput(string line, ProcessOutputKind kind = ProcessOutputKind.StandardOutput)
+    {
+        var output = new ProcessOutput(kind, line);
+        OutputLineObserved?.Invoke(output);
+        OutputReceived?.Invoke(output);
+    }
 
     public Task WriteLineAsync(string line, CancellationToken cancellationToken = default)
     {
@@ -104,6 +129,7 @@ internal sealed class StubManagedProcess : IManagedProcess
         {
             foreach (var output in _initialOutputs)
             {
+                OutputLineObserved?.Invoke(output);
                 OutputReceived?.Invoke(output);
             }
         }
@@ -122,6 +148,7 @@ internal sealed class StubManagedProcess : IManagedProcess
     public ValueTask DisposeAsync()
     {
         HasExited = true;
+        _exitTcs.TrySetResult(new ProcessExitResult(_defaultExitCode, true));
         _disposedTcs.TrySetResult();
         return ValueTask.CompletedTask;
     }

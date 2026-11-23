@@ -10,14 +10,14 @@ public sealed class SafeFileSystemTests
     [Theory]
     [InlineData(@"Z:\outside\file.txt")]
     [InlineData(@"\\server\share\file.txt")]
-    public void IsPathWithinRejectsTargetsOnDifferentRoot(string target)
+    public void IsPathWithin_TargetOnDifferentRoot_ReturnsFalse(string target)
     {
         using var rootTemp = new TempDirectory("msm-filesystem-");
         Assert.False(SafeFileSystem.IsPathWithin(rootTemp.FullName, target, strict: false));
     }
 
     [Fact]
-    public void CreateTempSiblingPathStaysInTargetDirectory()
+    public void CreateTempSiblingPath_TargetFile_StaysInTargetDirectory()
     {
         using var rootTemp = new TempDirectory("msm-filesystem-");
         string tempDir = rootTemp.FullName;
@@ -33,7 +33,7 @@ public sealed class SafeFileSystemTests
     }
 
     [Fact]
-    public void RecoverDeleteTombstones_CleansStagingDirsAndPreservesRestoreRollbacks()
+    public void RecoverDeleteTombstones_StagingAndRollbackDirs_CleansStagingOnly()
     {
         using var rootTemp = new TempDirectory("msm-tombstones-");
         string root = rootTemp.FullName;
@@ -58,7 +58,7 @@ public sealed class SafeFileSystemTests
     }
 
     [Fact]
-    public void BoundedDirectoryWalkReturnsFilesAndDirectories()
+    public void EnumerateBoundedTree_NestedTree_ReturnsFilesAndDirectories()
     {
         using var rootTemp = new TempDirectory("msm-filesystem-");
         string root = rootTemp.FullName;
@@ -73,7 +73,7 @@ public sealed class SafeFileSystemTests
     }
 
     [Fact]
-    public void DirectoryExistsAcceptsDriveRoot()
+    public void DirectoryExists_DriveRoot_ReturnsTrue()
     {
         string driveRoot = Path.GetPathRoot(Path.GetTempPath())!;
 
@@ -81,7 +81,7 @@ public sealed class SafeFileSystemTests
     }
 
     [Fact]
-    public void BoundedDirectoryWalkRejectsEntryLimit()
+    public void ListBoundedDirectory_ExceedsEntryLimit_Throws()
     {
         using var rootTemp = new TempDirectory("msm-filesystem-");
         string root = rootTemp.FullName;
@@ -92,7 +92,7 @@ public sealed class SafeFileSystemTests
     }
 
     [Fact]
-    public void PathWithinRejectsOutsidePath()
+    public void IsPathWithin_OutsidePath_ReturnsFalse()
     {
         using var rootTemp = new TempDirectory("msm-filesystem-");
         string root = rootTemp.FullName;
@@ -103,7 +103,7 @@ public sealed class SafeFileSystemTests
     }
 
     [Fact]
-    public void DeleteWithin_DeletesDirectoryContainingReadOnlyFilesSuccessfully()
+    public void DeleteWithin_DirectoryWithReadOnlyFiles_Deletes()
     {
         using var rootTemp = new TempDirectory("msm-filesystem-");
         string root = rootTemp.FullName;
@@ -121,7 +121,7 @@ public sealed class SafeFileSystemTests
     }
 
     [Fact]
-    public void DeleteWithin_DeletesNestedReadOnlyHiddenEntriesAndReadOnlyDirectories()
+    public void DeleteWithin_NestedReadOnlyHiddenEntries_Deletes()
     {
         using var rootTemp = new TempDirectory("msm-filesystem-");
         string root = rootTemp.FullName;
@@ -143,7 +143,7 @@ public sealed class SafeFileSystemTests
     }
 
     [Fact]
-    public void EnumerateBoundedTree_PrunesExcludedDirectories()
+    public void EnumerateBoundedTree_ExcludedDirectories_PrunesThem()
     {
         using var rootTemp = new TempDirectory("msm-filesystem-");
         string root = rootTemp.FullName;
@@ -164,7 +164,7 @@ public sealed class SafeFileSystemTests
     }
 
     [Fact]
-    public void EnumerateBoundedTree_PrunesPreventMaxEntriesExceeded()
+    public void EnumerateBoundedTree_PrunedEntries_DoNotCountTowardLimit()
     {
         using var rootTemp = new TempDirectory("msm-filesystem-");
         string root = rootTemp.FullName;
@@ -194,7 +194,7 @@ public sealed class SafeFileSystemTests
     }
 
     [Fact]
-    public void CopyDirectoryTreeSafe_CopiesNestedTree()
+    public void CopyDirectoryTreeSafe_NestedTree_CopiesAll()
     {
         using var temp = new TempDirectory("msm-filesystem-");
         string source = temp.Combine("src");
@@ -203,7 +203,7 @@ public sealed class SafeFileSystemTests
         File.WriteAllText(Path.Combine(source, "top.txt"), "top");
         File.WriteAllText(Path.Combine(source, "a", "b", "deep.txt"), "deep");
 
-        SafeFileSystem.CopyDirectoryTreeSafe(source, temp.Combine("dst"));
+        SafeFileSystem.CopyDirectoryTreeSafe(source, temp.Combine("dst"), TestContext.Current.CancellationToken);
 
         Assert.Equal("top", File.ReadAllText(temp.Combine("dst", "top.txt")));
         Assert.Equal("deep", File.ReadAllText(temp.Combine("dst", "a", "b", "deep.txt")));
@@ -211,7 +211,7 @@ public sealed class SafeFileSystemTests
     }
 
     [Fact]
-    public void CopyDirectoryTreeSafe_RejectsDestinationBehindJunction()
+    public void CopyDirectoryTreeSafe_DestinationBehindJunction_Rejects()
     {
         using var temp = new TempDirectory("msm-filesystem-");
         string source = temp.Combine("src");
@@ -223,12 +223,12 @@ public sealed class SafeFileSystemTests
         using var junction = new TestJunction(temp.Combine("link"), outside);
 
         Assert.Throws<SafeFileSystemException>(() =>
-            SafeFileSystem.CopyDirectoryTreeSafe(source, temp.Combine("link", "dst")));
+            SafeFileSystem.CopyDirectoryTreeSafe(source, temp.Combine("link", "dst"), TestContext.Current.CancellationToken));
         Assert.Empty(Directory.GetFileSystemEntries(outside));
     }
 
     [Fact]
-    public void CopyDirectoryTreeSafe_RejectsExistingJunctionInsideDestination()
+    public void CopyDirectoryTreeSafe_JunctionInsideDestination_Rejects()
     {
         using var temp = new TempDirectory("msm-filesystem-");
         string source = temp.Combine("src");
@@ -241,12 +241,12 @@ public sealed class SafeFileSystemTests
 
         using var junction = new TestJunction(Path.Combine(destination, "sub"), outside);
 
-        Assert.Throws<SafeFileSystemException>(() => SafeFileSystem.CopyDirectoryTreeSafe(source, destination));
+        Assert.Throws<SafeFileSystemException>(() => SafeFileSystem.CopyDirectoryTreeSafe(source, destination, TestContext.Current.CancellationToken));
         Assert.Empty(Directory.GetFileSystemEntries(outside));
     }
 
     [Fact]
-    public async Task ReadAllTextAsync_StripsBomAndEnforcesLimitAndMissingFile()
+    public async Task ReadAllTextAsync_BomLimitAndMissingFile_HandlesEach()
     {
         using var temp = new TempDirectory("msm-filesystem-");
         string path = temp.Combine("text.txt");
@@ -262,7 +262,7 @@ public sealed class SafeFileSystemTests
     }
 
     [Fact]
-    public void HasAnyFile_DetectsMatchesAndEarlyExits()
+    public void HasAnyFile_VariousDirectories_DetectsMatches()
     {
         using var rootTemp = new TempDirectory("msm-filesystem-");
         string root = rootTemp.FullName;
@@ -274,5 +274,40 @@ public sealed class SafeFileSystemTests
         Assert.True(SafeFileSystem.HasAnyFile(root, "*.jar", SearchOption.AllDirectories));
         Assert.False(SafeFileSystem.HasAnyFile(root, "*.zip", SearchOption.AllDirectories));
         Assert.False(SafeFileSystem.HasAnyFile(Path.Combine(root, "non_existent"), "*.jar"));
+    }
+
+    [Fact]
+    public void MoveWithinAndDeleteWithin_OutsideRoot_Rejects()
+    {
+        using var tempDirTemp = new TempDirectory("msm-filesystem-");
+        string tempDir = tempDirTemp.FullName;
+        using var externalDirTemp = new TempDirectory("msm-filesystem-");
+        string externalDir = externalDirTemp.FullName;
+        string subFile = Path.Combine(tempDir, "inner.txt");
+        File.WriteAllText(subFile, "test");
+
+        string targetFile = Path.Combine(tempDir, "moved.txt");
+        bool moveSuccess = SafeFileSystem.MoveWithin(tempDir, subFile, targetFile);
+        Assert.True(moveSuccess);
+        Assert.False(File.Exists(subFile));
+        Assert.True(File.Exists(targetFile));
+
+        // 嘗試移動到外部目錄應被拒絕
+        string extTarget = Path.Combine(externalDir, "escaped.txt");
+        bool invalidMove = SafeFileSystem.MoveWithin(tempDir, targetFile, extTarget);
+        Assert.False(invalidMove);
+        Assert.True(File.Exists(targetFile));
+
+        // 嘗試刪除外部目錄檔案應被拒絕
+        string extFile = Path.Combine(externalDir, "safe.txt");
+        File.WriteAllText(extFile, "external");
+        bool invalidDelete = SafeFileSystem.DeleteWithin(tempDir, extFile);
+        Assert.False(invalidDelete);
+        Assert.True(File.Exists(extFile));
+
+        // 正常刪除內部檔案應成功
+        bool deleteSuccess = SafeFileSystem.DeleteWithin(tempDir, targetFile);
+        Assert.True(deleteSuccess);
+        Assert.False(File.Exists(targetFile));
     }
 }

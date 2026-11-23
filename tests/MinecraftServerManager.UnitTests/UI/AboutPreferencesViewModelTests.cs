@@ -18,14 +18,14 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
 
     public void Dispose() => _testDirTemp.Dispose();
 
-    private AboutPreferencesViewModel Create(IUiService uiService, SettingsManager? settings = null, IUpdateCheckerService? updateChecker = null, IAppUpdateService? appUpdateService = null, Action? onResetWindowSizeRequested = null) =>
-        new(uiService, settings ?? new SettingsManager(_testDir), updateChecker ?? NoOp.Create<IUpdateCheckerService>(), static _ => { }, onResetWindowSizeRequested ?? (static () => { }), NoOp.Create<IExternalLauncher>(), appUpdateService ?? NoOp.Create<IAppUpdateService>());
+    private AboutPreferencesViewModel Create(IUiService uiService, SettingsManager? settings = null, IUpdateCheckerService? updateChecker = null, IAppUpdateService? appUpdateService = null, Action? onResetWindowSizeRequested = null, IExternalLauncher? launcher = null) =>
+        new(uiService, settings ?? new SettingsManager(_testDir), new ServerStopCoordinator(uiService, NoOp.Create<IServerRuntimeHost>()), updateChecker ?? NoOp.Create<IUpdateCheckerService>(), static _ => { }, onResetWindowSizeRequested ?? (static () => { }), launcher ?? NoOp.Create<IExternalLauncher>(), appUpdateService ?? NoOp.Create<IAppUpdateService>(), NoOp.Create<IAccentColorService>());
 
     [Fact]
-    public void OpenLicense_OpensGplV3FullText()
+    public void OpenLicense_Invoked_OpensGplV3Text()
     {
         var launcher = new RecordingLauncher();
-        var vm = new AboutPreferencesViewModel(new NoOpUiService(), new SettingsManager(_testDir), NoOp.Create<IUpdateCheckerService>(), static _ => { }, static () => { }, launcher, NoOp.Create<IAppUpdateService>());
+        var vm = Create(new NoOpUiService(), launcher: launcher);
 
         vm.OpenLicenseCommand.Execute(null);
 
@@ -36,7 +36,7 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     [Theory]
     [InlineData(1.0, "目前螢幕解析度：1920 × 1080")]
     [InlineData(1.5, "目前螢幕解析度：1920 × 1080（縮放 150%）")]
-    public void UpdateWindowMetrics_ShowsCurrentSizesAndScale(double scale, string expectedScreen)
+    public void UpdateWindowMetrics_NewMetrics_ShowsSizesAndScale(double scale, string expectedScreen)
     {
         var vm = Create(new NoOpUiService());
 
@@ -50,7 +50,7 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     }
 
     [Fact]
-    public void ShouldAlignWithAppInfo()
+    public void Constructor_Default_AlignsWithAppInfo()
     {
         Assert.Equal(AppInfo.Version, AboutPreferencesViewModel.AppVersion);
         Assert.Equal(AppInfo.AppName, AboutPreferencesViewModel.AppDescription);
@@ -58,7 +58,7 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     }
 
     [Fact]
-    public void ManualCheckVisibilityShouldBeInvertedFromAutoUpdate()
+    public void ManualCheckVisibility_AutoUpdateToggled_IsInverted()
     {
         var vm = Create(NoOpUiService.Instance);
         vm.IsAutoUpdateEnabled = true;
@@ -69,7 +69,7 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     }
 
     [Fact]
-    public void ResetAllSettingsShouldRestoreDefaults()
+    public async Task ResetAllSettings_Confirmed_RestoresDefaults()
     {
         var settings = new SettingsManager(_testDir);
         bool windowSizeResetCalled = false;
@@ -81,7 +81,7 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
         vm.IsAutoUpdateEnabled = false;
         vm.SelectedThemeModeIndex = 1; // 淺色
 
-        vm.ResetAllSettingsCommand.Execute(null);
+        await vm.ResetAllSettingsCommand.ExecuteAsync(null);
 
         Assert.True(vm.IsAutoUpdateEnabled);
         Assert.Equal(0, vm.SelectedThemeModeIndex);
@@ -90,53 +90,38 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     }
 
     [Fact]
-    public void SelectAccentColorShouldUpdateSettingsAndViewModel()
+    public async Task SelectAccentColor_NewColor_UpdatesSettings()
     {
         var settings = new SettingsManager(_testDir);
         var vm = Create(NoOpUiService.Instance, settings);
 
         var customColor = Windows.UI.Color.FromArgb(255, 18, 52, 86);
         vm.SelectAccentColor(customColor);
+        await vm.FlushPendingSaveAsync();
 
         Assert.True(vm.IsCustomAccentColor);
         Assert.Equal("#123456", vm.CustomAccentColor);
         Assert.Equal("#123456", settings.GetCustomAccentColor());
 
         vm.ResetAccentColor();
+        await vm.FlushPendingSaveAsync();
         Assert.False(vm.IsCustomAccentColor);
         Assert.Null(vm.CustomAccentColor);
         Assert.Null(settings.GetCustomAccentColor());
     }
 
     [Fact]
-    public void AccentColorService_ParseAndFormatHex_ShouldRoundTripCorrectly()
-    {
-        var parsed = AccentColorService.ParseColor("#3A7BD5");
-        Assert.NotNull(parsed);
-        Assert.Equal(255, parsed.Value.A);
-        Assert.Equal(0x3A, parsed.Value.R);
-        Assert.Equal(0x7B, parsed.Value.G);
-        Assert.Equal(0xD5, parsed.Value.B);
-        Assert.Equal("#3A7BD5", AccentColorService.ToHex(parsed.Value));
-
-        Assert.Null(AccentColorService.ParseColor(null));
-        Assert.Null(AccentColorService.ParseColor(""));
-        Assert.Null(AccentColorService.ParseColor("#ZZZZZZ"));
-    }
-
-    [Fact]
-    public async Task CheckForUpdatesShouldNotifyWhenAlreadyLatestVersion()
+    public async Task CheckForUpdates_AlreadyLatest_Notifies()
     {
         var ui = new ManualUiService();
-        var mockChecker = new MockUpdateChecker(new UpdateCheckResult(
-            HasUpdate: false,
-            CurrentVersion: "2.1.0",
-            LatestVersion: "2.1.0",
-            ReleaseTitle: "v2.1.0",
-            ReleaseNotes: "無更新",
-            DownloadUrl: null,
-            Sha256ChecksumUrl: null,
-            ReleasePageUrl: "https://example.com"));
+        var mockChecker = new MockUpdateChecker(TestUpdateResults.Create(
+            hasUpdate: false,
+            currentVersion: "2.1.0",
+            latestVersion: "2.1.0",
+            releaseTitle: "v2.1.0",
+            releaseNotes: "無更新",
+            downloadUrl: null,
+            sha256ChecksumUrl: null));
 
         var vm = Create(
             ui,
@@ -147,20 +132,19 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
         Assert.Contains(ui.Notifications, static n => n.Message.Contains("目前已是最新版本", StringComparison.Ordinal));
     }
 
-    [Fact]
-    public async Task CheckForUpdates_WhenUserDeclinesUpdate_DoesNotDownloadOrApply()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CheckForUpdates_UserConfirmation_DownloadsAndAppliesOnlyWhenConfirmed(bool userConfirmed)
     {
-        var mockChecker = new MockUpdateChecker(new UpdateCheckResult(
-            HasUpdate: true,
-            CurrentVersion: "2.1.0",
-            LatestVersion: "2.2.0",
-            ReleaseTitle: "v2.2.0",
-            ReleaseNotes: "測試更新",
-            DownloadUrl: "https://example.com/update.exe",
-            Sha256ChecksumUrl: null,
-            ReleasePageUrl: "https://example.com"));
+        var mockChecker = new MockUpdateChecker(TestUpdateResults.Create(
+            currentVersion: "2.1.0",
+            latestVersion: "2.2.0",
+            releaseTitle: "v2.2.0",
+            downloadUrl: "https://example.com/update.exe",
+            sha256ChecksumUrl: null));
         var mockUpdateService = new MockAppUpdateService();
-        var fakeUi = new ManualUiService { ConfirmResult = false };
+        var fakeUi = new ManualUiService { ConfirmResult = userConfirmed };
 
         var vm = Create(
             fakeUi,
@@ -169,65 +153,20 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
 
         await vm.CheckForUpdatesCommand.ExecuteAsync(null);
 
-        Assert.False(mockUpdateService.DownloadInvoked);
-        Assert.False(mockUpdateService.ApplyInvoked);
+        Assert.Equal(userConfirmed, mockUpdateService.DownloadInvoked);
+        Assert.Equal(userConfirmed, mockUpdateService.ApplyInvoked);
     }
 
     [Fact]
-    public async Task CheckForUpdates_WhenUserConfirmsUpdate_DownloadsAndAppliesUpdate()
-    {
-        var mockChecker = new MockUpdateChecker(new UpdateCheckResult(
-            HasUpdate: true,
-            CurrentVersion: "2.1.0",
-            LatestVersion: "2.2.0",
-            ReleaseTitle: "v2.2.0",
-            ReleaseNotes: "測試更新",
-            DownloadUrl: "https://example.com/update.exe",
-            Sha256ChecksumUrl: null,
-            ReleasePageUrl: "https://example.com"));
-        var mockUpdateService = new MockAppUpdateService();
-        var fakeUi = new ManualUiService { ConfirmResult = true };
-
-        var vm = Create(
-            fakeUi,
-            updateChecker: mockChecker,
-            appUpdateService: mockUpdateService);
-
-        await vm.CheckForUpdatesCommand.ExecuteAsync(null);
-
-        Assert.True(mockUpdateService.DownloadInvoked);
-        Assert.True(mockUpdateService.ApplyInvoked);
-    }
-
-    [Fact]
-    public void AccentColorService_ApplyAndReset_FiresAccentColorChanged()
-    {
-        bool eventFired = false;
-        Action handler = () => eventFired = true;
-        AccentColorService.AccentColorChanged += handler;
-        try
-        {
-            AccentColorService.ApplyAccentColor("#FF112233");
-            Assert.True(eventFired);
-
-            eventFired = false;
-            AccentColorService.ApplyAccentColor(null);
-            Assert.True(eventFired);
-        }
-        finally
-        {
-            AccentColorService.AccentColorChanged -= handler;
-        }
-    }
-
-    [Fact]
-    public void ResetAccentColor_ResetsCustomColorAndAppliesSystemDefault()
+    public async Task ResetAccentColor_CustomColor_AppliesSystemDefault()
     {
         var settings = new SettingsManager(_testDir);
-        settings.SetCustomAccentColor("#112233");
+        settings.UpdatePreferences(p => p with { CustomAccentColor = "#112233" });
         var vm = Create(NoOpUiService.Instance, settings);
 
         vm.ResetAccentColor();
+        await vm.FlushPendingSaveAsync();
+        vm.Dispose();
 
         Assert.False(vm.IsCustomAccentColor);
         Assert.Null(vm.CustomAccentColor);
@@ -248,7 +187,11 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
             return Task.FromResult("C:\\fake\\path.exe");
         }
 
-        public void ApplyUpdateAndRestart(string verifiedInstallerPath) => ApplyInvoked = true;
+        public void ApplyUpdateAndRestart(string verifiedInstallerPath, Action<Action> launchReplacement) => ApplyInvoked = true;
+
+        public void CleanupPreviousUpdateBackup()
+        {
+        }
     }
 
     private sealed class MockUpdateChecker(UpdateCheckResult result) : IUpdateCheckerService
@@ -258,7 +201,7 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     }
 
     [Fact]
-    public void BackupSettings_LoadFromAndWriteToSettings()
+    public async Task BackupSettings_Changed_WritesSettings()
     {
         var settings = new SettingsManager(_testDir);
         var vm = Create(new NoOpUiService(), settings);
@@ -267,16 +210,114 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
 
         vm.IsAutoBackupBeforeStartEnabled = true;
         vm.BackupRetentionCount = 7;
+        await vm.FlushPendingSaveAsync();
+        vm.Dispose();
 
         Assert.True(settings.IsAutoBackupBeforeStartEnabled());
         Assert.Equal(7, settings.GetBackupRetentionCount());
     }
 
     [Fact]
+    public async Task Constructor_Default_DoesNotWriteSettings()
+    {
+        var settings = new CountingSettings(new SettingsManager(_testDir));
+
+        using var vm = new AboutPreferencesViewModel(new NoOpUiService(), settings, new ServerStopCoordinator(NoOpUiService.Instance, NoOp.Create<IServerRuntimeHost>()), NoOp.Create<IUpdateCheckerService>(), static _ => { }, static () => { }, NoOp.Create<IExternalLauncher>(), NoOp.Create<IAppUpdateService>(), NoOp.Create<IAccentColorService>());
+        await vm.FlushPendingSaveAsync();
+
+        Assert.Equal(0, settings.SaveCount);
+    }
+
+    [Fact]
+    public async Task ResetAllSettings_Confirmed_WritesOnce()
+    {
+        var inner = new SettingsManager(_testDir);
+        var settings = new CountingSettings(inner);
+        using var vm = new AboutPreferencesViewModel(new NoOpUiService(), settings, new ServerStopCoordinator(NoOpUiService.Instance, NoOp.Create<IServerRuntimeHost>()), NoOp.Create<IUpdateCheckerService>(), static _ => { }, static () => { }, NoOp.Create<IExternalLauncher>(), NoOp.Create<IAppUpdateService>(), NoOp.Create<IAccentColorService>());
+
+        await vm.ResetAllSettingsCommand.ExecuteAsync(null);
+        await vm.FlushPendingSaveAsync();
+
+        Assert.Equal(1, settings.SaveCount);
+    }
+
+    [Fact]
+    public void OpenGithub_LaunchFailure_NotifiesWarning()
+    {
+        var ui = new ManualUiService();
+        var vm = Create(ui, launcher: NoOp.Create<IExternalLauncher>());
+
+        vm.OpenGithubCommand.Execute(null);
+
+        Assert.Contains(ui.Notifications, static n => n.Type == NotificationType.Warning);
+    }
+
+    [Fact]
+    public async Task HandleUpdateResult_ConcurrentCall_IsIgnored()
+    {
+        var gate = new TaskCompletionSource<bool>();
+        var ui = new GatedConfirmUiService(gate.Task);
+        var update = new MockAppUpdateService();
+        var vm = Create(ui, appUpdateService: update);
+        var result = new UpdateCheckResult(true, "2.1.0", "2.2.0", "v2.2.0", "測試", "https://example.com/u.exe", null, "https://example.com");
+
+        Task first = vm.HandleUpdateResultAsync(result, TestContext.Current.CancellationToken);
+        await vm.HandleUpdateResultAsync(result, TestContext.Current.CancellationToken);
+        gate.SetResult(false);
+        await first;
+
+        Assert.Equal(1, ui.ConfirmCount);
+    }
+
+    private sealed class GatedConfirmUiService(Task<bool> gate) : NoOpUiService
+    {
+        public int ConfirmCount { get; private set; }
+
+        public override Task<bool> ConfirmAsync(string message, string title, UiMessageLevel level = UiMessageLevel.Question)
+        {
+            ConfirmCount++;
+            return gate;
+        }
+    }
+
+    private sealed class CountingSettings(SettingsManager inner) : ISettingsManager
+    {
+        public int SaveCount { get; private set; }
+
+        public string GetServersRoot() => inner.GetServersRoot();
+
+        public void SetServersRoot(string? path) => inner.SetServersRoot(path);
+
+        public void SetExactServersRoot(string? path) => inner.SetExactServersRoot(path);
+
+        public string GetValidatedServersRootPath(bool create = false) => inner.GetValidatedServersRootPath(create);
+
+        public bool IsAutoUpdateEnabled() => inner.IsAutoUpdateEnabled();
+
+        public bool IsAutoBackupBeforeStartEnabled() => inner.IsAutoBackupBeforeStartEnabled();
+
+        public int GetBackupRetentionCount() => inner.GetBackupRetentionCount();
+
+        public MainWindowSettings GetMainWindowSettings() => inner.GetMainWindowSettings();
+
+        public void SetMainWindowSettings(int width, int height, int? x = null, int? y = null, bool maximized = false) => inner.SetMainWindowSettings(width, height, x, y, maximized);
+
+        public string GetThemeMode() => inner.GetThemeMode();
+
+        public string? GetCustomAccentColor() => inner.GetCustomAccentColor();
+
+        public void SetPreferences(UserPreferences preferences)
+        {
+            SaveCount++;
+            inner.SetPreferences(preferences);
+        }
+    }
+
+    [Fact]
     public void BackupRetentionCount_NaN_RestoresCurrentSetting()
     {
         var settings = new SettingsManager(_testDir);
-        settings.SetBackupRetentionCount(5);
+        settings.UpdatePreferences(p => p with { BackupRetentionCount = 5 });
         var vm = Create(new NoOpUiService(), settings);
 
         vm.BackupRetentionCount = double.NaN;
@@ -286,23 +327,24 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     }
 
     [Fact]
-    public void BackupRetentionCount_OutOfRangeIsClamped()
+    public async Task BackupRetentionCount_OutOfRange_Clamps()
     {
         var settings = new SettingsManager(_testDir);
         var vm = Create(new NoOpUiService(), settings);
 
         vm.BackupRetentionCount = 999;
+        await vm.FlushPendingSaveAsync();
 
         Assert.Equal(100, vm.BackupRetentionCount);
         Assert.Equal(100, settings.GetBackupRetentionCount());
     }
 
     [Fact]
-    public async Task ResetAllSettings_RestoresBackupDefaults()
+    public async Task ResetAllSettings_Confirmed_RestoresBackupDefaults()
     {
         var settings = new SettingsManager(_testDir);
-        settings.SetAutoBackupBeforeStartEnabled(true);
-        settings.SetBackupRetentionCount(3);
+        settings.UpdatePreferences(p => p with { AutoBackupBeforeStart = true });
+        settings.UpdatePreferences(p => p with { BackupRetentionCount = 3 });
         var vm = Create(new NoOpUiService(), settings);
 
         await vm.ResetAllSettingsCommand.ExecuteAsync(null);

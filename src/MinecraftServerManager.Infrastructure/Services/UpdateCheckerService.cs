@@ -2,36 +2,28 @@ using System.Text.Json.Serialization;
 using MinecraftServerManager.Core;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Utilities;
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Services;
 
 /// <summary>GitHub Releases 應用程式更新檢查服務實作</summary>
-public sealed class UpdateCheckerService(IHttpPort httpPort) : IUpdateCheckerService
+public sealed class UpdateCheckerService : IUpdateCheckerService
 {
-    private static readonly Uri LatestReleaseUri = BuildLatestReleaseUri();
-    private const string TrustedAssetHost = "github.com";
-    private static readonly string TrustedAssetPathPrefix = BuildTrustedAssetPathPrefix();
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(UpdateCheckerService));
 
-    private static string RepositoryPath => new Uri(AppInfo.RepositoryUrl).AbsolutePath.Trim('/');
+    private readonly IHttpPort _httpPort;
 
-    private static Uri BuildLatestReleaseUri() =>
-        new($"https://api.github.com/repos/{RepositoryPath}/releases/latest");
-
-    private static string BuildTrustedAssetPathPrefix() =>
-        $"/{RepositoryPath}/releases/download/";
-
-    /// <summary>更新資產只接受本專案 GitHub Release 的 HTTPS 位址</summary>
-    private static bool IsTrustedAssetUrl(string url) =>
-        Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)
-        && uri.Scheme == Uri.UriSchemeHttps
-        && string.Equals(uri.Host, TrustedAssetHost, StringComparison.OrdinalIgnoreCase)
-        && uri.AbsolutePath.StartsWith(TrustedAssetPathPrefix, StringComparison.Ordinal);
+    public UpdateCheckerService(IHttpPort httpPort)
+    {
+        ArgumentNullException.ThrowIfNull(httpPort);
+        _httpPort = httpPort;
+    }
 
     public async Task<UpdateCheckResult> CheckForUpdateAsync(CancellationToken cancellationToken = default)
     {
         string currentVersionStr = AppInfo.Version;
-        string defaultPageUrl = AppInfo.RepositoryUrl + "/releases";
+        string defaultPageUrl = GitHubReleaseTrustPolicy.DefaultReleasePageUrl;
 
         UpdateCheckResult Unavailable(string title, string notes) => new(
             HasUpdate: false,
@@ -45,18 +37,18 @@ public sealed class UpdateCheckerService(IHttpPort httpPort) : IUpdateCheckerSer
 
         try
         {
-            string? json = await httpPort.GetTextAsync(LatestReleaseUri, cancellationToken).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(json))
+            using var response = await _httpPort.GetJsonDocumentAsync(GitHubReleaseTrustPolicy.LatestReleaseUri, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccess || response.Payload is null)
             {
                 return Unavailable("無法取得更新資訊", "未能自 GitHub 取得 Release 資料");
             }
 
-            if (JsonCodec.Deserialize<GitHubReleasePayload>(json) is not { } release)
+            if (JsonCodec.Deserialize<GitHubReleasePayload>(response.Payload.RootElement) is not { } release)
             {
                 return Unavailable("無法解析更新資訊", "GitHub Release 資料格式無效");
             }
 
-            string tagName = release.TagName ?? "";
+            string tagName = release.TagName ?? string.Empty;
             bool hasUpdate = VersionValue.TryParse(tagName, out var latestVer) &&
                 VersionValue.TryParse(currentVersionStr, out var currentVer) &&
                 latestVer > currentVer;
@@ -66,7 +58,7 @@ public sealed class UpdateCheckerService(IHttpPort httpPort) : IUpdateCheckerSer
             string? FindTrustedAssetUrl(string name) => assets
                 .FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase)
                     && !string.IsNullOrWhiteSpace(a.BrowserDownloadUrl)
-                    && IsTrustedAssetUrl(a.BrowserDownloadUrl))
+                    && GitHubReleaseTrustPolicy.IsTrustedAssetUrl(a.BrowserDownloadUrl))
                 ?.BrowserDownloadUrl;
 
             string? downloadUrl = FindTrustedAssetUrl("MinecraftServerManager.exe");
@@ -77,13 +69,15 @@ public sealed class UpdateCheckerService(IHttpPort httpPort) : IUpdateCheckerSer
                 CurrentVersion: currentVersionStr,
                 LatestVersion: tagName,
                 ReleaseTitle: release.Name ?? tagName,
-                ReleaseNotes: release.Body ?? "",
+                ReleaseNotes: release.Body ?? string.Empty,
                 DownloadUrl: downloadUrl,
                 Sha256ChecksumUrl: checksumUrl,
-                ReleasePageUrl: release.HtmlUrl ?? defaultPageUrl);
+                // 頁面連結會交給瀏覽器開啟，非官方 Release 頁一律改用預設頁
+                ReleasePageUrl: GitHubReleaseTrustPolicy.IsTrustedReleasePageUrl(release.HtmlUrl) ? release.HtmlUrl! : defaultPageUrl);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning(ex, "檢查應用程式更新失敗");
             return Unavailable("檢查更新時發生例外", ex.Message);
         }
     }

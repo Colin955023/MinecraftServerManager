@@ -3,26 +3,26 @@
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
   xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-  xmlns:vm="using:MinecraftServerManager.App.ViewModels"
+  xmlns:controls="using:MinecraftServerManager.App.Controls"
   mc:Ignorable="d"
   Title="匯入外部 Minecraft 伺服器"
   PrimaryButtonText="開始匯入"
   CloseButtonText="取消"
   DefaultButton="Primary"
-  PrimaryButtonClick="Dialog_PrimaryButtonClick">
+  PrimaryButtonClick="OnPrimaryButtonClicked">
 
   <StackPanel Margin="0,12,0,0"
     MinWidth="480">
     <TextBlock Text="支援從本機資料夾或 ZIP 壓縮檔匯入既有伺服器"
-      Foreground="{ThemeResource MutedTextBrush}"
-      FontSize="13"
+      Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+      FontSize="{StaticResource BodyTextBlockFontSize}"
       Margin="0,0,0,16" />
 
     <!-- 來源路徑 -->
     <TextBlock Text="來源路徑（目錄或 .zip 檔）："
-      FontSize="13"
+      FontSize="{StaticResource BodyTextBlockFontSize}"
       FontWeight="SemiBold"
-      Foreground="{ThemeResource TextBrush}"
+      Foreground="{ThemeResource TextFillColorPrimaryBrush}"
       Margin="0,0,0,6" />
     <Grid Margin="0,0,0,14">
       <Grid.ColumnDefinitions>
@@ -31,36 +31,36 @@
         <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
       <TextBox Grid.Column="0"
+        Margin="0,0,8,0"
         Text="{x:Bind ViewModel.SourcePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-        Margin="0,0,8,0" />
+        AutomationProperties.Name="來源路徑" />
       <Button Grid.Column="1"
         Content="瀏覽 ZIP"
         Command="{x:Bind ViewModel.BrowseZipCommand}"
-        Margin="0,0,6,0"
-        Padding="10,6" />
+        Margin="0,0,6,0" />
       <Button Grid.Column="2"
         Content="瀏覽資料夾"
-        Command="{x:Bind ViewModel.BrowseFolderCommand}"
-        Padding="10,6" />
+        Command="{x:Bind ViewModel.BrowseFolderCommand}" />
     </Grid>
 
     <!-- 匯入後的伺服器名稱 -->
     <TextBlock Text="匯入後的伺服器名稱："
-      FontSize="13"
+      FontSize="{StaticResource BodyTextBlockFontSize}"
       FontWeight="SemiBold"
-      Foreground="{ThemeResource TextBrush}"
+      Foreground="{ThemeResource TextFillColorPrimaryBrush}"
       Margin="0,0,0,6" />
-    <TextBox Text="{x:Bind ViewModel.ServerName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+    <TextBox AutomationProperties.Name="匯入後的伺服器名稱"
+      Text="{x:Bind ViewModel.ServerName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
       Margin="0,0,0,14" />
 
     <!-- 匯入方式 -->
     <TextBlock Text="匯入方式："
-      FontSize="13"
+      FontSize="{StaticResource BodyTextBlockFontSize}"
       FontWeight="SemiBold"
-      Foreground="{ThemeResource TextBrush}"
+      Foreground="{ThemeResource TextFillColorPrimaryBrush}"
       Margin="0,0,0,6" />
-    <StackPanel Orientation="Horizontal"
-      Spacing="24"
+    <controls:WrapPanel
+      ItemSpacing="24" LineSpacing="8"
       Margin="0,0,0,14">
       <RadioButton Content="複製（保留原始來源）"
         GroupName="ImportTransferModeGroup"
@@ -68,12 +68,13 @@
       <RadioButton Content="遷移（匯入完成後移除原始來源）"
         GroupName="ImportTransferModeGroup"
         IsChecked="{x:Bind ViewModel.IsMoveMode, Mode=TwoWay}" />
-    </StackPanel>
+    </controls:WrapPanel>
 
     <!-- 錯誤狀態提示 -->
-    <TextBlock Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
-      Foreground="{ThemeResource DangerBrush}"
-      TextWrapping="Wrap"
-      FontSize="12" />
+    <InfoBar Severity="Error"
+      controls:InfoBarThemeRefresh.IsEnabled="True"
+      IsClosable="False"
+      IsOpen="{x:Bind controls:UiBindHelpers.HasText(ViewModel.StatusMessage), Mode=OneWay}"
+      Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}" />
   </StackPanel>
 </ContentDialog>

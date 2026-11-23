@@ -1,5 +1,6 @@
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
+using MinecraftServerManager.Domain.Mods;
 
 namespace MinecraftServerManager.UnitTests.TestSupport;
 
@@ -10,24 +11,36 @@ internal class ManualUiService : NoOpUiService
 
     public bool ConfirmResult { get; set; } = true;
     public bool ConfirmThrows { get; set; }
+    public Action? OnConfirm { get; set; }
     public List<string> ConfirmMessages { get; } = [];
     public Queue<bool> ChoiceResults { get; } = new();
     public TaskCompletionSource<bool>? ChoiceGate { get; set; }
     public List<(string Message, string PrimaryText)> ChoiceMessages { get; } = [];
     public bool? YesNoCancelDecision { get; set; } = true;
     public string? FolderToPick { get; set; }
+    /// <summary><see cref="PickFilesAsync"/> 的回傳值（預設 null 代表使用者取消）</summary>
+    public IReadOnlyList<string>? FilesToPick { get; set; }
     public string? SaveFileResult { get; set; }
+    public Queue<ModListExportFormat?> ExportModListFormats { get; } = new();
     public bool? ImportServerResult { get; set; }
+    public List<ModInstallQueueItem> ShownModInstallQueue { get; } = [];
+    public bool? ModInstallQueueResult { get; set; }
     public List<ModUpdateCandidateItem> ShownModUpdateCandidates { get; } = [];
+    /// <summary><see cref="ShowModUpdatesAsync"/> 的回傳值（預設 null 代表使用者取消）</summary>
+    public IReadOnlyList<ModUpdateCandidateItem>? ModUpdatesResult { get; set; }
     public int ActivateMainWindowCount { get; private set; }
     public bool RestartCalled { get; private set; }
     public Exception? RestartException { get; set; }
     public List<string> ErrorMessages { get; } = [];
+    public List<string> ErrorTitles { get; } = [];
     public string? LastErrorMessage => ErrorMessages.Count > 0 ? ErrorMessages[^1] : null;
     public List<(string Message, NotificationType Type)> Notifications { get; } = [];
     public (string Message, NotificationType Type)? LastNotification => Notifications.Count > 0 ? Notifications[^1] : null;
 
     public override void PostToUi(Action action, bool afterLayout = false) => action();
+
+    public override Task<IReadOnlyList<string>?> PickFilesAsync(string title, FileTypeChoice fileType, bool multiselect = false) =>
+        Task.FromResult(FilesToPick);
 
     public override IUiTimer CreateUiTimer(TimeSpan interval, Action tick)
     {
@@ -37,7 +50,6 @@ internal class ManualUiService : NoOpUiService
         return timer;
     }
 
-    /// <summary>觸發所有執行中的計時器一次</summary>
     public void TickRunningTimers()
     {
         foreach (var timer in _timers.ToArray())
@@ -57,6 +69,7 @@ internal class ManualUiService : NoOpUiService
         }
 
         ConfirmMessages.Add(message);
+        OnConfirm?.Invoke();
         return Task.FromResult(ConfirmResult);
     }
 
@@ -89,11 +102,22 @@ internal class ManualUiService : NoOpUiService
     public override Task<bool?> ShowImportServerAsync(ImportServerViewModel viewModel) =>
         Task.FromResult(ImportServerResult);
 
-    public override Task<IReadOnlyList<ModUpdateCandidateItem>?> ShowModUpdatesAsync(IEnumerable<ModUpdateCandidateItem> items)
+    public override Task<bool?> ShowModInstallQueueAsync(ModInstallQueueReviewViewModel viewModel)
     {
-        ShownModUpdateCandidates.AddRange(items);
-        return Task.FromResult<IReadOnlyList<ModUpdateCandidateItem>?>(null);
+        ArgumentNullException.ThrowIfNull(viewModel);
+        ShownModInstallQueue.AddRange(viewModel.Queue);
+        return Task.FromResult(ModInstallQueueResult);
     }
+
+    public override Task<IReadOnlyList<ModUpdateCandidateItem>?> ShowModUpdatesAsync(ModUpdateSelectionViewModel viewModel)
+    {
+        ArgumentNullException.ThrowIfNull(viewModel);
+        ShownModUpdateCandidates.AddRange(viewModel.CandidateItems);
+        return Task.FromResult(ModUpdatesResult);
+    }
+
+    public override Task<ModListExportFormat?> ShowExportModListAsync() =>
+        Task.FromResult(ExportModListFormats.Count > 0 ? ExportModListFormats.Dequeue() : null);
 
     public override void ActivateMainWindow() => ActivateMainWindowCount++;
 
@@ -109,6 +133,7 @@ internal class ManualUiService : NoOpUiService
     public override Task ShowErrorAsync(string message, string title)
     {
         ErrorMessages.Add(message);
+        ErrorTitles.Add(title);
         return Task.CompletedTask;
     }
 
@@ -122,6 +147,8 @@ internal class ManualUiService : NoOpUiService
         public void StartTimer() => IsRunning = true;
 
         public void StopTimer() => IsRunning = false;
+
+        public void Dispose() => IsRunning = false;
 
         public void Tick() => tick();
     }

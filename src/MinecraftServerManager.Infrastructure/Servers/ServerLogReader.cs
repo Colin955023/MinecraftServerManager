@@ -1,22 +1,29 @@
 using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
 /// <summary>latest.log 尾端讀取</summary>
-public sealed class ServerLogReader(int maxBytesToRead = ServerLogReader.DefaultMaxBytes, int maxLines = ServerLogReader.DefaultMaxLines) : IServerLogReader
+public sealed class ServerLogReader : IServerLogReader
 {
     /// <summary>預設讀取尾端位元組上限（2 MB）</summary>
     public const int DefaultMaxBytes = 2 * 1024 * 1024;
 
-    /// <summary>預設讀取行數上限</summary>
     private const int DefaultMaxLines = 2500;
 
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerLogReader));
-    private readonly int _maxBytesToRead = Math.Max(1, maxBytesToRead);
-    private readonly int _maxLines = Math.Max(1, maxLines);
+
+    private readonly int _maxBytesToRead;
+    private readonly int _maxLines;
+
+    public ServerLogReader(int maxBytesToRead = DefaultMaxBytes, int maxLines = DefaultMaxLines)
+    {
+        _maxBytesToRead = Math.Max(1, maxBytesToRead);
+        _maxLines = Math.Max(1, maxLines);
+    }
 
     public Task<IReadOnlyList<string>> ReadLatestLogTailAsync(string serverPath, CancellationToken cancellationToken = default)
     {
@@ -30,7 +37,7 @@ public sealed class ServerLogReader(int maxBytesToRead = ServerLogReader.Default
 
     private List<string> ReadTail(string serverPath)
     {
-        string logFile = Path.Combine(serverPath, "logs", "latest.log");
+        string logFile = Path.Combine(serverPath, ServerDefaults.LogsDirectoryName, ServerDefaults.LatestLogFileName);
         if (!SafeFileSystem.FileExists(logFile))
         {
             return [];
@@ -79,7 +86,9 @@ public sealed class ServerLogReader(int maxBytesToRead = ServerLogReader.Default
 
             if (index >= first)
             {
-                result.Add(ModHelpers.StripColorAndFormattingCodes(lineSpan.ToString()).TrimStart('\uFEFF'));
+                // BOM 只可能出現在檔案開頭（第 0 行）
+                ReadOnlySpan<char> line = index == 0 && lineSpan.StartsWith('\uFEFF') ? lineSpan[1..] : lineSpan;
+                result.Add(ModHelpers.StripColorAndFormattingCodes(line.ToString()));
             }
 
             index++;

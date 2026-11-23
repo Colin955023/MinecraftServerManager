@@ -2,21 +2,29 @@ using MinecraftServerManager.Core.Ports;
 
 namespace MinecraftServerManager.Infrastructure.FileSystem;
 
-/// <summary>呈現層的本機檔案系統存取</summary>
+/// <summary>以背景執行緒執行之呈現層檔案系統操作</summary>
 public sealed class LocalFileSystem : ILocalFileSystem
 {
-    public bool FileExists(string? path) =>
-        !string.IsNullOrWhiteSpace(path) && SafeFileSystem.FileExists(path);
+    public Task<bool> FileExistsAsync(string? path, CancellationToken cancellationToken = default) =>
+        string.IsNullOrWhiteSpace(path)
+            ? Task.FromResult(false)
+            : Task.Run(() => SafeFileSystem.FileExists(path), cancellationToken);
 
-    public bool DirectoryExists(string? path) =>
-        !string.IsNullOrWhiteSpace(path) && SafeFileSystem.DirectoryExists(path);
+    public Task<bool> DirectoryExistsAsync(string? path, CancellationToken cancellationToken = default) =>
+        string.IsNullOrWhiteSpace(path)
+            ? Task.FromResult(false)
+            : Task.Run(() => SafeFileSystem.DirectoryExists(path), cancellationToken);
 
-    public void CreateDirectory(string path)
+    public Task CreateDirectoryAsync(string path, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        SafeFileSystem.CreateDirectory(path);
+        return Task.Run(() => SafeFileSystem.CreateDirectory(path), cancellationToken);
     }
 
-    public DateTime? GetDirectoryLastWriteTime(string path) =>
-        DirectoryExists(path) ? SafeFileSystem.GetDirectoryLastWriteTime(path) : null;
+    public Task<DateTimeOffset?> GetDirectoryLastWriteTimeAsync(string path, CancellationToken cancellationToken = default) =>
+        string.IsNullOrWhiteSpace(path)
+            ? Task.FromResult<DateTimeOffset?>(null)
+            : Task.Run(
+                () => SafeFileSystem.TryGetDirectoryLastWriteTime(path),
+                cancellationToken);
 }

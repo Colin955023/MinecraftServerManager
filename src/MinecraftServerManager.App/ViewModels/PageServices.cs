@@ -1,13 +1,12 @@
 using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Ports;
-using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Infrastructure.Settings;
 
 namespace MinecraftServerManager.App.ViewModels;
 
 /// <summary>頁面組裝所需的服務集合，僅供組合根與 <see cref="PageViewModelFactory"/> 使用</summary>
 public sealed record PageServices(
-    SettingsManager SettingsManager,
+    ISettingsManager SettingsManager,
     IServerManager ServerManager,
     IServerBackupService BackupService,
     IServerRuntimeHost RuntimeHost,
@@ -35,4 +34,5 @@ public sealed record PageServices(
     IExternalLauncher Launcher,
     IMinecraftJavaRequirementService JavaRequirementService,
     IJavaInstaller JavaInstaller,
-    IAppUpdateService AppUpdateService);
+    IAppUpdateService AppUpdateService,
+    IAccentColorService AccentColorService);

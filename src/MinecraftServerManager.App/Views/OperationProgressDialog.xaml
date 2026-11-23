@@ -4,8 +4,8 @@
   xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
   xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
   mc:Ignorable="d"
-  Title="{x:Bind DialogHeading, Mode=OneTime}"
-  Closing="ContentDialog_Closing">
+  Title="{x:Bind DialogHeading}"
+  Closing="OnDialogClosing">
 
   <!-- 放寬 ContentDialog 預設最大寬度（548），讓固定尺寸內容可完整顯示 -->
   <ContentDialog.Resources>
@@ -23,15 +23,16 @@
 
     <!-- 階段狀態說明（固定三行高度，過長以刪節號截斷並以提示顯示全文） -->
     <TextBlock Grid.Row="0"
-      Text="{x:Bind PhaseMessage, Mode=OneWay}"
-      ToolTipService.ToolTip="{x:Bind PhaseMessage, Mode=OneWay}"
-      FontSize="14"
       Height="64"
+      Margin="0,0,0,16"
+      Text="{x:Bind PhaseMessage, Mode=OneWay}"
+      FontSize="{StaticResource BodyTextBlockFontSize}"
+      Foreground="{ThemeResource TextFillColorSecondaryBrush}"
       MaxLines="3"
       TextWrapping="Wrap"
       TextTrimming="CharacterEllipsis"
-      Foreground="{ThemeResource MutedTextBrush}"
-      Margin="0,0,0,16" />
+      ToolTipService.ToolTip="{x:Bind PhaseMessage, Mode=OneWay}"
+      AutomationProperties.LiveSetting="Polite" />
 
     <!-- 進度列 -->
     <ProgressBar Grid.Row="1"
@@ -40,15 +41,16 @@
       Maximum="100"
       Value="{x:Bind ProgressValue, Mode=OneWay}"
       Foreground="{ThemeResource AccentBrush}"
-      CornerRadius="4" />
+      CornerRadius="{StaticResource ControlCornerRadius}"
+      AutomationProperties.Name="作業進度" />
 
     <!-- 百分比文字 -->
     <TextBlock Grid.Row="2"
       Text="{x:Bind PercentDisplay, Mode=OneWay}"
-      FontSize="13"
+      FontSize="{StaticResource BodyTextBlockFontSize}"
       FontWeight="SemiBold"
       HorizontalAlignment="Right"
-      Foreground="{ThemeResource TextBrush}"
+      Foreground="{ThemeResource TextFillColorPrimaryBrush}"
       Margin="0,8,0,0" />
   </Grid>
 </ContentDialog>

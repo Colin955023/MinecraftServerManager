@@ -1,3 +1,4 @@
+// 示意資料：MC_JAVA_MAP 等對映為寫死值，僅供展示；實際 App 依 Mojang 官方資料取得。
 export const MC_JAVA_MAP = {
   "1.21.4": 21,
   "1.21.1": 21,
@@ -14,17 +15,23 @@ export const LOADER_VERSIONS = {
 };
 
 export const DANGEROUS_JVM_PREFIXES = [
+  "@",
   "-XX:OnError",
   "-XX:OnOutOfMemoryError",
+  "-XX:VMOptionsFile",
+  "-XX:OptionsFile",
+  "-XX:Flags",
+  "-javaagent:",
   "-agentpath",
   "-agentlib",
+  "-Xrun",
   "-Xbootclasspath"
 ];
 
 export const JVM_PRESETS_ZGC = [
   { opt: "-XX:+UseZGC", desc: "啟用低延遲 ZGC 垃圾回收器（Java 21+ 建議）" },
   { opt: "-XX:+ZGenerational", desc: "啟用世代化 ZGC 以降低停頓時間" },
-  { opt: "-XX:+AlwaysPreTouch", desc: "啟動時預先配置記憶體分頁，減少運行期抖動" }
+  { opt: "-XX:+AlwaysPreTouch", desc: "啟動時預先配置記憶體分頁，減少執行期抖動" }
 ];
 
 export const JVM_PRESETS_G1 = [
@@ -37,6 +44,8 @@ export const JVM_PRESETS_G1 = [
 export const MODRINTH_CATALOG = [
   {
     id: "fabric-api",
+    published: "2018-12-01",
+    updated: "2026-11-10",
     name: "Fabric API",
     author: "modmuss50",
     downloads: 95400000,
@@ -49,6 +58,8 @@ export const MODRINTH_CATALOG = [
   },
   {
     id: "sodium",
+    published: "2020-01-04",
+    updated: "2026-10-28",
     name: "Sodium",
     author: "jellysquid3",
     downloads: 48200000,
@@ -61,6 +72,8 @@ export const MODRINTH_CATALOG = [
   },
   {
     id: "lithium",
+    published: "2019-11-20",
+    updated: "2026-11-03",
     name: "Lithium",
     author: "jellysquid3",
     downloads: 31700000,
@@ -73,6 +86,8 @@ export const MODRINTH_CATALOG = [
   },
   {
     id: "cloth-config",
+    published: "2019-06-15",
+    updated: "2026-09-30",
     name: "Cloth Config API",
     author: "shedaniel",
     downloads: 42500000,
@@ -85,6 +100,8 @@ export const MODRINTH_CATALOG = [
   },
   {
     id: "ferrite-core",
+    published: "2020-11-08",
+    updated: "2026-08-22",
     name: "FerriteCore",
     author: "malte0811",
     downloads: 38900000,
@@ -99,7 +116,7 @@ export const MODRINTH_CATALOG = [
 
 export const DEFAULT_PROPERTIES = [
   { key: "server-port", cat: "基本設定", type: "text", def: "25565", val: "25565", desc: "伺服器監聽的 TCP 連接埠 (1–65535)" },
-  { key: "motd", cat: "基本設定", type: "text", def: "A Minecraft Server", val: "Survival Paper 1.21.4 Community", desc: "多人遊戲伺服器列表顯示的歡迎標語" },
+  { key: "motd", cat: "基本設定", type: "text", def: "A Minecraft Server", val: "Survival Paper 1.21.4 Community", desc: "多人遊戲伺服器清單顯示的歡迎標語" },
   { key: "max-players", cat: "基本設定", type: "text", def: "20", val: "20", desc: "同時可連線的最大玩家人數" },
   { key: "gamemode", cat: "遊戲設定", type: "options", options: ["survival", "creative", "adventure", "spectator"], def: "survival", val: "survival", desc: "新加入玩家的預設遊戲模式" },
   { key: "difficulty", cat: "遊戲設定", type: "options", options: ["peaceful", "easy", "normal", "hard"], def: "easy", val: "hard", desc: "遊戲難度等級" },
@@ -190,7 +207,7 @@ export function createInitialState() {
           { name: "GrieferX99", uuid: "d10077ac-9831-42f0-991a-001122334455", reason: "惡意破壞公有建築", created: "2026-10-20 22:18 (GMT+8)" }
         ],
         bannedIps: [
-          { ip: "203.0.113.45", reason: "頻繁發送異常連線封包", created: "2026-10-21 09:05 (GMT+8)" }
+          { ip: "203.0.113.45", reason: "頻繁傳送異常連線封包", created: "2026-10-21 09:05 (GMT+8)" }
         ]
       },
       {
@@ -215,7 +232,7 @@ export function createInitialState() {
           { fileName: "Modded-Fabric_20261113_2100.zip", size: "310.5 MB", created: "2026-11-13 21:00" }
         ],
         onlinePlayers: [],
-        consoleLogs: ["[系統] 伺服器目前未執行。按下上方「🚀 啟動」以啟動伺服器。"],
+        consoleLogs: ["[系統] 伺服器目前未執行。按下上方「啟動」以啟動伺服器。"],
         cmdHistory: [],
         properties: DEFAULT_PROPERTIES.map((p) =>
           p.key === "server-port" ? { ...p, val: "25566" } : p.key === "motd" ? { ...p, val: "Fabric 1.21.1 Modded World" } : { ...p }

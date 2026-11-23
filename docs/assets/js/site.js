@@ -1,10 +1,17 @@
+import { copyPlainText } from "./util.js";
+
 const THEME_STORAGE_KEY = "theme";
 
 function initSiteThemeSwitcher() {
   const meta = document.querySelector('meta[name="color-scheme"]');
   const toggleBtn = document.getElementById("site-theme-toggle");
-  const labelEl = document.getElementById("site-theme-label");
   if (!meta || !toggleBtn) return;
+
+  // 手動切換主題時，瀏覽器介面色同步改用該主題的 theme-color
+  const themeColorMetas = [...document.querySelectorAll('meta[name="theme-color"][media]')];
+  const themeColors = Object.fromEntries(
+    themeColorMetas.map((m) => [m.media.includes("dark") ? "dark" : "light", m.content])
+  );
 
   const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
@@ -26,17 +33,11 @@ function initSiteThemeSwitcher() {
     const saved = readSavedTheme();
     const effective = getEffectiveTheme(saved);
     meta.setAttribute("content", saved || "light dark");
-
-    if (labelEl) {
-      labelEl.textContent = effective === "dark" ? "深色" : "淺色";
+    for (const m of themeColorMetas) {
+      const own = m.media.includes("dark") ? "dark" : "light";
+      m.content = themeColors[saved ?? own];
     }
     toggleBtn.setAttribute("aria-pressed", effective === "dark" ? "true" : "false");
-    toggleBtn.setAttribute(
-      "aria-label",
-      effective === "dark"
-        ? "目前為深色主題，點擊切換為淺色"
-        : "目前為淺色主題，點擊切換為深色"
-    );
   }
 
   toggleBtn.addEventListener("click", () => {
@@ -118,7 +119,6 @@ function initResponsiveNavbar() {
           else visibleIds.delete(entry.target.id);
         }
         const active = pairs.find((pair) => visibleIds.has(pair.sec.id));
-        if (!active) return;
         for (const pair of pairs) {
           if (pair === active) pair.link.setAttribute("aria-current", "true");
           else pair.link.removeAttribute("aria-current");
@@ -167,12 +167,8 @@ function initCopyButtons() {
     const content = (target.innerText || target.textContent || "").trim();
     if (!content) return;
 
-    try {
-      await navigator.clipboard.writeText(content);
-      reportCopy(btn, true, "已複製");
-    } catch {
-      reportCopy(btn, false, "複製失敗");
-    }
+    const ok = await copyPlainText(content);
+    reportCopy(btn, ok, ok ? "已複製" : "複製失敗");
   }
 
   const targets = new Set();
@@ -185,6 +181,25 @@ function initCopyButtons() {
         handleCopy(e.source, target);
       }
     });
+  });
+}
+
+/** 不支援 Invoker Commands（command/commandfor）的瀏覽器改以 click 派送相同的 command 事件 */
+function initInvokerCommandsFallback() {
+  if ("command" in HTMLButtonElement.prototype) return;
+  document.addEventListener("click", (e) => {
+    const source = e.target instanceof Element ? e.target.closest("button[commandfor][command]") : null;
+    if (!source) return;
+    const target = document.getElementById(source.getAttribute("commandfor"));
+    if (!target) return;
+    const command = source.getAttribute("command");
+    const event = new Event("command", { cancelable: true });
+    Object.defineProperties(event, { command: { value: command }, source: { value: source } });
+    if (!target.dispatchEvent(event)) return;
+    if (target instanceof HTMLDialogElement) {
+      if (command === "show-modal" && !target.open) target.showModal();
+      else if (command === "close" && target.open) target.close();
+    }
   });
 }
 
@@ -220,14 +235,37 @@ function initLightbox() {
   dialog.addEventListener("close", () => {
     if (imgEl) imgEl.removeAttribute("src");
   });
+
+  // 不支援 closedby="any" 時，按遮罩關閉燈箱（Esc 由強制回應對話框原生處理）
+  if (!("closedBy" in HTMLDialogElement.prototype)) {
+    dialog.addEventListener("click", (e) => {
+      if (e.target === dialog) dialog.close();
+    });
+  }
 }
 
 initSiteThemeSwitcher();
+initInvokerCommandsFallback();
 initResponsiveNavbar();
 initCopyButtons();
 initLightbox();
 
-// 模擬器（約 150 KB）僅在接近視窗時才載入，首屏不解析
+function loadStylesheet(href) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`link[rel="stylesheet"][href="${href}"]`)) {
+      resolve();
+      return;
+    }
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = href;
+    link.onload = () => resolve();
+    link.onerror = () => reject(new Error(`無法載入樣式：${href}`));
+    document.head.appendChild(link);
+  });
+}
+
+// 模擬器（約 150 KB）僅在接近視窗時才動態載入 CSS 與 JS，不阻塞首屏
 const simulatorSection = document.getElementById("simulator");
 if (simulatorSection) {
   const observer = new IntersectionObserver(
@@ -235,13 +273,16 @@ if (simulatorSection) {
       if (!entry.isIntersecting) return;
       observer.disconnect();
       try {
-        const { initWinUiSimulator } = await import("./simulator/index.js");
+        const [, { initWinUiSimulator }] = await Promise.all([
+          loadStylesheet("assets/css/simulator.css"),
+          import("./simulator/index.js")
+        ]);
         initWinUiSimulator();
       } catch (err) {
         console.error("模擬器載入失敗", err);
       }
     },
-    { rootMargin: "800px 0px" }
+    { rootMargin: "200px 0px" }
   );
   observer.observe(simulatorSection);
 }

@@ -42,59 +42,113 @@ public sealed partial class WrapPanel : Panel
         }
     }
 
+    /// <summary>子項以無限高度量測；摺疊子項不佔空間</summary>
     protected override Size MeasureOverride(Size availableSize)
     {
-        double curLineX = 0;
-        double curLineY = 0;
-        double curLineHeight = 0;
+        var childConstraint = new Size(availableSize.Width, double.PositiveInfinity);
         double maxWidth = 0;
-
-        double itemSpacing = ItemSpacing;
-        double lineSpacing = LineSpacing;
+        double totalHeight = 0;
+        double currentLineWidth = 0;
+        double currentLineHeight = 0;
+        bool lineHasItem = false;
 
         foreach (var child in Children)
         {
-            child.Measure(availableSize);
-            var sz = child.DesiredSize;
-
-            if (curLineX + sz.Width > availableSize.Width && curLineX > 0)
+            if (child.Visibility != Visibility.Visible)
             {
-                curLineX = 0;
-                curLineY += curLineHeight + lineSpacing;
-                curLineHeight = 0;
+                continue;
             }
 
-            maxWidth = Math.Max(maxWidth, curLineX + sz.Width);
-            curLineX += sz.Width + itemSpacing;
-            curLineHeight = Math.Max(curLineHeight, sz.Height);
+            child.Measure(childConstraint);
+            Size size = child.DesiredSize;
+
+            if (lineHasItem && currentLineWidth + ItemSpacing + size.Width > availableSize.Width)
+            {
+                maxWidth = Math.Max(maxWidth, currentLineWidth);
+                totalHeight += currentLineHeight + LineSpacing;
+                currentLineWidth = size.Width;
+                currentLineHeight = size.Height;
+            }
+            else
+            {
+                currentLineWidth = lineHasItem ? currentLineWidth + ItemSpacing + size.Width : size.Width;
+                currentLineHeight = Math.Max(currentLineHeight, size.Height);
+                lineHasItem = true;
+            }
         }
 
-        return new Size(maxWidth, curLineY + curLineHeight);
+        if (lineHasItem)
+        {
+            maxWidth = Math.Max(maxWidth, currentLineWidth);
+            totalHeight += currentLineHeight;
+        }
+
+        return new Size(maxWidth, totalHeight);
     }
 
+    /// <summary>逐行以行高安排子項，使子項的 VerticalAlignment 在行內生效</summary>
     protected override Size ArrangeOverride(Size finalSize)
     {
-        double curLineX = 0;
-        double curLineY = 0;
-        double curLineHeight = 0;
+        double y = 0;
+        int i = 0;
+        int count = Children.Count;
 
-        double itemSpacing = ItemSpacing;
-        double lineSpacing = LineSpacing;
-
-        foreach (var child in Children)
+        while (i < count)
         {
-            var sz = child.DesiredSize;
-
-            if (curLineX + sz.Width > finalSize.Width && curLineX > 0)
+            while (i < count && Children[i].Visibility != Visibility.Visible)
             {
-                curLineX = 0;
-                curLineY += curLineHeight + lineSpacing;
-                curLineHeight = 0;
+                i++;
             }
 
-            child.Arrange(new Rect(curLineX, curLineY, sz.Width, sz.Height));
-            curLineX += sz.Width + itemSpacing;
-            curLineHeight = Math.Max(curLineHeight, sz.Height);
+            if (i >= count)
+            {
+                break;
+            }
+
+            int lineStart = i;
+            double lineWidth = 0;
+            double lineHeight = 0;
+            bool lineHasItem = false;
+            int lineEnd = i;
+
+            for (int j = i; j < count; j++)
+            {
+                var child = Children[j];
+                if (child.Visibility != Visibility.Visible)
+                {
+                    lineEnd = j + 1;
+                    continue;
+                }
+
+                double w = child.DesiredSize.Width;
+                double h = child.DesiredSize.Height;
+
+                if (lineHasItem && lineWidth + ItemSpacing + w > finalSize.Width)
+                {
+                    break;
+                }
+
+                lineWidth = lineHasItem ? lineWidth + ItemSpacing + w : w;
+                lineHeight = Math.Max(lineHeight, h);
+                lineHasItem = true;
+                lineEnd = j + 1;
+            }
+
+            double x = 0;
+            for (int k = lineStart; k < lineEnd; k++)
+            {
+                var child = Children[k];
+                if (child.Visibility != Visibility.Visible)
+                {
+                    continue;
+                }
+
+                child.Arrange(new Rect(x, y, child.DesiredSize.Width, lineHeight));
+                x += child.DesiredSize.Width + ItemSpacing;
+            }
+
+            y += lineHeight + LineSpacing;
+            i = lineEnd;
         }
 
         return finalSize;

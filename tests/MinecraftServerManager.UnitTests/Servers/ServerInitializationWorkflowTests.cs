@@ -1,96 +1,49 @@
-using MinecraftServerManager.Core.Ports;
-using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Infrastructure.Servers;
 
 namespace MinecraftServerManager.UnitTests.Servers;
 
 public sealed class ServerInitializationWorkflowTests
 {
-    private sealed class FakeServerRuntime : IServerRuntime
-    {
-        public int Pid => 1234;
-        public bool IsRunning { get; set; } = true;
-        public bool IsReady { get; set; }
-        public int? ExitCode => null;
-        public bool ShouldThrowOnStop { get; set; }
-        public int StopCallCount { get; private set; }
-
-        public event Action<string>? OutputLineReceived { add { } remove { } }
-        public event Action? ServerStarted { add { } remove { } }
-        public event Action? ServerReady;
-        public event Action<int>? ServerExited { add { } remove { } }
-
-        public void TriggerReady() => ServerReady?.Invoke();
-
-        public long? GetWorkingSet64() => null;
-
-        public Task StartAsync(ServerLaunchPlan plan, CancellationToken cancellationToken = default) => Task.CompletedTask;
-
-        public Task<bool> SendCommandAsync(string command, CancellationToken cancellationToken = default) => Task.FromResult(true);
-
-        public Task<ProcessExitResult> StopAsync(TimeSpan gracefulTimeout, CancellationToken cancellationToken = default)
-        {
-            StopCallCount++;
-            if (ShouldThrowOnStop)
-            {
-                throw new InvalidOperationException("停止伺服器失敗 (測試用例外)");
-            }
-            IsRunning = false;
-            return Task.FromResult(new ProcessExitResult(0, false));
-        }
-
-        public Task<ProcessExitResult?> WaitForExitAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
-            Task.FromResult(IsRunning ? null : new ProcessExitResult(0, false));
-
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
-
     [Fact]
-    public async Task WhenServerReadyFires_MarksReadyDetectedAndCallsStop()
+    public async Task ServerReady_Fired_MarksReadyAndStops()
     {
-        var fakeRuntime = new FakeServerRuntime();
+        var fakeRuntime = new FakeServerRuntime { IsRunning = true };
         using var workflow = new ServerInitializationWorkflow(fakeRuntime, new ServerLaunchPlanner());
 
         Assert.False(workflow.ReadyDetected);
 
-        fakeRuntime.TriggerReady();
+        fakeRuntime.RaiseReady();
 
-        for (int i = 0; i < 20 && fakeRuntime.StopCallCount == 0; i++)
-        {
-            await Task.Delay(25);
-        }
+        await TestWait.UntilAsync(() => fakeRuntime.StopCount > 0, "就緒後應呼叫停止");
 
         Assert.True(workflow.ReadyDetected);
-        Assert.True(fakeRuntime.StopCallCount > 0);
+        Assert.True(fakeRuntime.StopCount > 0);
     }
 
     [Fact]
     public async Task WhenServerReadyFires_AndStopThrows_SwallowsExceptionSafely()
     {
-        var fakeRuntime = new FakeServerRuntime { ShouldThrowOnStop = true };
+        var fakeRuntime = new FakeServerRuntime { IsRunning = true, ThrowOnStop = true };
         using var workflow = new ServerInitializationWorkflow(fakeRuntime, new ServerLaunchPlanner());
 
-        fakeRuntime.TriggerReady();
+        fakeRuntime.RaiseReady();
 
-        for (int i = 0; i < 20 && fakeRuntime.StopCallCount == 0; i++)
-        {
-            await Task.Delay(25);
-        }
+        await TestWait.UntilAsync(() => fakeRuntime.StopCount > 0, "就緒後應呼叫停止");
 
         Assert.True(workflow.ReadyDetected);
-        Assert.True(fakeRuntime.StopCallCount > 0);
+        Assert.True(fakeRuntime.StopCount > 0);
     }
 
     [Fact]
-    public void Dispose_UnsubscribesFromEvents()
+    public void Dispose_AfterStart_UnsubscribesEvents()
     {
-        var fakeRuntime = new FakeServerRuntime();
+        var fakeRuntime = new FakeServerRuntime { IsRunning = true };
         var workflow = new ServerInitializationWorkflow(fakeRuntime, new ServerLaunchPlanner());
         workflow.Dispose();
 
-        fakeRuntime.TriggerReady();
+        fakeRuntime.RaiseReady();
 
         Assert.False(workflow.ReadyDetected);
-        Assert.Equal(0, fakeRuntime.StopCallCount);
+        Assert.Equal(0, fakeRuntime.StopCount);
     }
 }

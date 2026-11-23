@@ -1,4 +1,5 @@
 using MinecraftServerManager.Domain.Mods;
+using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Core.Ports;
 
@@ -9,17 +10,17 @@ public interface IModDependencyPlanner
     public OnlineModCompatibilityReport EvaluateCompatibility(
         OnlineModVersion targetVersion,
         string serverMinecraftVersion,
-        string serverLoader,
+        LoaderKind serverLoader,
         IReadOnlyList<LocalModInfo> installedMods,
         string? serverSide = null);
 
-    /// <summary>遞迴解析未安裝的必要相依（upgradeInstalled=false 時已安裝者略過）</summary>
+    /// <summary>遞迴解析必要相依（upgradeInstalled=false 時已安裝者不升級）；<paramref name="rootProjectId"/> 為發起解析的模組，避免循環相依回頭安裝自身</summary>
     public Task<IReadOnlyList<ModDependencyPlanItem>> ResolveDependenciesRecursivelyAsync(
-        IModrinthClient modrinthClient,
         IReadOnlyList<OnlineModDependency> initialDependencies,
         string serverMinecraftVersion,
-        string serverLoader,
+        LoaderKind serverLoader,
         IReadOnlyList<LocalModInfo> installedMods,
+        string? rootProjectId = null,
         int maxDepth = 5,
         int maxItems = 20,
         bool upgradeInstalled = true,

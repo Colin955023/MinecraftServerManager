@@ -1,6 +1,4 @@
 using MinecraftServerManager.Core.Servers;
-using MinecraftServerManager.Domain.Servers;
-using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.Servers;
 
 namespace MinecraftServerManager.UnitTests.Servers;
@@ -26,18 +24,15 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     }
 
     private ServerLaunchPlan CreatePlan(string target, string javaPath, int maxMb, int? minMb = null, IReadOnlyList<string>? jvmArgs = null) =>
-        new ServerLaunchPlanner().CreatePlan(
-            new ServerConfig(ServerName.Parse("RuntimeTest"), MinecraftVersion.Parse("1.21.4"), LoaderKind.Vanilla, string.Empty, maxMb, minMb, path: _testDir, jvmArgs: jvmArgs),
-            target,
-            javaPath);
+        TestServerConfigs.CreatePlan("RuntimeTest", _testDir, target, javaPath, maxMb, minMb, jvmArgs);
 
     [Fact]
-    public async Task StartAsyncWithJarBuildsCorrectJvmArguments()
+    public async Task StartAsync_JarTarget_BuildsJvmArguments()
     {
         var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
 
-        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 4096, 2048, ["-Dfile.encoding=UTF-8"]));
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 4096, 2048, ["-Dfile.encoding=UTF-8"]), TestContext.Current.CancellationToken);
 
         Assert.True(runtime.IsRunning);
         Assert.Equal(1234, runtime.Pid);
@@ -55,12 +50,12 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task StartAsyncWithBatScriptExecutesScriptDirectly()
+    public async Task StartAsync_BatScript_ExecutesDirectly()
     {
         var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
 
-        await runtime.StartAsync(CreatePlan("run.bat", "java.exe", 2048));
+        await runtime.StartAsync(CreatePlan("run.bat", "java.exe", 2048), TestContext.Current.CancellationToken);
 
         Assert.True(runtime.IsRunning);
 
@@ -72,13 +67,15 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task StartAsyncWithBatScriptAndCustomJavaInjectsJavaHomeAndPathEnvironment()
+    public async Task StartAsync_BatScriptWithCustomJava_InjectsJavaHomeAndPath()
     {
         var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
 
         string fakeJava = Path.Combine(_testDir, "custom-jdk", "bin", "java.exe");
-        await runtime.StartAsync(CreatePlan("run.bat", fakeJava, 2048));
+        Directory.CreateDirectory(Path.GetDirectoryName(fakeJava)!);
+        File.WriteAllText(fakeJava, "dummy");
+        await runtime.StartAsync(CreatePlan("run.bat", fakeJava, 2048), TestContext.Current.CancellationToken);
 
         Assert.True(runtime.IsRunning);
 
@@ -92,26 +89,26 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task StartAsyncWhenAlreadyRunningThrowsInvalidOperationException()
+    public async Task StartAsync_AlreadyRunning_Throws()
     {
         var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
 
-        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024), TestContext.Current.CancellationToken);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024)));
+            runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024), TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task SendCommandAsyncWritesToProcessReturnsTrueWhenRunning()
+    public async Task SendCommandAsync_Running_WritesAndReturnsTrue()
     {
         var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
 
-        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024), TestContext.Current.CancellationToken);
 
-        bool sent = await runtime.SendCommandAsync("say hello");
+        bool sent = await runtime.SendCommandAsync("say hello", TestContext.Current.CancellationToken);
         Assert.True(sent);
 
         var proc = runner.LastCreatedProcess;
@@ -120,17 +117,17 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SendCommandAsyncReturnsFalseWhenNotRunning()
+    public async Task SendCommandAsync_NotRunning_ReturnsFalse()
     {
         var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
 
-        bool sent = await runtime.SendCommandAsync("say hello");
+        bool sent = await runtime.SendCommandAsync("say hello", TestContext.Current.CancellationToken);
         Assert.False(sent);
     }
 
     [Fact]
-    public async Task OutputLineReceivedForwardsOutputFromProcess()
+    public async Task OutputLineReceived_ProcessOutput_Forwards()
     {
         var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
@@ -138,7 +135,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         var outputs = new List<string>();
         runtime.OutputLineReceived += line => outputs.Add(line);
 
-        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024), TestContext.Current.CancellationToken);
 
         runner.LastCreatedProcess!.RaiseOutput("Server started!");
 
@@ -147,7 +144,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task OutputContainingDoneTriggersServerReadyAndSetsIsReady()
+    public async Task OutputLine_ContainsDone_SetsReady()
     {
         var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
@@ -155,7 +152,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         bool readyFired = false;
         runtime.ServerReady += () => readyFired = true;
 
-        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024), TestContext.Current.CancellationToken);
         Assert.False(runtime.IsReady);
 
         runner.LastCreatedProcess!.RaiseOutput("[Server thread/INFO]: Preparing spawn area: 98%");
@@ -167,15 +164,34 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         Assert.True(readyFired);
     }
 
+    [Theory]
+    [InlineData("[12:00:00 INFO]: Done in 3.2s")]
+    [InlineData("[12:00:00 INFO]: DONE IN 3.2s")]
+    [InlineData("[Server thread/INFO]: done (1.0s)! For help, type \"help\"")]
+    public async Task OutputReady_AnyCaseVariant_FiresServerReadyExactlyOnce(string readyLine)
+    {
+        var runner = new StubProcessRunner(interactive: true);
+        await using var runtime = new ServerRuntime(runner);
+        int readyCount = 0;
+        runtime.ServerReady += () => readyCount++;
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024), TestContext.Current.CancellationToken);
+
+        runner.LastCreatedProcess!.RaiseOutput(readyLine);
+        runner.LastCreatedProcess!.RaiseOutput(readyLine);
+
+        Assert.True(runtime.IsReady);
+        Assert.Equal(1, readyCount);
+    }
+
     [Fact]
-    public async Task StopAsyncSendsStopCommandAndWaitsForExit()
+    public async Task StopAsync_Running_SendsStopAndWaits()
     {
         var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
 
-        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024), TestContext.Current.CancellationToken);
 
-        var result = await runtime.StopAsync(TimeSpan.FromSeconds(5));
+        var result = await runtime.StopAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         Assert.Equal(0, result.ExitCode);
         Assert.False(result.WasForceStopped);
@@ -190,8 +206,8 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         var exited = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         runtime.ServerExited += code => exited.TrySetResult(code);
 
-        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
-        await runtime.StopAsync(TimeSpan.FromSeconds(5));
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024), TestContext.Current.CancellationToken);
+        await runtime.StopAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         int exitCode = await exited.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         Assert.NotNull(runtime.ExitCode);
@@ -199,11 +215,11 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ProcessExitingOnItsOwn_ReleasesManagedProcessAndClearsRunningState()
+    public async Task ProcessExit_Unrequested_ReleasesProcessAndClearsState()
     {
         var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
-        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024), TestContext.Current.CancellationToken);
         var process = runner.LastCreatedProcess;
         Assert.NotNull(process);
 
@@ -224,12 +240,12 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         var exited = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         runtime.ServerExited += code => exited.TrySetResult(code);
 
-        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
-        await runtime.StopAsync(TimeSpan.FromSeconds(5));
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024), TestContext.Current.CancellationToken);
+        await runtime.StopAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         await exited.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         Assert.NotNull(runtime.ExitCode);
 
-        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024), TestContext.Current.CancellationToken);
 
         Assert.Null(runtime.ExitCode);
     }
@@ -239,7 +255,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     {
         var runner = new StubProcessRunner(interactive: true);
         await using var runtime = new ServerRuntime(runner);
-        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024), TestContext.Current.CancellationToken);
 
         var result = await runtime.WaitForExitAsync(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
 
@@ -256,7 +272,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         var notStarted = await runtime.WaitForExitAsync(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
         Assert.NotNull(notStarted);
 
-        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024));
+        await runtime.StartAsync(CreatePlan("server.jar", "java.exe", 1024), TestContext.Current.CancellationToken);
         await runtime.SendCommandAsync("stop", TestContext.Current.CancellationToken);
         var result = await runtime.WaitForExitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 

@@ -1,0 +1,28 @@
+<UserControl
+  x:Class="MinecraftServerManager.App.Controls.IconMessageContent"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:controls="using:MinecraftServerManager.App.Controls">
+
+  <Grid>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="Auto" />
+      <ColumnDefinition Width="*" />
+    </Grid.ColumnDefinitions>
+
+    <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}"
+      FontFamily="{StaticResource SymbolThemeFontFamily}"
+      Margin="0,0,14,0"
+      VerticalAlignment="Top"
+      FontSize="{StaticResource TitleTextBlockFontSize}"
+      controls:ThemeBrush.ForegroundKey="{x:Bind IconBrushKey, Mode=OneWay}"
+      AutomationProperties.AccessibilityView="Raw" />
+
+    <TextBlock Grid.Column="1"
+      Text="{x:Bind Message, Mode=OneWay}"
+      TextWrapping="Wrap"
+      FontSize="{StaticResource BodyTextBlockFontSize}"
+      VerticalAlignment="Center"
+      Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+  </Grid>
+</UserControl>

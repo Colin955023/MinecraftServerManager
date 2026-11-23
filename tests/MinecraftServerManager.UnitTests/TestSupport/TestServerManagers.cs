@@ -16,6 +16,20 @@ internal static class TestServerManagers
             new FixedJavaRuntimeDetector(),
             new FixedJavaRequirementService());
 
+    public static async Task<ServerConfig> CreateVanillaServerAsync(
+        this ServerManager manager,
+        string name = "test-server",
+        string minecraftVersion = "1.21.4",
+        int memoryMb = 2048,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await manager.CreateServerAsync(
+            new ServerCreationPlan(
+                TestServerConfigs.Create(name, minecraftVersion, LoaderKind.Vanilla, memoryMaxMb: memoryMb)),
+            cancellationToken: cancellationToken);
+        return result.Config!;
+    }
+
     private sealed class StubLoaderInstaller : ILoaderInstallerService
     {
         public Task<string> InstallLoaderAsync(

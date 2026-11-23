@@ -13,7 +13,11 @@ public interface IAppUpdateService
         IProgress<(int Percentage, string StatusMessage)>? progress = null,
         CancellationToken cancellationToken = default);
 
-    /// <summary>套用更新並重新啟動主程式（安全置換執行檔並喚醒新版行程）</summary>
+    /// <summary>安全置換執行檔並啟動新版；置換或啟動失敗時還原舊版</summary>
     /// <param name="verifiedInstallerPath">已驗證的更新檔案路徑</param>
-    public void ApplyUpdateAndRestart(string verifiedInstallerPath);
+    /// <param name="launchReplacement">包裝啟動動作（如先釋放單一執行個體鎖、失敗時取回）</param>
+    public void ApplyUpdateAndRestart(string verifiedInstallerPath, Action<Action> launchReplacement);
+
+    /// <summary>清理前次更新留下的 .old 備份檔</summary>
+    public void CleanupPreviousUpdateBackup();
 }

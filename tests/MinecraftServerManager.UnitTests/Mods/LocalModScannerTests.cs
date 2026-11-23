@@ -5,7 +5,6 @@ using MinecraftServerManager.Infrastructure.Mods;
 
 namespace MinecraftServerManager.UnitTests.Mods;
 
-/// <summary>本地模組檔案掃描與詮釋資料解析測試</summary>
 public sealed class LocalModScannerTests : IDisposable
 {
     private readonly TempDirectory _testDirTemp = new("msm_test_scanner_");
@@ -22,10 +21,10 @@ public sealed class LocalModScannerTests : IDisposable
     public void Dispose() => _testDirTemp.Dispose();
 
     [Fact]
-    public async Task ScanModsWithFabricModJsonShouldExtractMetadataCorrectly()
+    public async Task ScanMods_FabricModJson_ExtractsMetadata()
     {
         string jarPath = Path.Combine(_modsDir, "fabric-example-1.0.0.jar");
-        CreateZipWithEntry(jarPath, "fabric.mod.json", """
+        TestZip.Create(jarPath, ("fabric.mod.json", """
         {
             "schemaVersion": 1,
             "id": "fabric_example",
@@ -38,25 +37,25 @@ public sealed class LocalModScannerTests : IDisposable
                 "minecraft": "~1.20.1"
             }
         }
-        """);
+        """));
         var scanner = new LocalModScanner();
-        var mods = await scanner.ScanModsAsync(_modsDir);
+        var mods = await scanner.ScanModsAsync(_modsDir, TestContext.Current.CancellationToken);
 
         var mod = Assert.Single(mods);
         Assert.Equal("fabric_example", mod.Id);
         Assert.Equal("Fabric Example Mod", mod.Name);
         Assert.Equal("1.0.0", mod.Version);
         Assert.Equal(ModPlatform.Local, mod.Platform);
-        Assert.Equal("fabric", mod.LoaderType);
+        Assert.Equal("Fabric", mod.LoaderType);
         Assert.Equal("TestAuthor", mod.Author);
         Assert.Equal("1.20.1", mod.MinecraftVersion);
     }
 
     [Fact]
-    public async Task ScanModsWithForgeModsTomlShouldExtractMetadataCorrectly()
+    public async Task ScanMods_ForgeModsToml_ExtractsMetadata()
     {
         string jarPath = Path.Combine(_modsDir, "forge-mod-2.0.0.jar.disabled");
-        CreateZipWithEntry(jarPath, "META-INF/mods.toml", """
+        TestZip.Create(jarPath, ("META-INF/mods.toml", """
         modLoader="javafml"
         loaderVersion="[47,)"
         [[mods]]
@@ -65,27 +64,27 @@ public sealed class LocalModScannerTests : IDisposable
         displayName="Forge Test Mod"
         authors="ForgeDev"
         description="A test mod for Forge"
-        """);
+        """));
         var scanner = new LocalModScanner();
-        var mods = await scanner.ScanModsAsync(_modsDir);
+        var mods = await scanner.ScanModsAsync(_modsDir, TestContext.Current.CancellationToken);
 
         var mod = Assert.Single(mods);
         Assert.Equal("forge_test", mod.Id);
         Assert.Equal("Forge Test Mod", mod.Name);
         Assert.Equal("2.0.0", mod.Version);
         Assert.Equal(ModPlatform.Local, mod.Platform);
-        Assert.Equal("forge", mod.LoaderType);
+        Assert.Equal("Forge", mod.LoaderType);
         Assert.Equal("ForgeDev", mod.Author);
         Assert.Equal(ModStatus.Disabled, mod.Status);
     }
 
     [Fact]
-    public async Task ScanModsWithFilenameFallbackShouldInferIdAndVersion()
+    public async Task ScanMods_NoMetadata_InfersFromFileName()
     {
         string jarPath = Path.Combine(_modsDir, "jei-1.20.1-forge-15.2.0.27.jar");
-        CreateZipWithEntry(jarPath, "META-INF/MANIFEST.MF", "Manifest-Version: 1.0\r\n");
+        TestZip.Create(jarPath, ("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\r\n"));
         var scanner = new LocalModScanner();
-        var mods = await scanner.ScanModsAsync(_modsDir);
+        var mods = await scanner.ScanModsAsync(_modsDir, TestContext.Current.CancellationToken);
 
         var mod = Assert.Single(mods);
         Assert.Equal("jei", mod.Id);
@@ -95,10 +94,10 @@ public sealed class LocalModScannerTests : IDisposable
     }
 
     [Fact]
-    public async Task ScanModsWithForgeTomlDependenciesShouldExtractMinecraftVersionCorrectly()
+    public async Task ScanMods_ForgeTomlDependencies_ExtractsMinecraftVersion()
     {
         string jarPath = Path.Combine(_modsDir, "complex-forge-mod.jar");
-        CreateZipWithEntry(jarPath, "META-INF/mods.toml", $"""
+        TestZip.Create(jarPath, ("META-INF/mods.toml", $"""
         modLoader="javafml"
         loaderVersion="[47,)"
         [[mods]]
@@ -118,9 +117,9 @@ public sealed class LocalModScannerTests : IDisposable
         versionRange="[1.20.1, 1.21)"
         ordering="NONE"
         side="BOTH"
-        """);
+        """));
         var scanner = new LocalModScanner();
-        var mods = await scanner.ScanModsAsync(_modsDir);
+        var mods = await scanner.ScanModsAsync(_modsDir, TestContext.Current.CancellationToken);
 
         var mod = Assert.Single(mods);
         Assert.Equal("complex_mod", mod.Id);
@@ -130,7 +129,7 @@ public sealed class LocalModScannerTests : IDisposable
     }
 
     [Fact]
-    public async Task ScanModsWithJarInJarShouldExtractNestedMetadata()
+    public async Task ScanMods_JarInJar_ExtractsNestedMetadata()
     {
         string jarPath = Path.Combine(_modsDir, "connector-root.jar");
         using (var fileStream = new FileStream(jarPath, FileMode.Create))
@@ -161,7 +160,7 @@ public sealed class LocalModScannerTests : IDisposable
                 """);
         }
         var scanner = new LocalModScanner();
-        var mods = await scanner.ScanModsAsync(_modsDir);
+        var mods = await scanner.ScanModsAsync(_modsDir, TestContext.Current.CancellationToken);
 
         var mod = Assert.Single(mods);
         Assert.Equal("nested_mod", mod.Id);
@@ -171,17 +170,17 @@ public sealed class LocalModScannerTests : IDisposable
     }
 
     [Fact]
-    public async Task LegacyUnknownFormatInModIndex_IsParsedAndNormalizedCompatibly()
+    public async Task ScanMods_LegacyModIndexFormat_ParsesAndNormalizes()
     {
         string jarPath = Path.Combine(_modsDir, "legacy-mod-1.0.jar");
-        CreateZipWithEntry(jarPath, "fabric.mod.json", """
+        TestZip.Create(jarPath, ("fabric.mod.json", """
         {
             "schemaVersion": 1,
             "id": "legacy-mod",
             "name": "Legacy Mod",
             "version": "1.0.0"
         }
-        """);
+        """));
 
         FileInfo fileInfo = new(jarPath);
         ModIndexPersistence persistence = new(_modsDir);
@@ -197,7 +196,7 @@ public sealed class LocalModScannerTests : IDisposable
         persistence.Flush();
 
         LocalModScanner scanner = new();
-        IReadOnlyList<LocalModInfo> mods = await scanner.ScanModsAsync(_modsDir);
+        IReadOnlyList<LocalModInfo> mods = await scanner.ScanModsAsync(_modsDir, TestContext.Current.CancellationToken);
 
         LocalModInfo mod = Assert.Single(mods);
         Assert.Equal("legacy-mod", mod.Id);
@@ -207,13 +206,65 @@ public sealed class LocalModScannerTests : IDisposable
         Assert.Equal("未知", mod.LoaderType);
     }
 
-    private static void CreateZipWithEntry(string zipPath, string entryName, string content)
+    [Fact]
+    public async Task ScanMods_NeoForgeToml_SkipsCommentsAndReportsNeoForge()
     {
-        using var fileStream = new FileStream(zipPath, FileMode.Create);
-        using var archive = new ZipArchive(fileStream, ZipArchiveMode.Create);
-        var entry = archive.CreateEntry(entryName);
-        using var entryStream = entry.Open();
-        using var writer = new StreamWriter(entryStream, Encoding.UTF8);
-        writer.Write(content);
+        TestZip.Create(Path.Combine(_modsDir, "neo-1.0.jar"), ("META-INF/neoforge.mods.toml", """"
+        # modId="commented_out"
+        [[mods]]
+        modId="neo_mod"
+        # displayName="Wrong Name"
+        displayName="Neo Mod"
+        version="1.0"
+        description="""line\none"""
+        """"));
+
+        var mod = Assert.Single(await new LocalModScanner().ScanModsAsync(_modsDir, TestContext.Current.CancellationToken));
+
+        Assert.Equal("neo_mod", mod.Id);
+        Assert.Equal("Neo Mod", mod.Name);
+        Assert.Equal("NeoForge", mod.LoaderType);
+        Assert.Equal("line\none", mod.Description);
+    }
+
+    [Fact]
+    public async Task ScanMods_QuiltModJson_ReadsQuiltLoader()
+    {
+        TestZip.Create(Path.Combine(_modsDir, "quilt-mod.jar"), ("quilt.mod.json", """
+        {
+            "schema_version": 1,
+            "quilt_loader": {
+                "id": "quilt_mod",
+                "version": "3.1.0",
+                "metadata": { "name": "Quilt Mod", "description": "desc", "contributors": { "Alice": "Owner" } },
+                "depends": [ "quilt_loader", { "id": "minecraft", "versions": ">=1.20.1" } ]
+            }
+        }
+        """));
+
+        var mod = Assert.Single(await new LocalModScanner().ScanModsAsync(_modsDir, TestContext.Current.CancellationToken));
+
+        Assert.Equal("quilt_mod", mod.Id);
+        Assert.Equal("Quilt Mod", mod.Name);
+        Assert.Equal("3.1.0", mod.Version);
+        Assert.Equal("Quilt", mod.LoaderType);
+        Assert.Equal("Alice", mod.Author);
+        Assert.Equal("1.20.1", mod.MinecraftVersion);
+    }
+
+    [Fact]
+    public async Task ScanMods_McModInfoV2WrongValueKinds_ParsesSafely()
+    {
+        TestZip.Create(Path.Combine(_modsDir, "legacy.jar"), ("mcmod.info", """
+        {"modListVersion":2,"modList":[{"modid":"legacy_mod","name":"Legacy","version":5,"mcversion":"1.7.10","authorList":["Bob",3]}]}
+        """));
+
+        var mod = Assert.Single(await new LocalModScanner().ScanModsAsync(_modsDir, TestContext.Current.CancellationToken));
+
+        Assert.Equal("legacy_mod", mod.Id);
+        Assert.Equal("Legacy", mod.Name);
+        Assert.Equal("Forge", mod.LoaderType);
+        Assert.Equal("Bob", mod.Author);
+        Assert.Equal("1.7.10", mod.MinecraftVersion);
     }
 }

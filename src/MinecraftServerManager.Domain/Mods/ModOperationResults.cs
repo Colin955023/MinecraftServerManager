@@ -27,7 +27,7 @@ public sealed record ModFileOperationResult(
         new(ModOperationStatus.Failed, message);
 }
 
-/// <summary>本地模組檔案異動結果（啟用、停用、刪除等批次操作）</summary>
+/// <summary>本機模組檔案異動結果（啟用、停用、刪除等批次操作）</summary>
 public sealed record LocalModMutationResult(
     ModOperationStatus Status,
     string Title = "",

@@ -6,7 +6,7 @@ namespace MinecraftServerManager.Core.Ports;
 public interface IServersRootService
 {
     /// <summary>驗證新設定之伺服器存放根目錄並回傳正規化後路徑</summary>
-    public ServersRootCheck ValidateTargetRoot(string? currentRoot, string? newRoot);
+    public Task<ServersRootCheck> ValidateTargetRootAsync(string? currentRoot, string? newRoot, CancellationToken cancellationToken = default);
 
     /// <summary>原伺服器根目錄是否存放有伺服器或檔案</summary>
     public Task<bool> HasStoredContentAsync(string? currentRoot, CancellationToken cancellationToken = default);

@@ -5,7 +5,6 @@
   xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
   xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
   xmlns:controls="using:MinecraftServerManager.App.Controls"
-  xmlns:vm="using:MinecraftServerManager.App.ViewModels"
   mc:Ignorable="d">
 
   <ScrollViewer VerticalScrollBarVisibility="Auto"
@@ -22,51 +21,25 @@
           Style="{StaticResource PageTitleTextStyle}"
           Margin="0,0,16,0"
           VerticalAlignment="Center" />
-        <StackPanel Grid.Column="1"
-          Orientation="Horizontal"
-          VerticalAlignment="Center"
-          Spacing="8">
-          <ProgressBar Style="{StaticResource BusyProgressBarStyle}"
-            VerticalAlignment="Center"
-            Visibility="{x:Bind ViewModel.IsLoadingVersions, Mode=OneWay}" />
-          <TextBlock Text="{x:Bind ViewModel.LoadingStatusText, Mode=OneWay}"
-            FontSize="12"
-            Foreground="{ThemeResource MutedTextBrush}"
-            VerticalAlignment="Center" />
-        </StackPanel>
+        <controls:BusyStatusIndicator Grid.Column="1"
+          IsBusy="{x:Bind ViewModel.IsLoadingVersions, Mode=OneWay}"
+          Message="{x:Bind ViewModel.LoadingStatusText, Mode=OneWay}"
+          BusyName="載入中" />
       </Grid>
 
       <!-- EULA 條款提示 -->
-      <Border Style="{StaticResource CardBorderStyle}"
-        CornerRadius="8"
-        Padding="14,10"
+      <InfoBar Severity="Warning"
+        controls:InfoBarThemeRefresh.IsEnabled="True"
+        IsOpen="True"
+        IsClosable="False"
+        Title="請務必閱讀並同意 Minecraft EULA 條款"
+        Message="點選建立即表示您同意 Minecraft 條款，任何違法行為本軟體不負責任"
         Margin="0,0,0,18">
-        <Grid>
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <ContentPresenter Grid.Column="0"
-            ContentTemplate="{StaticResource IconWarning}"
-            Width="20"
-            Height="20"
-            Margin="0,0,12,0"
-            VerticalAlignment="Top" />
-          <StackPanel Grid.Column="1">
-            <HyperlinkButton Command="{x:Bind ViewModel.OpenEulaCommand}"
-              Padding="0"
-              HorizontalAlignment="Left">
-              <TextBlock FontSize="13"
-                TextWrapping="Wrap"
-                LineHeight="20">
-                <Run Text="請務必閱讀並同意 Minecraft EULA 條款（點此閱讀）" />
-                <LineBreak />
-                <Run Text="點選建立即表示您同意 Minecraft 條款，任何違法行為本軟體不負責任" />
-              </TextBlock>
-            </HyperlinkButton>
-          </StackPanel>
-        </Grid>
-      </Border>
+        <InfoBar.ActionButton>
+          <HyperlinkButton Content="閱讀 EULA"
+            Command="{x:Bind ViewModel.OpenEulaCommand}" />
+        </InfoBar.ActionButton>
+      </InfoBar>
 
       <!-- 表單 Grid -->
       <Grid Margin="0,4,0,24">
@@ -89,112 +62,118 @@
         <!-- 伺服器名稱 -->
         <TextBlock Grid.Row="0"
           Grid.Column="0"
-          Text="伺服器名稱："
-          VerticalAlignment="Center"
           Margin="0,8"
-          Foreground="{ThemeResource TextBrush}" />
+          VerticalAlignment="Center"
+          Text="伺服器名稱："
+          Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
         <TextBox Grid.Row="0"
           Grid.Column="1"
           Grid.ColumnSpan="3"
-          Text="{x:Bind ViewModel.ServerName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
           Margin="0,6,0,6"
-          PlaceholderText="請輸入伺服器名稱 (例如 Survival)..." />
+          Text="{x:Bind ViewModel.ServerName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+          PlaceholderText="請輸入伺服器名稱（例如 Survival）..."
+          AutomationProperties.Name="伺服器名稱" />
 
         <!-- Java 執行檔路徑 -->
         <TextBlock Grid.Row="1"
           Grid.Column="0"
-          Text="Java 執行檔路徑（選填）："
-          VerticalAlignment="Center"
           Margin="0,8"
-          Foreground="{ThemeResource TextBrush}" />
+          VerticalAlignment="Center"
+          Text="Java 執行檔路徑（選填）："
+          Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
         <TextBox Grid.Row="1"
           Grid.Column="1"
           Grid.ColumnSpan="2"
-          Text="{x:Bind ViewModel.JavaPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
           Margin="0,6,8,6"
-          PlaceholderText="留空則自動探測匹配版本..." />
+          Text="{x:Bind ViewModel.JavaPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+          PlaceholderText="留空則自動偵測匹配版本..."
+          AutomationProperties.Name="Java 執行檔路徑" />
         <Button Grid.Row="1"
           Grid.Column="3"
-          Content="管理 Java"
-          Command="{x:Bind ViewModel.OpenManageJavaCommand}"
           Width="95"
-          Margin="0,6,0,6" />
+          Margin="0,6,0,6"
+          Content="管理 Java"
+          Command="{x:Bind ViewModel.OpenManageJavaCommand}" />
 
         <!-- 模組載入器 -->
         <TextBlock Grid.Row="2"
           Grid.Column="0"
-          Text="模組載入器："
-          VerticalAlignment="Center"
           Margin="0,8"
-          Foreground="{ThemeResource TextBrush}" />
-        <ComboBox Grid.Row="2"
+          VerticalAlignment="Center"
+          Text="模組載入器："
+          Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+        <controls:WheelPassthroughComboBox Grid.Row="2"
           Grid.Column="1"
-          ItemsSource="{x:Bind ViewModel.AvailableLoaders, Mode=OneWay}"
-          SelectedItem="{x:Bind ViewModel.SelectedLoader, Mode=TwoWay}"
+          Margin="0,6,8,6"
           HorizontalAlignment="Stretch"
-          Margin="0,6,8,6" />
+          ItemsSource="{x:Bind ViewModel.AvailableLoaders}"
+          SelectedItem="{x:Bind ViewModel.SelectedLoader, Mode=TwoWay}"
+          AutomationProperties.Name="模組載入器" />
 
         <!-- 載入器版本 -->
         <TextBlock Grid.Row="3"
           Grid.Column="0"
-          Text="載入器版本："
-          VerticalAlignment="Center"
           Margin="0,8"
-          Foreground="{ThemeResource TextBrush}" />
-        <ComboBox Grid.Row="3"
+          VerticalAlignment="Center"
+          Text="載入器版本："
+          Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+        <controls:WheelPassthroughComboBox Grid.Row="3"
           Grid.Column="1"
-          ItemsSource="{x:Bind ViewModel.LoaderVersions, Mode=OneWay}"
+          Margin="0,6,8,6"
+          HorizontalAlignment="Stretch"
+          ItemsSource="{x:Bind ViewModel.LoaderVersions}"
           SelectedItem="{x:Bind ViewModel.SelectedLoaderVersion, Mode=TwoWay}"
           IsEnabled="{x:Bind ViewModel.IsLoaderVersionEnabled, Mode=OneWay}"
-          HorizontalAlignment="Stretch"
-          Margin="0,6,8,6" />
+          AutomationProperties.Name="載入器版本" />
         <Button Grid.Row="3"
           Grid.Column="2"
-          Command="{x:Bind ViewModel.ReloadLoaderVersionsCommand}"
           Width="36"
-          Height="32"
-          Padding="0"
           Margin="0,6,0,6"
-          ToolTipService.ToolTip="重新載入載入器版本">
-          <ContentPresenter ContentTemplate="{StaticResource IconRefresh}"
-            Width="16"
-            Height="16" />
+          Padding="0"
+          Command="{x:Bind ViewModel.ReloadLoaderVersionsCommand}"
+          ToolTipService.ToolTip="重新載入載入器版本"
+          AutomationProperties.Name="重新載入載入器版本">
+          <FontIcon Glyph="{StaticResource IconRefresh}"
+            FontFamily="{StaticResource SymbolThemeFontFamily}"
+            FontSize="{StaticResource BodyTextBlockFontSize}"
+            AutomationProperties.AccessibilityView="Raw" />
         </Button>
 
         <!-- Minecraft 版本 -->
         <TextBlock Grid.Row="4"
           Grid.Column="0"
-          Text="Minecraft 版本："
-          VerticalAlignment="Center"
           Margin="0,8"
-          Foreground="{ThemeResource TextBrush}" />
-        <ComboBox Grid.Row="4"
+          VerticalAlignment="Center"
+          Text="Minecraft 版本："
+          Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+        <controls:WheelPassthroughComboBox Grid.Row="4"
           Grid.Column="1"
-          ItemsSource="{x:Bind ViewModel.AvailableMinecraftVersions, Mode=OneWay}"
-          SelectedItem="{x:Bind ViewModel.SelectedMinecraftVersion, Mode=TwoWay}"
+          Margin="0,6,8,6"
           HorizontalAlignment="Stretch"
-          Margin="0,6,8,6" />
+          ItemsSource="{x:Bind ViewModel.AvailableMinecraftVersions}"
+          SelectedItem="{x:Bind ViewModel.SelectedMinecraftVersion, Mode=TwoWay}"
+          AutomationProperties.Name="Minecraft 版本" />
         <Button Grid.Row="4"
           Grid.Column="2"
-          Command="{x:Bind ViewModel.ReloadMinecraftVersionsCommand}"
-          IsEnabled="{x:Bind ViewModel.IsMinecraftVersionReloadEnabled, Mode=OneWay}"
           Width="36"
-          Height="32"
-          Padding="0"
           Margin="0,6,0,6"
-          ToolTipService.ToolTip="重新載入 Minecraft 版本">
-          <ContentPresenter ContentTemplate="{StaticResource IconRefresh}"
-            Width="16"
-            Height="16" />
+          Padding="0"
+          Command="{x:Bind ViewModel.ReloadMinecraftVersionsCommand}"
+          ToolTipService.ToolTip="重新載入 Minecraft 版本"
+          AutomationProperties.Name="重新載入 Minecraft 版本">
+          <FontIcon Glyph="{StaticResource IconRefresh}"
+            FontFamily="{StaticResource SymbolThemeFontFamily}"
+            FontSize="{StaticResource BodyTextBlockFontSize}"
+            AutomationProperties.AccessibilityView="Raw" />
         </Button>
 
-        <!-- 記憶體設定 (MB) -->
+        <!-- 記憶體設定（MB） -->
         <TextBlock Grid.Row="5"
           Grid.Column="0"
           Text="記憶體設定（MB）："
           VerticalAlignment="Center"
           Margin="0,8"
-          Foreground="{ThemeResource TextBrush}" />
+          Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
         <Grid Grid.Row="5"
           Grid.Column="1"
           Grid.ColumnSpan="3"
@@ -205,22 +184,22 @@
             <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
           <StackPanel Grid.Column="0">
-            <TextBlock Text="最小記憶體："
-              FontSize="11"
-              Foreground="{ThemeResource MutedTextBrush}"
-              Margin="0,0,0,4" />
+            <TextBlock Style="{StaticResource SecondaryCaptionTextStyle}"
+              Margin="0,0,0,4"
+              Text="最小記憶體：" />
             <TextBox
               Text="{x:Bind ViewModel.MinMemoryMb, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-              PlaceholderText="例如 1024" />
+              PlaceholderText="例如 1024"
+              AutomationProperties.Name="最小記憶體" />
           </StackPanel>
           <StackPanel Grid.Column="2">
-            <TextBlock Text="最大記憶體："
-              FontSize="11"
-              Foreground="{ThemeResource MutedTextBrush}"
-              Margin="0,0,0,4" />
+            <TextBlock Style="{StaticResource SecondaryCaptionTextStyle}"
+              Margin="0,0,0,4"
+              Text="最大記憶體：" />
             <TextBox
               Text="{x:Bind ViewModel.MaxMemoryMb, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-              PlaceholderText="例如 4096" />
+              PlaceholderText="例如 4096"
+              AutomationProperties.Name="最大記憶體" />
           </StackPanel>
         </Grid>
 
@@ -229,55 +208,49 @@
           Grid.Column="1"
           Grid.ColumnSpan="3"
           Margin="0,0,0,6">
-          <TextBlock Text="最小記憶體選填，若留空由 Java 決定"
-            FontSize="11"
-            Foreground="{ThemeResource MutedTextBrush}" />
-          <TextBlock Text="最大記憶體（必要）建議：2048MB（預設）| 4096MB（一般）| 8192MB（多人遊戲）"
-            FontSize="11"
-            Foreground="{ThemeResource MutedTextBrush}"
-            Margin="0,2,0,0" />
-          <TextBlock Text="{x:Bind ViewModel.MemoryWarningText, Mode=OneWay}"
-            FontSize="12"
+          <TextBlock Style="{StaticResource SecondaryCaptionTextStyle}"
+            Text="最小記憶體選填，若留空由 Java 決定" />
+          <TextBlock Style="{StaticResource SecondaryCaptionTextStyle}"
+            Margin="0,2,0,0"
+            Text="最大記憶體（必要）建議：2048MB（預設）| 4096MB（一般）| 8192MB（多人遊戲）" />
+          <TextBlock Margin="0,6,0,0"
+            Text="{x:Bind ViewModel.MemoryWarningText, Mode=OneWay}"
+            FontSize="{StaticResource CaptionTextBlockFontSize}"
             FontWeight="SemiBold"
             controls:ThemeBrush.ForegroundKey="{x:Bind controls:UiBindHelpers.ErrorBrushKey(ViewModel.IsMemoryError), Mode=OneWay}"
             Visibility="{x:Bind controls:UiBindHelpers.NullOrWhitespaceToVis(ViewModel.MemoryWarningText), Mode=OneWay}"
-            Margin="0,6,0,0" />
+            AutomationProperties.LiveSetting="Polite" />
         </StackPanel>
       </Grid>
 
       <!-- JVM 啟動參數設定 -->
-      <StackPanel Orientation="Horizontal"
+      <controls:WrapPanel
         Margin="0,0,0,28"
         VerticalAlignment="Center"
-        Spacing="12">
+        ItemSpacing="12" LineSpacing="8">
         <TextBlock Text="JVM 啟動參數："
           Width="180"
           VerticalAlignment="Center"
-          Foreground="{ThemeResource TextBrush}" />
+          Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
         <Button Content="JVM 參數設定..."
-          Command="{x:Bind ViewModel.ConfigureJvmArgsCommand}"
-          Padding="14,6" />
+          Command="{x:Bind ViewModel.ConfigureJvmArgsCommand}" />
         <TextBlock Text="{x:Bind ViewModel.JvmArgsSummary, Mode=OneWay}"
-          Foreground="{ThemeResource MutedTextBrush}"
-          VerticalAlignment="Center"
-          FontSize="12" />
-      </StackPanel>
+          Style="{StaticResource SecondaryCaptionTextStyle}"
+          VerticalAlignment="Center" />
+      </controls:WrapPanel>
 
-      <!-- 底部操作按鈕 (重設表單、建立伺服器) -->
+      <!-- 底部操作按鈕（主要按鈕在左） -->
       <StackPanel Orientation="Horizontal"
         HorizontalAlignment="Right"
         Spacing="12">
+        <Button Content="建立伺服器"
+          Command="{x:Bind ViewModel.CreateServerCommand}"
+          Style="{StaticResource PrimaryButtonStyle}"
+          MinWidth="120" />
         <Button Content="重設表單"
           Command="{x:Bind ViewModel.ResetFormCommand}"
           Style="{StaticResource DangerButtonStyle}"
           MinWidth="100"
-          Height="36"
-          VerticalContentAlignment="Center" />
-        <Button Content="建立伺服器"
-          Command="{x:Bind ViewModel.CreateServerCommand}"
-          Style="{StaticResource PrimaryButtonStyle}"
-          MinWidth="120"
-          Height="36"
           VerticalContentAlignment="Center" />
       </StackPanel>
     </StackPanel>

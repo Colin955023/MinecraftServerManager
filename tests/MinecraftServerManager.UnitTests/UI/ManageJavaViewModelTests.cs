@@ -23,23 +23,22 @@ public sealed class ManageJavaViewModelTests : IDisposable
     [Fact]
     public async Task InstallWithWinget_WhenTargetMajorAlreadyExistsLocally_TriggersGuardAndSkipsInstall()
     {
-        var detector = new FakeJavaDetector(
+        var detector = new FixedJavaRuntimeDetector(
         [
             new JavaRuntimeInfo(_dummyJava17, 17, Is64Bit: true, Vendor: "Microsoft OpenJDK")
         ]);
         var installer = new FakeJavaInstaller();
 
-        var vm = new ManageJavaViewModel(
+        using var vm = new ManageJavaViewModel(
             javaDetector: detector,
             javaRequirementService: NoOp.Create<IMinecraftJavaRequirementService>(),
             javaInstaller: installer,
             currentJavaPath: string.Empty,
             minecraftVersion: "1.20.1",
-            loaderName: "Paper",
             fileSystem: new Infrastructure.FileSystem.LocalFileSystem(),
             uiService: NoOpUiService.Instance)
         {
-            SelectedInstallMajor = 17
+            SelectedInstallMajorOption = new JavaMajorOption(17, "Java 17")
         };
 
         await vm.InstallWithWingetAsync();
@@ -55,7 +54,7 @@ public sealed class ManageJavaViewModelTests : IDisposable
     [Fact]
     public async Task InstallWithWinget_WhenTargetMajorDoesNotExistLocally_ProceedsWithWingetInstall()
     {
-        var detector = new FakeJavaDetector(
+        var detector = new FixedJavaRuntimeDetector(
         [
             new JavaRuntimeInfo(_dummyJava17, 17, Is64Bit: true, Vendor: "Microsoft OpenJDK")
         ]);
@@ -64,21 +63,20 @@ public sealed class ManageJavaViewModelTests : IDisposable
             OnInstall = major =>
             {
                 File.WriteAllText(_dummyJava21, "fake binary 21");
-                detector.AddJava(new JavaRuntimeInfo(_dummyJava21, major, Is64Bit: true, Vendor: "Microsoft OpenJDK"));
+                detector.Add(new JavaRuntimeInfo(_dummyJava21, major, Is64Bit: true, Vendor: "Microsoft OpenJDK"));
             }
         };
 
-        var vm = new ManageJavaViewModel(
+        using var vm = new ManageJavaViewModel(
             javaDetector: detector,
             javaRequirementService: NoOp.Create<IMinecraftJavaRequirementService>(),
             javaInstaller: installer,
             currentJavaPath: string.Empty,
             minecraftVersion: "1.20.5",
-            loaderName: "Paper",
             fileSystem: new Infrastructure.FileSystem.LocalFileSystem(),
             uiService: NoOpUiService.Instance)
         {
-            SelectedInstallMajor = 21
+            SelectedInstallMajorOption = new JavaMajorOption(21, "Java 21")
         };
 
         await vm.InstallWithWingetAsync();
@@ -93,9 +91,9 @@ public sealed class ManageJavaViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task InstallWithWinget_KeepsBusyWhileInstallingAndClearsWhenFinished()
+    public async Task InstallWithWinget_Installing_KeepsBusyUntilFinished()
     {
-        var detector = new FakeJavaDetector(
+        var detector = new FixedJavaRuntimeDetector(
         [
             new JavaRuntimeInfo(_dummyJava17, 17, Is64Bit: true, Vendor: "Microsoft OpenJDK")
         ]);
@@ -112,11 +110,10 @@ public sealed class ManageJavaViewModelTests : IDisposable
             javaInstaller: installer,
             currentJavaPath: string.Empty,
             minecraftVersion: "1.20.5",
-            loaderName: "Paper",
             fileSystem: new Infrastructure.FileSystem.LocalFileSystem(),
             uiService: NoOpUiService.Instance)
         {
-            SelectedInstallMajor = 21
+            SelectedInstallMajorOption = new JavaMajorOption(21, "Java 21")
         };
 
         await vm.InstallWithWingetAsync();
@@ -126,19 +123,43 @@ public sealed class ManageJavaViewModelTests : IDisposable
         Assert.False(vm.IsBusy);
     }
 
-    private sealed class FakeJavaDetector(IEnumerable<JavaRuntimeInfo> initial) : IJavaRuntimeDetector
+    [Fact]
+    public void Constructor_RequiredMajor_SelectsItAndShowsSingleVersion()
     {
-        private readonly List<JavaRuntimeInfo> _list = [.. initial];
+        using var vm = new ManageJavaViewModel(
+            javaDetector: new FixedJavaRuntimeDetector([new JavaRuntimeInfo(_dummyJava17, 17)]),
+            javaRequirementService: new FixedJavaRequirementService(17),
+            javaInstaller: new FakeJavaInstaller(),
+            currentJavaPath: string.Empty,
+            minecraftVersion: "1.20.1",
+            fileSystem: new Infrastructure.FileSystem.LocalFileSystem(),
+            uiService: NoOpUiService.Instance);
 
-        public void AddJava(JavaRuntimeInfo info) => _list.Add(info);
+        Assert.Equal(17, vm.SelectedInstallMajorOption?.Major);
+        Assert.Equal(17, vm.SelectedInstallMajor);
+        Assert.Equal("Java 17", vm.RequiredMajorText);
+        Assert.Equal("Java 17", Assert.Single(vm.InstalledJavas).DisplayName);
+        Assert.True(vm.ApplyCommand.CanExecute(null));
+    }
 
-        public Task<IReadOnlyList<JavaRuntimeInfo>> DetectAsync(bool forceRefresh = false, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<JavaRuntimeInfo>>(_list.AsReadOnly());
+    [Fact]
+    public async Task InstallWithWinget_WithoutTargetMajor_DoesNotInstall()
+    {
+        var installer = new FakeJavaInstaller();
+        using var vm = new ManageJavaViewModel(
+            javaDetector: new FixedJavaRuntimeDetector([]),
+            javaRequirementService: NoOp.Create<IMinecraftJavaRequirementService>(),
+            javaInstaller: installer,
+            currentJavaPath: string.Empty,
+            minecraftVersion: string.Empty,
+            fileSystem: new Infrastructure.FileSystem.LocalFileSystem(),
+            uiService: NoOpUiService.Instance);
 
-        public Task<JavaRuntimeInfo?> FindBestMatchAsync(int targetMajor, CancellationToken cancellationToken = default)
-        {
-            var match = _list.FirstOrDefault(j => j.MajorVersion == targetMajor);
-            return Task.FromResult(match);
-        }
+        await vm.InstallWithWingetAsync();
+
+        Assert.False(vm.InstallWithWingetCommand.CanExecute(null));
+        Assert.False(installer.InstallInvoked);
+        Assert.Equal("請先選擇要安裝的 Java 版本", vm.StatusMessage);
     }
 
     private sealed class FakeJavaInstaller : IJavaInstaller

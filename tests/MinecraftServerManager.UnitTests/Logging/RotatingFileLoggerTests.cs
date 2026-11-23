@@ -1,32 +1,15 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
-using MinecraftServerManager.Infrastructure.FileSystem;
-using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.UnitTests.Logging;
 
 [SuppressMessage("Performance", "CA1848", Justification = "單元測試需驗證 ILogger 擴充方法行為")]
 [SuppressMessage("Performance", "CA1873", Justification = "單元測試需驗證 ILogger 擴充方法行為")]
 [SuppressMessage("Usage", "CA2254", Justification = "單元測試動態提供訊息範本")]
-[Collection("EnvironmentVariableCollection")]
 public sealed class RotatingFileLoggerTests
 {
     [Fact]
-    public void MaskerHidesPasswordsAndTokens()
-    {
-        string input = "連線字串包含 password=mySecretPassword123 與 token=xyz890 以及 Bearer eyJhbGciOiJIUzI1Ni";
-        string masked = LogDataMasker.Mask(input);
-
-        Assert.DoesNotContain("mySecretPassword123", masked, StringComparison.Ordinal);
-        Assert.DoesNotContain("xyz890", masked, StringComparison.Ordinal);
-        Assert.DoesNotContain("eyJhbGciOiJIUzI1Ni", masked, StringComparison.Ordinal);
-        Assert.Contains("password=***", masked, StringComparison.Ordinal);
-        Assert.Contains("token=***", masked, StringComparison.Ordinal);
-        Assert.Contains("Bearer ***", masked, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void LoggerOutputsFormattedMessageWithComponentAndLevel()
+    public void Log_InformationMessage_WritesComponentAndLevel()
     {
         using var tempDirTemp = new TempDirectory("msm-log-test-");
         string tempDir = tempDirTemp.FullName;
@@ -54,7 +37,7 @@ public sealed class RotatingFileLoggerTests
     }
 
     [Fact]
-    public void LoggerIncludesExceptionStackTrace()
+    public void Log_WithException_WritesStackTrace()
     {
         using var tempDirTemp = new TempDirectory("msm-log-test-");
         string tempDir = tempDirTemp.FullName;
@@ -88,7 +71,7 @@ public sealed class RotatingFileLoggerTests
     }
 
     [Fact]
-    public void LoggerRotatesWhenExceedingMaxFileBytes()
+    public void Log_ExceedsMaxFileBytes_RotatesFile()
     {
         using var tempDirTemp = new TempDirectory("msm-log-test-");
         string tempDir = tempDirTemp.FullName;
@@ -119,7 +102,7 @@ public sealed class RotatingFileLoggerTests
     }
 
     [Fact]
-    public void PruneLogsDeletesOldestFilesWhenExceedingKeepCount()
+    public void PruneLogs_ExceedsKeepCount_DeletesOldest()
     {
         using var tempDirTemp = new TempDirectory("msm-log-test-");
         string tempDir = tempDirTemp.FullName;
@@ -146,7 +129,7 @@ public sealed class RotatingFileLoggerTests
     }
 
     [Fact]
-    public async Task ConcurrentWritesDoNotThrowOrCorrupt()
+    public async Task Log_ConcurrentWrites_KeepsLinesIntact()
     {
         using var tempDirTemp = new TempDirectory("msm-log-test-");
         string tempDir = tempDirTemp.FullName;
@@ -165,7 +148,7 @@ public sealed class RotatingFileLoggerTests
             logger.LogInformation("執行緒 {ThreadId} 寫入平行測試記錄項 {Index}", Environment.CurrentManagedThreadId, i);
         }));
 
-        await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(15));
+        await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
 
         provider.Dispose();
 
@@ -174,58 +157,5 @@ public sealed class RotatingFileLoggerTests
 
         string[] lines = File.ReadAllLines(item);
         Assert.Equal(50, lines.Length);
-    }
-
-    [Fact]
-    public void SafeFileSystemMoveWithinAndDeleteWithinEnforceBoundaries()
-    {
-        using var tempDirTemp = new TempDirectory("msm-log-test-");
-        string tempDir = tempDirTemp.FullName;
-        using var externalDirTemp = new TempDirectory("msm-log-test-");
-        string externalDir = externalDirTemp.FullName;
-        string subFile = Path.Combine(tempDir, "inner.txt");
-        File.WriteAllText(subFile, "test");
-
-        string targetFile = Path.Combine(tempDir, "moved.txt");
-        bool moveSuccess = SafeFileSystem.MoveWithin(tempDir, subFile, targetFile);
-        Assert.True(moveSuccess);
-        Assert.False(File.Exists(subFile));
-        Assert.True(File.Exists(targetFile));
-
-        // 嘗試移動到外部目錄應被拒絕
-        string extTarget = Path.Combine(externalDir, "escaped.txt");
-        bool invalidMove = SafeFileSystem.MoveWithin(tempDir, targetFile, extTarget);
-        Assert.False(invalidMove);
-        Assert.True(File.Exists(targetFile));
-
-        // 嘗試刪除外部目錄檔案應被拒絕
-        string extFile = Path.Combine(externalDir, "safe.txt");
-        File.WriteAllText(extFile, "external");
-        bool invalidDelete = SafeFileSystem.DeleteWithin(tempDir, extFile);
-        Assert.False(invalidDelete);
-        Assert.True(File.Exists(extFile));
-
-        // 正常刪除內部檔案應成功
-        bool deleteSuccess = SafeFileSystem.DeleteWithin(tempDir, targetFile);
-        Assert.True(deleteSuccess);
-        Assert.False(File.Exists(targetFile));
-    }
-
-    [Fact]
-    public void RuntimePathsRespectsEnvironmentOverride()
-    {
-        using var tempDirTemp = new TempDirectory("msm-log-test-");
-        string tempDir = tempDirTemp.FullName;
-        Environment.SetEnvironmentVariable("MSM_USER_DATA_DIR", tempDir);
-        try
-        {
-            Assert.Equal(Path.GetFullPath(tempDir), RuntimePaths.GetUserDataDir());
-            Assert.Equal(Path.Combine(Path.GetFullPath(tempDir), "Logs"), RuntimePaths.GetLogDir());
-            Assert.Equal(Path.Combine(Path.GetFullPath(tempDir), "Cache"), RuntimePaths.GetCacheDir());
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("MSM_USER_DATA_DIR", null);
-        }
     }
 }

@@ -4,10 +4,10 @@ namespace MinecraftServerManager.UnitTests.UI;
 
 public sealed class CreateServerViewModelTests
 {
-    internal static CreateServerViewModel Create(Core.Ports.ILoaderCatalogService? loaderCatalog = null, long systemMemoryMb = 16384) =>
+    internal static CreateServerViewModel Create(Core.Ports.ILoaderCatalogService? loaderCatalog = null, long systemMemoryMb = 16384, App.Services.IUiService? ui = null) =>
         new(
             new Infrastructure.FileSystem.LocalFileSystem(),
-            NoOpUiService.Instance,
+            ui ?? NoOpUiService.Instance,
             NoOp.Create<Core.Ports.IJavaRuntimeDetector>(),
             NoOp.Create<Core.Ports.IServerManager>(),
             loaderCatalog ?? NoOp.Create<Core.Ports.ILoaderCatalogService>(),
@@ -17,10 +17,10 @@ public sealed class CreateServerViewModelTests
             NoOp.Create<Core.Ports.IMinecraftJavaRequirementService>(),
             NoOp.Create<Core.Ports.IJavaInstaller>(),
             NoOp.Create<Core.Ports.IServerRuntimeHost>(),
-            NoOp.Create<Core.Servers.IServerLaunchPlanner>());
+            static runtime => new Infrastructure.Servers.ServerInitializationWorkflow(runtime, NoOp.Create<Core.Ports.IServerLaunchPlanner>()));
 
     [Fact]
-    public void MemoryValidationShouldCatchInvalidValues()
+    public void MemoryValidation_InvalidValues_ReportsErrors()
     {
         var vm = Create(systemMemoryMb: 16384);
         vm.MinMemoryMb = "4096";
@@ -45,7 +45,7 @@ public sealed class CreateServerViewModelTests
     }
 
     [Fact]
-    public void ResetFormShouldRestoreDefaults()
+    public void ResetForm_ModifiedForm_RestoresDefaults()
     {
         var vm = Create();
         vm.ServerName = "自訂伺服器";
@@ -60,7 +60,7 @@ public sealed class CreateServerViewModelTests
     }
 
     [Fact]
-    public void IsMinecraftVersionReloadEnabledShouldToggleBasedOnSelectedLoader()
+    public void IsMinecraftVersionReloadEnabled_LoaderChanged_Toggles()
     {
         var vm = Create();
         Assert.Equal("Paper", vm.SelectedLoader);
@@ -89,7 +89,7 @@ public sealed class CreateServerViewModelTests
     }
 
     [Fact]
-    public void LoaderVersionsMenuShouldBeDisabledForPaperFabricQuiltAndEnabledForForgeNeoForge()
+    public void LoaderVersionsMenu_LoaderChanged_EnabledOnlyForForgeFamily()
     {
         var vm = Create();
         vm.SelectedLoader = "Paper";
@@ -109,22 +109,19 @@ public sealed class CreateServerViewModelTests
     }
 
     [Fact]
-    public async Task InitializeVersionsShouldAutoSelectFirstLatestVersionWhenNotManuallySelected()
+    public async Task InitializeVersions_NoManualSelection_SelectsLatest()
     {
         var fakeCatalog = new FakeLoaderCatalog();
         var vm = Create(fakeCatalog);
 
-        for (int i = 0; i < 50 && vm.IsLoadingVersions; i++)
-        {
-            await Task.Delay(20);
-        }
+        await TestWait.UntilAsync(() => !vm.IsLoadingVersions && vm.SelectedMinecraftVersion is not null, "版本清單載入");
 
         Assert.Equal("26.3", vm.SelectedMinecraftVersion);
         Assert.Equal("Paper 26.3", vm.ServerName);
     }
 
     [Fact]
-    public async Task StaleMinecraftVersionResponsesShouldNotOverwriteNewerLoaderSelection()
+    public async Task LoadVersions_StaleResponse_KeepsNewerSelection()
     {
         var catalog = new PendingLoaderCatalog();
         var vm = Create(catalog);
@@ -136,13 +133,106 @@ public sealed class CreateServerViewModelTests
         catalog.Complete(Domain.Servers.LoaderKind.Fabric, "F1");
         catalog.Complete(Domain.Servers.LoaderKind.Paper, "P1");
 
-        for (int i = 0; i < 50 && vm.IsLoadingVersions; i++)
-        {
-            await Task.Delay(20);
-        }
+        await TestWait.UntilAsync(() => !vm.IsLoadingVersions && vm.AvailableMinecraftVersions.Count > 0, "最新選擇的版本清單載入");
 
-        await Task.Delay(200);
+        // 負向斷言：保留時間讓過期回應的接續工作執行，確認其不會覆寫
+        await Task.Delay(200, TestContext.Current.CancellationToken);
         Assert.Equal(["Q1"], vm.AvailableMinecraftVersions);
+    }
+
+    [Fact]
+    public void ResetForm_ManualServerName_FollowsLoaderAgain()
+    {
+        var vm = Create();
+        vm.ServerName = "SuperServer";
+
+        vm.ResetFormCommand.Execute(null);
+        vm.SelectedLoader = "Fabric";
+
+        Assert.Equal("Fabric", vm.ServerName);
+    }
+
+    [Fact]
+    public void ReloadMinecraftVersionsCommand_Paper_IsDisabled()
+    {
+        var vm = Create();
+
+        Assert.False(vm.ReloadMinecraftVersionsCommand.CanExecute(null));
+        vm.SelectedLoader = "Fabric";
+        Assert.True(vm.ReloadMinecraftVersionsCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task ReloadMinecraftVersions_Failure_NotifiesWarning()
+    {
+        var ui = new ManualUiService();
+        var vm = Create(new FailingReloadCatalog(), ui: ui);
+        vm.SelectedLoader = "Fabric";
+
+        await vm.ReloadMinecraftVersionsCommand.ExecuteAsync(null);
+
+        Assert.Contains(ui.Notifications, n => n.Type == App.Services.NotificationType.Warning && n.Message.Contains("重新整理 Minecraft 版本清單失敗", StringComparison.Ordinal));
+        Assert.False(vm.IsLoadingVersions);
+    }
+
+    [Fact]
+    public async Task CreateServerCommand_ValidInput_CreatesServerAndNotifiesSuccess()
+    {
+        using var rootTemp = new TempDirectory("msm-create-vm-");
+        string javaExe = rootTemp.Combine("java.exe");
+        await File.WriteAllTextAsync(javaExe, "stub java", TestContext.Current.CancellationToken);
+
+        var ui = new ManualUiService();
+        var serverManager = TestServerManagers.Create(rootTemp.FullName);
+        var runtimeHost = new FakeServerRuntimeHost();
+        string? navigatedPage = null;
+        string? navigatedServer = null;
+
+        using var vm = new CreateServerViewModel(
+            new Infrastructure.FileSystem.LocalFileSystem(),
+            ui,
+            new FixedJavaRuntimeDetector(21, javaExe),
+            serverManager,
+            new FakeLoaderCatalog(),
+            systemMemoryMb: 16384,
+            new RecordingLauncher(),
+            (page, target) =>
+            {
+                navigatedPage = page;
+                navigatedServer = target;
+            },
+            new FixedJavaRequirementService(21),
+            NoOp.Create<Core.Ports.IJavaInstaller>(),
+            runtimeHost,
+            static runtime => new Infrastructure.Servers.ServerInitializationWorkflow(runtime, new Infrastructure.Servers.ServerLaunchPlanner()));
+
+        await TestWait.UntilAsync(() => !vm.IsLoadingVersions && vm.SelectedMinecraftVersion is not null, "版本清單載入");
+        vm.ServerName = "IntegrationTestServer";
+        vm.JavaPath = javaExe;
+
+        await vm.CreateServerCommand.ExecuteAsync(null);
+
+        Assert.False(vm.IsCreating);
+        Assert.Empty(ui.ErrorMessages);
+        Assert.True(Directory.Exists(Path.Combine(rootTemp.FullName, "IntegrationTestServer")));
+        Assert.Contains(ui.Notifications, n => n.Type == App.Services.NotificationType.Success && n.Message.Contains("IntegrationTestServer", StringComparison.Ordinal));
+        Assert.Equal("manage", navigatedPage);
+        Assert.Equal("IntegrationTestServer", navigatedServer);
+    }
+
+    private sealed class FailingReloadCatalog : Core.Ports.ILoaderCatalogService
+    {
+        public Task<IReadOnlyList<Core.Loaders.LoaderVersion>> GetMinecraftVersionsForLoaderAsync(Domain.Servers.LoaderKind loader, bool includeSnapshots = false, bool forceReload = false, CancellationToken cancellationToken = default) =>
+            forceReload ? throw new HttpRequestException("offline") : Task.FromResult<IReadOnlyList<Core.Loaders.LoaderVersion>>([]);
+
+        public Task<IReadOnlyList<Core.Loaders.LoaderVersion>> GetPaperMinecraftVersionsAsync(bool forceReload = false, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Core.Loaders.LoaderVersion>>([]);
+
+        public Task<IReadOnlyList<Core.Loaders.LoaderVersion>> GetLoaderVersionsAsync(Domain.Servers.LoaderKind loader, string minecraftVersion, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Core.Loaders.LoaderVersion>>([]);
+
+        public Task ForceReloadAllLoadersAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task WarmupLoadersAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class PendingLoaderCatalog : Core.Ports.ILoaderCatalogService
@@ -187,7 +277,7 @@ public sealed class CreateServerViewModelTests
 public sealed class CreateServerSynchronizationTests
 {
     [Fact]
-    public void ServerNameShouldSynchronizeWithLoaderAndVersion()
+    public void ServerName_LoaderOrVersionChanged_Synchronizes()
     {
         var vm = CreateServerViewModelTests.Create();
         // 初始切換 loader（版本尚未載入時與 loader 同步）

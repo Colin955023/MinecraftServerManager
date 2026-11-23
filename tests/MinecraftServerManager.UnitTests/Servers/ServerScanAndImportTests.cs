@@ -1,6 +1,5 @@
 using System.IO.Compression;
 using MinecraftServerManager.Core.Ports;
-using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Servers;
 
@@ -22,11 +21,29 @@ public sealed class ServerScanAndImportTests : IDisposable
         File.WriteAllText(Path.Combine(dir, "server.jar"), "jar");
         File.WriteAllText(Path.Combine(dir, "eula.txt"), "eula=true\n");
         File.WriteAllText(Path.Combine(dir, "server.properties"), "server-port=25565\n");
+        File.WriteAllText(Path.Combine(dir, "version.json"), "{\"id\":\"1.20.4\"}");
         return dir;
     }
 
     [Fact]
-    public async Task ScanAndRegister_AddsNewCandidatesAndSkipsEverythingElse()
+    public async Task ScanAndImport_UnknownMinecraftVersion_SkipsOrRejects()
+    {
+        string source = CreateServerFolder(Path.Combine(_temp.FullName, "src"), "noversion");
+        File.Delete(Path.Combine(source, "version.json"));
+
+        var result = await _manager.ImportServerAsync(source, "NoVersion", cancellationToken: TestContext.Current.CancellationToken);
+        Assert.False(result.Completed);
+        Assert.Contains("無法辨識", result.Message, StringComparison.Ordinal);
+        Assert.Null(await _manager.GetServerAsync("NoVersion", TestContext.Current.CancellationToken));
+
+        File.Delete(Path.Combine(CreateServerFolder(_temp.FullName, "Unversioned"), "version.json"));
+        var report = await _manager.ScanAndRegisterAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(0, report.NewlyAdded);
+        Assert.Null(await _manager.GetServerAsync("Unversioned", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ScanAndRegister_MixedCandidates_AddsOnlyNew()
     {
         CreateServerFolder(_temp.FullName, "Fresh");
         Directory.CreateDirectory(Path.Combine(_temp.FullName, "EmptyFolder"));
@@ -44,7 +61,7 @@ public sealed class ServerScanAndImportTests : IDisposable
     }
 
     [Fact]
-    public async Task ScanAndRegister_SecondRunCountsExistingAsManagedAndAddsNothing()
+    public async Task ScanAndRegister_SecondRun_AddsNothing()
     {
         CreateServerFolder(_temp.FullName, "Fresh");
         await _manager.ScanAndRegisterAsync(TestContext.Current.CancellationToken);
@@ -75,7 +92,7 @@ public sealed class ServerScanAndImportTests : IDisposable
     }
 
     [Fact]
-    public async Task Import_RejectsDirectoryWithoutServerCoreAndLeavesNoTarget()
+    public async Task Import_NoServerCore_RejectsWithoutTarget()
     {
         string source = Path.Combine(_temp.FullName, "not-a-server");
         Directory.CreateDirectory(source);
@@ -90,7 +107,7 @@ public sealed class ServerScanAndImportTests : IDisposable
     }
 
     [Fact]
-    public async Task Import_RejectsInvalidNameAndDuplicateName()
+    public async Task Import_InvalidOrDuplicateName_Rejects()
     {
         string source = CreateServerFolder(Path.Combine(_temp.FullName, "src"), "one");
 
@@ -105,11 +122,10 @@ public sealed class ServerScanAndImportTests : IDisposable
     }
 
     [Fact]
-    public async Task Import_RejectsExistingNonEmptyUnregisteredTargetAndKeepsItsContent()
+    public async Task Import_NonEmptyUnregisteredTarget_RejectsAndKeepsContent()
     {
         string source = CreateServerFolder(Path.Combine(_temp.FullName, "src"), "one");
-        string existing = Path.Combine(_temp.FullName, "Occupied");
-        Directory.CreateDirectory(existing);
+        string existing = _temp.CreateSubdirectory("Occupied");
         string keepsake = Path.Combine(existing, "world.dat");
         File.WriteAllText(keepsake, "precious");
 
@@ -122,7 +138,7 @@ public sealed class ServerScanAndImportTests : IDisposable
     }
 
     [Fact]
-    public async Task Import_IntoExistingEmptyTargetSucceeds()
+    public async Task Import_ExistingEmptyTarget_Succeeds()
     {
         string source = CreateServerFolder(Path.Combine(_temp.FullName, "src"), "one");
         Directory.CreateDirectory(Path.Combine(_temp.FullName, "Vacant"));
@@ -134,7 +150,7 @@ public sealed class ServerScanAndImportTests : IDisposable
     }
 
     [Fact]
-    public async Task Import_WritesStartScriptAndEula()
+    public async Task Import_ValidServer_WritesStartScriptAndEula()
     {
         string source = CreateServerFolder(Path.Combine(_temp.FullName, "src"), "one");
         File.Delete(Path.Combine(source, "eula.txt"));

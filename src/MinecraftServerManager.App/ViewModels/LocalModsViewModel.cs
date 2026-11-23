@@ -1,11 +1,9 @@
-using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Services;
+using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
-using MinecraftServerManager.Core.Utilities;
-using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.ViewModels;
@@ -19,7 +17,8 @@ public sealed partial class LocalModRowItem : ObservableObject
 
     public string Version { get; init; } = string.Empty;
 
-    public string FileName { get; set; } = string.Empty;
+    [ObservableProperty]
+    public partial string FileName { get; set; } = string.Empty;
 
     public string FileSize { get; init; } = "-";
 
@@ -49,10 +48,10 @@ public sealed partial class LocalModRowItem : ObservableObject
 }
 
 /// <summary>模組頁：本地模組清單載入、篩選、啟用／停用、刪除、匯入與匯出</summary>
-public sealed partial class LocalModsViewModel : ViewModelBase
+public sealed partial class LocalModsViewModel : ViewModelBase, IDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(LocalModsViewModel));
-    private static readonly string[] LocalFilterOptionsCache = ["全部", "已啟用", "已停用"];
+    private static readonly string[] LocalFilterOptionsValues = ["全部", "已啟用", "已停用"];
 
     private readonly IUiService _ui;
     private readonly ModsContext _context;
@@ -61,29 +60,9 @@ public sealed partial class LocalModsViewModel : ViewModelBase
     private readonly IModListExporter _modListExporter;
     private readonly IExternalLauncher _launcher;
     private readonly List<LocalModRowItem> _allLocalMods = [];
+    private readonly SerialCancellation _loadCancellation = new();
+    private readonly HashSet<string> _togglingMods = new(StringComparer.OrdinalIgnoreCase);
     private int _loadGeneration;
-
-    [ObservableProperty]
-    public partial string LocalSearchText { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial string SelectedLocalFilter { get; set; } = "全部";
-
-    [ObservableProperty]
-    public partial LocalModRowItem? SelectedLocalMod { get; set; }
-
-    [ObservableProperty]
-    public partial bool CanBatchToggle { get; set; }
-
-    [ObservableProperty]
-    public partial bool CanCheckUpdates { get; set; }
-
-    [ObservableProperty]
-    public partial bool CanDeleteMod { get; set; }
-
-    public BulkObservableCollection<LocalModRowItem> LocalMods { get; } = [];
-
-    public static IReadOnlyList<string> LocalFilterOptions => LocalFilterOptionsCache;
 
     public LocalModsViewModel(
         ModsContext context,
@@ -109,15 +88,40 @@ public sealed partial class LocalModsViewModel : ViewModelBase
         _context.RegisterModsChangedHandler(LoadLocalModsAsync);
     }
 
+    [ObservableProperty]
+    public partial string LocalSearchText { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial string SelectedLocalFilter { get; set; } = "全部";
+
+    [ObservableProperty]
+    public partial LocalModRowItem? SelectedLocalMod { get; set; }
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(BatchToggleCommand))]
+    public partial bool CanBatchToggle { get; private set; }
+
+    [ObservableProperty]
+    public partial bool CanCheckUpdates { get; private set; }
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(DeleteSelectedModCommand))]
+    public partial bool CanDeleteMod { get; private set; }
+
+    /// <summary>本地模組載入中（供空狀態判斷）</summary>
+    [ObservableProperty]
+    public partial bool IsLoading { get; private set; }
+
+    public BulkObservableCollection<LocalModRowItem> LocalMods { get; } = [];
+
+    public IReadOnlyList<string> LocalFilterOptions { get; } = LocalFilterOptionsValues;
+
     partial void OnLocalSearchTextChanged(string value) => ApplyLocalFilter();
 
     partial void OnSelectedLocalFilterChanged(string value) => ApplyLocalFilter();
 
-    partial void OnSelectedLocalModChanged(LocalModRowItem? value)
-    {
+    partial void OnSelectedLocalModChanged(LocalModRowItem? value) =>
         CanDeleteMod = value is not null || LocalMods.Any(static m => m.IsSelected);
-        DeleteSelectedModCommand.NotifyCanExecuteChanged();
-    }
 
     /// <summary>取得目前選取之模組（供更新檢查與批次切換使用）</summary>
     public IReadOnlyList<LocalModRowItem> GetCheckedMods() => LocalMods.Where(static m => m.IsSelected).ToList();
@@ -126,14 +130,15 @@ public sealed partial class LocalModsViewModel : ViewModelBase
     public async Task RefreshLocalModsAsync()
     {
         await LoadLocalModsAsync();
-        Logger.Information("已重新整理本地模組清單 (伺服器: {Server})", _context.Server?.Name.Value);
+        Logger.Information("已重新整理本地模組清單（伺服器：{Server}）", _context.Server?.Name.Value);
     }
 
     /// <summary>依目前伺服器快照重新載入本地模組</summary>
     public async Task LoadLocalModsAsync()
     {
-        // 以世代編號取代忙碌旗標：切換伺服器時新載入覆蓋舊載入，舊結果到達後直接捨棄
+        CancellationToken token = _loadCancellation.Next();
         int generation = ++_loadGeneration;
+        IsLoading = true;
         try
         {
             _allLocalMods.Clear();
@@ -146,7 +151,8 @@ public sealed partial class LocalModsViewModel : ViewModelBase
                 return;
             }
 
-            var mods = await _modManager.GetModsAsync(server.Path);
+            var mods = await _modManager.GetModsAsync(server.Path, cancellationToken: token);
+            token.ThrowIfCancellationRequested();
             if (generation != _loadGeneration)
             {
                 return;
@@ -156,59 +162,31 @@ public sealed partial class LocalModsViewModel : ViewModelBase
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var mod in mods)
             {
-                string dedupeKey = !string.IsNullOrWhiteSpace(mod.Filename) ? mod.Filename : mod.Id;
+                string dedupeKey = !string.IsNullOrWhiteSpace(mod.FileName) ? mod.FileName : mod.Id;
                 if (seen.Add(dedupeKey))
                 {
-                    _allLocalMods.Add(ToRowItem(mod));
+                    _allLocalMods.Add(LocalModRowMapper.ToRowItem(mod));
                 }
             }
 
-            Logger.Information("載入本地模組成功，共 {Count} 個模組 (伺服器: {Server})", _allLocalMods.Count, server.Name.Value);
+            Logger.Information("載入本地模組成功，共 {Count} 個模組（伺服器：{Server}）", _allLocalMods.Count, server.Name.Value);
             ApplyLocalFilter();
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            Logger.Information("載入本地模組已被較新的掃描要求取代");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.Error(ex, "載入本地模組失敗");
             _ui.Notify($"載入模組失敗：{ex.Message}", NotificationType.Error);
         }
-    }
-
-    private static LocalModRowItem ToRowItem(LocalModInfo mod) => new()
-    {
-        Id = mod.Id,
-        Name = mod.Name,
-        Version = string.IsNullOrWhiteSpace(mod.Version) ? "-" : mod.Version,
-        FileName = mod.Filename,
-        FileSize = mod.FileSize > 0 ? UnitFormatter.FormatBytes(mod.FileSize) : "-",
-        Author = string.IsNullOrWhiteSpace(mod.Author) ? "-" : mod.Author,
-        LoaderType = string.IsNullOrWhiteSpace(mod.LoaderType) ? "-" : mod.LoaderType,
-        MinecraftVersion = string.IsNullOrWhiteSpace(mod.MinecraftVersion) ? "-" : mod.MinecraftVersion,
-        RawFileSize = mod.FileSize,
-        ModifiedTime = FormatModTime(mod.FileMtime),
-        Description = mod.Description,
-        IsEnabled = mod.Status == ModStatus.Enabled,
-        SourcePlatform = mod.Platform == ModPlatform.CurseForge ? "CurseForge" : "Modrinth",
-        CurrentHash = mod.CurrentHash,
-        HashAlgorithm = mod.HashAlgorithm,
-    };
-
-    private static string FormatModTime(double unixSeconds)
-    {
-        if (unixSeconds <= 0)
+        finally
         {
-            return "-";
-        }
-
-        try
-        {
-            return DateTimeOffset.FromUnixTimeSeconds((long)unixSeconds)
-                .ToLocalTime()
-                .ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning(ex, "轉換模組發布時間失敗");
-            return "-";
+            if (generation == _loadGeneration)
+            {
+                IsLoading = false;
+            }
         }
     }
 
@@ -263,37 +241,68 @@ public sealed partial class LocalModsViewModel : ViewModelBase
         CanBatchToggle = selectedCount >= 2;
         CanCheckUpdates = selectedCount >= 1;
         CanDeleteMod = selectedCount >= 1 || SelectedLocalMod is not null;
-        DeleteSelectedModCommand.NotifyCanExecuteChanged();
     }
 
     [RelayCommand]
     public async Task ToggleModAsync(LocalModRowItem? mod)
     {
-        if (mod is null || _context.Server is not { } server)
+        if (mod is null || !_context.TryRequireServer(_ui, out var server))
         {
             return;
         }
 
+        string lockKey = !string.IsNullOrWhiteSpace(mod.FileName) ? mod.FileName : mod.Id;
+        if (!_togglingMods.Add(lockKey))
+        {
+            return;
+        }
+
+        try
+        {
+            if (await ToggleCoreAsync(server.Path, mod) is { } error)
+            {
+                _ui.Notify($"切換模組「{mod.Name}」狀態失敗：{error}", NotificationType.Error);
+            }
+        }
+        finally
+        {
+            _togglingMods.Remove(lockKey);
+        }
+    }
+
+    /// <summary>切換單一模組啟用狀態並同步列項檔名；成功回傳 null，失敗回傳原因</summary>
+    private async Task<string?> ToggleCoreAsync(string serverPath, LocalModRowItem mod)
+    {
         bool newState = !mod.IsEnabled;
         try
         {
-            // 與批次切換、刪除一致：優先以實際檔名定位，避免以模組 ID 前綴比對到其他模組
+            // 優先以實際檔名定位，避免以模組 ID 前綴比對到其他模組
             string target = !string.IsNullOrEmpty(mod.FileName) ? mod.FileName : mod.Id;
-            var result = await _modManager.SetModStateAsync(server.Path, target, newState);
-            if (result.Completed)
+            var result = await _modManager.SetModStateAsync(serverPath, target, newState);
+            if (!result.Completed)
             {
-                mod.IsEnabled = newState;
-                Logger.Information("已切換模組「{Name}」狀態為: {State}", mod.Name, newState ? "啟用" : "停用");
+                Logger.Warning("切換模組「{Name}」狀態失敗：{Message}", mod.Name, result.Message);
+                return result.Message;
             }
+
+            mod.IsEnabled = newState;
+            if (!string.IsNullOrEmpty(mod.FileName))
+            {
+                var stem = ModHelpers.ModFilenameStem(mod.FileName.AsSpan());
+                mod.FileName = newState ? ModHelpers.ToEnabledModFileName(stem) : ModHelpers.ToDisabledModFileName(stem);
+            }
+
+            Logger.Information("已切換模組「{Name}」狀態為：{State}", mod.Name, newState ? "啟用" : "停用");
+            return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.Error(ex, "切換模組「{Name}」狀態失敗", mod.Name);
-            _ui.Notify($"切換模組「{mod.Name}」狀態失敗：{ex.Message}", NotificationType.Error);
+            return ex.Message;
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanBatchToggle))]
     public async Task BatchToggleAsync()
     {
         var targets = LocalMods.Where(static m => m.IsSelected).ToList();
@@ -308,28 +317,21 @@ public sealed partial class LocalModsViewModel : ViewModelBase
             return;
         }
 
-        int successCount = 0;
+        List<string> failures = [];
         foreach (var mod in targets)
         {
-            bool newState = !mod.IsEnabled;
-            try
+            if (await ToggleCoreAsync(server.Path, mod) is { } error)
             {
-                string targetIdentifier = !string.IsNullOrEmpty(mod.FileName) ? mod.FileName : mod.Id;
-                var result = await _modManager.SetModStateAsync(server.Path, targetIdentifier, newState);
-                if (result.Completed)
-                {
-                    mod.IsEnabled = newState;
-                    successCount++;
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Logger.Error(ex, "切換模組「{Name}」狀態失敗", mod.Name);
+                failures.Add($"{mod.Name}：{error}");
             }
         }
 
-        Logger.Information("批次切換模組狀態完成，成功: {Count} / {Total}", successCount, targets.Count);
+        Logger.Information("批次切換模組狀態完成，成功：{Count} / {Total}", targets.Count - failures.Count, targets.Count);
         ApplyLocalFilter();
+        if (failures.Count > 0)
+        {
+            ModBatchOperations.NotifySummary(_ui, "切換", targets.Count - failures.Count, failures);
+        }
     }
 
     [RelayCommand]
@@ -343,7 +345,7 @@ public sealed partial class LocalModsViewModel : ViewModelBase
 
         try
         {
-            _ui.CopyToClipboard(BuildModInfoText(target));
+            _ui.CopyToClipboard(LocalModRowMapper.BuildModInfoText(target));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -351,32 +353,8 @@ public sealed partial class LocalModsViewModel : ViewModelBase
         }
     }
 
-    /// <summary>組合模組資訊純文字（略過空白或 "-" 欄位）</summary>
-    public static string BuildModInfoText(LocalModRowItem target)
-    {
-        ArgumentNullException.ThrowIfNull(target);
-        var lines = new List<string>();
-        AddLine(lines, "模組名稱", target.Name);
-        AddLine(lines, "版本", target.Version);
-        lines.Add($"狀態: {(target.IsEnabled ? "啟用" : "停用")}");
-        AddLine(lines, "作者", target.Author);
-        AddLine(lines, "載入器", target.LoaderType);
-        AddLine(lines, "檔案大小", target.FileSize);
-        AddLine(lines, "修改時間", target.ModifiedTime);
-        AddLine(lines, "描述", target.Description);
-        return string.Join(Environment.NewLine, lines);
-
-        static void AddLine(List<string> lines, string label, string? value)
-        {
-            if (!string.IsNullOrWhiteSpace(value) && value != "-")
-            {
-                lines.Add($"{label}: {value.Trim()}");
-            }
-        }
-    }
-
     [RelayCommand]
-    public void OpenModsFolder()
+    public async Task OpenModsFolderAsync()
     {
         if (_context.Server is not { } server)
         {
@@ -387,7 +365,7 @@ public sealed partial class LocalModsViewModel : ViewModelBase
         string modsDir;
         try
         {
-            modsDir = _modFileService.EnsureModsDirectory(server.Path);
+            modsDir = await _modFileService.EnsureModsDirectoryAsync(server.Path);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -396,11 +374,8 @@ public sealed partial class LocalModsViewModel : ViewModelBase
             return;
         }
 
-        Logger.Information("開啟模組資料夾: {Path}", modsDir);
-        if (!_launcher.OpenFolder(modsDir))
-        {
-            _ui.Notify($"無法開啟資料夾：{modsDir}", NotificationType.Warning);
-        }
+        Logger.Information("開啟模組資料夾：{Path}", modsDir);
+        _ui.OpenFolderOrWarn(_launcher, modsDir);
     }
 
     [RelayCommand]
@@ -412,11 +387,19 @@ public sealed partial class LocalModsViewModel : ViewModelBase
             return;
         }
 
-        string filePath = await Task.Run(() => _modFileService.ResolveModFilePath(server.Path, targetMod.FileName)).ConfigureAwait(true);
-        if (!_launcher.ShowInFolder(filePath))
+        string filePath;
+        try
         {
-            _ui.Notify($"無法在資料夾中顯示：{filePath}", NotificationType.Warning);
+            filePath = await _modFileService.ResolveModFilePathAsync(server.Path, targetMod.FileName);
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Warning(ex, "解析模組「{File}」路徑失敗", targetMod.FileName);
+            _ui.Notify($"無法定位模組檔案：{ex.Message}", NotificationType.Warning);
+            return;
+        }
+
+        _ui.ShowInFolderOrWarn(_launcher, filePath);
     }
 
     [RelayCommand]
@@ -428,24 +411,34 @@ public sealed partial class LocalModsViewModel : ViewModelBase
             return;
         }
 
-        if (await _ui.PickFilesAsync("選取要匯入的 Minecraft 模組檔案 (.jar)", FileTypeChoice.Jar, multiselect: true) is not { } files)
+        if (await _ui.PickFilesAsync("選取要匯入的 Minecraft 模組檔案（.jar）", FileTypeChoice.Jar, multiselect: true) is not { Count: > 0 } files)
         {
             return;
         }
 
-        int count = 0;
+        List<string> failures = [];
         foreach (string file in files)
         {
-            var result = await _modManager.ImportModAsync(server.Path, file);
-            if (result.Completed)
+            string fileName = Path.GetFileName(file);
+            try
             {
-                count++;
+                var result = await _modManager.ImportModAsync(server.Path, file);
+                if (!result.Completed)
+                {
+                    failures.Add($"{fileName}：{result.Message}");
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Logger.Error(ex, "匯入模組「{File}」失敗", fileName);
+                failures.Add($"{fileName}：{ex.Message}");
             }
         }
 
+        int count = files.Count - failures.Count;
         Logger.Information("已成功匯入 {Count} 個模組檔案至「{Server}」", count, server.Name.Value);
         await LoadLocalModsAsync();
-        _ui.Notify($"已成功匯入 {count} 個模組檔案至伺服器", NotificationType.Success);
+        ModBatchOperations.NotifySummary(_ui, "匯入", count, failures);
     }
 
     [RelayCommand(CanExecute = nameof(CanDeleteMod))]
@@ -482,28 +475,36 @@ public sealed partial class LocalModsViewModel : ViewModelBase
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var result = await _modManager.DeleteModsAsync(server.Path, idsToDelete);
-        if (result.Completed)
+        try
         {
-            foreach (var mod in targets)
+            var result = await _modManager.DeleteModsAsync(server.Path, idsToDelete);
+            if (result.Completed)
             {
-                _allLocalMods.Remove(mod);
-                LocalMods.Remove(mod);
+                foreach (var mod in targets)
+                {
+                    _allLocalMods.Remove(mod);
+                    LocalMods.Remove(mod);
+                }
+
+                SelectedLocalMod = null;
+                UpdateSelectionState(0);
+
+                string successMsg = targets.Count == 1
+                    ? $"已成功刪除模組「{targets[0].Name}」"
+                    : $"已成功刪除 {targets.Count} 個模組";
+                Logger.Information("刪除模組成功，共 {Count} 個模組", targets.Count);
+                _ui.Notify(successMsg, NotificationType.Success);
             }
-
-            SelectedLocalMod = null;
-            UpdateSelectionState(0);
-
-            string successMsg = targets.Count == 1
-                ? $"已成功刪除模組「{targets[0].Name}」"
-                : $"已成功刪除 {targets.Count} 個模組";
-            Logger.Information("刪除模組成功，共 {Count} 個模組", targets.Count);
-            _ui.Notify(successMsg, NotificationType.Success);
+            else
+            {
+                Logger.Warning("刪除模組失敗：{Message}", result.Message);
+                _ui.Notify($"刪除失敗：{result.Message}", NotificationType.Error);
+            }
         }
-        else
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.Warning("刪除模組失敗: {Message}", result.Message);
-            _ui.Notify($"刪除失敗：{result.Message}", NotificationType.Error);
+            Logger.Error(ex, "刪除模組失敗");
+            _ui.Notify($"刪除模組失敗：{ex.Message}", NotificationType.Error);
         }
     }
 
@@ -516,20 +517,10 @@ public sealed partial class LocalModsViewModel : ViewModelBase
             return;
         }
 
-        var rows = _allLocalMods.Select(ToExportRow).ToList();
-        await _ui.ShowExportModListAsync(server.Name.Value, rows, _modListExporter, _launcher);
+        var rows = _allLocalMods.Select(LocalModRowMapper.ToExportRow).ToList();
+        var vm = new ExportModListViewModel(server.Name.Value, rows, _modListExporter, _launcher, _ui);
+        await vm.RunAsync();
     }
 
-    private static ModListExportRow ToExportRow(LocalModRowItem m) => new(
-        Id: m.Id,
-        Name: m.Name,
-        Version: m.Version,
-        FileName: m.FileName,
-        FileSize: m.FileSize,
-        Author: m.Author,
-        LoaderType: m.LoaderType,
-        MinecraftVersion: m.MinecraftVersion,
-        ModifiedTime: m.ModifiedTime,
-        Description: m.Description,
-        IsEnabled: m.IsEnabled);
+    public void Dispose() => _loadCancellation.Dispose();
 }

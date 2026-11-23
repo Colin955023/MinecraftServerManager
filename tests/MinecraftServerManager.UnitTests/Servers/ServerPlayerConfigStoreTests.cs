@@ -20,7 +20,7 @@ public sealed class ServerPlayerConfigStoreTests : IDisposable
     [Fact]
     public async Task LoadBundleAsync_WhenDirectoryHasNoJsonFiles_ReturnsEmptyCollections()
     {
-        var bundle = await _store.LoadBundleAsync(_testDir);
+        var bundle = await _store.LoadBundleAsync(_testDir, TestContext.Current.CancellationToken);
 
         Assert.NotNull(bundle);
         Assert.Empty(bundle.UserCache);
@@ -28,6 +28,21 @@ public sealed class ServerPlayerConfigStoreTests : IDisposable
         Assert.Empty(bundle.Whitelist);
         Assert.Empty(bundle.BannedPlayers);
         Assert.Empty(bundle.BannedIps);
+    }
+
+    [Fact]
+    public async Task LoadBundleAsync_ExistingUserCache_ReadsEntries()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_testDir, "usercache.json"),
+            """[{"name":"PlayerA","uuid":"11111111-2222-3333-4444-555555555555","expiresOn":"2026-12-01 00:00:00 +0800"}]""",
+            TestContext.Current.CancellationToken);
+
+        var bundle = await _store.LoadBundleAsync(_testDir, TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            new ServerUserCacheEntry("PlayerA", "11111111-2222-3333-4444-555555555555", "2026-12-01 00:00:00 +0800"),
+            Assert.Single(bundle.UserCache));
     }
 
     [Fact]
@@ -55,9 +70,9 @@ public sealed class ServerPlayerConfigStoreTests : IDisposable
                 new ServerBannedIpEntry("192.168.1.100", "2026-10-18 20:30:00 +0800", "Server", "forever", "Spam")
             ]);
 
-        await _store.SaveBundleAsync(_testDir, originalBundle);
+        await _store.SaveBundleAsync(_testDir, originalBundle, TestContext.Current.CancellationToken);
 
-        var loaded = await _store.LoadBundleAsync(_testDir);
+        var loaded = await _store.LoadBundleAsync(_testDir, TestContext.Current.CancellationToken);
 
         var item = Assert.Single(loaded.Operators);
         Assert.Equal("PlayerA", item.Name);
@@ -76,10 +91,14 @@ public sealed class ServerPlayerConfigStoreTests : IDisposable
         Assert.Equal("192.168.1.100", item_4.Ip);
         Assert.Equal("Spam", loaded.BannedIps[0].Reason);
 
+        // usercache.json 由伺服器維護，儲存時不得覆寫
+        Assert.Empty(loaded.UserCache);
+        Assert.False(File.Exists(Path.Combine(_testDir, "usercache.json")));
+
         // 驗證 ops.json 檔案存在且為合法 JSON 陣列
         string opsPath = Path.Combine(_testDir, "ops.json");
         Assert.True(File.Exists(opsPath));
-        string opsJson = await File.ReadAllTextAsync(opsPath);
+        string opsJson = await File.ReadAllTextAsync(opsPath, TestContext.Current.CancellationToken);
         Assert.StartsWith("[", opsJson.Trim(), StringComparison.Ordinal);
         Assert.Contains("\"bypassesPlayerLimit\": false", opsJson, StringComparison.Ordinal);
     }

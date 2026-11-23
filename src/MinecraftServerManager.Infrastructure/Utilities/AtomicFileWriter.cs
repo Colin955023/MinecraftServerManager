@@ -7,22 +7,23 @@ namespace MinecraftServerManager.Infrastructure.Utilities;
 /// <summary>原子寫入：先寫同目錄暫存檔，再一次替換目標</summary>
 public static class AtomicFileWriter
 {
-    /// <summary>原子寫入暫存檔副檔名</summary>
     public const string TempFileExtension = ".tmp";
 
     /// <summary>產生同目錄的暫存檔路徑</summary>
     public static string CreateTempSiblingPath(string targetPath) =>
         $"{targetPath}.{Guid.NewGuid():N}{TempFileExtension}";
 
+    private const int StripeCount = 128;
+    private const int CommitMaxAttempts = 3;
+    private static readonly TimeSpan CommitRetryDelay = TimeSpan.FromMilliseconds(50);
+    private static readonly SemaphoreSlim[] StripeGates = [.. Enumerable.Range(0, StripeCount).Select(static _ => new SemaphoreSlim(1, 1))];
+
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(AtomicFileWriter));
 
-    private const int StripeCount = 128;
-    private static readonly Lock[] StripeLocks = [.. Enumerable.Range(0, StripeCount).Select(static _ => new Lock())];
-
-    private static Lock GetLockForPath(string path)
+    private static SemaphoreSlim GetGateForPath(string path)
     {
         uint hash = (uint)StringComparer.OrdinalIgnoreCase.GetHashCode(path);
-        return StripeLocks[hash % StripeCount];
+        return StripeGates[hash % StripeCount];
     }
 
     public static bool WriteBytes(string filePath, ReadOnlySpan<byte> content, bool skipIfUnchanged = false)
@@ -32,68 +33,26 @@ public static class AtomicFileWriter
             return false;
         }
 
-        lock (GetLockForPath(target))
+        var gate = GetGateForPath(target);
+        gate.Wait();
+        string? temporary = null;
+        bool committed = false;
+        try
         {
             if (skipIfUnchanged && IsUnchanged(target, content))
             {
                 return true;
             }
 
-            string temporary = CreateTempSiblingPath(target);
-            try
+            temporary = CreateTempSiblingPath(target);
+            using (SafeFileHandle handle = File.OpenHandle(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, FileOptions.None, content.Length))
             {
-                using (SafeFileHandle handle = File.OpenHandle(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, FileOptions.None, content.Length))
-                {
-                    RandomAccess.Write(handle, content, fileOffset: 0);
-                    RandomAccess.FlushToDisk(handle);
-                }
-
-                CommitReplace(temporary, target);
-                return true;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                Logger.Warning(ex, "原子寫入失敗: {Path}", target);
-                return false;
-            }
-            finally
-            {
-                SafeFileSystem.TryDeleteFile(temporary);
-            }
-        }
-    }
-
-    public static async Task<bool> WriteBytesAsync(
-        string filePath,
-        ReadOnlyMemory<byte> content,
-        bool skipIfUnchanged = false,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (TryResolveTarget(filePath) is not { } target)
-        {
-            return false;
-        }
-
-        if (skipIfUnchanged && IsUnchanged(target, content.Span))
-        {
-            return true;
-        }
-
-        string temporary = CreateTempSiblingPath(target);
-        try
-        {
-            using (SafeFileHandle handle = File.OpenHandle(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, FileOptions.Asynchronous, content.Length))
-            {
-                await RandomAccess.WriteAsync(handle, content, fileOffset: 0, cancellationToken).ConfigureAwait(false);
+                RandomAccess.Write(handle, content, fileOffset: 0);
                 RandomAccess.FlushToDisk(handle);
             }
 
-            lock (GetLockForPath(target))
-            {
-                CommitReplace(temporary, target);
-            }
-
+            CommitReplace(temporary, target);
+            committed = true;
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -103,7 +62,12 @@ public static class AtomicFileWriter
         }
         finally
         {
-            SafeFileSystem.TryDeleteFile(temporary);
+            if (!committed)
+            {
+                SafeFileSystem.TryDeleteFile(temporary);
+            }
+
+            gate.Release();
         }
     }
 
@@ -144,7 +108,17 @@ public static class AtomicFileWriter
                 return false;
             }
 
-            CommitReplace(source, target);
+            var gate = GetGateForPath(target);
+            gate.Wait();
+            try
+            {
+                CommitReplace(source, target);
+            }
+            finally
+            {
+                gate.Release();
+            }
+
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -162,22 +136,32 @@ public static class AtomicFileWriter
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            Logger.Warning(ex, "原子寫入目標路徑無效或不安全: {Path}", filePath);
             return null;
         }
     }
 
-    private static bool IsUnchanged(string target, ReadOnlySpan<byte> content) =>
-        SafeFileSystem.FileExists(target) && SafeFileSystem.ReadRegularFile(target) is { } existing && existing.AsSpan().SequenceEqual(content);
+    /// <summary>先比長度再比內容；長度不同即免讀取整份檔案</summary>
+    private static bool IsUnchanged(string target, ReadOnlySpan<byte> content)
+    {
+        var info = new FileInfo(target);
+        return info.Exists &&
+            info.Length == content.Length &&
+            SafeFileSystem.ReadRegularFile(target) is { } existing &&
+            existing.AsSpan().SequenceEqual(content);
+    }
 
+    /// <summary>以單一覆寫搬移提交；目標唯讀時先清除，短暫鎖檔時輕量重試</summary>
     private static void CommitReplace(string source, string target)
     {
-        if (File.Exists(target))
-        {
-            File.Replace(source, target, null);
-        }
-        else
-        {
-            File.Move(source, target);
-        }
+        SafeFileSystem.ClearReadOnlyAttribute(target);
+
+        // ERROR_SHARING_VIOLATION (32)、ERROR_LOCK_VIOLATION (33)：防毒或索引短暫開啟目標
+        SafeFileSystem.RetryOnTransientIo(
+            () => File.Move(source, target, overwrite: true),
+            target,
+            CommitMaxAttempts,
+            CommitRetryDelay,
+            static (ex, _) => ex is IOException io && SafeFileSystem.IsTransientFileLock(io));
     }
 }

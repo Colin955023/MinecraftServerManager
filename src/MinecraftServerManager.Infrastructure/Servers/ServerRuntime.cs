@@ -5,30 +5,59 @@ using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
+public sealed class ServerRuntime : IServerRuntime
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ServerRuntime));
 
+    private readonly IProcessRunner _processRunner;
+    // 序列化 StartAsync 與 DisposeAsync，避免併發啟動兩個行程或啟動中途被處置
+    private readonly SemaphoreSlim _stateGate = new(1, 1);
+
     // MonitorExitAsync 於背景執行緒將其設為 null，讀取端一律先取區域快照
     private volatile IManagedProcess? _process;
-    private bool _disposed;
+    private volatile bool _disposed;
+    // 0 = 未就緒，1 = 已就緒；以 Interlocked 確保 ServerReady 僅觸發一次
+    private int _isReady;
+    private long _startedTimestamp;
+    private int? _lastExitCode;
+    private Task? _monitorTask;
+
+    public ServerRuntime(IProcessRunner processRunner)
+    {
+        ArgumentNullException.ThrowIfNull(processRunner);
+        _processRunner = processRunner;
+    }
 
     public int Pid => _process?.Pid ?? 0;
     public bool IsRunning => _process is { HasExited: false };
-    public bool IsReady { get; private set; }
-    private int? _lastExitCode;
+    public bool HasExited => _lastExitCode is not null || _process is null or { HasExited: true };
+    public bool IsReady => Volatile.Read(ref _isReady) != 0;
+    public long? StartedTimestamp => Interlocked.Read(ref _startedTimestamp) is var ts and not 0 ? ts : null;
     public int? ExitCode => _process?.ExitCode ?? _lastExitCode;
     public long? GetWorkingSet64() => _process?.GetWorkingSet64();
 
     public event Action<string>? OutputLineReceived;
-    public event Action? ServerStarted;
+    public event Action<int>? ServerStarted;
     public event Action<int>? ServerExited;
     public event Action? ServerReady;
 
     public async Task StartAsync(ServerLaunchPlan plan, CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(plan);
+        await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await StartCoreAsync(plan, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _stateGate.Release();
+        }
+    }
+
+    private async Task StartCoreAsync(ServerLaunchPlan plan, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
 
         if (IsRunning)
         {
@@ -36,7 +65,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             throw new InvalidOperationException("伺服器行程已在執行中");
         }
 
-        IsReady = false;
+        Interlocked.Exchange(ref _isReady, 0);
         _lastExitCode = null;
         string stableDir = SafeFileSystem.ResolveStableDirectory(plan.WorkingDirectory);
 
@@ -63,14 +92,18 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             WorkingDirectory: stableDir,
             Environment: plan.Environment);
 
-        var started = await processRunner.StartAsync(spec, cancellationToken).ConfigureAwait(false);
+        var started = await _processRunner.StartAsync(
+            spec,
+            outputLineObserved: OnOutputLineObserved,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        started.OutputReceived += OnOutputReceived;
         _process = started;
+        Interlocked.Exchange(ref _startedTimestamp, System.Diagnostics.Stopwatch.GetTimestamp());
         string serverName = plan.ServerName ?? Path.GetFileName(stableDir);
         Logger.Information("伺服器「{Server}」行程已啟動，PID: {Pid}", serverName, started.Pid);
-        started.OutputReceived += OnOutputReceived;
-        ServerStarted?.Invoke();
+        ServerStarted?.Invoke(started.Pid);
 
-        _ = MonitorExitAsync(started);
+        _monitorTask = MonitorExitAsync(started);
     }
 
     public async Task<bool> SendCommandAsync(string command, CancellationToken cancellationToken = default)
@@ -93,6 +126,12 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             Logger.Information("傳送伺服器主控台指令: {Command}", (space < 0 ? trimmed : trimmed[..space]).ToString());
             await proc.WriteLineAsync(command, cancellationToken).ConfigureAwait(false);
             return true;
+        }
+        catch (OperationCanceledException)
+        {
+            // 呼叫端取消屬預期流程，不記為錯誤
+            Logger.Information("傳送伺服器主控台指令已取消");
+            throw;
         }
         catch (Exception ex)
         {
@@ -150,38 +189,70 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            Logger.Information("等待伺服器行程結束逾時 ({Timeout})", timeout);
             return null;
         }
     }
 
     public async ValueTask DisposeAsync()
     {
+        await _stateGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+
+            var proc = _process;
+            if (proc is not null)
+            {
+                Logger.Information("處置伺服器行程資源 (PID: {Pid})", proc.Pid);
+                proc.OutputReceived -= OnOutputReceived;
+                await proc.DisposeAsync().ConfigureAwait(false);
+                if (proc.HasExited)
+                {
+                    _process = null;
+                    Interlocked.Exchange(ref _startedTimestamp, 0);
+                }
+            }
+
+            if (_monitorTask is { } monitorTask)
+            {
+                try
+                {
+                    await monitorTask.ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning(ex, "等待伺服器監控任務完成時發生例外");
+                }
+            }
+
+            Interlocked.Exchange(ref _isReady, 0);
+        }
+        finally
+        {
+            _stateGate.Release();
+        }
+    }
+
+    private void OnOutputReceived(ProcessOutput output) => OutputLineReceived?.Invoke(output.Text);
+
+    private void OnOutputLineObserved(ProcessOutput output)
+    {
         if (_disposed)
         {
             return;
         }
 
-        _disposed = true;
-
-        var proc = _process;
-        if (proc is not null)
-        {
-            Logger.Information("處置伺服器行程資源 (PID: {Pid})", proc.Pid);
-            proc.OutputReceived -= OnOutputReceived;
-            await proc.DisposeAsync().ConfigureAwait(false);
-            _process = null;
-        }
-        IsReady = false;
-    }
-
-    private void OnOutputReceived(ProcessOutput output)
-    {
         string text = output.Text;
-        OutputLineReceived?.Invoke(text);
-
-        if (!IsReady && (text.Contains("Done (", StringComparison.OrdinalIgnoreCase) || text.Contains("Done in ", StringComparison.OrdinalIgnoreCase)))
+        if (!IsReady
+            && (text.Contains("Done (", StringComparison.OrdinalIgnoreCase) || text.Contains("Done in ", StringComparison.OrdinalIgnoreCase))
+            && Interlocked.CompareExchange(ref _isReady, 1, 0) == 0)
         {
-            IsReady = true;
             Logger.Information("伺服器已進入就緒 (Ready) 狀態");
             ServerReady?.Invoke();
         }
@@ -189,33 +260,45 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 
     private async Task MonitorExitAsync(IManagedProcess proc)
     {
+        int exitCode;
         try
         {
             var result = await proc.WaitForExitAsync().ConfigureAwait(false);
             Logger.Information("伺服器監控回報行程 (PID: {Pid}) 已結束，結束代碼: {ExitCode}, 是否被強制終止: {WasForceStopped}", proc.Pid, result.ExitCode, result.WasForceStopped);
-            IsReady = false;
-            _lastExitCode = result.ExitCode;
-            ServerExited?.Invoke(result.ExitCode);
+            exitCode = result.ExitCode;
         }
         catch (Exception ex)
         {
+            // 背景監控無呼叫端可接收例外，記錄完整例外後仍以結束事件通知
             Logger.Error(ex, "伺服器行程監控失敗 (PID: {Pid})", proc.Pid);
-            IsReady = false;
-            _lastExitCode = proc.ExitCode ?? -1;
-            ServerExited?.Invoke(_lastExitCode.Value);
+            exitCode = proc.ExitCode ?? -1;
         }
-        finally
-        {
-            proc.OutputReceived -= OnOutputReceived;
-            if (ReferenceEquals(_process, proc))
-            {
-                _process = null;
-                IsReady = false;
-            }
 
-            // 伺服器自行結束時在此釋放行程資源
-            await proc.DisposeAsync().ConfigureAwait(false);
+        // 先清除狀態再觸發事件，訂閱者讀到的 IsRunning／IsReady 與事件一致
+        proc.OutputReceived -= OnOutputReceived;
+        _lastExitCode = exitCode;
+        if (ReferenceEquals(_process, proc))
+        {
+            _process = null;
+            Interlocked.Exchange(ref _startedTimestamp, 0);
         }
+
+        Interlocked.Exchange(ref _isReady, 0);
+
+        try
+        {
+            // 伺服器自行結束時在此釋放行程資源
+            if (!_disposed)
+            {
+                await proc.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "釋放已結束的伺服器行程資源失敗 (PID: {Pid})", proc.Pid);
+        }
+
+        ServerExited?.Invoke(exitCode);
     }
     private static string ResolveScriptPath(string stableDir, string scriptExecutable) =>
         Path.GetFullPath(scriptExecutable, stableDir);

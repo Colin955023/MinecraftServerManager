@@ -1,7 +1,5 @@
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Servers;
-using MinecraftServerManager.Domain.Servers;
-using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.Servers;
 
 namespace MinecraftServerManager.UnitTests.Servers;
@@ -26,6 +24,8 @@ public sealed class ServerRuntimeHostTests : IDisposable
 
         public Task<bool> TerminateAsync(TrackedServerProcess process, CancellationToken cancellationToken = default) =>
             Task.FromResult(true);
+
+        public Task FlushAsync() => Task.CompletedTask;
     }
 
     private ServerLaunchPlan CreatePlan(string name)
@@ -33,10 +33,7 @@ public sealed class ServerRuntimeHostTests : IDisposable
         string dir = Path.Combine(_temp.FullName, name);
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, "server.jar"), "dummy jar");
-        return new ServerLaunchPlanner().CreatePlan(
-            new ServerConfig(ServerName.Parse(name), MinecraftVersion.Parse("1.21.4"), LoaderKind.Vanilla, string.Empty, 1024, null, path: dir),
-            "server.jar",
-            "java.exe");
+        return TestServerConfigs.CreatePlan(name, dir);
     }
 
     [Fact]
@@ -53,7 +50,7 @@ public sealed class ServerRuntimeHostTests : IDisposable
     }
 
     [Fact]
-    public async Task TwoServers_CanRunSimultaneously()
+    public async Task GetRuntime_TwoServers_RunSimultaneously()
     {
         await using var host = new ServerRuntimeHost(new StubProcessRunner(interactive: true), new RecordingRegistry());
 
@@ -94,5 +91,21 @@ public sealed class ServerRuntimeHostTests : IDisposable
         Assert.Equal(["Alpha"], registry.Removed);
         Assert.False(host.IsRunning("Alpha"));
         Assert.False(host.IsAnyRunning);
+    }
+
+    [Fact]
+    public async Task ReleaseIdleRuntimeAsync_RunningAndStopped_ReleasesOnlyStopped()
+    {
+        await using var host = new ServerRuntimeHost(new StubProcessRunner(interactive: true), new RecordingRegistry());
+        var idle = host.GetRuntime("Idle");
+        var running = host.GetRuntime("Running");
+        await running.StartAsync(CreatePlan("Running"), TestContext.Current.CancellationToken);
+
+        Assert.True(await host.ReleaseIdleRuntimeAsync("idle"));
+        Assert.False(await host.ReleaseIdleRuntimeAsync("Running"));
+        Assert.False(await host.ReleaseIdleRuntimeAsync("Missing"));
+
+        Assert.NotSame(idle, host.GetRuntime("Idle"));
+        Assert.Same(running, host.GetRuntime("Running"));
     }
 }

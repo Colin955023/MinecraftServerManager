@@ -9,7 +9,10 @@
     <!-- .NET SDK 內建的預設投影套件 10.0.26100.57 會在裁剪時產生 IL2104 警告，指定較新的投影套件版本 -->
     <WindowsSdkPackageVersion>10.0.26100.87</WindowsSdkPackageVersion>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <Version>2.2.0</Version>
+    <!-- 還原時稽核直接與遞移相依套件的已知弱點 -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <Version>2.2.1</Version>
     <IsTrimmable Condition="!$(MSBuildProjectName.EndsWith('Tests'))">true</IsTrimmable>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -23,14 +26,17 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PublishDocumentationFiles>false</PublishDocumentationFiles>
     <NoWarn>$(NoWarn);1591</NoWarn>
+    <!-- NU1900：弱點資料來源無法連線時不使建置失敗 -->
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1900</WarningsNotAsErrors>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <!-- AnyCPU 相依組件參考至 x64 專案時不視為架構不符 -->
     <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+    <!-- 未安裝 Windows SDK 的環境（如 CI）改用套件內附的 Windows 中繼資料 -->
     <CsWinRTWindowsMetadata
       Condition="'$(CsWinRTWindowsMetadata)' == '' and '$(WindowsSdkDir)' == ''">local</CsWinRTWindowsMetadata>
   </PropertyGroup>
   <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('Tests'))">
-    <NoWarn>$(NoWarn);CsWinRT1032;CA1859</NoWarn>
+    <NoWarn>$(NoWarn);CsWinRT1032</NoWarn>
   </PropertyGroup>
   <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>

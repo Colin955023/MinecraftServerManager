@@ -1,18 +1,31 @@
-using MinecraftServerManager.Infrastructure.Logging;
+using System.Buffers;
+using System.Collections.Frozen;
 using MinecraftServerManager.Core.Mods;
-using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Http;
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
 /// <summary>模組檔案異動、啟停、批次刪除與原子交易安裝實作</summary>
-public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
+public sealed class ModFileInstaller
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(ModFileInstaller));
-    public async Task<LocalModMutationResult> SetModStateAsync(
+    private static readonly FrozenSet<string> ModrinthHosts = TrustedHostPolicy.Hosts("cdn.modrinth.com", "modrinth.com");
+
+    private readonly IHttpPort _httpPort;
+
+    public ModFileInstaller(IHttpPort httpPort)
+    {
+        ArgumentNullException.ThrowIfNull(httpPort);
+        _httpPort = httpPort;
+    }
+
+    public static async Task<LocalModMutationResult> SetModStateAsync(
         string modsDirectory,
         string modId,
         bool enable,
@@ -64,7 +77,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         return LocalModMutationResult.Failure($"{action}失敗", $"找不到模組檔案：{Path.GetFileName(srcFile)}");
     }
 
-    public Task<LocalModMutationResult> DeleteModsAsync(
+    public static Task<LocalModMutationResult> DeleteModsAsync(
         string modsDirectory,
         IReadOnlyList<string> modIds,
         CancellationToken cancellationToken = default)
@@ -80,6 +93,8 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         return Task.Run(() =>
         {
             string stableModsDir = SafeFileSystem.ResolveStableDirectory(modsDirectory, create: true);
+            // 目錄只列舉一次，供所有識別碼比對
+            var modStems = ListModStems(stableModsDir);
             int deletedCount = 0;
             int missingCount = 0;
             int failedCount = 0;
@@ -87,23 +102,20 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
             foreach (string modId in modIds)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var (enabledPath, disabledPath) = ResolveModFilePaths(stableModsDir, modId);
+                var (enabledPath, disabledPath) = ResolveModFilePaths(stableModsDir, modId, modStems);
+                var (found, allSucceeded) = ModFileVariants.DeleteVariants(stableModsDir, enabledPath, disabledPath);
 
-                string? target = SafeFileSystem.FileExists(enabledPath) ? enabledPath
-                    : SafeFileSystem.FileExists(disabledPath) ? disabledPath
-                    : null;
-
-                if (target is null)
+                if (!found)
                 {
                     missingCount++;
                 }
-                else if (SafeFileSystem.DeleteWithin(stableModsDir, target))
+                else if (!allSucceeded)
                 {
-                    deletedCount++;
+                    failedCount++;
                 }
                 else
                 {
-                    failedCount++;
+                    deletedCount++;
                 }
             }
 
@@ -126,7 +138,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         }, cancellationToken);
     }
 
-    public Task<LocalModMutationResult> ImportLocalModAsync(
+    public static Task<LocalModMutationResult> ImportLocalModAsync(
         string modsDirectory,
         string sourceFilePath,
         CancellationToken cancellationToken = default)
@@ -155,7 +167,29 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
                 return LocalModMutationResult.Failure("匯入失敗", "目標路徑超出模組資料夾邊界");
             }
 
-            SafeFileSystem.CopyFile(sourceFilePath, targetPath, overwrite: true);
+            if (string.Equals(Path.GetFullPath(sourceFilePath), targetPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return LocalModMutationResult.Success($"模組「{fileName}」已位於模組資料夾");
+            }
+
+            // 先複製至同目錄暫存檔再原子替換，避免中斷時留下不完整的 jar
+            string tempPath = AtomicFileWriter.CreateTempSiblingPath(targetPath);
+            try
+            {
+                SafeFileSystem.CopyFile(sourceFilePath, tempPath, overwrite: true);
+                if (!AtomicFileWriter.ReplaceFile(tempPath, targetPath))
+                {
+                    return LocalModMutationResult.Failure("匯入失敗", $"無法寫入模組檔案（可能被其他程式占用）：{fileName}");
+                }
+            }
+            finally
+            {
+                if (SafeFileSystem.FileExists(tempPath))
+                {
+                    SafeFileSystem.DeleteWithin(stableModsDir, tempPath);
+                }
+            }
+
             return LocalModMutationResult.Success($"模組「{fileName}」已成功匯入");
         }, cancellationToken);
     }
@@ -199,22 +233,22 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         string tempFilePath = AtomicFileWriter.CreateTempSiblingPath(Path.Combine(stagingDir, safeFileName));
         string finalTargetPath = Path.Combine(stableModsDir, safeFileName);
         string? backupFilePath = null;
-        string algo = !string.IsNullOrEmpty(hashAlgorithm) ? hashAlgorithm : "sha512";
+        string algo = !string.IsNullOrEmpty(hashAlgorithm) ? hashAlgorithm : ModHelpers.PreferredHashAlgorithm;
 
         try
         {
             // 下載並於串流管線中即時增量驗證雜湊（消除下載後二次全檔磁碟讀取 I/O）
-            var downloadResult = await httpPort.DownloadAsync(
+            var downloadResult = await _httpPort.DownloadAsync(
                 new Uri(downloadUrl),
                 tempFilePath,
                 progress: progress is not null ? new SynchronousProgress<HttpProgress>(p =>
                 {
                     if (p.TotalBytes > 0)
                     {
-                        progress.Report((int)((double)p.BytesDownloaded / p.TotalBytes * 100));
+                        progress.Report(ProgressMapping.Map(p.BytesDownloaded, p.TotalBytes, 0, 100));
                     }
                 }) : null,
-                expectedHash: !string.IsNullOrEmpty(expectedHash) ? expectedHash : null,
+                expectedHash: expectedHash,
                 expectedHashAlgorithm: algo,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
 
@@ -253,11 +287,13 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         }
         catch (OperationCanceledException)
         {
+            Logger.Information("線上模組安裝已取消，已回滾暫存檔案: {FileName}", safeFileName);
             Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
             return ModFileOperationResult.Cancel("已取消安裝");
         }
         catch (Exception ex)
         {
+            Logger.Error(ex, "安裝線上模組失敗: {FileName}", safeFileName);
             Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
             return ModFileOperationResult.Fail($"安裝失敗：{ex.Message}");
         }
@@ -267,14 +303,39 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         }
     }
 
-    /// <summary>清理模組目錄中的 .download_staging 暫存資料夾</summary>
+    /// <summary>清理模組目錄中的 .download_staging 暫存資料夾（避免誤刪併發進行中的下載子項）</summary>
     public static void CleanupStagingDirectory(string modsDirectory)
     {
         try
         {
             string stableModsDir = SafeFileSystem.ResolveStableDirectory(modsDirectory);
-            string stagingDir = Path.Combine(stableModsDir, ".download_staging");
-            SafeFileSystem.DeleteWithin(stableModsDir, stagingDir);
+            string stagingRoot = Path.Combine(stableModsDir, ".download_staging");
+            if (!SafeFileSystem.DirectoryExists(stagingRoot))
+            {
+                return;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            foreach (var entry in SafeFileSystem.ListBoundedDirectory(stagingRoot, rejectReparse: true))
+            {
+                if (entry.IsDirectory)
+                {
+                    if (SafeFileSystem.IsDirectoryEmpty(entry.FullPath) ||
+                        (now - entry.LastWriteTimeUtc) > TimeSpan.FromMinutes(30))
+                    {
+                        SafeFileSystem.DeleteWithin(stagingRoot, entry.FullPath);
+                    }
+                }
+                else
+                {
+                    SafeFileSystem.DeleteWithin(stagingRoot, entry.FullPath);
+                }
+            }
+
+            if (SafeFileSystem.IsDirectoryEmpty(stagingRoot))
+            {
+                SafeFileSystem.DeleteWithin(stableModsDir, stagingRoot);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -286,13 +347,9 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
     {
         try
         {
-            if (SafeFileSystem.DirectoryExists(stagingDir))
+            if (SafeFileSystem.DirectoryExists(stagingDir) && SafeFileSystem.IsDirectoryEmpty(stagingDir))
             {
-                var entries = SafeFileSystem.ListBoundedDirectory(stagingDir, maxEntries: 10, rejectReparse: false);
-                if (entries.Count == 0)
-                {
-                    SafeFileSystem.DeleteWithin(stableModsDir, stagingDir);
-                }
+                SafeFileSystem.DeleteWithin(stableModsDir, stagingDir);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -326,7 +383,23 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         }
     }
 
-    private static (string EnabledPath, string DisabledPath) ResolveModFilePaths(string stableModsDir, string modId)
+    /// <summary>列出模組目錄中所有模組檔的檔名主幹（不拒絕 reparse point，僅讀取名稱）</summary>
+    private static List<string> ListModStems(string stableModsDir)
+    {
+        var stems = new List<string>();
+        foreach (FileSystemEntry entry in SafeFileSystem.ListBoundedDirectory(stableModsDir, rejectReparse: false))
+        {
+            ReadOnlySpan<char> fileName = Path.GetFileName(entry.FullPath.AsSpan());
+            if (!entry.IsDirectory && ModHelpers.IsModFileName(fileName))
+            {
+                stems.Add(ModHelpers.ModFilenameStem(fileName).ToString());
+            }
+        }
+
+        return stems;
+    }
+
+    private static (string EnabledPath, string DisabledPath) ResolveModFilePaths(string stableModsDir, string modId, IReadOnlyList<string>? modStems = null)
     {
         ReadOnlySpan<char> raw = modId.AsSpan().Trim();
         int hashIdx = raw.IndexOf('#');
@@ -338,8 +411,11 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         ReadOnlySpan<char> cleanSpan = ModHelpers.ModFilenameStem(Path.GetFileName(raw.Trim("'\" \r\n\t")));
         string cleanModId = cleanSpan.ToString();
 
-        string enabledPath = Path.Combine(stableModsDir, ModHelpers.ToEnabledModFileName(cleanModId));
-        string disabledPath = Path.Combine(stableModsDir, ModHelpers.ToDisabledModFileName(cleanModId));
+        if (!ModFileVariants.TryGetPaths(stableModsDir, cleanModId, out string? enabledPath, out string? disabledPath, requireModExtension: false))
+        {
+            enabledPath = Path.Combine(stableModsDir, ModHelpers.ToEnabledModFileName(cleanModId));
+            disabledPath = Path.Combine(stableModsDir, ModHelpers.ToDisabledModFileName(cleanModId));
+        }
 
         if (SafeFileSystem.FileExists(enabledPath) || SafeFileSystem.FileExists(disabledPath))
         {
@@ -349,18 +425,11 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         // 完全相符優先；前綴相符須唯一，避免 sodium 誤中 sodium-extra
         string? exact = null;
         var prefixed = new List<string>();
-        foreach (FileSystemEntry entry in SafeFileSystem.ListBoundedDirectory(stableModsDir))
+        foreach (string stem in modStems ?? ListModStems(stableModsDir))
         {
-            ReadOnlySpan<char> fileName = Path.GetFileName(entry.FullPath.AsSpan());
-            if (entry.IsDirectory || !ModHelpers.IsModFileName(fileName))
-            {
-                continue;
-            }
-
-            ReadOnlySpan<char> stem = ModHelpers.ModFilenameStem(fileName);
             if (stem.Equals(cleanModId, StringComparison.OrdinalIgnoreCase))
             {
-                exact = stem.ToString();
+                exact = stem;
                 break;
             }
 
@@ -368,14 +437,14 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
                 && stem.StartsWith(cleanModId, StringComparison.OrdinalIgnoreCase)
                 && stem[cleanModId.Length] is '-' or '_')
             {
-                prefixed.Add(stem.ToString());
+                prefixed.Add(stem);
             }
         }
 
         string? matchedStem = exact ?? (prefixed.Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1 ? prefixed[0] : null);
-        if (matchedStem is not null)
+        if (matchedStem is not null && ModFileVariants.TryGetPaths(stableModsDir, matchedStem, out string? mEnabled, out string? mDisabled, requireModExtension: false))
         {
-            return (Path.Combine(stableModsDir, ModHelpers.ToEnabledModFileName(matchedStem)), Path.Combine(stableModsDir, ModHelpers.ToDisabledModFileName(matchedStem)));
+            return (mEnabled, mDisabled);
         }
 
         if (prefixed.Count > 1)
@@ -386,28 +455,43 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         return (enabledPath, disabledPath);
     }
 
-    /// <summary>指定的模組下載 URL 是否為官方 Modrinth CDN 來源</summary>
-    public static bool IsOfficialModrinthSource(string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            return false;
-        }
+    /// <summary>是否為官方 Modrinth 來源（HTTPS、預設埠、無使用者資訊）</summary>
+    public static bool IsOfficialModrinthSource(string? url) => TrustedHostPolicy.IsTrusted(url, ModrinthHosts);
 
-        if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
-        {
-            return uri.Scheme == Uri.UriSchemeHttps &&
-                   (string.Equals(uri.Host, "cdn.modrinth.com", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(uri.Host, "modrinth.com", StringComparison.OrdinalIgnoreCase));
-        }
-
-        return false;
-    }
-
+    /// <summary>逐塊比對內容（呼叫端已確認長度相同）；讀取失敗視為不同</summary>
     private static async Task<bool> HasSameContentAsync(string firstFile, string secondFile, CancellationToken cancellationToken)
     {
-        string firstHash = await HashCalculator.ComputeFileHashAsync(firstFile, "sha256", cancellationToken: cancellationToken).ConfigureAwait(false);
-        return !string.IsNullOrEmpty(firstHash)
-            && string.Equals(firstHash, await HashCalculator.ComputeFileHashAsync(secondFile, "sha256", cancellationToken: cancellationToken).ConfigureAwait(false), StringComparison.OrdinalIgnoreCase);
+        const int ChunkSize = 81920;
+        byte[] firstBuffer = ArrayPool<byte>.Shared.Rent(ChunkSize);
+        byte[] secondBuffer = ArrayPool<byte>.Shared.Rent(ChunkSize);
+        try
+        {
+            using var first = SafeFileSystem.OpenRead(firstFile, FileShare.Read, FileOptions.SequentialScan | FileOptions.Asynchronous);
+            using var second = SafeFileSystem.OpenRead(secondFile, FileShare.Read, FileOptions.SequentialScan | FileOptions.Asynchronous);
+            while (true)
+            {
+                int firstRead = await first.ReadAtLeastAsync(firstBuffer.AsMemory(0, ChunkSize), ChunkSize, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
+                int secondRead = await second.ReadAtLeastAsync(secondBuffer.AsMemory(0, ChunkSize), ChunkSize, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
+                if (!firstBuffer.AsSpan(0, firstRead).SequenceEqual(secondBuffer.AsSpan(0, secondRead)))
+                {
+                    return false;
+                }
+
+                if (firstRead < ChunkSize)
+                {
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.Warning(ex, "比對模組檔案內容失敗: {FilePath}", firstFile);
+            return false;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(firstBuffer);
+            ArrayPool<byte>.Shared.Return(secondBuffer);
+        }
     }
 }

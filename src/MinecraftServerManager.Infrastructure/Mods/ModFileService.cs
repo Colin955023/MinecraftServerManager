@@ -7,57 +7,62 @@ namespace MinecraftServerManager.Infrastructure.Mods;
 /// <summary>呈現層模組檔案輔助服務：路徑解析、暫存清理與官方來源判定</summary>
 public sealed class ModFileService : IModFileService
 {
-    private const string DisabledSuffix = ".disabled";
-
     public bool IsOfficialModrinthSource(string? url) => ModFileInstaller.IsOfficialModrinthSource(url);
 
-    public void CleanupStagingDirectory(string serverPath)
+    public Task CleanupStagingDirectoryAsync(string serverPath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(serverPath))
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        ModFileInstaller.CleanupStagingDirectory(Path.Combine(serverPath, ServerDefaults.ModsDirectoryName));
+        return Task.Run(() => ModFileInstaller.CleanupStagingDirectory(Path.Combine(serverPath, ServerDefaults.ModsDirectoryName)), cancellationToken);
     }
 
-    public string EnsureModsDirectory(string serverPath)
+    public Task<string> EnsureModsDirectoryAsync(string serverPath, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverPath);
-        return SafeFileSystem.CreateDirectory(Path.Combine(serverPath, ServerDefaults.ModsDirectoryName));
+        return Task.Run(() => SafeFileSystem.CreateDirectory(Path.Combine(serverPath, ServerDefaults.ModsDirectoryName)), cancellationToken);
     }
 
-    public string ResolveModFilePath(string serverPath, string fileName)
+    public Task<string> ResolveModFilePathAsync(string serverPath, string fileName, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverPath);
+        return Task.Run(() => ResolveModFilePath(serverPath, fileName), cancellationToken);
+    }
+
+    public Task DeleteModFileVariantsAsync(string serverPath, string fileName, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
+        return Task.Run(() => DeleteModFileVariants(serverPath, fileName), cancellationToken);
+    }
+
+    private static string ResolveModFilePath(string serverPath, string fileName)
+    {
         string modsDir = Path.Combine(serverPath, ServerDefaults.ModsDirectoryName);
-        if (string.IsNullOrWhiteSpace(fileName))
+        if (!ModFileVariants.TryGetPaths(modsDir, fileName, out string? enabledPath, out string? disabledPath))
         {
             return modsDir;
         }
 
-        string filePath = Path.Combine(modsDir, fileName);
-        if (SafeFileSystem.FileExists(filePath))
-        {
-            return filePath;
-        }
-
-        string disabledPath = filePath + DisabledSuffix;
-        return SafeFileSystem.FileExists(disabledPath) ? disabledPath : modsDir;
+        return SafeFileSystem.FileExists(enabledPath) ? enabledPath
+            : SafeFileSystem.FileExists(disabledPath) ? disabledPath
+            : modsDir;
     }
 
-    public void DeleteModFileVariants(string serverPath, string fileName)
+    private static void DeleteModFileVariants(string serverPath, string fileName)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(serverPath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
-
-        string filePath = Path.Combine(serverPath, ServerDefaults.ModsDirectoryName, fileName);
-        foreach (string candidate in (string[])[filePath, filePath + DisabledSuffix])
+        string modsPath = Path.Combine(serverPath, ServerDefaults.ModsDirectoryName);
+        if (!SafeFileSystem.DirectoryExists(modsPath))
         {
-            if (SafeFileSystem.FileExists(candidate))
-            {
-                SafeFileSystem.DeleteWithin(serverPath, candidate);
-            }
+            return;
+        }
+
+        string modsDir = SafeFileSystem.ResolveStableDirectory(modsPath);
+        if (ModFileVariants.TryGetPaths(modsDir, fileName, out string? enabledPath, out string? disabledPath))
+        {
+            ModFileVariants.DeleteVariants(modsDir, enabledPath, disabledPath);
         }
     }
 }

@@ -8,10 +8,13 @@
   mc:Ignorable="d">
 
   <Border Style="{StaticResource TableCellBorderStyle}"
+    BorderThickness="{x:Bind local:TableCell.ToBorderThickness(ShowRightBorder)}"
     Padding="8,6">
     <TextBlock Text="{x:Bind Text, Mode=OneWay}"
       TextTrimming="CharacterEllipsis"
-      ToolTipService.ToolTip="{x:Bind local:TableCell.PickToolTip(ToolTipText, Text), Mode=OneWay}"
+      ToolTipService.ToolTip="{x:Bind local:TableCell.PickToolTip(ToolTipText, Text)}"
+      local:ThemeBrush.ForegroundKey="{x:Bind ForegroundKey, Mode=OneWay}"
+      FontWeight="{x:Bind TextFontWeight, Mode=OneWay}"
       VerticalAlignment="Center" />
   </Border>
 </UserControl>

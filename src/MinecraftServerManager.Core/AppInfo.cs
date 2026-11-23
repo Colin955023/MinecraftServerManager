@@ -22,12 +22,19 @@ public static class AppInfo
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
             ?.InformationalVersion;
 
-        if (string.IsNullOrWhiteSpace(informationalVersion))
+        // 去除 +建置中繼資料；若僅剩空白（如 "+abc"）則改用組件版本
+        ReadOnlySpan<char> version = informationalVersion.AsSpan();
+        int separatorIndex = version.IndexOf('+');
+        if (separatorIndex >= 0)
         {
-            return typeof(AppInfo).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+            version = version[..separatorIndex];
         }
 
-        int separatorIndex = informationalVersion.IndexOf('+', StringComparison.Ordinal);
-        return separatorIndex >= 0 ? informationalVersion[..separatorIndex] : informationalVersion;
+        version = version.Trim();
+        return version.IsEmpty ? FormatAssemblyVersion(typeof(AppInfo).Assembly.GetName().Version) : version.ToString();
     }
+
+    /// <summary>組件版本格式化為三段；不足三段者以 0 補齊</summary>
+    private static string FormatAssemblyVersion(Version? version) =>
+        version is null ? "0.0.0" : $"{version.Major}.{version.Minor}.{Math.Max(version.Build, 0)}";
 }

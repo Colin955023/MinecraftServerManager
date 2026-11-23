@@ -1,30 +1,75 @@
-using MinecraftServerManager.Infrastructure.Logging;
 using System.Buffers;
+using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using MinecraftServerManager.Core.Loaders;
 using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
-using MinecraftServerManager.Core.Utilities;
+using MinecraftServerManager.Infrastructure.Http;
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Servers;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Loaders;
 
-public sealed partial class LoaderInstallerService(
-    IHttpPort httpPort,
-    IProcessRunner processRunner,
-    string installerCacheDirectory) : ILoaderInstallerService
+public sealed partial class LoaderInstallerService : ILoaderInstallerService
 {
+    private const int InstallerOutputTailLines = 20;
+
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(LoaderInstallerService));
     private static readonly SearchValues<char> HashSeparators = SearchValues.Create(" \t\r\n");
+    private static readonly TimeSpan MetadataCacheTtl = TimeSpan.FromHours(1);
+    private static readonly (string Name, int HexLength)[] HashAlgorithms = [(HashAlgorithmNames.Sha256, 64), (HashAlgorithmNames.Sha1, 40)];
+    private static readonly FrozenSet<string> PaperDownloadHosts = TrustedHostPolicy.Hosts("fill-data.papermc.io", "api.papermc.io");
+    private static readonly FrozenSet<string> VanillaDownloadHosts = TrustedHostPolicy.Hosts("piston-data.mojang.com", "launcher.mojang.com");
+    private static readonly SearchValues<char> VersionTokenChars =
+        SearchValues.Create("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.-_+");
+    private static readonly TimeSpan OutputProgressInterval = TimeSpan.FromMilliseconds(200);
+
+    private static readonly FrozenDictionary<LoaderKind, InstallerPolicy> Policies =
+        new Dictionary<LoaderKind, InstallerPolicy>
+        {
+            [LoaderKind.Fabric] = new("fabric-installer-", ".jar", KeepCount: 1, new Uri("https://meta.fabricmc.net/v2/versions/installer"), TrustedHostPolicy.Hosts("maven.fabricmc.net"), PreferStable: true, ReadMetaHashes: false),
+            [LoaderKind.Quilt] = new("quilt-installer-", ".jar", KeepCount: 1, new Uri("https://meta.quiltmc.org/v3/versions/installer"), TrustedHostPolicy.Hosts("maven.quiltmc.org"), PreferStable: false, ReadMetaHashes: true),
+            [LoaderKind.Forge] = new("forge-", "-installer.jar", KeepCount: 5),
+            [LoaderKind.NeoForge] = new("neoforge-", "-installer.jar", KeepCount: 5)
+        }.ToFrozenDictionary();
+
+    private readonly IHttpPort _httpPort;
+    private readonly IProcessRunner _processRunner;
+    private readonly string _cacheDir;
+    private readonly string _versionCacheDir;
+    private readonly ConcurrentDictionary<LoaderKind, (InstallerDescriptor Descriptor, DateTimeOffset ExpiresAtUtc)> _metadataCache = new();
+
+    // 同一安裝器快取檔序列化下載；進行中的檔名不得被清理
+    private readonly KeyedAsyncLock _downloadGates = new();
+    private readonly TimeProvider _timeProvider;
+    private readonly ConcurrentDictionary<string, byte> _activeInstallers = new(StringComparer.OrdinalIgnoreCase);
+
+    public LoaderInstallerService(
+        IHttpPort httpPort,
+        IProcessRunner processRunner,
+        string installerCacheDirectory,
+        string versionCacheDirectory,
+        TimeProvider timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(httpPort);
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        _timeProvider = timeProvider;
+        ArgumentNullException.ThrowIfNull(processRunner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(installerCacheDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(versionCacheDirectory);
+        _httpPort = httpPort;
+        _processRunner = processRunner;
+        _cacheDir = SafeFileSystem.ResolveStableDirectory(installerCacheDirectory, create: true);
+        _versionCacheDir = SafeFileSystem.ResolveStableDirectory(versionCacheDirectory, create: true);
+    }
 
     /// <summary>安裝器整體逾時；測試可縮短</summary>
     internal TimeSpan InstallerTimeout { get; init; } = TimeSpan.FromMinutes(30);
-
-    private readonly string _cacheDir = SafeFileSystem.ResolveStableDirectory(installerCacheDirectory, create: true);
 
     public async Task<string> InstallLoaderAsync(
         LoaderKind loader,
@@ -47,7 +92,7 @@ public sealed partial class LoaderInstallerService(
         }
 
         int lastPct = 0;
-        void SafeReport(string phase, string message, int pct)
+        void SafeReport(LoaderInstallPhase phase, string message, int pct)
         {
             lastPct = Math.Max(lastPct, pct);
             progress?.Report(new LoaderInstallProgress(phase, message, Math.Clamp(lastPct, 0, 100)));
@@ -56,40 +101,69 @@ public sealed partial class LoaderInstallerService(
         // 只有 Fabric 與 Quilt 需先準備原版 server.jar
         if (loader is LoaderKind.Fabric or LoaderKind.Quilt)
         {
-            SafeReport("vanilla_prepare", "正在準備原版伺服器檔案...", 5);
-            string serverJarPath = Path.Combine(stableServerDir, "server.jar");
-            if (!SafeFileSystem.FileExists(serverJarPath))
+            SafeReport(LoaderInstallPhase.VanillaPrepare, "正在準備原版伺服器檔案...", 5);
+            string serverJarPath = Path.Combine(stableServerDir, ServerDefaults.ServerJarFileName);
+            if (!SafeFileSystem.FileExists(serverJarPath) || SafeFileSystem.GetFileLength(serverJarPath) == 0)
             {
                 IProgress<LoaderInstallProgress>? vanillaProgress = progress is null ? null : new SynchronousProgress<LoaderInstallProgress>(vp =>
                 {
-                    int mapped = (int)(vp.PercentCompleted * 0.35); // 0% ~ 35%
-                    SafeReport("vanilla_prepare", vp.Message, mapped);
+                    int mapped = ProgressMapping.Map(vp.PercentCompleted, 100, 0, 35); // 0% ~ 35%
+                    SafeReport(LoaderInstallPhase.VanillaPrepare, vp.Message, mapped);
                 });
                 await EnsureVanillaServerJarAsync(minecraftVersion, stableServerDir, vanillaProgress, cancellationToken).ConfigureAwait(false);
             }
-            SafeReport("vanilla_prepare", "原版伺服器檔案已就緒", 35);
+            SafeReport(LoaderInstallPhase.VanillaPrepare, "原版伺服器檔案已就緒", 35);
         }
 
         // 下載各 Loader Installer (35% ~ 50%)
-        SafeReport("downloading", $"正在下載 {loader} 安裝器...", 38);
-        string installerJarPath = await DownloadInstallerJarAsync(loader, minecraftVersion, loaderVersion, cancellationToken).ConfigureAwait(false);
-        SafeReport("downloading", $"{loader} 安裝器下載完成", 50);
+        bool isDynamic = Policies.TryGetValue(loader, out var policy) && policy.MetaUri is not null;
+        SafeReport(LoaderInstallPhase.Downloading, isDynamic ? $"正在查詢 {loader} 最新安裝器版本..." : $"正在下載 {loader} 安裝器...", 36);
+        string installerJarPath = await DownloadInstallerJarAsync(
+            loader,
+            minecraftVersion,
+            loaderVersion,
+            () => SafeReport(LoaderInstallPhase.Downloading, $"正在下載 {loader} 安裝器...", 38),
+            cancellationToken).ConfigureAwait(false);
+        SafeReport(LoaderInstallPhase.Downloading, $"{loader} 安裝器下載完成", 50);
 
         // 組合啟動參數
-        SafeReport("installing", $"正在執行 {loader} 伺服器安裝...", 52);
+        SafeReport(LoaderInstallPhase.Installing, $"正在執行 {loader} 伺服器安裝...", 52);
         var spec = BuildProcessStartSpec(loader, minecraftVersion, loaderVersion, installerJarPath, stableServerDir, javaExecutablePath);
 
-        // 執行安裝流程 (52% ~ 95%)
-        var process = await processRunner.StartAsync(spec, cancellationToken).ConfigureAwait(false);
+        // 執行安裝流程 (52% ~ 95%)：提前備妥處理常式避免漏接啟動首行輸出
+        var tracker = new InstallerProgressEstimator();
+        var outputTail = new Queue<string>(InstallerOutputTailLines);
+        var outputLock = new Lock();
+        var progressThrottle = new ProgressThrottle(OutputProgressInterval, _timeProvider);
+
+        var process = await _processRunner.StartAsync(spec, cancellationToken: cancellationToken).ConfigureAwait(false);
+        process.OutputReceived += output =>
+        {
+            int mapped;
+            bool shouldReport;
+            lock (outputLock)
+            {
+                if (outputTail.Count == InstallerOutputTailLines)
+                {
+                    outputTail.Dequeue();
+                }
+
+                outputTail.Enqueue(output.Text);
+                int estimated = tracker.FeedOutput(output.Text);
+                mapped = ProgressMapping.Map(estimated, 100, 52, 95);
+
+                // 安裝器輸出量大；百分比未變時節流回報，避免 UI 佇列堆積
+                shouldReport = progressThrottle.ShouldReport(mapped);
+            }
+
+            if (shouldReport)
+            {
+                SafeReport(LoaderInstallPhase.Installing, output.Text, mapped);
+            }
+        };
+
         await using (process.ConfigureAwait(false))
         {
-            var tracker = new InstallerProgressEstimator();
-            process.OutputReceived += output =>
-            {
-                int estimated = tracker.FeedOutput(output.Text);
-                int mapped = 52 + (int)(estimated * 0.43); // 52% ~ 95%
-                SafeReport("installing", output.Text, mapped);
-            };
 
             // 安裝器卡住時不可無限等待；逾時後離開 using 會強制終止行程樹
             using var installTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -106,15 +180,26 @@ public sealed partial class LoaderInstallerService(
 
             if (exitResult.ExitCode != 0)
             {
-                throw new InvalidOperationException($"{loader} 安裝失敗，行程結束代碼：{exitResult.ExitCode}");
+                string tail;
+                string lastLine;
+                lock (outputLock)
+                {
+                    tail = string.Join(Environment.NewLine, outputTail);
+                    lastLine = outputTail.LastOrDefault(static line => !string.IsNullOrWhiteSpace(line)) ?? string.Empty;
+                }
+
+                Logger.Warning("{Loader} 安裝器結束代碼 {ExitCode}，最後輸出：{Output}", loader, exitResult.ExitCode, tail);
+                throw new InvalidOperationException(lastLine.Length == 0
+                    ? $"{loader} 安裝失敗，行程結束代碼：{exitResult.ExitCode}"
+                    : $"{loader} 安裝失敗，行程結束代碼：{exitResult.ExitCode}\n{lastLine}");
             }
         }
 
         // 探索主要啟動檔案
-        SafeReport("finalizing", "正在確認伺服器啟動檔案...", 96);
+        SafeReport(LoaderInstallPhase.Finalizing, "正在確認伺服器啟動檔案...", 96);
         string launchTarget = ServerLaunchTargetResolver.ResolveLaunchTarget(stableServerDir, loader);
 
-        SafeReport("completed", "安裝完成", 100);
+        SafeReport(LoaderInstallPhase.Completed, "安裝完成", 100);
         return launchTarget;
     }
 
@@ -125,22 +210,40 @@ public sealed partial class LoaderInstallerService(
         IProgress<LoaderInstallProgress>? progress,
         CancellationToken cancellationToken)
     {
-        progress?.Report(new LoaderInstallProgress("fetching", "正在取得 PaperMC 伺服器下載資訊...", 10));
+        progress?.Report(new LoaderInstallProgress(LoaderInstallPhase.Fetching, "正在取得 PaperMC 伺服器下載資訊...", 10));
 
-        Uri buildEndpoint = string.IsNullOrWhiteSpace(loaderVersion) || loaderVersion.Contains("最新", StringComparison.OrdinalIgnoreCase) || loaderVersion.Equals("latest", StringComparison.OrdinalIgnoreCase)
+        Uri buildEndpoint = string.IsNullOrWhiteSpace(loaderVersion) || loaderVersion.Equals("latest", StringComparison.OrdinalIgnoreCase)
             ? MojangVersionCatalog.PaperBuildUri(minecraftVersion, null)
             : MojangVersionCatalog.PaperBuildUri(minecraftVersion, loaderVersion);
 
-        string? buildJson = await httpPort.GetTextAsync(buildEndpoint, cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(buildJson))
+        var buildResponse = await _httpPort.GetJsonDocumentAsync(buildEndpoint, cancellationToken).ConfigureAwait(false);
+        if (!buildResponse.IsSuccess || buildResponse.Payload is null)
         {
             throw new InvalidOperationException($"無法取得 PaperMC {minecraftVersion} 的建置下載資訊");
         }
 
-        var (downloadUrl, fileName, sha256) = ExtractPaperDownloadInfo(buildJson);
-        if (string.IsNullOrEmpty(downloadUrl))
+        string? rawDownloadUrl;
+        string? fileName;
+        string? sha256;
+        using (buildResponse.Payload)
+        {
+            (rawDownloadUrl, fileName, sha256) = ExtractPaperDownloadInfo(buildResponse.Payload.RootElement);
+        }
+
+        if (string.IsNullOrEmpty(rawDownloadUrl))
         {
             throw new InvalidOperationException($"找不到 PaperMC {minecraftVersion} 的伺服器下載連結");
+        }
+
+        // 伺服器核心會以 java 執行：僅接受官方網域且須附 SHA-256
+        if (!TrustedHostPolicy.TryCreate(rawDownloadUrl, PaperDownloadHosts, out Uri? downloadUri))
+        {
+            throw new InvalidOperationException($"PaperMC 下載連結不是官方來源，已拒絕下載：{rawDownloadUrl}");
+        }
+
+        if (string.IsNullOrEmpty(sha256) || !HashCalculator.IsHexDigest(sha256, 64))
+        {
+            throw new InvalidOperationException($"PaperMC {minecraftVersion} 缺少有效 SHA-256，已拒絕下載");
         }
 
         // API 回傳檔名不可信任：僅取檔名部分且須為 .jar，並確認位於伺服器目錄內
@@ -153,46 +256,33 @@ public sealed partial class LoaderInstallerService(
             throw new InvalidOperationException($"PaperMC 檔名超出伺服器目錄邊界：{fileName}");
         }
 
-        progress?.Report(new LoaderInstallProgress("downloading", $"正在下載 {targetJarName}...", 20));
-
-        var downloadResult = await httpPort.DownloadAsync(
-            new Uri(downloadUrl),
+        await TrustedArtifactDownloader.DownloadVerifiedAsync(
+            _httpPort,
+            downloadUri,
             targetJarPath,
-            new SynchronousProgress<HttpProgress>(p =>
-            {
-                int pct = p.TotalBytes > 0 ? (int)(20 + ((double)p.BytesDownloaded / p.TotalBytes * 75)) : 20;
-                progress?.Report(new LoaderInstallProgress("downloading", $"正在下載 {targetJarName} ({UnitFormatter.FormatBytes(p.BytesDownloaded)})...", pct));
-            }),
-            expectedHash: sha256,
-            expectedHashAlgorithm: "sha256",
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            sha256,
+            HashAlgorithmNames.Sha256,
+            progress,
+            20,
+            95,
+            targetJarName,
+            cancellationToken).ConfigureAwait(false);
 
-        if (!downloadResult.Success)
-        {
-            throw new InvalidOperationException($"下載 PaperMC 核心失敗：{downloadResult.Error}");
-        }
-
-        progress?.Report(new LoaderInstallProgress("completed", "PaperMC 伺服器核心下載完成", 100));
+        progress?.Report(new LoaderInstallProgress(LoaderInstallPhase.Completed, "PaperMC 伺服器核心下載完成", 100));
         return targetJarName;
     }
 
-    private static (string? DownloadUrl, string? FileName, string? Sha256) ExtractPaperDownloadInfo(string json)
+    private static (string? DownloadUrl, string? FileName, string? Sha256) ExtractPaperDownloadInfo(JsonElement root)
     {
-        using var doc = JsonCodec.ParseDocument(json);
-        if (!MojangVersionCatalog.TryGetPaperDownload(doc.RootElement, out var item))
+        if (!MojangVersionCatalog.TryGetPaperDownload(root, out var item))
         {
             return (null, null, null);
         }
 
-        string? url = item.TryGetProperty("url", out var u) ? u.GetString() : null;
-        string? name = item.TryGetProperty("name", out var n) ? n.GetString() : null;
-        string? sha256 = null;
-        if (item.TryGetProperty("checksums", out var csProp) && csProp.TryGetProperty("sha256", out var shaProp))
-        {
-            sha256 = shaProp.GetString();
-        }
-
-        return (url, name, sha256);
+        string? sha256 = item.TryGetProperty("checksums", JsonValueKind.Object, out var checksums)
+            ? checksums.GetStringOrNull("sha256")
+            : null;
+        return (item.GetStringOrNull("url"), item.GetStringOrNull("name"), sha256);
     }
 
     private async Task<string> EnsureVanillaServerJarAsync(
@@ -201,23 +291,22 @@ public sealed partial class LoaderInstallerService(
         IProgress<LoaderInstallProgress>? progress,
         CancellationToken cancellationToken)
     {
-        progress?.Report(new LoaderInstallProgress("fetching", "正在取得官方原版伺服器下載資訊...", 10));
+        progress?.Report(new LoaderInstallProgress(LoaderInstallPhase.Fetching, "正在取得官方原版伺服器下載資訊...", 10));
 
-        string cacheDirectory = RuntimePaths.GetVersionCacheDir();
-        string? versionMetaUrl = MojangVersionCatalog.TryGetCachedPackageUrl(cacheDirectory, minecraftVersion);
+        string? versionMetaUrl = MojangVersionCatalog.TryGetCachedPackageUrl(_versionCacheDir, minecraftVersion);
         if (string.IsNullOrEmpty(versionMetaUrl))
         {
-            var manifest = await MojangVersionCatalog.FetchManifestAsync(httpPort, cancellationToken).ConfigureAwait(false)
+            var manifest = await MojangVersionCatalog.FetchManifestAsync(_httpPort, cancellationToken).ConfigureAwait(false)
                 ?? throw new InvalidOperationException("無法取得 Minecraft 官方版本清單");
             versionMetaUrl = manifest.FirstOrDefault(v => string.Equals(v.Version, minecraftVersion, StringComparison.Ordinal))?.Url;
         }
 
-        if (string.IsNullOrEmpty(versionMetaUrl))
+        if (!MojangVersionCatalog.IsOfficialPackageUrl(versionMetaUrl))
         {
             throw new InvalidOperationException($"找不到 Minecraft {minecraftVersion} 的官方下載詮釋資料");
         }
 
-        var metaResp = await httpPort.GetJsonDocumentAsync(new Uri(versionMetaUrl), cancellationToken).ConfigureAwait(false);
+        var metaResp = await _httpPort.GetJsonDocumentAsync(new Uri(versionMetaUrl), cancellationToken).ConfigureAwait(false);
         if (!metaResp.IsSuccess || metaResp.Payload is null)
         {
             throw new InvalidOperationException($"無法取得 Minecraft {minecraftVersion} 的版本詮釋資料");
@@ -235,134 +324,43 @@ public sealed partial class LoaderInstallerService(
             throw new InvalidOperationException($"找不到 Minecraft {minecraftVersion} 的 server.jar 下載連結");
         }
 
-        string targetJar = Path.Combine(serverDirectory, "server.jar");
-        progress?.Report(new LoaderInstallProgress("downloading", "正在下載原版 server.jar...", 30));
+        if (!TrustedHostPolicy.TryCreate(serverDownloadUrl, VanillaDownloadHosts, out Uri? serverDownloadUri))
+        {
+            throw new InvalidOperationException($"server.jar 下載連結不是 Mojang 官方來源，已拒絕下載：{serverDownloadUrl}");
+        }
 
-        var downloadResult = await httpPort.DownloadAsync(
-            new Uri(serverDownloadUrl),
+        if (string.IsNullOrEmpty(expectedSha1) || !HashCalculator.IsHexDigest(expectedSha1, 40))
+        {
+            throw new InvalidOperationException($"Minecraft {minecraftVersion} 的 server.jar 缺少有效 SHA-1，已拒絕下載");
+        }
+
+        string targetJar = Path.Combine(serverDirectory, ServerDefaults.ServerJarFileName);
+        await TrustedArtifactDownloader.DownloadVerifiedAsync(
+            _httpPort,
+            serverDownloadUri,
             targetJar,
-            new SynchronousProgress<HttpProgress>(p =>
-            {
-                int pct = ProgressMapping.Map(p.BytesDownloaded, p.TotalBytes, 30, 95);
-                progress?.Report(new LoaderInstallProgress("downloading", $"正在下載原版 server.jar ({UnitFormatter.FormatBytes(p.BytesDownloaded)})...", pct));
-            }),
-            expectedHash: expectedSha1,
-            expectedHashAlgorithm: "sha1",
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            expectedSha1,
+            HashAlgorithmNames.Sha1,
+            progress,
+            30,
+            95,
+            "原版 server.jar",
+            cancellationToken).ConfigureAwait(false);
 
-        if (!downloadResult.Success)
-        {
-            throw new InvalidOperationException($"下載原版 server.jar 失敗：{downloadResult.Error}");
-        }
-
-        progress?.Report(new LoaderInstallProgress("completed", "原版 server.jar 準備完成", 100));
-        return "server.jar";
+        progress?.Report(new LoaderInstallProgress(LoaderInstallPhase.Completed, "原版 server.jar 準備完成", 100));
+        return ServerDefaults.ServerJarFileName;
     }
 
-    private async Task<string> DownloadInstallerJarAsync(
-        LoaderKind loader,
-        string minecraftVersion,
-        string loaderVersion,
-        CancellationToken cancellationToken)
-    {
-        string installerUrl = loader switch
-        {
-            LoaderKind.Fabric => "https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.0.1/fabric-installer-1.0.1.jar",
-            LoaderKind.Quilt => "https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-installer/0.11.0/quilt-installer-0.11.0.jar",
-            LoaderKind.Forge => $"https://maven.minecraftforge.net/net/minecraftforge/forge/{minecraftVersion}-{loaderVersion}/forge-{minecraftVersion}-{loaderVersion}-installer.jar",
-            LoaderKind.NeoForge => $"https://maven.neoforged.net/releases/net/neoforged/neoforge/{loaderVersion}/neoforge-{loaderVersion}-installer.jar",
-            _ => throw new NotSupportedException($"不支援的 Loader: {loader}")
-        };
+    private sealed record InstallerPolicy(
+        string Prefix,
+        string Suffix,
+        int KeepCount,
+        Uri? MetaUri = null,
+        FrozenSet<string>? AllowedHosts = null,
+        bool PreferStable = false,
+        bool ReadMetaHashes = false);
 
-        var uri = new Uri(installerUrl);
-        string fileName = Path.GetFileName(uri.AbsolutePath);
-        string destination = Path.Combine(_cacheDir, fileName);
-        string hashSidecar = destination + ".sha256";
-
-        // 快取安裝器執行前須與下載當下記錄之 SHA-256 相符，否則重新下載
-        if (!await IsCachedInstallerIntactAsync(destination, hashSidecar, cancellationToken).ConfigureAwait(false))
-        {
-            // 安裝器會以 java 執行：取不到雜湊即拒絕，不做未驗證下載
-            string expectedAlgorithm = "sha256";
-            string? expectedHash = await TryFetchInstallerHashAsync(installerUrl + ".sha256", 64, cancellationToken).ConfigureAwait(false);
-            if (expectedHash is null)
-            {
-                expectedAlgorithm = "sha1";
-                expectedHash = await TryFetchInstallerHashAsync(installerUrl + ".sha1", 40, cancellationToken).ConfigureAwait(false);
-            }
-
-            if (expectedHash is null)
-            {
-                throw new InvalidOperationException($"無法取得 {loader} 安裝器的雜湊檔，已拒絕下載與執行");
-            }
-
-            var result = await httpPort.DownloadAsync(
-                uri,
-                destination,
-                expectedHash: expectedHash,
-                expectedHashAlgorithm: expectedAlgorithm,
-                cancellationToken: cancellationToken).ConfigureAwait(false);
-            if (!result.Success)
-            {
-                throw new InvalidOperationException($"下載 {loader} 安裝器失敗：{result.Error}");
-            }
-
-            await SafeFileSystem.WriteAllTextAsync(hashSidecar, await HashCalculator.ComputeFileHashAsync(destination, cancellationToken: cancellationToken).ConfigureAwait(false), cancellationToken: cancellationToken).ConfigureAwait(false);
-        }
-
-        return destination;
-    }
-
-    /// <summary>取得遠端雜湊檔內容；無檔、格式不符或連線失敗回傳 null</summary>
-    private async Task<string?> TryFetchInstallerHashAsync(string hashUrl, int hexLength, CancellationToken cancellationToken)
-    {
-        try
-        {
-            return ExtractValidHexHash(await httpPort.GetTextAsync(new Uri(hashUrl), cancellationToken).ConfigureAwait(false), hexLength);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning(ex, "取得安裝器雜湊檔失敗: {Url}", hashUrl);
-            return null;
-        }
-    }
-
-    private static async Task<bool> IsCachedInstallerIntactAsync(string jarPath, string hashSidecar, CancellationToken cancellationToken)
-    {
-        if (!SafeFileSystem.FileExists(jarPath) || !SafeFileSystem.FileExists(hashSidecar))
-        {
-            return false;
-        }
-
-        string recorded = (await SafeFileSystem.ReadAllTextAsync(hashSidecar, cancellationToken: cancellationToken).ConfigureAwait(false)).Trim();
-        string actual = await HashCalculator.ComputeFileHashAsync(jarPath, cancellationToken: cancellationToken).ConfigureAwait(false);
-        if (actual.Length > 0 && string.Equals(recorded, actual, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        Logger.Warning("快取安裝器雜湊不符，將重新下載: {Path}", jarPath);
-        return false;
-    }
-
-    private static string? ExtractValidHexHash(string? text, int expectedLength)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return null;
-        }
-
-        ReadOnlySpan<char> span = text.AsSpan().Trim();
-        int separatorIdx = span.IndexOfAny(HashSeparators);
-        ReadOnlySpan<char> firstToken = separatorIdx >= 0 ? span[..separatorIdx] : span;
-
-        if (!HashCalculator.IsHexDigest(firstToken, expectedLength))
-        {
-            return null;
-        }
-
-        return firstToken.ToString();
-    }
+    private sealed record InstallerDescriptor(Uri Uri, string FileName, string? ExpectedHash = null, string? HashAlgorithm = null);
 
     private static ProcessStartSpec BuildProcessStartSpec(
         LoaderKind loader,
@@ -417,74 +415,9 @@ public sealed partial class LoaderInstallerService(
             WorkingDirectory: serverDirectory);
     }
 
-    private static (string? Url, string? Sha1) ExtractServerDownloadInfo(JsonDocument doc)
-    {
-        if (doc.RootElement.TryGetProperty("downloads", out var dl) &&
-            dl.TryGetProperty("server", out var serverElem) &&
-            serverElem.TryGetProperty("url", out var urlElem))
-        {
-            string? url = urlElem.GetString();
-            string? sha1 = null;
-            if (serverElem.TryGetProperty("sha1", out var sha1Elem))
-            {
-                sha1 = sha1Elem.GetString();
-            }
-            return (url, sha1);
-        }
-        return (null, null);
-    }
-
-    private sealed partial class InstallerProgressEstimator
-    {
-        private static readonly SearchValues<string> CompletionWords = SearchValues.Create(["successfully installed", "installation complete", "all done"], StringComparison.OrdinalIgnoreCase);
-        private static readonly SearchValues<string> PatchingWords = SearchValues.Create(["patching", "remapping", "injecting"], StringComparison.OrdinalIgnoreCase);
-        private static readonly SearchValues<string> ProcessingWords = SearchValues.Create(["processor", "processing", "applying"], StringComparison.OrdinalIgnoreCase);
-        private static readonly SearchValues<string> DownloadingWords = SearchValues.Create(["downloading", "extracting", "task"], StringComparison.OrdinalIgnoreCase);
-
-        private int _current = 30;
-
-        internal int FeedOutput(string line)
-        {
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                return _current;
-            }
-
-            // 百分比匹配
-            var match = PercentRegex().Match(line);
-            if (match.Success && int.TryParse(match.Groups[1].Value, out int pct))
-            {
-                _current = Math.Max(_current, Math.Min(95, pct));
-                return _current;
-            }
-
-            ReadOnlySpan<char> text = line;
-            if (text.ContainsAny(CompletionWords))
-            {
-                _current = 98;
-            }
-            else if (text.ContainsAny(PatchingWords))
-            {
-                _current = Math.Max(_current, 85);
-            }
-            else if (text.ContainsAny(ProcessingWords))
-            {
-                _current = Math.Max(_current, Math.Min(80, _current + 2));
-            }
-            else if (text.ContainsAny(DownloadingWords))
-            {
-                _current = Math.Max(_current, Math.Min(65, _current + 1));
-            }
-            else
-            {
-                // 持續輸出但未命中特定詞彙時微幅平穩推進
-                _current = Math.Min(92, _current + 1);
-            }
-
-            return _current;
-        }
-
-        [GeneratedRegex(@"(?<!\d)(100|\d{1,2})(?:\.\d+)?\s*%")]
-        private static partial Regex PercentRegex();
-    }
+    private static (string? Url, string? Sha1) ExtractServerDownloadInfo(JsonDocument doc) =>
+        doc.RootElement.TryGetProperty("downloads", JsonValueKind.Object, out var dl)
+        && dl.TryGetProperty("server", JsonValueKind.Object, out var serverElem)
+            ? (serverElem.GetStringOrNull("url"), serverElem.GetStringOrNull("sha1"))
+            : (null, null);
 }

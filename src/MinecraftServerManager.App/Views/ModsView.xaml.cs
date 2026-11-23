@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using MinecraftServerManager.App.Controls;
@@ -9,23 +8,34 @@ namespace MinecraftServerManager.App.Views;
 /// <summary>模組管理與線上探索分頁 View</summary>
 public sealed partial class ModsView : UserControl
 {
-    public ModsViewModel ViewModel { get; }
-
     public ModsView(ModsViewModel viewModel)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         ViewModel = viewModel;
         InitializeComponent();
+        DeleteModsAccelerator.ScopeOwner = LocalModsListView;
     }
 
-    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "WinUI 3 x:Bind requires instance method")]
-    public Visibility GetLocalTabVisibility(int index) => index == 0 ? Visibility.Visible : Visibility.Collapsed;
+    public ModsViewModel ViewModel { get; }
 
-    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "WinUI 3 x:Bind requires instance method")]
-    public Visibility GetOnlineTabVisibility(int index) => index == 1 ? Visibility.Visible : Visibility.Collapsed;
+    public ITableSortTarget LocalSort => field ??= new TableSortTarget<LocalModRowItem>(() => ViewModel.Local.LocalMods, TableSortKeys.LocalMods);
+
+    public ITableSortTarget OnlineSort => field ??= new TableSortTarget<OnlineModRowItem>(() => ViewModel.Online.OnlineMods, TableSortKeys.OnlineMods);
+
+    public static Visibility GetLocalTabVisibility(int index) => index == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    public static Visibility GetOnlineTabVisibility(int index) => index == 1 ? Visibility.Visible : Visibility.Collapsed;
 
     private void OnLocalModsSelectionChanged(object sender, SelectionChangedEventArgs e) =>
         ViewModel.Local.SetSelectedMods(LocalModsListView.SelectedItems.OfType<LocalModRowItem>());
+
+    private void OnLocalModToggleClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: LocalModRowItem mod })
+        {
+            ViewModel.Local.ToggleModCommand.Execute(mod);
+        }
+    }
 
     private void OnSelectAllLocalModsClicked(object sender, RoutedEventArgs e)
     {
@@ -36,28 +46,6 @@ public sealed partial class ModsView : UserControl
         else
         {
             LocalModsListView.SelectAll();
-        }
-    }
-
-    public ITableSortTarget LocalSort => field ??= new TableSortTarget<LocalModRowItem>(() => ViewModel.Local.LocalMods, TableSortKeys.LocalMods);
-
-    public ITableSortTarget OnlineSort => field ??= new TableSortTarget<OnlineModRowItem>(() => ViewModel.Online.OnlineMods, TableSortKeys.OnlineMods);
-
-    private void OnOnlineModsDoubleTapped(object sender, Microsoft.UI.Xaml.Input.DoubleTappedRoutedEventArgs e) => ViewModel.PickOnlineModVersionCommand.TryExecute();
-
-    private void OnlineSearchBox_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
-    {
-        if (e.Key == Windows.System.VirtualKey.Enter && ViewModel.Online.SearchOnlineModsCommand.TryExecute())
-        {
-            e.Handled = true;
-        }
-    }
-
-    private void OnModToggleClicked(object sender, RoutedEventArgs e)
-    {
-        if (sender is FrameworkElement { DataContext: LocalModRowItem item })
-        {
-            ViewModel.Local.ToggleModCommand.TryExecute(item);
         }
     }
 

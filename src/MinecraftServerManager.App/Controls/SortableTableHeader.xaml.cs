@@ -3,15 +3,15 @@ using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
 
 namespace MinecraftServerManager.App.Controls;
 
-/// <summary>表頭控制項：排序、方向指示、拖曳調欄寬、按兩下自動對齊</summary>
+/// <summary>表頭控制項：排序、方向指示、拖曳或 Alt+方向鍵調欄寬、按兩下分隔線自動對齊</summary>
 public sealed partial class SortableTableHeader : UserControl
 {
     public const double DefaultMinColumnWidth = 48.0;
     public const double DefaultMaxColumnWidth = 1200.0;
+    private const double KeyboardResizeStep = 16.0;
 
     public static readonly DependencyProperty TextProperty =
         DependencyProperty.Register(
@@ -23,13 +23,6 @@ public sealed partial class SortableTableHeader : UserControl
     public static readonly DependencyProperty SortPropertyNameProperty =
         DependencyProperty.Register(
             nameof(SortPropertyName),
-            typeof(string),
-            typeof(SortableTableHeader),
-            new PropertyMetadata(string.Empty));
-
-    public static readonly DependencyProperty CurrentSortPropertyProperty =
-        DependencyProperty.Register(
-            nameof(CurrentSortProperty),
             typeof(string),
             typeof(SortableTableHeader),
             new PropertyMetadata(string.Empty, OnSortStateChanged));
@@ -55,16 +48,18 @@ public sealed partial class SortableTableHeader : UserControl
             typeof(SortableTableHeader),
             new PropertyMetadata(true, OnSortStateChanged));
 
+    // 調整欄寬游標為無狀態系統游標，所有表頭共用同一執行個體
+    private static InputSystemCursor? s_resizeCursor;
+
     private bool _isDraggingSplitter;
     private double _dragStartX;
     private double _dragStartWidth;
-    private long _lastDoubleTapTick;
     private double? _initialPixelWidth;
-
 
     public SortableTableHeader()
     {
         InitializeComponent();
+        Loaded += OnLoaded;
     }
 
     public string Text
@@ -77,12 +72,6 @@ public sealed partial class SortableTableHeader : UserControl
     {
         get => (string)GetValue(SortPropertyNameProperty);
         set => SetValue(SortPropertyNameProperty, value);
-    }
-
-    public string CurrentSortProperty
-    {
-        get => (string)GetValue(CurrentSortPropertyProperty);
-        set => SetValue(CurrentSortPropertyProperty, value);
     }
 
     public ListSortDirection? SortDirection
@@ -104,7 +93,12 @@ public sealed partial class SortableTableHeader : UserControl
     }
 
     public string SortGlyph =>
-        SortDirection == ListSortDirection.Ascending ? "\uE70E" : "\uE70D";
+        (string)Application.Current.Resources[SortDirection == ListSortDirection.Ascending ? "IconSortAscending" : "IconSortDescending"];
+
+    /// <summary>供螢幕閱讀程式朗讀的排序狀態</summary>
+    public string SortStatusText => !IsActiveSortColumn
+        ? string.Empty
+        : SortDirection == ListSortDirection.Ascending ? "遞增排序" : "遞減排序";
 
     public Visibility SortIndicatorVisibility =>
         IsActiveSortColumn ? Visibility.Visible : Visibility.Collapsed;
@@ -114,20 +108,39 @@ public sealed partial class SortableTableHeader : UserControl
 
     private bool IsActiveSortColumn =>
         !string.IsNullOrEmpty(SortPropertyName) &&
-        string.Equals(SortPropertyName, CurrentSortProperty, StringComparison.OrdinalIgnoreCase) &&
         SortDirection.HasValue;
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        UpdateHitTestState();
+        int col = Grid.GetColumn(this);
+        if (Parent is Grid parentGrid && col >= 0 && col < parentGrid.ColumnDefinitions.Count)
+        {
+            var def = parentGrid.ColumnDefinitions[col];
+            if (_initialPixelWidth is null && def.Width.IsAbsolute)
+            {
+                _initialPixelWidth = def.Width.Value;
+            }
+
+            ColumnWidth = def.Width;
+        }
+    }
+
+    private void UpdateHitTestState() => HeaderButton.IsHitTestVisible = !string.IsNullOrEmpty(SortPropertyName);
 
     /// <summary>計算對齊該欄最寬項目（包含表頭與所有資料列內容）所需之欄位像素寬度</summary>
     public static double CalculateAutoFitWidth(
         double minOrDefaultWidth,
         IEnumerable<string?> values,
+        Func<string, double> measureText,
         string? headerText = null)
     {
+        ArgumentNullException.ThrowIfNull(measureText);
         double maxEstimatedWidth = Math.Max(DefaultMinColumnWidth, minOrDefaultWidth);
 
         if (!string.IsNullOrWhiteSpace(headerText))
         {
-            double headerWidth = EstimateTextPixelWidth(headerText) + 40.0;
+            double headerWidth = measureText(headerText) + 40.0;
             if (headerWidth > maxEstimatedWidth)
             {
                 maxEstimatedWidth = headerWidth;
@@ -141,7 +154,7 @@ public sealed partial class SortableTableHeader : UserControl
                 continue;
             }
 
-            double estimated = EstimateTextPixelWidth(val) + 32.0;
+            double estimated = measureText(val) + 32.0;
             if (estimated > maxEstimatedWidth)
             {
                 maxEstimatedWidth = estimated;
@@ -151,36 +164,64 @@ public sealed partial class SortableTableHeader : UserControl
         return Math.Min(maxEstimatedWidth, DefaultMaxColumnWidth);
     }
 
-    /// <summary>依顯示文字自動對齊欄寬（不小於初始寬度）</summary>
-    public void FitToContent(IEnumerable<string?> values) =>
-        ColumnWidth = new GridLength(CalculateAutoFitWidth(_initialPixelWidth ?? DefaultMinColumnWidth, values, Text));
+    /// <summary>依實際量測之顯示文字寬度自動對齊欄寬（不小於初始寬度）</summary>
+    public void FitToContent(IEnumerable<string?> values)
+    {
+        var measurer = new TextBlock();
+        double width = CalculateAutoFitWidth(_initialPixelWidth ?? DefaultMinColumnWidth, values, text => MeasureText(measurer, text), Text);
+        SetColumnWidth(new GridLength(width, GridUnitType.Pixel));
+    }
 
+    private static double MeasureText(TextBlock measurer, string text)
+    {
+        measurer.Text = text;
+        measurer.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        return measurer.DesiredSize.Width;
+    }
+
+    /// <summary>鍵盤調整欄寬：Alt+←／→</summary>
+    private void OnHeaderKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (!ShowSplitter || (InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Menu) & Windows.UI.Core.CoreVirtualKeyStates.Down) == 0)
+        {
+            return;
+        }
+
+        double delta = e.Key switch
+        {
+            Windows.System.VirtualKey.Left => -KeyboardResizeStep,
+            Windows.System.VirtualKey.Right => KeyboardResizeStep,
+            _ => 0,
+        };
+        if (delta == 0)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        double current = ColumnWidth.IsAbsolute && ColumnWidth.Value > 0 ? ColumnWidth.Value : ActualWidth;
+        SetColumnWidth(new GridLength(Math.Clamp(current + delta, DefaultMinColumnWidth, DefaultMaxColumnWidth), GridUnitType.Pixel));
+    }
+
+    private void SetColumnWidth(GridLength width)
+    {
+        ColumnWidth = width;
+        int col = Grid.GetColumn(this);
+        this.FindAncestor<TableFrame>()?.SyncColumnWidth(col, width);
+    }
+
+    /// <summary>僅記錄載入前（XAML 宣告）的初始寬度，拖曳或自動對齊後的寬度不得成為下限</summary>
     private static void OnColumnWidthChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        if (d is SortableTableHeader { _initialPixelWidth: null } header && e.NewValue is GridLength { IsAbsolute: true } width)
+        if (d is SortableTableHeader { _initialPixelWidth: null, IsLoaded: false } header && e.NewValue is GridLength { IsAbsolute: true } width)
         {
             header._initialPixelWidth = width.Value;
         }
     }
 
-    private static double EstimateTextPixelWidth(string text)
-    {
-        double len = 0;
-        foreach (char c in text)
-        {
-            len += c > 127 ? 15.0 : 8.5;
-        }
-        return len;
-    }
-
     private void OnHeaderClicked(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrEmpty(SortPropertyName))
-        {
-            return;
-        }
-
-        if (Environment.TickCount64 - _lastDoubleTapTick < 350)
         {
             return;
         }
@@ -202,47 +243,35 @@ public sealed partial class SortableTableHeader : UserControl
         }
 
         SortDirection = nextDirection;
-        CurrentSortProperty = SortPropertyName;
         FindSortTarget()?.Sort(SortPropertyName, nextDirection);
     }
 
-    /// <summary>取得所屬 TableFrame 的排序對象</summary>
-    private ITableSortTarget? FindSortTarget()
+    private ITableSortTarget? FindSortTarget() => this.FindAncestor<TableFrame>()?.SortTarget;
+
+    private void EndDrag(bool releaseCapture)
     {
-        for (DependencyObject? node = this; node is not null; node = VisualTreeHelper.GetParent(node))
+        _isDraggingSplitter = false;
+        if (releaseCapture)
         {
-            if (node is TableFrame frame)
-            {
-                return frame.SortTarget;
-            }
+            SplitterGrip.ReleasePointerCaptures();
         }
 
-        return null;
+        ProtectedCursor = null;
     }
 
-    private void OnButtonDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
-    {
-        e.Handled = true;
-        _lastDoubleTapTick = Environment.TickCount64;
-        if (!string.IsNullOrEmpty(SortPropertyName))
-        {
-            FindSortTarget()?.AutoFit(this);
-        }
-    }
-
+    /// <summary>按兩下自動對齊僅限分隔線，避免與點選表頭排序衝突</summary>
     private void OnSplitterDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
         e.Handled = true;
-        _lastDoubleTapTick = Environment.TickCount64;
-        _isDraggingSplitter = false;
-        SplitterGrip.ReleasePointerCaptures();
+        EndDrag(true);
         if (!string.IsNullOrEmpty(SortPropertyName))
         {
             FindSortTarget()?.AutoFit(this);
         }
     }
 
-    private void OnSplitterPointerEntered(object sender, PointerRoutedEventArgs e) => ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeWestEast);
+    private void OnSplitterPointerEntered(object sender, PointerRoutedEventArgs e) =>
+        ProtectedCursor = s_resizeCursor ??= InputSystemCursor.Create(InputSystemCursorShape.SizeWestEast);
 
     private void OnSplitterPointerExited(object sender, PointerRoutedEventArgs e)
     {
@@ -280,7 +309,7 @@ public sealed partial class SortableTableHeader : UserControl
         double currentX = e.GetCurrentPoint(XamlRoot?.Content).Position.X;
         double deltaX = currentX - _dragStartX;
         double newWidth = Math.Clamp(_dragStartWidth + deltaX, DefaultMinColumnWidth, DefaultMaxColumnWidth);
-        ColumnWidth = new GridLength(newWidth, GridUnitType.Pixel);
+        SetColumnWidth(new GridLength(newWidth, GridUnitType.Pixel));
     }
 
     private void OnSplitterPointerReleased(object sender, PointerRoutedEventArgs e)
@@ -291,23 +320,12 @@ public sealed partial class SortableTableHeader : UserControl
         }
 
         e.Handled = true;
-        _isDraggingSplitter = false;
-        SplitterGrip.ReleasePointerCaptures();
-        ProtectedCursor = null;
+        EndDrag(true);
     }
 
-    private void OnSplitterPointerCanceled(object sender, PointerRoutedEventArgs e)
-    {
-        _isDraggingSplitter = false;
-        SplitterGrip.ReleasePointerCaptures();
-        ProtectedCursor = null;
-    }
+    private void OnSplitterPointerCanceled(object sender, PointerRoutedEventArgs e) => EndDrag(true);
 
-    private void OnSplitterPointerCaptureLost(object sender, PointerRoutedEventArgs e)
-    {
-        _isDraggingSplitter = false;
-        ProtectedCursor = null;
-    }
+    private void OnSplitterPointerCaptureLost(object sender, PointerRoutedEventArgs e) => EndDrag(false);
 
     private static void OnTextChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
@@ -322,6 +340,7 @@ public sealed partial class SortableTableHeader : UserControl
         if (d is SortableTableHeader header)
         {
             header.Bindings.Update();
+            header.UpdateHitTestState();
         }
     }
 }

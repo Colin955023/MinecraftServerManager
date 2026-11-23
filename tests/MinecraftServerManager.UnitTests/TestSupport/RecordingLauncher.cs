@@ -25,7 +25,7 @@ internal sealed class RecordingLauncher : IExternalLauncher
         return true;
     }
 
-    public bool OpenUrl(string url, bool isTrusted = false)
+    public bool OpenUrl(string url)
     {
         OpenedUrls.Add(url);
         return true;

@@ -1,7 +1,5 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Nodes;
 using MinecraftServerManager.Core;
-using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Services;
 
 namespace MinecraftServerManager.UnitTests.Services;
@@ -12,7 +10,6 @@ public sealed class UpdateCheckerServiceTests
     private const string SingleExeName = "MinecraftServerManager.exe";
     private const string SingleShaName = "MinecraftServerManager.exe.sha256";
 
-    [RequiresUnreferencedCode("Calls System.Text.Json.Nodes.JsonArray.Add<T>(T)")]
     private static string BuildReleasePayload(string tagName, params (string Name, string Url)[] assets)
     {
         var root = new JsonObject
@@ -38,8 +35,7 @@ public sealed class UpdateCheckerServiceTests
     }
 
     [Fact]
-    [RequiresUnreferencedCode("Testing reflection")]
-    public async Task SelectsSingleExeAndPairsSha256()
+    public async Task CheckForUpdateAsync_ReleaseAssets_SelectsExeAndSha256()
     {
         string json = BuildReleasePayload(
             "99.0.0",
@@ -49,7 +45,7 @@ public sealed class UpdateCheckerServiceTests
         var http = new StubHttpPort(json);
         var checker = new UpdateCheckerService(http);
 
-        var result = await checker.CheckForUpdateAsync();
+        var result = await checker.CheckForUpdateAsync(TestContext.Current.CancellationToken);
 
         Assert.True(result.HasUpdate);
         Assert.Equal($"{RepoUrl}/releases/download/v99.0.0/{SingleExeName}", result.DownloadUrl);
@@ -57,12 +53,12 @@ public sealed class UpdateCheckerServiceTests
     }
 
     [Fact]
-    public async Task HandlesEmptyResponseGracefully()
+    public async Task CheckForUpdateAsync_EmptyResponse_ReturnsNoUpdate()
     {
         var http = new StubHttpPort();
         var checker = new UpdateCheckerService(http);
 
-        var result = await checker.CheckForUpdateAsync();
+        var result = await checker.CheckForUpdateAsync(TestContext.Current.CancellationToken);
 
         Assert.False(result.HasUpdate);
         Assert.Null(result.DownloadUrl);
@@ -72,11 +68,11 @@ public sealed class UpdateCheckerServiceTests
     [InlineData("not json at all")]
     [InlineData("[]")]
     [InlineData("""{"tag_name": 123}""")]
-    public async Task InvalidReleasePayload_ReturnsNoUpdateWithoutThrowing(string payload)
+    public async Task CheckForUpdateAsync_InvalidPayload_ReturnsNoUpdate(string payload)
     {
         var checker = new UpdateCheckerService(new StubHttpPort(payload));
 
-        var result = await checker.CheckForUpdateAsync();
+        var result = await checker.CheckForUpdateAsync(TestContext.Current.CancellationToken);
 
         Assert.False(result.HasUpdate);
         Assert.Null(result.DownloadUrl);
@@ -84,12 +80,12 @@ public sealed class UpdateCheckerServiceTests
     }
 
     [Fact]
-    public async Task MissingOptionalFields_FallBackToTagNameAndDefaultReleasePage()
+    public async Task CheckForUpdateAsync_MissingOptionalFields_UsesFallbacks()
     {
         string json = """{"tag_name": "v99.0.0", "unknown_field": {"nested": [1, 2]}}""";
         var checker = new UpdateCheckerService(new StubHttpPort(json));
 
-        var result = await checker.CheckForUpdateAsync();
+        var result = await checker.CheckForUpdateAsync(TestContext.Current.CancellationToken);
 
         Assert.True(result.HasUpdate);
         Assert.Equal("v99.0.0", result.LatestVersion);
@@ -100,8 +96,7 @@ public sealed class UpdateCheckerServiceTests
     }
 
     [Fact]
-    [RequiresUnreferencedCode("Testing reflection")]
-    public async Task IgnoresAssetsOutsideTrustedReleaseDownloadPath()
+    public async Task CheckForUpdateAsync_UntrustedAssetPath_Ignores()
     {
         string json = BuildReleasePayload(
             "99.0.0",
@@ -110,7 +105,7 @@ public sealed class UpdateCheckerServiceTests
 
         var checker = new UpdateCheckerService(new StubHttpPort(json));
 
-        var result = await checker.CheckForUpdateAsync();
+        var result = await checker.CheckForUpdateAsync(TestContext.Current.CancellationToken);
 
         Assert.True(result.HasUpdate);
         Assert.Null(result.DownloadUrl);

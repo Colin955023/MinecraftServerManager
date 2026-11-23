@@ -22,7 +22,7 @@ public static class NotificationPresentation
         _ => InfoBarSeverity.Informational,
     };
 
-    /// <summary>是否以對話方塊顯示（僅錯誤）</summary>
+    /// <summary>是否以對話框顯示（僅錯誤）</summary>
     public static bool UsesDialog(NotificationType type) => type == NotificationType.Error;
 
     /// <summary>InfoBar 自動關閉秒數：警告停留較久以便閱讀</summary>

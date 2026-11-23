@@ -8,9 +8,16 @@ using MinecraftServerManager.Infrastructure.Settings;
 
 namespace MinecraftServerManager.UnitTests.TestSupport;
 
-/// <summary>測試用相依集合工廠</summary>
 internal static class TestDependencies
 {
+    /// <summary>建立以 <paramref name="root"/> 為固定伺服器根目錄的設定</summary>
+    public static SettingsManager CreateSettings(string root)
+    {
+        var settings = new SettingsManager(root);
+        settings.SetExactServersRoot(root);
+        return settings;
+    }
+
     public static PageServices Create(
         string root,
         IUiService? uiService = null,
@@ -24,10 +31,11 @@ internal static class TestDependencies
         Directory.CreateDirectory(root);
         var inspector = new ServerInspector();
         var settingsManager = settings ?? new SettingsManager(root);
-        var backupService = new ServerBackupService(root, static () => 10);
+        var backupService = new ServerBackupService(root, static () => 10, TimeProvider.System);
         var propertiesStore = new ServerPropertiesStore(root);
         var host = runtimeHost ?? new FakeServerRuntimeHost();
         var ui = uiService ?? NoOpUiService.Instance;
+        var modrinthClient = NoOp.Create<IModrinthClient>();
         return new PageServices(
             SettingsManager: settingsManager,
             ServerManager: TestServerManagers.Create(root, inspector),
@@ -40,9 +48,9 @@ internal static class TestDependencies
             LaunchPlanner: new ServerLaunchPlanner(),
             PropertiesStore: propertiesStore,
             PlayerConfigStore: new ServerPlayerConfigStore(),
-            DirectorySizeService: new ServerDirectorySizeService(TimeSpan.FromSeconds(60)),
+            DirectorySizeService: new ServerDirectorySizeService(TimeSpan.FromSeconds(60), TimeProvider.System),
             IntegrityService: new ServerIntegrityService(),
-            DependencyPlanner: new ModDependencyPlanner(),
+            DependencyPlanner: new ModDependencyPlanner(modrinthClient),
             ModListExporter: new ModListExporter(),
             FileSystem: new LocalFileSystem(),
             LogReader: new ServerLogReader(),
@@ -52,23 +60,21 @@ internal static class TestDependencies
             JavaDetector: javaDetector ?? new FixedJavaRuntimeDetector(),
             LoaderCatalog: NoOp.Create<ILoaderCatalogService>(),
             ModManager: NoOp.Create<IModManager>(),
-            ModrinthClient: NoOp.Create<IModrinthClient>(),
+            ModrinthClient: modrinthClient,
             UpdateChecker: NoOp.Create<IUpdateCheckerService>(),
             Launcher: launcher ?? new RecordingLauncher(),
             JavaRequirementService: javaRequirementService ?? new FixedJavaRequirementService(),
             JavaInstaller: NoOp.Create<IJavaInstaller>(),
-            AppUpdateService: NoOp.Create<IAppUpdateService>());
+            AppUpdateService: NoOp.Create<IAppUpdateService>(),
+            AccentColorService: NoOp.Create<IAccentColorService>());
     }
 
-    /// <summary>以相依集合組裝「管理現有伺服器」頁面</summary>
     public static ManageServerViewModel CreateManagePage(PageServices services, Action<string>? navigate = null) =>
         new PageViewModelFactory(services).CreateManagePage(navigate ?? (static _ => { }));
 
-    /// <summary>以相依集合組裝主視窗 ViewModel</summary>
     public static MainViewModel CreateMainViewModel(PageServices services) => new(
         services.UiService,
         services.SettingsManager,
-        services.UpdateChecker,
         services.Launcher,
         services.FileSystem,
         services.RunningServerRegistry,

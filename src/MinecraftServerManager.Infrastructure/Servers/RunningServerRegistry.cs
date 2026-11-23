@@ -5,12 +5,13 @@ using MinecraftServerManager.Infrastructure.Utilities;
 namespace MinecraftServerManager.Infrastructure.Servers;
 
 /// <summary>執行中伺服器行程登記，以 PID 與啟動時間辨識遺留行程</summary>
-public sealed class RunningServerRegistry(string userDataDirectory, IProcessInspector inspector) : IRunningServerRegistry
+public sealed class RunningServerRegistry : IRunningServerRegistry
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(RunningServerRegistry));
     private static readonly long StartTimeToleranceTicks = TimeSpan.FromSeconds(1).Ticks;
 
-    private readonly string _filePath = Path.Combine(userDataDirectory, "running_servers.json");
+    private readonly string _filePath;
+    private readonly IProcessInspector _inspector;
     private readonly Dictionary<string, TrackedServerProcess> _session = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _removed = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _lock = new();
@@ -18,9 +19,17 @@ public sealed class RunningServerRegistry(string userDataDirectory, IProcessInsp
     // 以單一鏈式工作序列化背景寫入，確保最後寫入者為最新狀態
     private Task _writeChain = Task.CompletedTask;
 
+    public RunningServerRegistry(string userDataDirectory, IProcessInspector inspector)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userDataDirectory);
+        ArgumentNullException.ThrowIfNull(inspector);
+        _filePath = Path.Combine(userDataDirectory, "running_servers.json");
+        _inspector = inspector;
+    }
+
     public void Record(string serverName, int pid)
     {
-        DateTime? startTime = inspector.GetStartTimeUtc(pid);
+        DateTimeOffset? startTime = _inspector.GetStartTimeUtc(pid);
         if (startTime is null)
         {
             Logger.Warning("無法取得伺服器「{Server}」行程 (PID: {Pid}) 的啟動時間，略過登記", serverName, pid);
@@ -29,9 +38,9 @@ public sealed class RunningServerRegistry(string userDataDirectory, IProcessInsp
 
         lock (_lock)
         {
-            _session[serverName] = new TrackedServerProcess(serverName, pid, startTime.Value.Ticks);
+            _session[serverName] = new TrackedServerProcess(serverName, pid, startTime.Value.UtcTicks);
             _removed.Remove(serverName);
-            QueueWriteLocked();
+            QueueWriteLockedAsync();
         }
     }
 
@@ -41,12 +50,12 @@ public sealed class RunningServerRegistry(string userDataDirectory, IProcessInsp
         {
             _session.Remove(serverName);
             _removed.Add(serverName);
-            QueueWriteLocked();
+            QueueWriteLockedAsync();
         }
     }
 
     public Task<IReadOnlyList<TrackedServerProcess>> FindOrphansAsync(CancellationToken cancellationToken = default) =>
-        Task.Run<IReadOnlyList<TrackedServerProcess>>(() =>
+        Task.Run<IReadOnlyList<TrackedServerProcess>>(async () =>
         {
             var tracked = ReadFile();
             if (tracked.Count == 0)
@@ -54,21 +63,24 @@ public sealed class RunningServerRegistry(string userDataDirectory, IProcessInsp
                 return [];
             }
 
-            var survivors = new List<TrackedServerProcess>();
+            HashSet<string> sessionNames;
             lock (_lock)
             {
-                foreach (var entry in tracked)
+                sessionNames = new HashSet<string>(_session.Keys, StringComparer.OrdinalIgnoreCase);
+            }
+
+            // 查詢作業系統行程資訊較慢，於鎖外進行
+            var survivors = tracked.Where(e => !sessionNames.Contains(e.ServerName) && IsSameProcess(e)).ToList();
+            if (survivors.Count != tracked.Count)
+            {
+                var dead = tracked.Except(survivors).ToHashSet();
+                Task write;
+                lock (_lock)
                 {
-                    if (!_session.ContainsKey(entry.ServerName) && IsSameProcess(entry))
-                    {
-                        survivors.Add(entry);
-                    }
+                    write = QueueWriteLockedAsync(dead.Contains);
                 }
 
-                if (survivors.Count != tracked.Count)
-                {
-                    PersistLocked(survivors);
-                }
+                await write.ConfigureAwait(false);
             }
 
             return survivors;
@@ -77,34 +89,42 @@ public sealed class RunningServerRegistry(string userDataDirectory, IProcessInsp
     public Task<bool> TerminateAsync(TrackedServerProcess process, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(process);
-        return Task.Run(() =>
+        return Task.Run(async () =>
         {
-            bool success = !IsSameProcess(process) || inspector.KillProcessTree(process.Pid);
+            bool success = !IsSameProcess(process) || _inspector.KillProcessTree(process.Pid);
             if (success)
             {
+                Task write;
                 lock (_lock)
                 {
-                    var remaining = ReadFile()
-                        .Where(e => !(string.Equals(e.ServerName, process.ServerName, StringComparison.OrdinalIgnoreCase) && e.Pid == process.Pid))
-                        .ToList();
-                    PersistLocked(remaining);
+                    write = QueueWriteLockedAsync(e => string.Equals(e.ServerName, process.ServerName, StringComparison.OrdinalIgnoreCase) && e.Pid == process.Pid);
                 }
+
+                await write.ConfigureAwait(false);
             }
 
             return success;
         }, cancellationToken);
     }
 
+    public Task FlushAsync()
+    {
+        lock (_lock)
+        {
+            return _writeChain;
+        }
+    }
+
     private bool IsSameProcess(TrackedServerProcess entry)
     {
-        DateTime? start = inspector.GetStartTimeUtc(entry.Pid);
-        return start is not null && Math.Abs(start.Value.Ticks - entry.StartTimeUtcTicks) <= StartTimeToleranceTicks;
+        DateTimeOffset? start = _inspector.GetStartTimeUtc(entry.Pid);
+        return start is not null && Math.Abs(start.Value.UtcTicks - entry.StartTimeUtcTicks) <= StartTimeToleranceTicks;
     }
 
     private List<TrackedServerProcess> ReadFile() =>
         JsonCodec.TryReadFile<List<TrackedServerProcess>>(_filePath) ?? [];
 
-    private void PersistLocked(List<TrackedServerProcess> entries)
+    private void Persist(List<TrackedServerProcess> entries)
     {
         if (!AtomicFileWriter.WriteJson(_filePath, entries))
         {
@@ -112,23 +132,38 @@ public sealed class RunningServerRegistry(string userDataDirectory, IProcessInsp
         }
     }
 
-    // 呼叫端須已持有 _lock；背景工作取得鎖後才讀取最新快照
-    private void QueueWriteLocked()
+    /// <summary>排入背景寫入：鎖內擷取目前工作階段快照，鎖外由寫入鏈序列化讀寫，避免磁碟 I/O 阻塞呼叫端；呼叫端須已持有 _lock</summary>
+    private Task QueueWriteLockedAsync(Func<TrackedServerProcess, bool>? discard = null)
     {
         _writeChain = _writeChain.ContinueWith(
             _ =>
             {
-                lock (_lock)
+                try
                 {
+                    List<TrackedServerProcess> sessionSnapshot;
+                    HashSet<string> removedSnapshot;
+                    lock (_lock)
+                    {
+                        sessionSnapshot = [.. _session.Values];
+                        removedSnapshot = new HashSet<string>(_removed, StringComparer.OrdinalIgnoreCase);
+                    }
+
+                    var sessionNames = sessionSnapshot.Select(static e => e.ServerName).ToHashSet(StringComparer.OrdinalIgnoreCase);
                     var merged = ReadFile()
-                        .Where(e => !_session.ContainsKey(e.ServerName) && !_removed.Contains(e.ServerName))
-                        .Concat(_session.Values)
+                        .Where(e => !sessionNames.Contains(e.ServerName) && !removedSnapshot.Contains(e.ServerName) && discard?.Invoke(e) != true)
+                        .Concat(sessionSnapshot)
                         .ToList();
-                    PersistLocked(merged);
+                    Persist(merged);
+                }
+                catch (Exception ex)
+                {
+                    // 寫入鏈須持續可用，失敗記錄後不中斷後續寫入
+                    Logger.Warning(ex, "更新伺服器行程登記檔失敗: {Path}", _filePath);
                 }
             },
             CancellationToken.None,
             TaskContinuationOptions.None,
             TaskScheduler.Default);
+        return _writeChain;
     }
 }

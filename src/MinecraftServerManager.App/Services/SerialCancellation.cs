@@ -1,6 +1,7 @@
 namespace MinecraftServerManager.App.Services;
 
 /// <summary>連續請求只保留最新者：每次 Next() 取消前一個權杖並回傳新權杖</summary>
+// IDisposable 投射為 WinRT IClosable，CsWinRT 要求 partial
 public sealed partial class SerialCancellation : IDisposable
 {
     private readonly Lock _lock = new();
@@ -32,17 +33,27 @@ public sealed partial class SerialCancellation : IDisposable
         return token;
     }
 
-    public void Dispose()
+    /// <summary>取消目前請求，不建立新權杖</summary>
+    public void Cancel()
     {
         CancellationTokenSource? previous;
         lock (_lock)
         {
-            _disposed = true;
             previous = _current;
             _current = null;
         }
 
         Release(previous);
+    }
+
+    public void Dispose()
+    {
+        lock (_lock)
+        {
+            _disposed = true;
+        }
+
+        Cancel();
     }
 
     private static void Release(CancellationTokenSource? source)
@@ -52,7 +63,13 @@ public sealed partial class SerialCancellation : IDisposable
             return;
         }
 
-        source.Cancel();
-        source.Dispose();
+        try
+        {
+            source.Cancel();
+        }
+        finally
+        {
+            source.Dispose();
+        }
     }
 }

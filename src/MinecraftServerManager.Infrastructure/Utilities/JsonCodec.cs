@@ -10,29 +10,23 @@ namespace MinecraftServerManager.Infrastructure.Utilities;
 /// <summary>JSON 共用入口；無法解析時回傳預設值</summary>
 public static class JsonCodec
 {
-    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(JsonCodec));
-
     public const long DefaultMaxBytes = 2L * 1024 * 1024;
 
-    private static readonly JsonSerializerOptions CompactOptions = new()
-    {
-        PropertyNamingPolicy = null,
-        PropertyNameCaseInsensitive = true,
-    };
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger(nameof(JsonCodec));
 
-    private static readonly JsonSerializerOptions IndentedOptions = new(CompactOptions)
+    private static readonly AppJsonSerializerContext DefaultContext = AppJsonSerializerContext.Default;
+
+    private static readonly JsonSerializerOptions IndentedOptions = new(DefaultContext.Options)
     {
         WriteIndented = true,
     };
 
-    private static readonly JsonSerializerOptions RelaxedIndentedOptions = new(IndentedOptions)
+    private static readonly AppJsonSerializerContext IndentedContext = new(IndentedOptions);
+
+    private static readonly AppJsonSerializerContext RelaxedContext = new(new JsonSerializerOptions(IndentedOptions)
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-    };
-
-    private static readonly AppJsonSerializerContext DefaultContext = new(CompactOptions);
-    private static readonly AppJsonSerializerContext IndentedContext = new(IndentedOptions);
-    private static readonly AppJsonSerializerContext RelaxedContext = new(RelaxedIndentedOptions);
+    });
 
     public static JsonDocument ParseDocument(string json, JsonDocumentOptions options = default) =>
         JsonDocument.Parse(json, options);
@@ -47,14 +41,14 @@ public static class JsonCodec
         JsonDocument.ParseAsync(utf8Json, options, cancellationToken);
 
     public static string Serialize<T>(T? value, bool indented = false) =>
-        value is null ? "null" : TrySerialize((value, indented), static s => JsonSerializer.Serialize(s.value, GetTypeInfo<T>(s.indented ? IndentedContext : DefaultContext))) ?? string.Empty;
+        value is null ? "null" : TryJson<T, (T value, bool indented), string>((value, indented), static s => JsonSerializer.Serialize(s.value, GetTypeInfo<T>(s.indented ? IndentedContext : DefaultContext))) ?? string.Empty;
 
     /// <summary>以寬鬆跳脫（保留中文等非 ASCII 字元）縮排序列化，供匯出檔案使用</summary>
     public static string SerializeRelaxed<T>(T? value) =>
-        value is null ? "null" : TrySerialize(value, static v => JsonSerializer.Serialize(v, GetTypeInfo<T>(RelaxedContext))) ?? string.Empty;
+        value is null ? "null" : TryJson<T, T, string>(value, static v => JsonSerializer.Serialize(v, GetTypeInfo<T>(RelaxedContext))) ?? string.Empty;
 
     public static byte[]? SerializeToUtf8Bytes<T>(T? value, bool indented = false) =>
-        value is null ? "null"u8.ToArray() : TrySerialize((value, indented), static s => JsonSerializer.SerializeToUtf8Bytes(s.value, GetTypeInfo<T>(s.indented ? IndentedContext : DefaultContext)));
+        value is null ? "null"u8.ToArray() : TryJson<T, (T value, bool indented), byte[]>((value, indented), static s => JsonSerializer.SerializeToUtf8Bytes(s.value, GetTypeInfo<T>(s.indented ? IndentedContext : DefaultContext)));
 
     public static T? Deserialize<T>(ReadOnlySpan<byte> utf8Json)
     {
@@ -70,7 +64,10 @@ public static class JsonCodec
     }
 
     public static T? Deserialize<T>(string? json) =>
-        string.IsNullOrWhiteSpace(json) ? default : TrySerialize(json, static j => JsonSerializer.Deserialize(j, GetTypeInfo<T>(DefaultContext)));
+        string.IsNullOrWhiteSpace(json) ? default : TryJson<T, string, T>(json, static j => JsonSerializer.Deserialize(j, GetTypeInfo<T>(DefaultContext)));
+
+    public static T? Deserialize<T>(JsonElement element) =>
+        TryJson<T, JsonElement, T>(element, static e => JsonSerializer.Deserialize(e, GetTypeInfo<T>(DefaultContext)));
 
     /// <summary>讀檔並反序列化；超過大小上限或無法解析回傳 null，檔案不存在則擲出</summary>
     public static T? ReadFile<T>(string filePath, long maxBytes = DefaultMaxBytes)
@@ -81,7 +78,7 @@ public static class JsonCodec
             return default;
         }
 
-        return TrySerialize(stream, static s => JsonSerializer.Deserialize(s, GetTypeInfo<T>(DefaultContext)));
+        return TryJson<T, Stream, T>(stream, static s => JsonSerializer.Deserialize(s, GetTypeInfo<T>(DefaultContext)), filePath);
     }
 
     /// <summary>檔案不存在回傳 null；超過上限、無法解析或讀取失敗回傳 null 並記錄警告</summary>
@@ -98,6 +95,42 @@ public static class JsonCodec
         }
     }
 
+    /// <summary>嘗試讀取 JSON 檔案；若檔案存在但內容無法解析或損毀，自動將損毀檔案備份為 .bad 並回傳 default</summary>
+    public static T? TryReadOrPreserveCorrupt<T>(string filePath, long maxBytes = DefaultMaxBytes)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || !SafeFileSystem.FileExists(filePath))
+        {
+            return default;
+        }
+
+        try
+        {
+            byte[]? bytes = SafeFileSystem.ReadRegularFile(filePath, maxBytes);
+            if (bytes is null)
+            {
+                Logger.Warning("JSON 檔案無法安全讀取或超過大小限制，嘗試備份損毀檔: {Path}", filePath);
+                SafeFileSystem.TryPreserveCorruptFile(filePath, Logger);
+                return default;
+            }
+
+            var result = Deserialize<T>(bytes);
+            if (result is null)
+            {
+                Logger.Warning("JSON 檔案內容無法解析，已備份為 .bad: {Path}", filePath);
+                SafeFileSystem.TryPreserveCorruptFile(filePath, Logger);
+                return default;
+            }
+
+            return result;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Warning(ex, "讀取 JSON 檔案失敗，保留損毀檔: {Path}", filePath);
+            SafeFileSystem.TryPreserveCorruptFile(filePath, Logger);
+            return default;
+        }
+    }
+
     /// <summary><see cref="ReadFile{T}"/> 的非同步版本</summary>
     public static Task<T?> ReadFileAsync<T>(string filePath, CancellationToken cancellationToken = default) =>
         ReadFileAsync<T>(filePath, DefaultMaxBytes, cancellationToken);
@@ -105,6 +138,7 @@ public static class JsonCodec
     /// <summary><see cref="ReadFile{T}"/> 的非同步版本</summary>
     public static async Task<T?> ReadFileAsync<T>(string filePath, long maxBytes, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         using var stream = SafeFileSystem.OpenRead(filePath, options: FileOptions.Asynchronous | FileOptions.SequentialScan);
         if (!HasReadableLength(stream, maxBytes, filePath))
         {
@@ -117,7 +151,7 @@ public static class JsonCodec
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
-            Logger.Warning(ex, "JSON 串流反序列化失敗");
+            Logger.Warning(ex, "JSON 反序列化失敗，型別: {Type}，路徑: {Path}", typeof(T).Name, filePath);
             return default;
         }
     }
@@ -134,7 +168,8 @@ public static class JsonCodec
         return stream.Length > 0;
     }
 
-    private static TResult? TrySerialize<TState, TResult>(TState state, Func<TState, TResult?> operation)
+    /// <summary>執行 JSON 操作；失敗（含型別未登錄）記錄型別與來源後回傳預設值，不得無聲失敗</summary>
+    private static TResult? TryJson<T, TState, TResult>(TState state, Func<TState, TResult?> operation, string? source = null)
     {
         try
         {
@@ -142,8 +177,7 @@ public static class JsonCodec
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
-            // 含型別未登錄的情形，不得無聲失敗
-            Logger.Warning(ex, "JSON 序列化／反序列化失敗");
+            Logger.Warning(ex, "JSON 序列化／反序列化失敗，型別: {Type}，來源: {Source}", typeof(T).Name, source ?? "記憶體");
             return default;
         }
     }

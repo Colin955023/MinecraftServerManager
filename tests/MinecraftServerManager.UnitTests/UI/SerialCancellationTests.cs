@@ -5,7 +5,7 @@ namespace MinecraftServerManager.UnitTests.UI;
 public sealed class SerialCancellationTests
 {
     [Fact]
-    public void Next_CancelsPreviousTokenAndKeepsLatestActive()
+    public void Next_CalledTwice_CancelsPreviousToken()
     {
         using var serial = new SerialCancellation();
         var first = serial.Next();
@@ -16,7 +16,7 @@ public sealed class SerialCancellationTests
     }
 
     [Fact]
-    public void Dispose_CancelsCurrentToken()
+    public void Dispose_ActiveToken_CancelsIt()
     {
         var serial = new SerialCancellation();
         var token = serial.Next();
@@ -33,5 +33,17 @@ public sealed class SerialCancellationTests
         serial.Dispose();
 
         Assert.True(serial.Next().IsCancellationRequested);
+    }
+
+    [Fact]
+    public void Cancel_ActiveToken_CancelsAndAllowsNext()
+    {
+        using var serial = new SerialCancellation();
+        var token = serial.Next();
+
+        serial.Cancel();
+
+        Assert.True(token.IsCancellationRequested);
+        Assert.False(serial.Next().IsCancellationRequested);
     }
 }

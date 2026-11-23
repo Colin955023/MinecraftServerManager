@@ -21,7 +21,7 @@ public sealed class ServerManagerTests : IDisposable
     public void Dispose() => _testRootTemp.Dispose();
 
     [Fact]
-    public async Task CreatesServerWithDefaultFilesAndRegistry()
+    public async Task CreateServerAsync_ValidPlan_WritesDefaultFilesAndRegistry()
     {
         var plan = ServerCreationPlan.Create(
             name: ServerName.Parse("Survival-1"),
@@ -30,7 +30,7 @@ public sealed class ServerManagerTests : IDisposable
             memoryMaxMb: 4096,
             memoryMinMb: 2048);
 
-        var result = await _manager.CreateServerAsync(plan);
+        var result = await _manager.CreateServerAsync(plan, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Completed);
         Assert.NotNull(result.Config);
@@ -41,12 +41,29 @@ public sealed class ServerManagerTests : IDisposable
         Assert.True(File.Exists(Path.Combine(serverDir, "eula.txt")));
         Assert.True(File.Exists(Path.Combine(serverDir, "server.properties")));
 
-        var all = await _manager.GetAllServersAsync();
+        var all = await _manager.GetAllServersAsync(TestContext.Current.CancellationToken);
         Assert.Contains(all, static s => s.Name.Value == "Survival-1");
     }
 
     [Fact]
-    public async Task RejectsDuplicateServerCreation()
+    public async Task CreateServerAsync_JavaMajor21_ScriptUsesZgcFromResolvedJava()
+    {
+        var plan = ServerCreationPlan.Create(
+            name: ServerName.Parse("ZgcScript"),
+            minecraftVersion: MinecraftVersion.Parse("1.20.4"),
+            loaderType: LoaderKind.Vanilla,
+            memoryMaxMb: 2048);
+
+        var creation = await _manager.CreateServerAsync(plan, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(creation.Completed);
+        string script = await File.ReadAllTextAsync(Path.Combine(creation.Config!.Path, "start_server.bat"), TestContext.Current.CancellationToken);
+        Assert.Contains("-XX:+UseZGC", script);
+        Assert.DoesNotContain("-XX:+UseG1GC", script);
+    }
+
+    [Fact]
+    public async Task CreateServerAsync_DuplicateName_Rejects()
     {
         var plan = ServerCreationPlan.Create(
             name: ServerName.Parse("DuplicateServer"),
@@ -54,16 +71,16 @@ public sealed class ServerManagerTests : IDisposable
             loaderType: LoaderKind.Vanilla,
             memoryMaxMb: 2048);
 
-        var first = await _manager.CreateServerAsync(plan);
+        var first = await _manager.CreateServerAsync(plan, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(first.Completed);
 
-        var second = await _manager.CreateServerAsync(plan);
+        var second = await _manager.CreateServerAsync(plan, cancellationToken: TestContext.Current.CancellationToken);
         Assert.False(second.Completed);
         Assert.Contains("已存在同名的伺服器", second.Message);
     }
 
     [Fact]
-    public async Task UpdatesServerConfiguration()
+    public async Task UpdateServerAsync_ChangedConfig_Persists()
     {
         var plan = ServerCreationPlan.Create(
             name: ServerName.Parse("UpdateTarget"),
@@ -71,7 +88,7 @@ public sealed class ServerManagerTests : IDisposable
             loaderType: LoaderKind.Vanilla,
             memoryMaxMb: 2048);
 
-        var creation = await _manager.CreateServerAsync(plan);
+        var creation = await _manager.CreateServerAsync(plan, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(creation.Completed);
 
         var updatedConfig = new ServerConfig(
@@ -84,10 +101,10 @@ public sealed class ServerManagerTests : IDisposable
             path: creation.Config.Path,
             jvmArgs: ["-XX:+UseG1GC"]);
 
-        var updateResult = await _manager.UpdateServerAsync(updatedConfig);
+        var updateResult = await _manager.UpdateServerAsync(updatedConfig, TestContext.Current.CancellationToken);
         Assert.True(updateResult.Success);
 
-        var fetched = await _manager.GetServerAsync("UpdateTarget");
+        var fetched = await _manager.GetServerAsync("UpdateTarget", TestContext.Current.CancellationToken);
         Assert.NotNull(fetched);
         Assert.Equal(8192, fetched.MemoryMaxMb);
         Assert.Equal(4096, fetched.MemoryMinMb);
@@ -95,13 +112,61 @@ public sealed class ServerManagerTests : IDisposable
 
         string scriptPath = Path.Combine(creation.Config.Path, "start_server.bat");
         Assert.True(File.Exists(scriptPath));
-        string script = await File.ReadAllTextAsync(scriptPath);
+        string script = await File.ReadAllTextAsync(scriptPath, TestContext.Current.CancellationToken);
         Assert.Contains("-Xms4096M", script);
         Assert.Contains("-Xmx8192M", script);
     }
 
     [Fact]
-    public void UpdateStartScriptMemory_UpdatesExistingScriptCorrectly()
+    public async Task UpdateServerAsync_CustomJvmArgs_SyncsManagedScript()
+    {
+        var plan = ServerCreationPlan.Create(
+            name: ServerName.Parse("ArgsSync"),
+            minecraftVersion: MinecraftVersion.Parse("1.20.4"),
+            loaderType: LoaderKind.Vanilla,
+            memoryMaxMb: 2048,
+            jvmArgs: ["-Dold.flag=1"]);
+        var creation = await _manager.CreateServerAsync(plan, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(creation.Completed);
+        string scriptPath = Path.Combine(creation.Config!.Path, "start_server.bat");
+        Assert.Contains("-Dold.flag=1", await File.ReadAllTextAsync(scriptPath, TestContext.Current.CancellationToken));
+
+        var updated = new ServerConfig(creation.Config.Name, creation.Config.MinecraftVersion, creation.Config.LoaderType, string.Empty, 2048, null, path: creation.Config.Path, jvmArgs: ["-Dnew.flag=2", "-Dpath=C:\\a b"]);
+        var result = await _manager.UpdateServerAsync(updated, TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success);
+        string script = await File.ReadAllTextAsync(scriptPath, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain("-Dold.flag=1", script);
+        Assert.Contains("-Dnew.flag=2 \"-Dpath=C:\\a b\" -jar", script);
+    }
+
+    [Theory]
+    [InlineData("-Dx=a&calc")]
+    [InlineData("-Dx=%PATH%")]
+    [InlineData("-Dx=a\nb")]
+    [InlineData("-XX:OnError=calc")]
+    public async Task UpdateServerAsync_UnsafeJvmArgs_RejectsWithoutSaving(string argument)
+    {
+        var plan = ServerCreationPlan.Create(
+            name: ServerName.Parse("ArgsReject"),
+            minecraftVersion: MinecraftVersion.Parse("1.20.4"),
+            loaderType: LoaderKind.Vanilla,
+            memoryMaxMb: 2048);
+        var creation = await _manager.CreateServerAsync(plan, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(creation.Completed);
+
+        var updated = new ServerConfig(creation.Config!.Name, creation.Config.MinecraftVersion, creation.Config.LoaderType, string.Empty, 4096, null, path: creation.Config.Path, jvmArgs: [argument]);
+        var result = await _manager.UpdateServerAsync(updated, TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        var fetched = await _manager.GetServerAsync("ArgsReject", TestContext.Current.CancellationToken);
+        Assert.NotNull(fetched);
+        Assert.Equal(2048, fetched.MemoryMaxMb);
+        Assert.DoesNotContain(argument, fetched.JvmArgs);
+    }
+
+    [Fact]
+    public void UpdateMemory_ExistingScript_UpdatesMemory()
     {
         string dir = Path.Combine(_testRoot, "ScriptTest");
         Directory.CreateDirectory(dir);
@@ -148,7 +213,7 @@ public sealed class ServerManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task DeletesServerSafely()
+    public async Task DeleteServerAsync_ExistingServer_Deletes()
     {
         var plan = ServerCreationPlan.Create(
             name: ServerName.Parse("ToDelete"),
@@ -156,13 +221,13 @@ public sealed class ServerManagerTests : IDisposable
             loaderType: LoaderKind.Vanilla,
             memoryMaxMb: 2048);
 
-        var creation = await _manager.CreateServerAsync(plan);
+        var creation = await _manager.CreateServerAsync(plan, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(creation.Completed);
 
-        var deleteResult = await _manager.DeleteServerAsync("ToDelete");
+        var deleteResult = await _manager.DeleteServerAsync("ToDelete", TestContext.Current.CancellationToken);
         Assert.True(deleteResult.Success);
 
-        var fetched = await _manager.GetServerAsync("ToDelete");
+        var fetched = await _manager.GetServerAsync("ToDelete", TestContext.Current.CancellationToken);
         Assert.Null(fetched);
 
         string toDeleteDir = Path.Combine(_testRoot, "ToDelete");
@@ -170,16 +235,20 @@ public sealed class ServerManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task ImportsExistingServerDirectory()
+    public async Task ImportServerAsync_ExistingDirectory_Imports()
     {
         using var externalDirTemp = new TempDirectory("msm-external-server-");
-        string externalDir = Path.Combine(externalDirTemp.FullName, "root");
-        Directory.CreateDirectory(externalDir);
+        string externalDir = externalDirTemp.CreateSubdirectory("root");
         File.WriteAllText(Path.Combine(externalDir, "server.jar"), "dummy jar");
         File.WriteAllText(Path.Combine(externalDir, "eula.txt"), "eula=true\n");
         File.WriteAllText(Path.Combine(externalDir, "server.properties"), "server-port=25565\n");
+        File.WriteAllText(Path.Combine(externalDir, "version.json"), "{\"id\":\"1.20.4\"}");
 
-        var importResult = await _manager.ImportServerAsync(externalDir, "ImportedServer", ImportTransferMode.Copy);
+        var importResult = await _manager.ImportServerAsync(
+            externalDir,
+            "ImportedServer",
+            ImportTransferMode.Copy,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(importResult.Completed);
         Assert.NotNull(importResult.Config);
@@ -192,16 +261,20 @@ public sealed class ServerManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task ImportsExistingServerDirectoryWithMoveModeRemovesSource()
+    public async Task ImportServerAsync_MoveMode_RemovesSource()
     {
         using var externalDirTemp = new TempDirectory("msm-external-move-");
-        string externalDir = Path.Combine(externalDirTemp.FullName, "root");
-        Directory.CreateDirectory(externalDir);
+        string externalDir = externalDirTemp.CreateSubdirectory("root");
         File.WriteAllText(Path.Combine(externalDir, "server.jar"), "dummy jar");
         File.WriteAllText(Path.Combine(externalDir, "eula.txt"), "eula=true\n");
         File.WriteAllText(Path.Combine(externalDir, "server.properties"), "server-port=25565\n");
+        File.WriteAllText(Path.Combine(externalDir, "version.json"), "{\"id\":\"1.20.4\"}");
 
-        var importResult = await _manager.ImportServerAsync(externalDir, "MovedServer", ImportTransferMode.Move);
+        var importResult = await _manager.ImportServerAsync(
+            externalDir,
+            "MovedServer",
+            ImportTransferMode.Move,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(importResult.Completed);
         string importedDir = Path.Combine(_testRoot, "MovedServer");
@@ -214,7 +287,7 @@ public sealed class ServerManagerTests : IDisposable
     [InlineData(ImportTransferMode.Move, false)]
     [InlineData(ImportTransferMode.Move, true)]
     [InlineData(ImportTransferMode.Copy, true)]
-    public async Task ImportRejectsServersRootOrItsAncestorAsSource(ImportTransferMode mode, bool useAncestor)
+    public async Task ImportServerAsync_ServersRootOrAncestorSource_Rejects(ImportTransferMode mode, bool useAncestor)
     {
         string parent = Path.Combine(_testRoot, "parent");
         string serversRoot = Path.Combine(parent, "servers");
@@ -224,7 +297,7 @@ public sealed class ServerManagerTests : IDisposable
         File.WriteAllText(Path.Combine(source, "server.jar"), "dummy jar");
         var manager = TestServerManagers.Create(serversRoot);
 
-        var result = await manager.ImportServerAsync(source + Path.DirectorySeparatorChar, "Imported", mode);
+        var result = await manager.ImportServerAsync(source + Path.DirectorySeparatorChar, "Imported", mode, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Completed);
         Assert.Contains("根目錄", result.Message);
@@ -234,25 +307,25 @@ public sealed class ServerManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task ImportRejectsDriveRootAsSource()
+    public async Task ImportServerAsync_DriveRootSource_Rejects()
     {
         string driveRoot = Path.GetPathRoot(_testRoot)!;
 
-        var result = await _manager.ImportServerAsync(driveRoot, "FromDriveRoot", ImportTransferMode.Move);
+        var result = await _manager.ImportServerAsync(driveRoot, "FromDriveRoot", ImportTransferMode.Move, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Completed);
         Assert.Contains("磁碟根目錄", result.Message);
     }
 
     [Fact]
-    public async Task ServersRootRelocator_ValidatesAndRelocatesAllContent()
+    public async Task ServersRootRelocator_ExistingServers_RelocatesAllContent()
     {
         var plan = ServerCreationPlan.Create(
             name: ServerName.Parse("RelocateSrv"),
             minecraftVersion: MinecraftVersion.Parse("1.20.4"),
             loaderType: LoaderKind.Vanilla,
             memoryMaxMb: 2048);
-        var created = await _manager.CreateServerAsync(plan);
+        var created = await _manager.CreateServerAsync(plan, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(created.Completed);
 
         string subDir = Path.Combine(_testRoot, "sub");
@@ -267,16 +340,16 @@ public sealed class ServerManagerTests : IDisposable
         Assert.True(ServersRootRelocator.HasStoredContent(_testRoot));
         Assert.True(ServersRootRelocator.IsTargetDirectoryEmpty(newRoot));
 
-        ServersRootRelocator.RelocateAllContent(_testRoot, newRoot);
+        ServersRootRelocator.RelocateAllContent(_testRoot, newRoot, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(Directory.Exists(Path.Combine(newRoot, "servers", "RelocateSrv")));
         Assert.True(File.Exists(Path.Combine(newRoot, "servers", "servers.json")));
-        string registryJson = await File.ReadAllTextAsync(Path.Combine(newRoot, "servers", "servers.json"));
+        string registryJson = await File.ReadAllTextAsync(Path.Combine(newRoot, "servers", "servers.json"), TestContext.Current.CancellationToken);
         Assert.Contains(newRoot.Replace("\\", "\\\\", StringComparison.Ordinal), registryJson);
     }
 
     [Fact]
-    public async Task UpdatesForgeUserJvmArgsCorrectly()
+    public async Task UpdateServerAsync_ForgeServer_UpdatesUserJvmArgs()
     {
         var plan = ServerCreationPlan.Create(
             name: ServerName.Parse("ForgeTest"),
@@ -286,26 +359,30 @@ public sealed class ServerManagerTests : IDisposable
             memoryMinMb: 2048,
             jvmArgs: ["-Dcustom.flag=true"]);
 
-        var creation = await _manager.CreateServerAsync(plan);
+        var creation = await _manager.CreateServerAsync(plan, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(creation.Completed);
 
         string serverDir = Path.Combine(_testRoot, "ForgeTest");
         string jvmArgsFile = Path.Combine(serverDir, "user_jvm_args.txt");
         Assert.True(File.Exists(jvmArgsFile));
 
-        string content = await File.ReadAllTextAsync(jvmArgsFile);
+        string content = await File.ReadAllTextAsync(jvmArgsFile, TestContext.Current.CancellationToken);
         Assert.Contains("-Xms2048M", content);
         Assert.Contains("-Xmx4096M", content);
         Assert.Contains("-Dcustom.flag=true", content);
         Assert.Contains("-XX:+UseG1GC", content);
+
+        // user_jvm_args.txt 以空白分隔引數，含空白者須加引號
+        var updated = new ServerConfig(creation.Config!.Name, creation.Config.MinecraftVersion, creation.Config.LoaderType, creation.Config.LoaderVersion, 4096, 2048, path: serverDir, jvmArgs: ["-Dpath=C:\\a b"]);
+        Assert.True((await _manager.UpdateServerAsync(updated, TestContext.Current.CancellationToken)).Success);
+        Assert.Contains("\"-Dpath=C:\\a b\"", await File.ReadAllTextAsync(jvmArgsFile, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task GetAllServersAsync_RecoversInterruptedDeletionBeforeListing()
+    public async Task GetAllServersAsync_InterruptedDeletion_RecoversFirst()
     {
         using var tempDir = new TempDirectory("msm-tombstone-manager-");
-        string serverPath = Path.Combine(tempDir.FullName, "Survival2");
-        Directory.CreateDirectory(serverPath);
+        string serverPath = tempDir.CreateSubdirectory("Survival2");
         File.WriteAllText(Path.Combine(serverPath, "world.txt"), "data");
         new ServerRegistryStore(tempDir.FullName).Set("Survival2", new ServerConfig(
             ServerName.Parse("Survival2"),
@@ -318,7 +395,7 @@ public sealed class ServerManagerTests : IDisposable
         var registered = new ServerRegistryStore(tempDir.FullName).Find("Survival2");
         Assert.NotNull(registered);
 
-        // 模擬刪除進行到一半：伺服器目錄已被搬入墓碑，但登錄檔仍保留
+        // 模擬刪除進行到一半：伺服器目錄已被搬入墓碑，但伺服器清單檔仍保留
         ServerTombstoneManager.PrepareDeleteTombstone(tempDir.FullName, "Survival2", registered.Path);
         Assert.False(Directory.Exists(registered.Path));
 

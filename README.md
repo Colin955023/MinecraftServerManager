@@ -5,7 +5,7 @@
 [![WinUI 3](https://img.shields.io/badge/UI-WinUI%203-0078D4)](https://learn.microsoft.com/windows/apps/winui/winui3/)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue)](LICENSE)
 [![CI](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml/badge.svg)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml)
-[![CodeQL Analysis (C#)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/codeql.yml/badge.svg)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/codeql.yml)
+[![CodeQL Analysis](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/codeql.yml/badge.svg)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Colin955023/MinecraftServerManager/badge)](https://scorecard.dev/viewer/?uri=github.com/Colin955023/MinecraftServerManager)
 
 Windows 11 的 Minecraft 伺服器管理工具，以 C#、.NET 10 與 WinUI 3 開發。系統需求見[使用手冊](docs/USER_GUIDE.md#系統需求)。
@@ -22,13 +22,13 @@ Windows 11 的 Minecraft 伺服器管理工具，以 C#、.NET 10 與 WinUI 3 �
 
 ## 使用方法
 
-下載[最新版 `MinecraftServerManager.exe`](https://github.com/Colin955023/MinecraftServerManager/releases/latest/download/MinecraftServerManager.exe)，按兩下即可啟動。
+取得最新版 `MinecraftServerManager.exe` 後，按兩下即可啟動。
 
 ### 從原始碼建置
 
-需要 Windows 11、.NET 10 SDK、PowerShell 7（`pwsh`）。
+需要 Windows 11、.NET 10 SDK（版本見 global.json）、PowerShell 7（`pwsh`）。
 
-```bat
+```powershell
 dotnet run --project src\MinecraftServerManager.App\MinecraftServerManager.App.csproj
 pwsh -NoProfile -File scripts\dotnet_quality_gate.ps1
 pwsh -NoProfile -File scripts\dotnet_publish.ps1

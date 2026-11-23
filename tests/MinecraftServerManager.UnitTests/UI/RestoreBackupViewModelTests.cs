@@ -1,4 +1,3 @@
-using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
 
@@ -7,7 +6,7 @@ namespace MinecraftServerManager.UnitTests.UI;
 public sealed class RestoreBackupViewModelTests
 {
     [Fact]
-    public async Task RefreshBackupsAsync_PopulatesBackupsCorrectly()
+    public async Task RefreshBackupsAsync_BackupsExist_PopulatesList()
     {
         var backupService = new FakeBackupService([
             new ServerBackupInfo("backup_2026.zip", "/backups/backup_2026.zip", 1024 * 1024, DateTimeOffset.UtcNow)
@@ -23,7 +22,7 @@ public sealed class RestoreBackupViewModelTests
     [Theory]
     [InlineData(true, false)]
     [InlineData(false, true)]
-    public async Task RestoreAsync_HonorsServerRunningState(bool isRunning, bool expectedRestored)
+    public async Task RestoreAsync_ServerRunning_Blocks(bool isRunning, bool expectedRestored)
     {
         var backupService = new FakeBackupService([
             new ServerBackupInfo("backup_2026.zip", "/backups/backup_2026.zip", 1024 * 1024, DateTimeOffset.UtcNow)
@@ -48,9 +47,40 @@ public sealed class RestoreBackupViewModelTests
         }
     }
 
+    [Fact]
+    public async Task RefreshBackupsAsync_EmptyList_ClearsSelectionAndDisablesCommands()
+    {
+        var vm = new RestoreBackupViewModel(new FakeBackupService([]), "TestServer", NoOpUiService.Instance, "/backups", static () => false);
+        await vm.RefreshBackupsAsync();
+
+        Assert.Null(vm.SelectedBackup);
+        Assert.False(vm.RestoreCommand.CanExecute(null));
+        Assert.False(vm.DeleteCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task RestoreAsync_SelectionChangedDuringConfirm_UsesSnapshot()
+    {
+        var backupService = new FakeBackupService([
+            new ServerBackupInfo("first.zip", "/backups/first.zip", 1, DateTimeOffset.UtcNow),
+            new ServerBackupInfo("second.zip", "/backups/second.zip", 1, DateTimeOffset.UtcNow)
+        ]);
+        RestoreBackupViewModel? vm = null;
+        var ui = new ManualUiService { OnConfirm = () => vm!.SelectedBackup = vm.Backups[1] };
+        vm = new RestoreBackupViewModel(backupService, "TestServer", ui, "/backups", static () => false);
+        await vm.RefreshBackupsAsync();
+
+        await vm.RestoreAsync();
+
+        Assert.Equal("first.zip", backupService.RestoredFileName);
+        Assert.False(vm.IsOperating);
+    }
+
     private sealed class FakeBackupService(IReadOnlyList<ServerBackupInfo> backups) : IServerBackupService
     {
         public bool RestoreCalled { get; private set; }
+
+        public string? RestoredFileName { get; private set; }
 
         public Task<IReadOnlyList<ServerBackupInfo>> ListBackupsAsync(
             string serverName,
@@ -74,6 +104,7 @@ public sealed class RestoreBackupViewModelTests
             CancellationToken cancellationToken = default)
         {
             RestoreCalled = true;
+            RestoredFileName = backupFileName;
             return Task.FromResult(true);
         }
 
@@ -84,12 +115,13 @@ public sealed class RestoreBackupViewModelTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult(true);
 
-        public ServerBackupSummary GetBackupSummary(string serverName, string? backupDirectory) =>
-            new(ServerBackupSummaryStatus.HasBackups, backups.Count);
+        public Task<ServerBackupSummary> GetBackupSummaryAsync(string serverName, string? backupDirectory, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ServerBackupSummary(ServerBackupSummaryStatus.HasBackups, backups.Count));
 
-        public string? ValidateBackupDestination(string destinationPath) => null;
+        public Task<string?> ValidateBackupDestinationAsync(string destinationPath, CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>(null);
 
-        public string PrepareBackupFilePath(string serverName, string destinationDirectory) =>
-            Path.Combine(destinationDirectory, $"backup-{serverName}.zip");
+        public Task<string> PrepareBackupFilePathAsync(string serverName, string destinationDirectory, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Path.Combine(destinationDirectory, $"backup-{serverName}.zip"));
     }
 }

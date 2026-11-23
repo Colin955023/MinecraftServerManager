@@ -3,18 +3,27 @@ using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.Domain.ValueObjects;
 
+/// <summary>經驗證的伺服器名稱值物件（符合 Windows 檔名與內部保留路徑規則）</summary>
 public readonly record struct ServerName
 {
     private static readonly SearchValues<char> InvalidWindowsChars = SearchValues.Create(
         "\0\u0001\u0002\u0003\u0004\u0005\u0006\u0007\u0008\t\n\u000B\u000C\r\u000E\u000F\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001A\u001B\u001C\u001D\u001E\u001F\u007F\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008A\u008B\u008C\u008D\u008E\u008F\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009A\u009B\u009C\u009D\u009E\u009F<>:\"/\\|?*");
 
+    private static readonly string[] ReservedDeviceNames = ["CON", "PRN", "AUX", "NUL", "CLOCK$", "CONIN$", "CONOUT$"];
+
     public const int DefaultMaxLength = 100;
 
-    public string Value { get; }
+    private readonly string? _value;
+
+    /// <summary>名稱文字；<c>default</c> 執行個體為空字串</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>是否為經驗證建立之名稱（非 <c>default</c>）</summary>
+    public bool IsValid => _value is not null;
 
     private ServerName(string value)
     {
-        Value = value;
+        _value = value;
     }
 
     public static ServerName Parse(string? value, int maxLength = DefaultMaxLength)
@@ -43,8 +52,8 @@ public readonly record struct ServerName
 
     private static bool TryValidate(string? value, int maxLength, out string normalized, out string? error)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxLength, 1);
         normalized = value ?? string.Empty;
-        int effectiveMaxLength = Math.Max(1, maxLength);
 
         ReadOnlySpan<char> span = normalized.AsSpan();
         if (span.IsEmpty || span.Trim().Length != span.Length)
@@ -53,28 +62,13 @@ public readonly record struct ServerName
             return false;
         }
 
-        if (span.Length > effectiveMaxLength)
+        if (span.Length > maxLength)
         {
-            error = $"伺服器名稱過長（上限 {effectiveMaxLength} 字元）";
+            error = $"伺服器名稱過長（上限 {maxLength} 字元）";
             return false;
         }
 
-        if (span is "." or ".."
-            || span[^1] is '.' or ' '
-            || ContainsInvalidCharacter(span))
-        {
-            error = "伺服器名稱不可包含路徑片段或不合法字元";
-            return false;
-        }
-
-        int dotIndex = span.IndexOf('.');
-        ReadOnlySpan<char> baseName = (dotIndex >= 0 ? span[..dotIndex] : span).TrimEnd(" .");
-        if (baseName.IsEmpty || IsWindowsDeviceName(span))
-        {
-            error = "伺服器名稱不符合 Windows 檔名規則";
-            return false;
-        }
-
+        // 內部保留路徑須先於「.」開頭檢查，否則 .issues、.msm- 會被誤報為檔名規則錯誤
         if (span.Equals(".issues", StringComparison.OrdinalIgnoreCase)
             || span.Equals(ServerDefaults.RegistryFileName, StringComparison.OrdinalIgnoreCase)
             || span.Equals("servers_config.json", StringComparison.OrdinalIgnoreCase)
@@ -84,26 +78,44 @@ public readonly record struct ServerName
             return false;
         }
 
+        if (span is "." or ".."
+            || span[^1] is '.' or ' '
+            || span.ContainsAny(InvalidWindowsChars))
+        {
+            error = "伺服器名稱不可包含路徑片段或不合法字元";
+            return false;
+        }
+
+        ReadOnlySpan<char> baseName = GetBaseName(span);
+        if (baseName.IsEmpty || IsDeviceBaseName(baseName))
+        {
+            error = "伺服器名稱不符合 Windows 檔名規則";
+            return false;
+        }
+
         error = null;
         return true;
     }
 
-    private static bool ContainsInvalidCharacter(ReadOnlySpan<char> span) =>
-        span.ContainsAny(InvalidWindowsChars);
+    /// <summary>取第一個「.」之前並去除尾端空白與「.」的主檔名</summary>
+    private static ReadOnlySpan<char> GetBaseName(ReadOnlySpan<char> value)
+    {
+        int dotIndex = value.IndexOf('.');
+        return (dotIndex >= 0 ? value[..dotIndex] : value).TrimEnd(" .");
+    }
 
     /// <summary>是否為 Windows 保留裝置名稱（CON、PRN、COM1 等）</summary>
-    public static bool IsWindowsDeviceName(ReadOnlySpan<char> value)
+    public static bool IsWindowsDeviceName(ReadOnlySpan<char> value) =>
+        IsDeviceBaseName(GetBaseName(value.TrimEnd(" .")));
+
+    private static bool IsDeviceBaseName(ReadOnlySpan<char> baseName)
     {
-        ReadOnlySpan<char> trimmed = value.TrimEnd(" .");
-        int dotIndex = trimmed.IndexOf('.');
-        ReadOnlySpan<char> baseName = (dotIndex >= 0 ? trimmed[..dotIndex] : trimmed).TrimEnd(" .");
-        if (baseName.Equals("CON", StringComparison.OrdinalIgnoreCase)
-            || baseName.Equals("PRN", StringComparison.OrdinalIgnoreCase)
-            || baseName.Equals("AUX", StringComparison.OrdinalIgnoreCase)
-            || baseName.Equals("NUL", StringComparison.OrdinalIgnoreCase)
-            || baseName.Equals("CLOCK$", StringComparison.OrdinalIgnoreCase))
+        foreach (string reserved in ReservedDeviceNames)
         {
-            return true;
+            if (baseName.Equals(reserved, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
         }
 
         return baseName.Length == 4

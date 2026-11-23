@@ -8,6 +8,7 @@
 
 # 建置與發布產生的記錄、發行說明草稿
 *.log
+*.binlog
 release_notes.md
 
 # 敏感資料 / 本機憑證

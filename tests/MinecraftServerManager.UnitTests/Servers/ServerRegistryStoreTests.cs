@@ -1,5 +1,4 @@
 using MinecraftServerManager.Domain.Servers;
-using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.Servers;
 
 namespace MinecraftServerManager.UnitTests.Servers;
@@ -12,11 +11,10 @@ public sealed class ServerRegistryStoreTests : IDisposable
 
     private string RegistryPath => Path.Combine(_temp.FullName, ServerDefaults.RegistryFileName);
 
-    private ServerConfig Create(string name) =>
-        new(ServerName.Parse(name), MinecraftVersion.Parse("1.21.4"), LoaderKind.Vanilla, string.Empty, 2048, null, path: Path.Combine(_temp.FullName, name));
+    private ServerConfig Create(string name) => TestServerConfigs.Create(name, path: Path.Combine(_temp.FullName, name));
 
     [Fact]
-    public void SetFindGetAll_RoundTripsAndIgnoresCase()
+    public void SetFindGetAll_MixedCase_RoundTrips()
     {
         var store = new ServerRegistryStore(_temp.FullName);
         store.Set("Alpha", Create("Alpha"));
@@ -34,7 +32,7 @@ public sealed class ServerRegistryStoreTests : IDisposable
     }
 
     [Fact]
-    public void UnreadableRegistry_IsPreservedAsBadAndStoreContinuesEmpty()
+    public void GetAll_UnreadableRegistry_PreservesAsBadAndStartsEmpty()
     {
         File.WriteAllText(RegistryPath, "{ not valid json");
         var store = new ServerRegistryStore(_temp.FullName);
@@ -45,7 +43,7 @@ public sealed class ServerRegistryStoreTests : IDisposable
     }
 
     [Fact]
-    public void ExternalModification_IsReloaded()
+    public void GetAll_ExternalModification_Reloads()
     {
         var store = new ServerRegistryStore(_temp.FullName);
         store.Set("Alpha", Create("Alpha"));
@@ -60,7 +58,7 @@ public sealed class ServerRegistryStoreTests : IDisposable
     }
 
     [Fact]
-    public void Update_WritesOnlyOnce()
+    public void Update_SingleChange_WritesOnce()
     {
         var store = new ServerRegistryStore(_temp.FullName);
         store.Set("Seed", Create("Seed"));
