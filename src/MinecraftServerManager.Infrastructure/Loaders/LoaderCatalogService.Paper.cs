@@ -4,6 +4,7 @@ using MinecraftServerManager.Core.Loaders;
 using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Http;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Loaders;
@@ -40,14 +41,10 @@ public sealed partial class LoaderCatalogService
         try
         {
             string url = MojangVersionCatalog.PaperProjectUrl;
-            var response = await _httpPort.GetJsonDocumentAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
-            if (response.IsSuccess && response.Payload is not null)
+            using var doc = await _httpPort.TryGetJsonDocumentAsync(new Uri(url), Logger, "抓取 Paper 版本清單失敗 ({Url})", cancellationToken).ConfigureAwait(false);
+            if (doc is not null)
             {
-                List<LoaderVersion> baseVersions;
-                using (response.Payload)
-                {
-                    baseVersions = ParsePaperMinecraftVersions(response.Payload);
-                }
+                List<LoaderVersion> baseVersions = ParsePaperMinecraftVersions(doc);
                 if (baseVersions.Count > 0)
                 {
                     // Java major 一律依 Mojang 官方版本 JSON（Paper 與原版相同）
@@ -164,14 +161,8 @@ public sealed partial class LoaderCatalogService
         bool updateCache = true)
     {
         Uri buildsUrl = MojangVersionCatalog.PaperBuildsUri(minecraftVersion);
-        var response = await _httpPort.GetJsonDocumentAsync(buildsUrl, cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccess || response.Payload is null)
-        {
-            return [];
-        }
-
-        using var doc = response.Payload;
-        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+        using var doc = await _httpPort.TryGetJsonDocumentAsync(buildsUrl, Logger, "抓取 Paper Build 清單失敗 ({Url})", cancellationToken).ConfigureAwait(false);
+        if (doc is null || doc.RootElement.ValueKind != JsonValueKind.Array)
         {
             return [];
         }

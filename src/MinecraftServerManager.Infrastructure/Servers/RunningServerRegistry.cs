@@ -124,7 +124,7 @@ public sealed class RunningServerRegistry : IRunningServerRegistry
     private List<TrackedServerProcess> ReadFile() =>
         JsonCodec.TryReadFile<List<TrackedServerProcess>>(_filePath) ?? [];
 
-    private void PersistLocked(List<TrackedServerProcess> entries)
+    private void Persist(List<TrackedServerProcess> entries)
     {
         if (!AtomicFileWriter.WriteJson(_filePath, entries))
         {
@@ -132,7 +132,7 @@ public sealed class RunningServerRegistry : IRunningServerRegistry
         }
     }
 
-    /// <summary>排入背景寫入：讀取檔案、排除 <paramref name="discard"/> 指定項目後與本次工作階段登記合併；呼叫端須已持有 _lock</summary>
+    /// <summary>排入背景寫入：鎖內擷取目前工作階段快照，鎖外由寫入鏈序列化讀寫，避免磁碟 I/O 阻塞呼叫端；呼叫端須已持有 _lock</summary>
     private Task QueueWriteLockedAsync(Func<TrackedServerProcess, bool>? discard = null)
     {
         _writeChain = _writeChain.ContinueWith(
@@ -140,14 +140,20 @@ public sealed class RunningServerRegistry : IRunningServerRegistry
             {
                 try
                 {
+                    List<TrackedServerProcess> sessionSnapshot;
+                    HashSet<string> removedSnapshot;
                     lock (_lock)
                     {
-                        var merged = ReadFile()
-                            .Where(e => !_session.ContainsKey(e.ServerName) && !_removed.Contains(e.ServerName) && discard?.Invoke(e) != true)
-                            .Concat(_session.Values)
-                            .ToList();
-                        PersistLocked(merged);
+                        sessionSnapshot = [.. _session.Values];
+                        removedSnapshot = new HashSet<string>(_removed, StringComparer.OrdinalIgnoreCase);
                     }
+
+                    var sessionNames = sessionSnapshot.Select(static e => e.ServerName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var merged = ReadFile()
+                        .Where(e => !sessionNames.Contains(e.ServerName) && !removedSnapshot.Contains(e.ServerName) && discard?.Invoke(e) != true)
+                        .Concat(sessionSnapshot)
+                        .ToList();
+                    Persist(merged);
                 }
                 catch (Exception ex)
                 {

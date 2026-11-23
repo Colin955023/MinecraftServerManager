@@ -66,6 +66,9 @@ public static class JsonCodec
     public static T? Deserialize<T>(string? json) =>
         string.IsNullOrWhiteSpace(json) ? default : TryJson<T, string, T>(json, static j => JsonSerializer.Deserialize(j, GetTypeInfo<T>(DefaultContext)));
 
+    public static T? Deserialize<T>(JsonElement element) =>
+        TryJson<T, JsonElement, T>(element, static e => JsonSerializer.Deserialize(e, GetTypeInfo<T>(DefaultContext)));
+
     /// <summary>讀檔並反序列化；超過大小上限或無法解析回傳 null，檔案不存在則擲出</summary>
     public static T? ReadFile<T>(string filePath, long maxBytes = DefaultMaxBytes)
     {

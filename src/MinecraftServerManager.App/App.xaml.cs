@@ -168,21 +168,17 @@ public partial class App : Application
             // 6. 建構組合根並載入主畫面
             var compositionRoot = new AppCompositionRoot(serversRoot, uiService, settingsManager, processRunner, new ShellLauncher(ShellLauncher.StartShellProcess), accentColorService);
             mainWindow.InitializeViewModel(compositionRoot);
-            compositionRoot.StartBackgroundWarmup();
 
             if (IsSmokeTest)
             {
                 Logger.Information("偵測到 --smoke-test 參數，將於 2 秒後安全結束以供發布測試驗證");
-                var timer = dispatcherQueue.CreateTimer();
-                timer.Interval = TimeSpan.FromSeconds(2);
-                timer.IsRepeating = false;
-                timer.Tick += (_, _) =>
-                {
-                    Logger.Information("煙霧測試完成，正常結束");
-                    Environment.Exit(0);
-                };
-                timer.Start();
+                await Task.Delay(TimeSpan.FromSeconds(2));
+                Logger.Information("煙霧測試完成，正常結束");
+                Environment.Exit(0);
+                return;
             }
+
+            compositionRoot.StartBackgroundWarmup();
         }
         catch (OperationCanceledException)
         {

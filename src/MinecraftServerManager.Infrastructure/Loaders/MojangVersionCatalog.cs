@@ -169,20 +169,10 @@ internal static class MojangVersionCatalog
     {
         foreach (string url in ManifestUrls)
         {
-            try
+            using var doc = await httpPort.TryGetJsonDocumentAsync(new Uri(url), Logger, "抓取 Mojang Manifest 失敗 ({Url})", cancellationToken).ConfigureAwait(false);
+            if (doc is not null)
             {
-                var response = await httpPort.GetJsonDocumentAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
-                if (response is { IsSuccess: true, Payload: not null })
-                {
-                    using (response.Payload)
-                    {
-                        return ParseManifest(response.Payload);
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Logger.Warning(ex, "抓取 Mojang Manifest 失敗 ({Url})", url);
+                return ParseManifest(doc);
             }
         }
 
@@ -258,24 +248,8 @@ internal static class MojangVersionCatalog
             return null;
         }
 
-        try
-        {
-            var response = await httpPort.GetJsonDocumentAsync(new Uri(packageUrl), cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccess || response.Payload is null)
-            {
-                return null;
-            }
-
-            using (response.Payload)
-            {
-                return ParseJavaMajorFromVersionJson(response.Payload.RootElement);
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.Warning(ex, "抓取版本 package JSON 失敗 ({Url})", packageUrl);
-            return null;
-        }
+        using var doc = await httpPort.TryGetJsonDocumentAsync(new Uri(packageUrl), Logger, "抓取版本 package JSON 失敗 ({Url})", cancellationToken).ConfigureAwait(false);
+        return doc is null ? null : ParseJavaMajorFromVersionJson(doc.RootElement);
     }
 
     /// <summary>解析 javaVersion.majorVersion 或 java_version.major</summary>

@@ -37,13 +37,13 @@ public sealed class UpdateCheckerService : IUpdateCheckerService
 
         try
         {
-            string? json = await _httpPort.GetTextAsync(GitHubReleaseTrustPolicy.LatestReleaseUri, cancellationToken).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(json))
+            using var response = await _httpPort.GetJsonDocumentAsync(GitHubReleaseTrustPolicy.LatestReleaseUri, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccess || response.Payload is null)
             {
                 return Unavailable("無法取得更新資訊", "未能自 GitHub 取得 Release 資料");
             }
 
-            if (JsonCodec.Deserialize<GitHubReleasePayload>(json) is not { } release)
+            if (JsonCodec.Deserialize<GitHubReleasePayload>(response.Payload.RootElement) is not { } release)
             {
                 return Unavailable("無法解析更新資訊", "GitHub Release 資料格式無效");
             }

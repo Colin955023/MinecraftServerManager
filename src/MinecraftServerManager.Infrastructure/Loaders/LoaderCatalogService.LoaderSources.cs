@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using MinecraftServerManager.Core.Loaders;
 using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Servers;
+using MinecraftServerManager.Infrastructure.Http;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Loaders;
@@ -21,14 +22,8 @@ public sealed partial class LoaderCatalogService
     /// <summary>取得 Fabric／Quilt 載入器版本（排除預發布）</summary>
     private async Task<IReadOnlyList<LoaderVersion>> FetchMetaLoaderVersionsAsync(string url, CancellationToken cancellationToken)
     {
-        using var response = await _httpPort.GetJsonDocumentAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccess || response.Payload is null)
-        {
-            return [];
-        }
-
-        var doc = response.Payload;
-        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+        using var doc = await _httpPort.TryGetJsonDocumentAsync(new Uri(url), Logger, "抓取載入器版本清單失敗 ({Url})", cancellationToken).ConfigureAwait(false);
+        if (doc is null || doc.RootElement.ValueKind != JsonValueKind.Array)
         {
             return [];
         }

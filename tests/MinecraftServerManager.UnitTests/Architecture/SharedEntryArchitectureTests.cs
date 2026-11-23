@@ -104,7 +104,7 @@ public sealed partial class SharedEntryArchitectureTests
             "var regex = new\n    Regex(pattern);\nRegex r = new(pattern);", Multiline: true),
 
         new("A7", Src, A7Regex(), "UI 派送、檔案選取器、對話方塊、訊息框與計時器必須由 IUiService (WinUiService) 統一管理；ViewModel 禁用 DispatcherQueue",
-            [App + "Services/WinUiService.cs", App + "Services/WinUiService.CoalescingProgress.cs", App + "Services/WinUiService.WinUiTimer.cs", App + "App.xaml.cs", App + "MainWindow.xaml.cs", App + "MainWindow.Notifications.cs", App + "Controls/TableSortExtensions.cs"],
+            [App + "Services/WinUiService.cs", App + "Services/WinUiService.CoalescingProgress.cs", App + "Services/WinUiService.WinUiTimer.cs", App + "MainWindow.xaml.cs", App + "MainWindow.Notifications.cs", App + "Controls/TableSortExtensions.cs"],
             "DispatcherQueue.TryEnqueue(Refresh);"),
 
         new("A8", ["src", "tests"], A8Regex(), "專案全境嚴格禁止 unsafe 程式碼", [],
